@@ -26,15 +26,6 @@ import { customerRole } from './rolePages/customer';
 const ROLES = [collectorRole, salesRole, warehouseRole, branchManagerRole, operatingManagerRole, customerRole];
 const ROLE_BY_KEY = Object.fromEntries(ROLES.map((role) => [role.key, role]));
 const ROUTE_REGISTRY = Object.assign({}, ...ROLES.map((role) => role.routes));
-const SIDEBAR_STORAGE_KEY = 'corvex-sidebar-collapsed';
-
-function readSidebarCollapsed() {
-  try {
-    return window.localStorage.getItem(SIDEBAR_STORAGE_KEY) === '1';
-  } catch {
-    return false;
-  }
-}
 
 function App() {
   return (
@@ -80,20 +71,7 @@ function PrototypeShell() {
               : ROUTE_REGISTRY[location.pathname] ?? null;
   const [showMap, setShowMap] = useState(false);
   const [filter, setFilter] = useState('All');
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(readSidebarCollapsed);
   const { toast, showToast, clearToast } = useToast();
-
-  const toggleSidebar = () => {
-    setSidebarCollapsed((collapsed) => {
-      const next = !collapsed;
-      try {
-        window.localStorage.setItem(SIDEBAR_STORAGE_KEY, next ? '1' : '0');
-      } catch {
-        // ignore storage errors
-      }
-      return next;
-    });
-  };
 
   const topLinks = useMemo(() => {
     if (isAuthPath(location.pathname) || !currentRole) {
@@ -109,8 +87,8 @@ function PrototypeShell() {
   const pageTitle = page?.title ?? (currentRole ? currentRole.label : 'CORVEX');
 
   return (
-    <div className={`app-shell${sidebarCollapsed ? ' sidebar-collapsed' : ''}`}>
-      <aside className={`sidebar${sidebarCollapsed ? ' collapsed' : ''}`}>
+    <div className="app-shell">
+      <aside className="sidebar">
         <div className="sidebar-header">
           <div className="brand-card">
             <div className="brand-mark">C</div>
@@ -119,15 +97,6 @@ function PrototypeShell() {
               {currentRole ? <div className="brand-subtitle">{currentRole.label}</div> : null}
             </div>
           </div>
-          <button
-            className="sidebar-toggle"
-            type="button"
-            onClick={toggleSidebar}
-            aria-label={sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
-            title={sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
-          >
-            <NavIcon name={sidebarCollapsed ? 'chevronRight' : 'chevronLeft'} />
-          </button>
         </div>
 
         {currentRole && !isAuthPath(location.pathname) && !isCustomerLogin ? (
@@ -157,7 +126,6 @@ function PrototypeShell() {
                         ? 'nav-link active'
                         : 'nav-link'
                   }
-                  title={sidebarCollapsed ? link.label : undefined}
                 >
                   <span className="nav-link-icon">
                     <NavIcon label={link.label} />
@@ -171,7 +139,6 @@ function PrototypeShell() {
                 className="button ghost sidebar-switch"
                 type="button"
                 onClick={() => navigate('/login')}
-                title={sidebarCollapsed ? 'Switch user' : undefined}
               >
                 <span className="sidebar-switch-icon">
                   <NavIcon name="switch" />
@@ -187,7 +154,6 @@ function PrototypeShell() {
                 key={link.to}
                 to={link.to}
                 className={location.pathname === link.to ? 'nav-link active' : 'nav-link'}
-                title={sidebarCollapsed ? link.label : undefined}
               >
                 <span className="nav-link-icon">
                   <NavIcon label={link.label} />
