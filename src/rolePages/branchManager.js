@@ -1,0 +1,20 @@
+export const branchManagerRole = {
+  key: 'branchManager',
+  label: 'Branch Manager',
+  homePath: '/branch-manager',
+  entryPath: '/branch-manager/dashboard',
+  loginPath: '/branch-manager',
+  accent: 'Approvals, maps, and branch reporting',
+  navPages: [
+    { label: 'Dashboard', to: '/branch-manager/dashboard' },
+    { label: 'Field Operations', to: '/branch-manager/field-operations' },
+    { label: 'Credit Investigation Approvals', to: '/branch-manager/ci-approvals' },
+    { label: 'GIS & Location Intelligence', to: '/branch-manager/gis' },
+    { label: 'Reports & Analytics', to: '/branch-manager/reports' },
+    { label: 'Staff Performance', to: '/branch-manager/staff-performance' },
+    { label: 'Alerts & Exceptions', to: '/branch-manager/alerts' },
+    { label: 'Notifications', to: '/branch-manager/notifications' },
+    { label: 'Profile', to: '/branch-manager/profile' },
+  ],
+  routes: {},
+};
