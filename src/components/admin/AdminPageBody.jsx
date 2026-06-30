@@ -496,13 +496,13 @@ function ReportsPage({ showToast }) {
       </div>
 
       {tab === 'collections' && (<>
-        <Stats stats={[{ label: 'Total Collections (Jun)', value: 'PHP 16.55M' }, { label: 'Growth MoM', value: '+5.9%' }]} />
+        <Stats stats={[{ label: 'Total Collections (Jun)', value: '₱12.04M' }, { label: 'Growth MoM', value: '+3.3%' }]} />
         <Card title="System-wide Monthly Collections" sub="All branches combined">
           <ResponsiveContainer width="100%" height={240}>
             <AreaChart data={SYSTEM_MONTHLY_COLLECTIONS}>
               <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
               <XAxis dataKey="month" tick={{ fontSize: 12 }} /><YAxis tick={{ fontSize: 11 }} tickFormatter={v => `${(v / 1000000).toFixed(1)}M`} />
-              <Tooltip formatter={v => `PHP ${(v / 1000000).toFixed(2)}M`} />
+              <Tooltip formatter={v => `₱${(v / 1000000).toFixed(2)}M`} />
               <Area type="monotone" dataKey="total" name="Collections" stroke="#2563eb" fill="#2563eb" fillOpacity={0.1} strokeWidth={2} />
             </AreaChart>
           </ResponsiveContainer>
@@ -511,13 +511,13 @@ function ReportsPage({ showToast }) {
       </>)}
 
       {tab === 'sales' && (<>
-        <Stats stats={[{ label: 'Total Sales (Jun)', value: 'PHP 14.16M' }, { label: 'Growth MoM', value: '+4.7%' }]} />
+        <Stats stats={[{ label: 'Total Sales (Jun)', value: '₱10.30M' }, { label: 'Growth MoM', value: '+4.7%' }]} />
         <Card title="System-wide Monthly Sales" sub="All branches combined">
           <ResponsiveContainer width="100%" height={240}>
             <AreaChart data={SYSTEM_MONTHLY_SALES}>
               <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
               <XAxis dataKey="month" tick={{ fontSize: 12 }} /><YAxis tick={{ fontSize: 11 }} tickFormatter={v => `${(v / 1000000).toFixed(1)}M`} />
-              <Tooltip formatter={v => `PHP ${(v / 1000000).toFixed(2)}M`} />
+              <Tooltip formatter={v => `₱${(v / 1000000).toFixed(2)}M`} />
               <Area type="monotone" dataKey="total" name="Sales" stroke="#06b6d4" fill="#06b6d4" fillOpacity={0.1} strokeWidth={2} />
             </AreaChart>
           </ResponsiveContainer>

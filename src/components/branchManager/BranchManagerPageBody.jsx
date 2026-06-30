@@ -85,26 +85,37 @@ function StaffCard({ title, metrics, actions, onAction }) {
 
 // ── chart data derived from mock ──────────────────────────────────────────────
 const DAILY_COL = [
-  {day:'Mon',amount:260000,target:270000},{day:'Tue',amount:268000,target:270000},
-  {day:'Wed',amount:272000,target:270000},{day:'Thu',amount:275000,target:280000},
-  {day:'Fri',amount:279000,target:280000},{day:'Sat',amount:282000,target:280000},
-  {day:'Today',amount:285400,target:285000},
+  {day:'Mon',  amount:170000, target:180000},
+  {day:'Tue',  amount:178000, target:180000},
+  {day:'Wed',  amount:182000, target:185000},
+  {day:'Thu',  amount:186000, target:185000},
+  {day:'Fri',  amount:189000, target:190000},
+  {day:'Sat',  amount:192000, target:190000},
+  {day:'Today',amount:186500, target:190000},
 ];
 const WEEKLY_SALES_D = [
-  {day:'Mon',actual:280000,target:290000},{day:'Tue',actual:295000,target:290000},
-  {day:'Wed',actual:301000,target:295000},{day:'Thu',actual:308000,target:300000},
-  {day:'Fri',actual:310000,target:305000},{day:'Sat',actual:312000,target:310000},
-  {day:'Today',actual:314200,target:315000},
+  {day:'Mon',  actual:220000, target:230000},
+  {day:'Tue',  actual:235000, target:230000},
+  {day:'Wed',  actual:241000, target:240000},
+  {day:'Thu',  actual:248000, target:245000},
+  {day:'Fri',  actual:252000, target:250000},
+  {day:'Sat',  actual:258000, target:255000},
+  {day:'Today',actual:248000, target:260000},
 ];
 const DELINQUENCY_W = [
-  {week:'W1',accounts:19,rate:18},{week:'W2',accounts:20,rate:19},
-  {week:'W3',accounts:18,rate:17},{week:'W4',accounts:21,rate:20},
-  {week:'W5',accounts:22,rate:22},{week:'W6',accounts:22,rate:21},
-  {week:'W7',accounts:23,rate:23},
+  {week:'W1', accounts:9,  rate:14},
+  {week:'W2', accounts:10, rate:15},
+  {week:'W3', accounts:9,  rate:13},
+  {week:'W4', accounts:10, rate:16},
+  {week:'W5', accounts:11, rate:17},
+  {week:'W6', accounts:10, rate:16},
+  {week:'W7', accounts:11, rate:18},
 ];
 const COMPLIANCE_W = [
-  {week:'W1',Maria:92,John:95,Pedro:84},{week:'W2',Maria:93,John:96,Pedro:85},
-  {week:'W3',Maria:91,John:97,Pedro:86},{week:'W4',Maria:94,John:97,Pedro:88},
+  {week:'W1', Maria:92, John:96, Pedro:82},
+  {week:'W2', Maria:93, John:97, Pedro:83},
+  {week:'W3', Maria:91, John:97, Pedro:84},
+  {week:'W4', Maria:94, John:97, Pedro:85},
 ];
 
 // ── Dashboard ─────────────────────────────────────────────────────────────────

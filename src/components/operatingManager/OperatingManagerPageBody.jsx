@@ -17,8 +17,12 @@ import { EmptyState } from '../collector/EmptyState';
 import { LoadingState } from '../collector/LoadingState';
 import { NavIcon } from '../../navIcons';
 
-const COLORS = ['#2563eb', '#06b6d4', '#8b5cf6', '#f59e0b'];
-const BRANCH_COLORS = { Main: '#2563eb', North: '#06b6d4', South: '#ef4444', Davao: '#10b981' };
+const COLORS = ['#2563eb', '#06b6d4', '#ef4444', '#f59e0b'];
+const BRANCH_COLORS = {
+  'Davao City':    '#2563eb',
+  'General Santos':'#10b981',
+  'Davao Oriental':'#ef4444',
+};
 
 function actionButtonClass(v) {
   if (v === 'secondary') return 'button secondary';
@@ -88,13 +92,13 @@ function DashboardPage({ navigate }) {
   const criticalAlerts = ALERTS.filter((a) => a.severity === 'Critical' && !a.resolved);
 
   const branchBarData = BRANCHES.map((b) => ({
-    name: b.name.replace(' Branch', '').replace(' City', ''),
+    name: b.name,
     Collection: b.collectionRate,
     Sales: b.salesCompletionRate,
     Inventory: b.inventoryHealth,
   }));
 
-  const revenueDonut = BRANCHES.map((b) => ({ name: b.name.replace(' Branch', '').replace(' City', ''), value: b.revenue }));
+  const revenueDonut = BRANCHES.map((b) => ({ name: b.name, value: b.revenue }));
 
   return (
     <div className="page">
@@ -244,7 +248,7 @@ function BranchPerformanceHub({ navigate }) {
           <div className="grid two-up">
             <ChartCard title="Performance Scores" subtitle="All branches ranked">
               <ResponsiveContainer width="100%" height={220}>
-                <BarChart data={BRANCHES.map((b) => ({ name: b.name.replace(' Branch', '').replace(' City', ''), score: b.performanceScore, growth: b.growthScore }))} layout="vertical">
+                <BarChart data={BRANCHES.map((b) => ({ name: b.name, score: b.performanceScore, growth: b.growthScore }))} layout="vertical">
                   <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
                   <XAxis type="number" domain={[0, 100]} tick={{ fontSize: 12 }} />
                   <YAxis dataKey="name" type="category" width={70} tick={{ fontSize: 12 }} />
@@ -260,7 +264,7 @@ function BranchPerformanceHub({ navigate }) {
               <div style={{ display: 'grid', gap: 10, padding: '8px 0' }}>
                 {[...BRANCHES].sort((a, b) => b.performanceScore - a.performanceScore).map((b, i) => (
                   <div key={b.id} style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                    <span style={{ width: 120, fontSize: '0.85rem', fontWeight: 600 }}>{b.name.replace(' Branch', '').replace(' City', '')}</span>
+                    <span style={{ width: 140, fontSize: '0.85rem', fontWeight: 600 }}>{b.name}</span>
                     <div style={{ flex: 1, height: 14, background: '#f1f5f9', borderRadius: 999, overflow: 'hidden' }}>
                       <div style={{ height: '100%', width: `${b.performanceScore}%`, background: COLORS[i % COLORS.length], borderRadius: 999 }} />
                     </div>
@@ -600,7 +604,7 @@ function ReportsHubPage({ navigate, showToast }) {
         <>
           <ChartCard title="Inventory Health by Branch" subtitle="Current health scores">
             <ResponsiveContainer width="100%" height={230}>
-              <BarChart data={BRANCHES.map((b) => ({ name: b.name.replace(' Branch', '').replace(' City', ''), health: b.inventoryHealth, value: b.inventoryValue / 1000000 }))}>
+              <BarChart data={BRANCHES.map((b) => ({ name: b.name, health: b.inventoryHealth, value: b.inventoryValue / 1000000 }))}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
                 <XAxis dataKey="name" tick={{ fontSize: 12 }} />
                 <YAxis yAxisId="left" domain={[0, 100]} tick={{ fontSize: 12 }} unit="%" />
@@ -634,7 +638,7 @@ function ReportsHubPage({ navigate, showToast }) {
 
             <ChartCard title="Delinquency by Branch" subtitle="Current overdue counts">
               <ResponsiveContainer width="100%" height={230}>
-                <BarChart data={BRANCHES.map((b) => ({ name: b.name.replace(' Branch', '').replace(' City', ''), overdue: b.overdueAccounts, risk: b.riskScore }))}>
+                <BarChart data={BRANCHES.map((b) => ({ name: b.name, overdue: b.overdueAccounts, risk: b.riskScore }))}>
                   <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
                   <XAxis dataKey="name" tick={{ fontSize: 12 }} />
                   <YAxis tick={{ fontSize: 12 }} />

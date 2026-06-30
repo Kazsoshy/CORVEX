@@ -18,3 +18,129 @@ find a way to combine all content inside that page but still have a navigation f
 Improve staff performance page. 
 
 
+
+Here's how a real-world furniture retail inventory and stock movement system works, mapped to your CORVEX role structure.
+
+Real-World Inventory Authority Chain
+The Core Principle
+Inventory authority follows money authority. The higher the value of the movement, the higher the approval level required.
+
+Stock Movement Types & Who Controls Each
+1. Daily Sales Deduction
+What it is: When a sales agent logs a confirmed sale, the system automatically deducts stock.
+
+Real-world flow:
+
+Sales Agent logs invoice → System auto-deducts stock
+No approval needed. It's automatic. The sale itself is the authority. The warehouse staff just sees the updated count.
+
+In CORVEX: Sales Agent (Carlos Mendoza) closes a sale → PRODUCTS[p1].stock decreases → STOCK_MOVEMENTS records a Sale Deduction entry automatically.
+
+2. Stock Count Adjustment (Physical Count Variance)
+What it is: After a physical inventory count, there's a discrepancy between the system count and actual count on shelf.
+
+Real-world flow:
+
+Warehouse Staff counts physical stock
+→ Discovers variance (e.g. system says 85, shelf has 80)
+→ Submits Adjustment Request with reason + photo proof
+→ Branch Manager reviews and approves
+→ System updates count
+→ Large variances (> threshold, e.g. ₱50,000 value) escalate to Operating Manager
+Authority: Branch Manager approves adjustments within threshold. Operating Manager approves large variances. Admin can audit all adjustments.
+
+3. Stock Transfer Between Branches
+What it is: Moving physical units from one branch's warehouse to another.
+
+Real-world flow:
+
+Requesting Branch (receiving side):
+  Branch Manager identifies low stock
+  → Warehouse Staff creates Transfer Request
+  → Branch Manager approves the REQUEST (confirms they need it)
+
+Sending Branch:
+  Branch Manager of the SOURCE branch approves the RELEASE
+  → Warehouse Staff packs and ships
+  → Receiving Warehouse Staff confirms receipt
+  → System completes the transfer (deducts source, adds destination)
+Two-sided approval is critical. Both branch managers must sign off. This prevents one branch silently depleting another.
+
+Large transfers (above a set value, e.g. ₱100,000) require Operating Manager approval before either branch can move.
+
+In CORVEX: TRF-301 (Sofa x4 from Davao Oriental to Davao City) needs:
+
+Davao City Branch Manager approves the need
+Davao Oriental Branch Manager approves the release
+Davao Oriental Warehouse Staff physically ships
+Davao City Warehouse Staff confirms receipt → status becomes Completed
+4. Restock (Supplier Delivery / Purchase Order)
+What it is: New stock arriving from a supplier.
+
+Real-world flow:
+
+Warehouse Staff sees stock approaching reorder point
+→ Raises a Restock Request (Pending)
+→ Branch Manager approves (confirms budget allocation)
+→ Operating Manager approves if above branch purchase limit
+→ Admin records the approved Purchase Order
+→ Supplier delivers → Warehouse Staff receives and counts
+→ Warehouse Staff logs the delivery (quantity, supplier, delivery ref)
+→ System adds to stock count
+→ Branch Manager is notified of receipt
+In CORVEX current state: Only the receiving/logging step is tracked (RESTOCK_RECORDS). The approval chain before delivery isn't modeled yet — which is a gap.
+
+5. Damage / Loss Write-Off
+What it is: Units that are broken, stolen, or unsellable must be removed from inventory.
+
+Real-world flow:
+
+Warehouse Staff documents damage with photos and description
+→ Branch Manager approves write-off up to a threshold (e.g. ₱20,000)
+→ Operating Manager approves above threshold
+→ Admin records write-off for audit purposes
+→ System deducts from stock
+No one below Branch Manager can approve removing stock without a corresponding sale. This prevents theft by write-off.
+
+The Full Authority Matrix
+Action	Warehouse Staff	Branch Manager	Operating Manager	Admin	Super Admin
+View inventory	✓	✓	✓ (all branches)	✓	✓
+Log sale deduction	Auto	—	—	—	—
+Request stock adjustment	✓ create	✓ approve	✓ approve (large)	✓ audit	—
+Request transfer	✓ create	✓ approve both sides	✓ approve (high value)	✓ audit	—
+Approve restock PO	—	✓ (within budget)	✓ (above branch limit)	✓ audit	—
+Receive delivery	✓ log	notified	—	✓ audit	—
+Write off damaged stock	✓ document	✓ approve (small)	✓ approve (large)	✓ audit	—
+Transfer final confirmation	✓ ship/receive	—	—	—	—
+View all branch inventory	—	own branch only	✓	✓	✓
+What Your Current CORVEX System Has vs. What's Missing
+✅ Currently modeled
+Stock counts per branch per product
+Sale deductions in movement history
+Transfer requests with status (Pending / Approved / Completed / Rejected)
+Restock records (delivery logging)
+Low stock / out-of-stock alerts visible to Branch Manager and Operating Manager
+⚠️ Gaps in the current model
+Transfer needs two-branch approval — right now it's one approval. In reality, the source branch manager also needs to authorize the release separately.
+Restock has no purchase order approval chain — deliveries are logged but there's no step where Branch Manager or Operating Manager approves the purchase before the supplier ships.
+No damage/write-off workflow — stock count adjustments exist but there's no formal damage documentation and tiered approval.
+No budget/value threshold rules — all transfers look the same regardless of value. Real systems block large transfers until a higher level approves.
+Warehouse Staff can't see across branches — the current warehouse page shows all branches, but in a real system they should only see their own branch unless explicitly granted access.
+How the Restock Flow Should Connect to Sales
+This is the real feedback loop:
+
+Sales Agent logs sales → stock drops
+→ System compares stock vs reorder point
+→ Alert fires to Warehouse Staff + Branch Manager
+→ Warehouse Staff raises Restock Request
+→ Branch Manager approves (within budget)
+→ Operating Manager approves (if above limit)
+→ Admin issues PO to supplier
+→ Supplier delivers
+→ Warehouse Staff receives and confirms count
+→ Stock rises → alert clears
+→ Branch Manager and Operating Manager notified
+In CORVEX, this loop goes: Sales Agent closes sale → STOCK_MOVEMENTS → INVENTORY_HEALTH alerts → NOTIFICATIONS to warehouse/branch → transfer or restock initiated.
+
+The missing link is the purchase order step between "Branch Manager approves" and "supplier delivers." If you want a fully accurate system, that's the next workflow to build.
+

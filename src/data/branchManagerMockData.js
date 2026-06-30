@@ -1,25 +1,27 @@
+// Furniture retail — Davao City branch manager
+
 export const BRANCH_MANAGER_PROFILE = {
   name: 'Roberto Villanueva',
   employeeId: 'BM-4012',
-  branch: 'Quezon City Main Branch',
+  branch: 'Davao City Branch',
   email: 'roberto.villanueva@corvex.ph',
   phone: '+63 917 555 9900',
   avatarInitials: 'RV',
 };
 
 export const BRANCH_ANALYTICS = {
-  healthScore: 82,
-  collectionEfficiency: 91,
-  salesEfficiency: 84,
-  inventoryHealth: 78,
-  collectionRateToday: 91,
-  routeCompliance: 88,
-  salesVisitCompletion: 84,
-  stockAlertsCount: 7,
-  pendingCI: 12,
-  overdueAccounts: 23,
-  totalCollectionsToday: 285400,
-  totalSalesToday: 314200,
+  healthScore: 84,
+  collectionEfficiency: 88,
+  salesEfficiency: 82,
+  inventoryHealth: 76,
+  collectionRateToday: 88,
+  routeCompliance: 91,
+  salesVisitCompletion: 82,
+  stockAlertsCount: 4,
+  pendingCI: 8,
+  overdueAccounts: 11,
+  totalCollectionsToday: 186500,
+  totalSalesToday: 248000,
   activeCollectors: 5,
   activeSalesAgents: 4,
 };
@@ -28,35 +30,35 @@ export const COLLECTORS = [
   {
     id: 'c1',
     name: 'Maria Dela Cruz',
-    accountsAssigned: 24,
-    accountsVisited: 16,
-    accountsPending: 8,
+    accountsAssigned: 18,
+    accountsVisited: 13,
+    accountsPending: 5,
     complianceScore: 94,
     collectionAmount: 68500,
     recoveryRate: 88,
     missedVisits: 2,
-    avgVisitDuration: '22 min',
+    avgVisitDuration: '28 min',
     collectionSuccessRate: 92,
     route: [
-      { account: 'Juan Santos', status: 'Completed', time: '08:30 AM', amount: 5000 },
-      { account: 'Maria Garcia', status: 'Completed', time: '09:45 AM', amount: 3500 },
-      { account: 'Pedro Reyes', status: 'Pending', time: '—', amount: 0 },
-      { account: 'Anna Lopez', status: 'Missed', time: '—', amount: 0 },
+      { account: 'Luntiang Tahanan Interiors', status: 'Completed', time: '08:30 AM', amount: 12000 },
+      { account: 'Casa Moderna Furniture',     status: 'Completed', time: '09:45 AM', amount: 10000 },
+      { account: 'Hardin ng Bahay',            status: 'Pending',   time: '—',        amount: 0 },
+      { account: 'Mabuhay Sala Sets',          status: 'Missed',    time: '—',        amount: 0 },
     ],
-    missedAccounts: ['Anna Lopez'],
+    missedAccounts: ['Mabuhay Sala Sets'],
     gpsAttendance: true,
   },
   {
     id: 'c2',
     name: 'John Dela Cruz',
-    accountsAssigned: 20,
-    accountsVisited: 18,
-    accountsPending: 2,
+    accountsAssigned: 16,
+    accountsVisited: 15,
+    accountsPending: 1,
     complianceScore: 97,
     collectionAmount: 74200,
     recoveryRate: 94,
     missedVisits: 0,
-    avgVisitDuration: '19 min',
+    avgVisitDuration: '22 min',
     collectionSuccessRate: 96,
     route: [],
     missedAccounts: [],
@@ -65,17 +67,17 @@ export const COLLECTORS = [
   {
     id: 'c3',
     name: 'Pedro Garcia',
-    accountsAssigned: 22,
-    accountsVisited: 14,
+    accountsAssigned: 20,
+    accountsVisited: 12,
     accountsPending: 8,
-    complianceScore: 88,
-    collectionAmount: 52100,
-    recoveryRate: 81,
-    missedVisits: 3,
-    avgVisitDuration: '25 min',
-    collectionSuccessRate: 85,
+    complianceScore: 85,
+    collectionAmount: 43800,
+    recoveryRate: 78,
+    missedVisits: 4,
+    avgVisitDuration: '32 min',
+    collectionSuccessRate: 82,
     route: [],
-    missedAccounts: ['Jose Cruz', 'Rosa Mendoza'],
+    missedAccounts: ['Dreamspace Living', 'Soledad Furniture Gallery'],
     gpsAttendance: true,
   },
 ];
@@ -84,41 +86,41 @@ export const SALES_AGENTS = [
   {
     id: 's1',
     name: 'Carlos Mendoza',
-    clientsAssigned: 17,
-    visitsCompleted: 11,
-    salesLogged: 8,
-    totalSalesAmount: 87600,
-    visitCompletionRate: 84,
-    conversionRate: 72,
-    avgSaleValue: 10950,
+    clientsAssigned: 14,
+    visitsCompleted: 10,
+    salesLogged: 7,
+    totalSalesAmount: 248000,
+    visitCompletionRate: 82,
+    conversionRate: 70,
+    avgSaleValue: 35429,
     newClientsAcquired: 2,
-    clients: ['Corner Store Manila', 'City Convenience', 'Riverside Trading'],
-    productPerformance: [{ product: 'Beverage Pack A', units: 120 }, { product: 'Snack Box B', units: 85 }],
+    clients: ['Furniture Plus GenSan', 'Casa Elegante GenSan', 'Living Space Interiors'],
+    productPerformance: [{ product: 'L-Shape Sofa (Gray)', units: 8 }, { product: '6-Seater Dining Set (Narra)', units: 4 }],
   },
   {
     id: 's2',
     name: 'Jane Smith',
-    clientsAssigned: 15,
-    visitsCompleted: 13,
-    salesLogged: 9,
-    totalSalesAmount: 72400,
-    visitCompletionRate: 87,
-    conversionRate: 69,
-    avgSaleValue: 8044,
+    clientsAssigned: 12,
+    visitsCompleted: 11,
+    salesLogged: 8,
+    totalSalesAmount: 192000,
+    visitCompletionRate: 88,
+    conversionRate: 72,
+    avgSaleValue: 24000,
     newClientsAcquired: 1,
-    clients: ['Barangay Store', 'Plaza Shop'],
-    productPerformance: [{ product: 'Instant Noodles D', units: 95 }],
+    clients: ['Home Essentials SoCCSKSargen', 'Abode Furniture Warehouse'],
+    productPerformance: [{ product: 'Queen Bed Frame (Walnut)', units: 5 }, { product: 'Ergonomic Office Chair', units: 12 }],
   },
   {
     id: 's3',
     name: 'Robert Lee',
-    clientsAssigned: 18,
-    visitsCompleted: 16,
-    salesLogged: 11,
-    totalSalesAmount: 95200,
-    visitCompletionRate: 89,
-    conversionRate: 78,
-    avgSaleValue: 8655,
+    clientsAssigned: 15,
+    visitsCompleted: 13,
+    salesLogged: 10,
+    totalSalesAmount: 276000,
+    visitCompletionRate: 86,
+    conversionRate: 76,
+    avgSaleValue: 27600,
     newClientsAcquired: 3,
     clients: [],
     productPerformance: [],
@@ -128,101 +130,101 @@ export const SALES_AGENTS = [
 export const CI_QUEUE = [
   {
     id: 'ci1',
-    clientName: 'Juan Santos',
+    clientName: 'Luntiang Tahanan Interiors',
     submittedBy: 'Maria Dela Cruz',
     submissionDate: '2026-06-24',
     delinquencyStatus: 'Clear',
     status: 'Pending',
-    monthlyIncome: 45000,
-    businessType: 'Sari-Sari Store',
+    monthlyIncome: 180000,
+    businessType: 'Furniture Retail Store',
     purpose: 'Credit Limit Increase',
-    references: 'Verified — 2 references',
+    references: 'Verified — 2 trade references',
     paymentHistory: [
-      { date: '2026-06-20', amount: 5000, status: 'Paid' },
-      { date: '2026-06-15', amount: 3500, status: 'Paid' },
+      { date: '2026-06-20', amount: 12000, status: 'Paid' },
+      { date: '2026-06-15', amount: 8500,  status: 'Paid' },
     ],
     delinquencyFlags: [],
     gisClassification: 'High Collection Area',
-    riskScore: 22,
-    formRemarks: 'Consistent payer, requesting limit increase.',
+    riskScore: 18,
+    formRemarks: 'Consistent payer, requesting credit limit increase for Q3 orders.',
   },
   {
     id: 'ci2',
-    clientName: 'Maria Garcia',
+    clientName: 'Mabuhay Sala Sets',
     submittedBy: 'John Dela Cruz',
     submissionDate: '2026-06-24',
     delinquencyStatus: 'Overdue',
     status: 'Pending',
-    monthlyIncome: 32000,
-    businessType: 'Convenience Store',
+    monthlyIncome: 95000,
+    businessType: 'Sala Set Specialty Store',
     purpose: 'Delinquency Review',
     references: '1 reference pending verification',
-    paymentHistory: [{ date: '2026-06-10', amount: 2000, status: 'Late' }],
-    delinquencyFlags: ['12 days overdue', 'Missed last visit'],
+    paymentHistory: [{ date: '2026-05-28', amount: 5000, status: 'Late' }],
+    delinquencyFlags: ['28 days overdue', 'Missed 3 collector visits'],
     gisClassification: 'Delinquency Cluster Zone B',
-    riskScore: 68,
-    formRemarks: 'Review required due to recent delinquency.',
+    riskScore: 72,
+    formRemarks: 'Review required — long overdue balance.',
   },
   {
     id: 'ci3',
-    clientName: 'Pedro Reyes',
+    clientName: 'Dreamspace Living',
     submittedBy: 'Pedro Garcia',
     submissionDate: '2026-06-23',
     delinquencyStatus: 'Clear',
     status: 'Approved',
-    monthlyIncome: 28000,
-    businessType: 'General Store',
+    monthlyIncome: 140000,
+    businessType: 'Home Décor & Furniture',
     purpose: 'New Account',
     references: 'Verified',
     paymentHistory: [],
     delinquencyFlags: [],
     gisClassification: 'Moderate Collection Area',
-    riskScore: 35,
-    formRemarks: 'New client onboarding.',
+    riskScore: 28,
+    formRemarks: 'New client onboarding for Sandawa district.',
   },
   {
     id: 'ci4',
-    clientName: 'Jose Cruz',
-    submittedBy: 'Anna Lopez',
+    clientName: 'Casa Moderna Furniture',
+    submittedBy: 'Maria Dela Cruz',
     submissionDate: '2026-06-22',
     delinquencyStatus: 'Overdue',
     status: 'Rejected',
-    monthlyIncome: 18000,
-    businessType: 'Retail',
+    monthlyIncome: 75000,
+    businessType: 'Furniture Retail',
     purpose: 'Account Restructure',
     references: 'Incomplete',
     paymentHistory: [],
-    delinquencyFlags: ['Multiple missed payments'],
+    delinquencyFlags: ['Multiple partial payments', '9 days overdue'],
     gisClassification: 'Low Collection Area',
-    riskScore: 82,
-    formRemarks: 'Rejected — insufficient payment history.',
+    riskScore: 68,
+    formRemarks: 'Rejected — incomplete documentation.',
   },
 ];
 
 export const MAP_ACCOUNTS = [
-  { id: 'a1', clientName: 'Juan Santos', balance: 18500, paymentStatus: 'Overdue', lastVisit: '2026-06-16', assignedStaff: 'Maria Dela Cruz', lat: 14.676, lng: 121.043, zone: 'High Collection' },
-  { id: 'a2', clientName: 'Maria Garcia', balance: 5200, paymentStatus: 'Pending', lastVisit: '2026-06-18', assignedStaff: 'John Dela Cruz', lat: 14.599, lng: 120.984, zone: 'Delinquency Cluster' },
-  { id: 'a3', clientName: 'Corner Store Manila', balance: 0, paymentStatus: 'Current', lastVisit: '2026-06-24', assignedStaff: 'Carlos Mendoza', lat: 14.554, lng: 121.024, zone: 'High Sales' },
-  { id: 'a4', clientName: 'Pedro Reyes', balance: 3800, paymentStatus: 'Overdue', lastVisit: '2026-06-19', assignedStaff: 'Maria Dela Cruz', lat: 14.608, lng: 121.022, zone: 'Low Collection' },
+  { id: 'a1', clientName: 'Luntiang Tahanan Interiors', balance: 48500,  paymentStatus: 'Overdue',  lastVisit: '2026-06-16', assignedStaff: 'Maria Dela Cruz', lat: 7.0731, lng: 125.6128, zone: 'High Collection' },
+  { id: 'a2', clientName: 'Casa Moderna Furniture',     balance: 22000,  paymentStatus: 'Pending',  lastVisit: '2026-06-18', assignedStaff: 'John Dela Cruz',  lat: 7.0682, lng: 125.6096, zone: 'Delinquency Cluster' },
+  { id: 'a3', clientName: 'Furniture Plus GenSan',      balance: 0,      paymentStatus: 'Current',  lastVisit: '2026-06-24', assignedStaff: 'Carlos Mendoza', lat: 6.1175, lng: 125.1739, zone: 'High Sales' },
+  { id: 'a4', clientName: 'Hardin ng Bahay',            balance: 15800,  paymentStatus: 'Overdue',  lastVisit: '2026-06-19', assignedStaff: 'Maria Dela Cruz', lat: 7.0718, lng: 125.6148, zone: 'Low Collection' },
 ];
 
 export const ALERTS = [
-  { id: 'al1', type: 'collection', category: 'Overdue Accounts', title: '23 accounts overdue', message: 'Total outstanding PHP 412,800 across branch territory.', severity: 'Critical', time: '9:00 AM' },
-  { id: 'al2', type: 'collection', category: 'Missed Visits', title: '5 missed visits today', message: 'Collectors missed scheduled account visits.', severity: 'Warning', time: '8:45 AM' },
-  { id: 'al3', type: 'sales', category: 'Unvisited Clients', title: '6 clients unvisited', message: 'Sales agents have pending client visits.', severity: 'Warning', time: '8:30 AM' },
-  { id: 'al4', type: 'inventory', category: 'Low Stock', title: '7 low stock items', message: 'Snack Box B and Coffee Mix D below reorder point.', severity: 'Warning', time: '8:15 AM' },
-  { id: 'al5', type: 'inventory', category: 'Stockout Risk', title: 'Candy Mix C out of stock', message: 'Predicted stockout — reorder recommended.', severity: 'Critical', time: '8:00 AM' },
-  { id: 'al6', type: 'route', category: 'Route Deviations', title: 'Route deviation detected', message: 'Pedro Garcia deviated from assigned route.', severity: 'Warning', time: '7:50 AM' },
-  { id: 'al7', type: 'route', category: 'Low Compliance', title: 'Compliance below threshold', message: 'Pedro Garcia compliance at 88%.', severity: 'Informational', time: '7:30 AM' },
-  { id: 'al8', type: 'collection', category: 'High Delinquency', title: 'Critical delinquency cluster', message: 'Zone B delinquency rate increased 8%.', severity: 'Critical', time: 'Yesterday' },
+  { id: 'al1', type: 'collection', category: 'Overdue Accounts', title: '11 accounts overdue',         message: 'Total outstanding PHP 284,800 across Davao City territory.',                severity: 'Critical',       time: '9:00 AM' },
+  { id: 'al2', type: 'collection', category: 'Missed Visits',    title: '4 missed visits today',       message: 'Collectors missed scheduled account visits.',                            severity: 'Warning',        time: '8:45 AM' },
+  { id: 'al3', type: 'sales',      category: 'Unvisited Clients', title: '5 clients unvisited',        message: 'Sales agents have pending client visits in Davao City territory.',       severity: 'Warning',        time: '8:30 AM' },
+  { id: 'al4', type: 'inventory',  category: 'Low Stock',         title: '4 low stock items',          message: 'Ergonomic Office Chair and Queen Bed Frame below reorder point.',        severity: 'Warning',        time: '8:15 AM' },
+  { id: 'al5', type: 'inventory',  category: 'Stockout Risk',     title: 'Office Chair out of stock',  message: 'Ergonomic Office Chair (Black Mesh) — zero units remaining at branch.',  severity: 'Critical',       time: '8:00 AM' },
+  { id: 'al6', type: 'route',      category: 'Route Deviations',  title: 'Route deviation detected',   message: 'Pedro Garcia deviated from assigned route in McArthur Highway cluster.', severity: 'Warning',        time: '7:50 AM' },
+  { id: 'al7', type: 'route',      category: 'Low Compliance',    title: 'Compliance below threshold', message: 'Pedro Garcia compliance score at 85% — below 90% branch minimum.',       severity: 'Informational',  time: '7:30 AM' },
+  { id: 'al8', type: 'collection', category: 'High Delinquency',  title: 'Delinquency cluster growth', message: 'JP Laurel Ave zone delinquency rate increased 6% week-on-week.',        severity: 'Critical',       time: 'Yesterday' },
 ];
 
 export const NOTIFICATIONS = [
-  { id: 'bn1', type: 'ci', title: 'CI pending review', message: 'Maria Garcia CI submitted by John Dela Cruz.', time: '9:10 AM', read: false, relatedTo: '/branch-manager/ci-approvals/ci2' },
-  { id: 'bn2', type: 'route', title: 'Route alert', message: 'Pedro Garcia route deviation flagged.', time: '8:50 AM', read: false, relatedTo: '/branch-manager/alerts' },
-  { id: 'bn3', type: 'delinquency', title: 'Delinquency spike', message: 'Zone B delinquency rate increased.', time: '8:30 AM', read: false, relatedTo: '/branch-manager/gis/delinquency' },
-  { id: 'bn4', type: 'inventory', title: 'Critical stock alert', message: 'Candy Mix C out of stock at Main Branch.', time: 'Yesterday', read: true, relatedTo: '/branch-manager/alerts' },
-  { id: 'bn5', type: 'staff', title: 'Staff check-in', message: 'All collectors checked in via GPS.', time: '8:00 AM', read: true, relatedTo: '/branch-manager/staff-performance' },
+  { id: 'bn1', type: 'ci',          title: 'CI pending review',    message: 'Mabuhay Sala Sets CI submitted by John Dela Cruz.',          time: '9:10 AM',   read: false, relatedTo: '/branch-manager/ci-approvals/ci2' },
+  { id: 'bn2', type: 'route',       title: 'Route alert',          message: 'Pedro Garcia route deviation flagged in McArthur cluster.',  time: '8:50 AM',   read: false, relatedTo: '/branch-manager/alerts' },
+  { id: 'bn3', type: 'delinquency', title: 'Delinquency spike',    message: 'JP Laurel Ave zone delinquency rate increased.',            time: '8:30 AM',   read: false, relatedTo: '/branch-manager/gis/delinquency' },
+  { id: 'bn4', type: 'inventory',   title: 'Critical stock alert', message: 'Ergonomic Office Chair out of stock at Davao City Branch.', time: 'Yesterday', read: true,  relatedTo: '/branch-manager/alerts' },
+  { id: 'bn5', type: 'staff',       title: 'Staff check-in',       message: 'All collectors checked in via GPS.',                        time: '8:00 AM',   read: true,  relatedTo: '/branch-manager/staff-performance' },
 ];
 
 export const PENDING_APPROVALS = {
@@ -232,86 +234,62 @@ export const PENDING_APPROVALS = {
 };
 
 export const AUDIT_LOGS = [
-  { id: 'ba1', action: 'CI Approval', detail: 'Approved CI for Pedro Reyes (ci3)', timestamp: '2026-06-23 03:15 PM' },
-  { id: 'ba2', action: 'CI Rejection', detail: 'Rejected CI for Jose Cruz — insufficient history', timestamp: '2026-06-22 11:40 AM' },
-  { id: 'ba3', action: 'Report Export', detail: 'Exported Collection Report (PDF)', timestamp: '2026-06-22 09:00 AM' },
-  { id: 'ba4', action: 'GIS Access', detail: 'Viewed Delinquency Heatmap layer', timestamp: '2026-06-21 04:30 PM' },
-  { id: 'ba5', action: 'Staff Monitoring', detail: 'Reviewed Pedro Garcia route playback', timestamp: '2026-06-21 02:00 PM' },
+  { id: 'ba1', action: 'CI Approval',   detail: 'Approved CI for Dreamspace Living (ci3)',             timestamp: '2026-06-23 03:15 PM' },
+  { id: 'ba2', action: 'CI Rejection',  detail: 'Rejected CI for Casa Moderna — incomplete docs',      timestamp: '2026-06-22 11:40 AM' },
+  { id: 'ba3', action: 'Report Export', detail: 'Exported Collection Report (PDF)',                    timestamp: '2026-06-22 09:00 AM' },
+  { id: 'ba4', action: 'GIS Access',    detail: 'Viewed Delinquency Heatmap layer — Davao City',       timestamp: '2026-06-21 04:30 PM' },
+  { id: 'ba5', action: 'Staff Monitor', detail: 'Reviewed Pedro Garcia GPS route playback',            timestamp: '2026-06-21 02:00 PM' },
 ];
 
 export const TRENDS = {
-  delinquency: [18, 19, 17, 20, 22, 21, 23],
-  routeCompliance: [85, 86, 87, 88, 87, 89, 88],
-  sales: [280000, 295000, 301000, 308000, 310000, 312000, 314200],
-  collection: [260000, 268000, 272000, 275000, 279000, 282000, 285400],
+  delinquency:    [14, 15, 13, 16, 17, 16, 18],
+  routeCompliance:[88, 89, 90, 91, 90, 92, 91],
+  sales:    [220000, 235000, 241000, 248000, 252000, 258000, 248000],
+  collection:[170000, 178000, 182000, 186000, 189000, 192000, 186500],
 };
 
-// Chart-ready daily collection trend (last 7 days)
 export const DAILY_COLLECTION = [
-  { day: 'Mon', amount: 260000, target: 270000 },
-  { day: 'Tue', amount: 268000, target: 270000 },
-  { day: 'Wed', amount: 272000, target: 270000 },
-  { day: 'Thu', amount: 275000, target: 280000 },
-  { day: 'Fri', amount: 279000, target: 280000 },
-  { day: 'Sat', amount: 282000, target: 280000 },
-  { day: 'Today', amount: 285400, target: 285000 },
+  { day: 'Mon', amount: 170000, target: 180000 },
+  { day: 'Tue', amount: 178000, target: 180000 },
+  { day: 'Wed', amount: 182000, target: 185000 },
+  { day: 'Thu', amount: 186000, target: 185000 },
+  { day: 'Fri', amount: 189000, target: 190000 },
+  { day: 'Sat', amount: 192000, target: 190000 },
+  { day: 'Today', amount: 186500, target: 190000 },
 ];
 
-// Weekly sales vs target
 export const WEEKLY_SALES = [
-  { day: 'Mon', actual: 280000, target: 290000 },
-  { day: 'Tue', actual: 295000, target: 290000 },
-  { day: 'Wed', actual: 301000, target: 295000 },
-  { day: 'Thu', actual: 308000, target: 300000 },
-  { day: 'Fri', actual: 310000, target: 305000 },
-  { day: 'Sat', actual: 312000, target: 310000 },
-  { day: 'Today', actual: 314200, target: 315000 },
+  { day: 'Mon', actual: 220000, target: 230000 },
+  { day: 'Tue', actual: 235000, target: 230000 },
+  { day: 'Wed', actual: 241000, target: 240000 },
+  { day: 'Thu', actual: 248000, target: 245000 },
+  { day: 'Fri', actual: 252000, target: 250000 },
+  { day: 'Sat', actual: 258000, target: 255000 },
+  { day: 'Today', actual: 248000, target: 260000 },
 ];
 
-// Collector performance bar chart data
-export const COLLECTOR_PERFORMANCE_CHART = COLLECTORS
-  ? [] // filled below after COLLECTORS definition
-  : [];
+export const COLLECTOR_PERFORMANCE_CHART = [];
 
-// Delinquency weekly trend
 export const DELINQUENCY_TREND = [
-  { week: 'W1', rate: 18, accounts: 19 },
-  { week: 'W2', rate: 19, accounts: 20 },
-  { week: 'W3', rate: 17, accounts: 18 },
-  { week: 'W4', rate: 20, accounts: 21 },
-  { week: 'W5', rate: 22, accounts: 22 },
-  { week: 'W6', rate: 21, accounts: 22 },
-  { week: 'W7', rate: 23, accounts: 23 },
+  { week: 'W1', rate: 14, accounts: 9  },
+  { week: 'W2', rate: 15, accounts: 10 },
+  { week: 'W3', rate: 13, accounts: 9  },
+  { week: 'W4', rate: 16, accounts: 10 },
+  { week: 'W5', rate: 17, accounts: 11 },
+  { week: 'W6', rate: 16, accounts: 10 },
+  { week: 'W7', rate: 18, accounts: 11 },
 ];
 
-// Route compliance weekly per collector
 export const COMPLIANCE_TREND = [
-  { week: 'W1', Maria: 92, John: 95, Pedro: 84 },
-  { week: 'W2', Maria: 93, John: 96, Pedro: 85 },
-  { week: 'W3', Maria: 91, John: 97, Pedro: 86 },
-  { week: 'W4', Maria: 94, John: 97, Pedro: 88 },
+  { week: 'W1', Maria: 92, John: 96, Pedro: 82 },
+  { week: 'W2', Maria: 93, John: 97, Pedro: 83 },
+  { week: 'W3', Maria: 91, John: 97, Pedro: 84 },
+  { week: 'W4', Maria: 94, John: 97, Pedro: 85 },
 ];
 
-export function formatCurrency(amount) {
-  return `PHP ${Number(amount).toLocaleString('en-PH')}`;
-}
-
-export function getCollectorById(id) {
-  return COLLECTORS.find((c) => c.id === String(id)) ?? null;
-}
-
-export function getSalesAgentById(id) {
-  return SALES_AGENTS.find((a) => a.id === String(id)) ?? null;
-}
-
-export function getCIById(id) {
-  return CI_QUEUE.find((c) => c.id === String(id)) ?? null;
-}
-
-export function getMapAccountById(id) {
-  return MAP_ACCOUNTS.find((a) => a.id === String(id)) ?? null;
-}
-
-export function getAlertById(id) {
-  return ALERTS.find((a) => a.id === String(id)) ?? null;
-}
+export function formatCurrency(amount) { return `₱${Number(amount).toLocaleString('en-PH')}`; }
+export function getCollectorById(id)   { return COLLECTORS.find((c) => c.id === String(id)) ?? null; }
+export function getSalesAgentById(id)  { return SALES_AGENTS.find((a) => a.id === String(id)) ?? null; }
+export function getCIById(id)          { return CI_QUEUE.find((c) => c.id === String(id)) ?? null; }
+export function getMapAccountById(id)  { return MAP_ACCOUNTS.find((a) => a.id === String(id)) ?? null; }
+export function getAlertById(id)       { return ALERTS.find((a) => a.id === String(id)) ?? null; }
