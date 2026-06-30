@@ -246,6 +246,52 @@ export const TRENDS = {
   collection: [260000, 268000, 272000, 275000, 279000, 282000, 285400],
 };
 
+// Chart-ready daily collection trend (last 7 days)
+export const DAILY_COLLECTION = [
+  { day: 'Mon', amount: 260000, target: 270000 },
+  { day: 'Tue', amount: 268000, target: 270000 },
+  { day: 'Wed', amount: 272000, target: 270000 },
+  { day: 'Thu', amount: 275000, target: 280000 },
+  { day: 'Fri', amount: 279000, target: 280000 },
+  { day: 'Sat', amount: 282000, target: 280000 },
+  { day: 'Today', amount: 285400, target: 285000 },
+];
+
+// Weekly sales vs target
+export const WEEKLY_SALES = [
+  { day: 'Mon', actual: 280000, target: 290000 },
+  { day: 'Tue', actual: 295000, target: 290000 },
+  { day: 'Wed', actual: 301000, target: 295000 },
+  { day: 'Thu', actual: 308000, target: 300000 },
+  { day: 'Fri', actual: 310000, target: 305000 },
+  { day: 'Sat', actual: 312000, target: 310000 },
+  { day: 'Today', actual: 314200, target: 315000 },
+];
+
+// Collector performance bar chart data
+export const COLLECTOR_PERFORMANCE_CHART = COLLECTORS
+  ? [] // filled below after COLLECTORS definition
+  : [];
+
+// Delinquency weekly trend
+export const DELINQUENCY_TREND = [
+  { week: 'W1', rate: 18, accounts: 19 },
+  { week: 'W2', rate: 19, accounts: 20 },
+  { week: 'W3', rate: 17, accounts: 18 },
+  { week: 'W4', rate: 20, accounts: 21 },
+  { week: 'W5', rate: 22, accounts: 22 },
+  { week: 'W6', rate: 21, accounts: 22 },
+  { week: 'W7', rate: 23, accounts: 23 },
+];
+
+// Route compliance weekly per collector
+export const COMPLIANCE_TREND = [
+  { week: 'W1', Maria: 92, John: 95, Pedro: 84 },
+  { week: 'W2', Maria: 93, John: 96, Pedro: 85 },
+  { week: 'W3', Maria: 91, John: 97, Pedro: 86 },
+  { week: 'W4', Maria: 94, John: 97, Pedro: 88 },
+];
+
 export function formatCurrency(amount) {
   return `PHP ${Number(amount).toLocaleString('en-PH')}`;
 }

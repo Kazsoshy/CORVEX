@@ -102,11 +102,67 @@ export const ENTERPRISE_KPIS = {
   totalInventoryValue: BRANCHES.reduce((s, b) => s + b.inventoryValue, 0),
 };
 
+// Weekly trend data (7 weeks) for line/area charts
 export const TREND_DATA = {
   collection: [82, 84, 86, 85, 88, 90, 91],
   sales: [74, 76, 78, 79, 81, 83, 84],
   delinquency: [18, 17, 16, 15, 14, 13, 12],
 };
+
+// Monthly revenue per branch (6 months) for multi-line chart
+export const MONTHLY_REVENUE = [
+  { month: 'Jan', Main: 3800000, North: 3100000, South: 2600000, Davao: 4400000 },
+  { month: 'Feb', Main: 3950000, North: 3220000, South: 2700000, Davao: 4600000 },
+  { month: 'Mar', Main: 4050000, North: 3350000, South: 2820000, Davao: 4750000 },
+  { month: 'Apr', Main: 4100000, North: 3480000, South: 2890000, Davao: 4890000 },
+  { month: 'May', Main: 4200000, North: 3560000, South: 2940000, Davao: 5020000 },
+  { month: 'Jun', Main: 4280000, North: 3620000, South: 2980000, Davao: 5120000 },
+];
+
+// Monthly collections per branch
+export const MONTHLY_COLLECTIONS = [
+  { month: 'Jan', Main: 3400000, North: 2800000, South: 2200000, Davao: 4100000 },
+  { month: 'Feb', Main: 3520000, North: 2920000, South: 2310000, Davao: 4280000 },
+  { month: 'Mar', Main: 3640000, North: 3010000, South: 2390000, Davao: 4450000 },
+  { month: 'Apr', Main: 3710000, North: 3090000, South: 2440000, Davao: 4620000 },
+  { month: 'May', Main: 3800000, North: 3160000, South: 2490000, Davao: 4780000 },
+  { month: 'Jun', Main: 3890000, North: 3220000, South: 2530000, Davao: 4910000 },
+];
+
+// Monthly delinquency rate per branch
+export const MONTHLY_DELINQUENCY = [
+  { month: 'Jan', Main: 22, North: 30, South: 46, Davao: 14 },
+  { month: 'Feb', Main: 21, North: 29, South: 45, Davao: 13 },
+  { month: 'Mar', Main: 20, North: 28, South: 44, Davao: 13 },
+  { month: 'Apr', Main: 19, North: 29, South: 46, Davao: 12 },
+  { month: 'May', Main: 21, North: 30, South: 47, Davao: 12 },
+  { month: 'Jun', Main: 23, North: 31, South: 47, Davao: 12 },
+];
+
+// Collection rate weekly trend per branch
+export const WEEKLY_COLLECTION_RATE = [
+  { week: 'W1', Main: 88, North: 85, South: 80, Davao: 93 },
+  { week: 'W2', Main: 89, North: 86, South: 81, Davao: 94 },
+  { week: 'W3', Main: 90, North: 87, South: 83, Davao: 95 },
+  { week: 'W4', Main: 91, North: 89, South: 85, Davao: 96 },
+];
+
+// Sales completion weekly trend per branch
+export const WEEKLY_SALES_RATE = [
+  { week: 'W1', Main: 80, North: 77, South: 74, Davao: 88 },
+  { week: 'W2', Main: 81, North: 78, South: 75, Davao: 89 },
+  { week: 'W3', Main: 83, North: 80, South: 76, Davao: 90 },
+  { week: 'W4', Main: 84, North: 81, South: 78, Davao: 91 },
+];
+
+// Radar / performance profile per branch (for radar chart)
+export const BRANCH_RADAR = [
+  { metric: 'Collection', Main: 91, North: 89, South: 85, Davao: 96 },
+  { metric: 'Sales', Main: 84, North: 81, South: 78, Davao: 91 },
+  { metric: 'Inventory', Main: 88, North: 82, South: 74, Davao: 90 },
+  { metric: 'Compliance', Main: 88, North: 86, South: 82, Davao: 94 },
+  { metric: 'Growth', Main: 85, North: 79, South: 71, Davao: 93 },
+];
 
 export const GIS_LAYERS = [
   { id: 'routes', label: 'Collector Routes', active: true },
@@ -213,7 +269,7 @@ export const NOTIFICATIONS = [
 ];
 
 export function formatCurrency(amount) {
-  return `PHP ${amount.toLocaleString('en-PH')}`;
+  return `PHP ${Number(amount).toLocaleString('en-PH')}`;
 }
 
 export function getBranchById(id) {

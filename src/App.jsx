@@ -7,6 +7,8 @@ import { WarehousePageBody } from './components/warehouse/WarehousePageBody';
 import { BranchManagerPageBody } from './components/branchManager/BranchManagerPageBody';
 import { OperatingManagerPageBody } from './components/operatingManager/OperatingManagerPageBody';
 import { CustomerPageBody } from './components/customer/CustomerPageBody';
+import { AdminPageBody } from './components/admin/AdminPageBody';
+import { SuperAdminPageBody } from './components/superAdmin/SuperAdminPageBody';
 import { Toast, useToast } from './components/collector/Toast';
 import { quickFacts } from './pageData';
 import { NavIcon } from './navIcons';
@@ -22,8 +24,12 @@ import { warehouseRole } from './rolePages/warehouse';
 import { branchManagerRole } from './rolePages/branchManager';
 import { operatingManagerRole } from './rolePages/operatingManager';
 import { customerRole } from './rolePages/customer';
+import { adminRole } from './rolePages/admin';
+import { superAdminRole } from './rolePages/superAdmin';
+import { resolveAdminPage, isAdminNavActive } from './utils/adminRoutes';
+import { resolveSuperAdminPage, isSuperAdminNavActive } from './utils/superAdminRoutes';
 
-const ROLES = [collectorRole, salesRole, warehouseRole, branchManagerRole, operatingManagerRole, customerRole];
+const ROLES = [collectorRole, salesRole, warehouseRole, branchManagerRole, operatingManagerRole, customerRole, adminRole, superAdminRole];
 const ROLE_BY_KEY = Object.fromEntries(ROLES.map((role) => [role.key, role]));
 const ROUTE_REGISTRY = Object.assign({}, ...ROLES.map((role) => role.routes));
 
@@ -38,6 +44,8 @@ function App() {
       <Route path="/branch-manager" element={<Navigate to={branchManagerRole.entryPath} replace />} />
       <Route path="/operating-manager" element={<Navigate to={operatingManagerRole.entryPath} replace />} />
       <Route path="/customer" element={<Navigate to={customerRole.entryPath} replace />} />
+      <Route path="/admin" element={<Navigate to={adminRole.entryPath} replace />} />
+      <Route path="/super-admin" element={<Navigate to={superAdminRole.entryPath} replace />} />
       <Route path="*" element={<PrototypeShell />} />
     </Routes>
   );
@@ -53,7 +61,9 @@ function PrototypeShell() {
   const isBranchManager = currentRole?.key === 'branchManager';
   const isOperatingManager = currentRole?.key === 'operatingManager';
   const isCustomer = currentRole?.key === 'customer';
-  const isRoleModule = isCollector || isSales || isWarehouse || isBranchManager || isOperatingManager || isCustomer;
+  const isAdmin = currentRole?.key === 'admin';
+  const isSuperAdmin = currentRole?.key === 'superAdmin';
+  const isRoleModule = isCollector || isSales || isWarehouse || isBranchManager || isOperatingManager || isCustomer || isAdmin || isSuperAdmin;
   const isCustomerLogin = isCustomerAuthPath(location.pathname);
   const fullPath = location.pathname + location.search;
   const page = isCollector
@@ -68,7 +78,11 @@ function PrototypeShell() {
             ? resolveOperatingManagerPage(location.pathname)
             : isCustomer
               ? resolveCustomerPage(location.pathname)
-              : ROUTE_REGISTRY[location.pathname] ?? null;
+              : isAdmin
+                ? resolveAdminPage(location.pathname)
+                : isSuperAdmin
+                  ? resolveSuperAdminPage(location.pathname)
+                  : ROUTE_REGISTRY[location.pathname] ?? null;
   const [showMap, setShowMap] = useState(false);
   const [filter, setFilter] = useState('All');
   const { toast, showToast, clearToast } = useToast();
@@ -91,7 +105,7 @@ function PrototypeShell() {
       <aside className="sidebar">
         <div className="sidebar-header">
           <div className="brand-card">
-            <div className="brand-mark">C</div>
+            <img src="/src/assets/logo.png.png" alt="CORVEX logo" className="brand-logo" />
             <div className="brand-copy">
               <div className="brand-title">CORVEX</div>
               {currentRole ? <div className="brand-subtitle">{currentRole.label}</div> : null}
@@ -119,7 +133,11 @@ function PrototypeShell() {
                               ? isBranchManagerNavActive(fullPath, link.to)
                               : isOperatingManager
                                 ? isOperatingManagerNavActive(fullPath, link.to)
-                                : isCustomerNavActive(fullPath, link.to))
+                                : isAdmin
+                                  ? isAdminNavActive(fullPath, link.to)
+                                  : isSuperAdmin
+                                    ? isSuperAdminNavActive(fullPath, link.to)
+                                    : isCustomerNavActive(fullPath, link.to))
                         ? 'nav-link active'
                         : 'nav-link'
                       : location.pathname === link.to
@@ -238,6 +256,16 @@ function PrototypeShell() {
                   <CustomerPageBody page={page} navigate={navigate} showToast={showToast} />
                   <Toast toast={toast} onDismiss={clearToast} />
                 </>
+              ) : isAdmin ? (
+                <>
+                  <AdminPageBody page={page} navigate={navigate} showToast={showToast} />
+                  <Toast toast={toast} onDismiss={clearToast} />
+                </>
+              ) : isSuperAdmin ? (
+                <>
+                  <SuperAdminPageBody page={page} navigate={navigate} showToast={showToast} />
+                  <Toast toast={toast} onDismiss={clearToast} />
+                </>
               ) : (
                 <PageBody
                   showMap={showMap}
@@ -264,6 +292,8 @@ function roleFromPath(pathname) {
   if (pathname.startsWith('/branch-manager')) return branchManagerRole;
   if (pathname.startsWith('/operating-manager')) return operatingManagerRole;
   if (pathname.startsWith('/customer')) return customerRole;
+  if (pathname.startsWith('/admin')) return adminRole;
+  if (pathname.startsWith('/super-admin')) return superAdminRole;
   return null;
 }
 
@@ -332,7 +362,7 @@ function LoginPage() {
 
         <div className="login-card">
         <div className="login-brand">
-          <div className="login-mark">C</div>
+          <img src="/src/assets/logo.png.png" alt="CORVEX logo" className="login-logo" />
           <div>
             <span className="login-eyebrow">Operations platform</span>
             <h1>CORVEX</h1>

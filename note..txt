@@ -1,0 +1,20 @@
+Operating Manager:
+- Reports and Analytics should have graphs and etc. provide mock data for now.
+use recharts.
+- The Branch Performance page in the Operating manager should have charts too.
+
+And ofc the dashboards should have charts too.
+
+
+The Branch Manager -> Field Operations page is too empty. Find a way to
+combine the (Collector route overview, sales schedule overview, route performance)
+but still have the navigation to be in a page for specific navigation.
+
+
+Branch Manager: improve reports and analytics and add charts.
+find a way to combine all content inside that page but still have a navigation for each content only.
+
+
+Improve staff performance page. 
+
+

@@ -215,6 +215,15 @@ const LABEL_ICON_KEY = {
   'Alerts Center': 'alert',
   'Digital Receipts': 'receipt',
   Statements: 'reports',
+  'User Management': 'accounts',
+  'Branch Management': 'home',
+  'Inventory Management': 'inventory',
+  'System Reports': 'reports',
+  'Audit Logs': 'log',
+  'Role & Permissions': 'accounts',
+  'System Settings': 'form',
+  'Backup & Restore': 'history',
+  'Database Monitoring': 'reports',
 };
 
 export function NavIcon({ name, label, className = 'nav-svg' }) {
