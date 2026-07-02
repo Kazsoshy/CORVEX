@@ -263,10 +263,10 @@ function RoutePage({ pageType, navigate, showToast }) {
           <div className="panel-section-header">
             <h3>Route Summary</h3>
           </div>
-          <ul className="bullet-list">
-            <li>Total outstanding on route: {formatCurrency(ROUTE_STOPS.reduce((sum, s) => sum + s.outstandingBalance, 0))}</li>
-            <li>Completed collections: {ROUTE_STOPS.filter((s) => s.status === 'Completed').length}</li>
-            <li>Remaining visits: {ROUTE_STOPS.filter((s) => s.status !== 'Completed').length}</li>
+          <ul className="info-grid">
+            <li><span className="info-item-label">Total Outstanding on Route</span><span className="info-item-value">{formatCurrency(ROUTE_STOPS.reduce((sum, s) => sum + s.outstandingBalance, 0))}</span></li>
+            <li><span className="info-item-label">Completed Collections</span><span className="info-item-value">{ROUTE_STOPS.filter((s) => s.status === 'Completed').length} stops</span></li>
+            <li><span className="info-item-label">Remaining Visits</span><span className="info-item-value">{ROUTE_STOPS.filter((s) => s.status !== 'Completed').length} stops</span></li>
           </ul>
         </section>
       </div>
@@ -283,9 +283,15 @@ function RoutePage({ pageType, navigate, showToast }) {
           { label: 'Distance Planned', value: '18 km' },
         ]}
       />
+      <section className="panel content-panel" style={{ padding: '14px 20px' }}>
+        <p style={{ margin: 0, fontSize: '0.85rem', color: '#64748b' }}>
+          <strong style={{ color: '#1e293b' }}>SAW Priority Engine</strong> — Accounts are ranked using Simple Additive Weighting:
+          outstanding balance <strong>(45%)</strong>, days overdue <strong>(35%)</strong>, proximity <strong>(20%)</strong>. Highest score = visit first.
+        </p>
+      </section>
       <section className="panel content-panel">
         <div className="panel-section-header">
-          <h3>{showMap || pageType === 'routeMap' ? 'Route Map View' : 'Route List'}</h3>
+          <h3>{showMap || pageType === 'routeMap' ? 'Route Map View' : 'SAW Prioritized Collection List'}</h3>
           <div className="inline-toolbar">
             <div className="segmented-control">
               {['All', 'Pending', 'Completed'].map((item) => (
@@ -309,21 +315,30 @@ function RoutePage({ pageType, navigate, showToast }) {
               <thead>
                 <tr>
                   <th>Rank</th>
-                  <th>Name</th>
+                  <th>Client</th>
                   <th>Address</th>
                   <th>Balance</th>
                   <th>Days Overdue</th>
+                  <th>SAW Score</th>
                   <th>Actions</th>
                 </tr>
               </thead>
               <tbody>
                 {filteredStops.map((stop) => (
                   <tr key={stop.id}>
-                    <td>{stop.rank}</td>
+                    <td><strong>#{stop.rank}</strong></td>
                     <td>{stop.clientName}</td>
                     <td>{stop.address}</td>
                     <td>{formatCurrency(stop.outstandingBalance)}</td>
-                    <td>{stop.daysOverdue}</td>
+                    <td style={{ color: stop.daysOverdue > 0 ? '#dc2626' : 'inherit', fontWeight: stop.daysOverdue > 0 ? 600 : 400 }}>{stop.daysOverdue}d</td>
+                    <td>
+                      <span style={{ display:'inline-flex', alignItems:'center', gap:6 }}>
+                        <span style={{ width: 60, height: 6, background: '#f1f5f9', borderRadius: 999, overflow: 'hidden', display: 'inline-block' }}>
+                          <span style={{ display: 'block', height: '100%', width: `${(stop.sawScore ?? 0) * 100}%`, background: '#2563eb', borderRadius: 999 }} />
+                        </span>
+                        <span style={{ fontSize: '0.8rem', color: '#64748b' }}>{((stop.sawScore ?? 0) * 100).toFixed(0)}%</span>
+                      </span>
+                    </td>
                     <td>
                       <button className="link-button" type="button" onClick={() => navigate(`/collector/account-detail/${stop.id}?from=route`)}>
                         View
@@ -649,11 +664,11 @@ function DigitalReceiptPage({ accountId, parentContext, navigate, showToast }) {
         <div className="panel-section-header">
           <h3>Receipt Information</h3>
         </div>
-        <ul className="bullet-list">
-          <li>Client: {account.clientName}</li>
-          <li>Collector: {COLLECTOR_PROFILE.name}</li>
-          <li>Branch: {COLLECTOR_PROFILE.branch}</li>
-          <li>Date & Time: {new Date().toLocaleString('en-PH')}</li>
+        <ul className="info-grid">
+          <li><span className="info-item-label">Client</span><span className="info-item-value">{account.clientName}</span></li>
+          <li><span className="info-item-label">Collector</span><span className="info-item-value">{COLLECTOR_PROFILE.name}</span></li>
+          <li><span className="info-item-label">Branch</span><span className="info-item-value">{COLLECTOR_PROFILE.branch}</span></li>
+          <li><span className="info-item-label">Date & Time</span><span className="info-item-value">{new Date().toLocaleString('en-PH')}</span></li>
         </ul>
       </section>
       <PageToolbar
@@ -694,20 +709,20 @@ function CIFormPage({ accountId, parentContext, navigate, showToast }) {
           { name: 'businessType', label: 'Business Type', type: 'select', required: true, placeholder: 'Select type', options: ['Sari-Sari Store', 'Convenience Store', 'General Store', 'Wholesale', 'Retail', 'Service'] },
           { name: 'reference1', label: 'Character Reference 1', type: 'text', placeholder: 'Name and contact' },
           { name: 'reference2', label: 'Character Reference 2', type: 'text', placeholder: 'Name and contact' },
-          { name: 'remarks', label: 'Remarks', type: 'textarea', placeholder: 'Additional notes for branch manager...' },
+          { name: 'remarks', label: 'Remarks', type: 'textarea', placeholder: 'Additional notes for the operating manager...' },
         ]}
       />
       <PageToolbar
         actions={[
           {
-            label: 'Submit to Branch Manager',
+            label: 'Submit to Operating Manager',
             action: 'submit',
           },
           { label: 'Cancel', to: `/collector/account-detail/${account.id}${contextQuery}`, variant: 'secondary' },
         ]}
         onAction={(action) => {
           if (action.action === 'submit') {
-            showToast('CI Form sent to Branch Manager.', 'success');
+            showToast('CI Form sent to Operating Manager.', 'success');
             navigate(`/collector/account-detail/${account.id}${contextQuery}`);
           } else {
             navigate(action.to);
@@ -747,14 +762,14 @@ function IncidentReportPage({ accountId, parentContext, navigate, showToast }) {
       <PageToolbar
         actions={[
           {
-            label: 'Submit to Branch Manager',
+            label: 'Submit to Operating Manager',
             action: 'submit',
           },
           { label: 'Cancel', to: backTo, variant: 'secondary' },
         ]}
         onAction={(action) => {
           if (action.action === 'submit') {
-            showToast('Incident report sent to Branch Manager.', 'success');
+            showToast('Incident report sent to Operating Manager.', 'success');
             navigate(backTo);
           } else {
             navigate(action.to);
@@ -879,13 +894,13 @@ function ReceiptDetailsPage({ receiptId, navigate, showToast }) {
         <div className="panel-section-header">
           <h3>Receipt Details</h3>
         </div>
-        <ul className="bullet-list">
-          <li>Client: {receipt.clientName}</li>
-          <li>Account: {receipt.accountNumber}</li>
-          <li>Collector: {receipt.collectorName}</li>
-          <li>Branch: {receipt.branch}</li>
-          <li>Payment Method: {receipt.paymentMethod}</li>
-          <li>Date & Time: {receipt.date} at {receipt.time}</li>
+        <ul className="info-grid">
+          <li><span className="info-item-label">Client</span><span className="info-item-value">{receipt.clientName}</span></li>
+          <li><span className="info-item-label">Account</span><span className="info-item-value">{receipt.accountNumber}</span></li>
+          <li><span className="info-item-label">Collector</span><span className="info-item-value">{receipt.collectorName}</span></li>
+          <li><span className="info-item-label">Branch</span><span className="info-item-value">{receipt.branch}</span></li>
+          <li><span className="info-item-label">Payment Method</span><span className="info-item-value">{receipt.paymentMethod}</span></li>
+          <li><span className="info-item-label">Date & Time</span><span className="info-item-value">{receipt.date} at {receipt.time}</span></li>
         </ul>
       </section>
       <PageToolbar
@@ -986,10 +1001,10 @@ function ProfilePage({ navigate, showToast }) {
             <p className="muted">{COLLECTOR_PROFILE.employeeId}</p>
           </div>
         </div>
-        <ul className="bullet-list">
-          <li>Branch Assignment: {COLLECTOR_PROFILE.branch}</li>
-          <li>Email: {COLLECTOR_PROFILE.email}</li>
-          <li>Phone: {COLLECTOR_PROFILE.phone}</li>
+        <ul className="info-grid">
+          <li><span className="info-item-label">Branch Assignment</span><span className="info-item-value">{COLLECTOR_PROFILE.branch}</span></li>
+          <li><span className="info-item-label">Email</span><span className="info-item-value">{COLLECTOR_PROFILE.email}</span></li>
+          <li><span className="info-item-label">Phone</span><span className="info-item-value">{COLLECTOR_PROFILE.phone}</span></li>
         </ul>
       </section>
       <PageToolbar

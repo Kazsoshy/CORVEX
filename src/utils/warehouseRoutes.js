@@ -1,4 +1,4 @@
-import { getMovementById, getProductById, getRestockById, getTransferById } from '../data/warehouseMockData';
+import { getCreditRecordById, getMovementById, getProductById, getRestockById, getTransferById } from '../data/warehouseMockData';
 
 const ROUTE_DEFINITIONS = [
   { pattern: /^\/warehouse\/dashboard$/, pageType: 'dashboard' },
@@ -15,6 +15,8 @@ const ROUTE_DEFINITIONS = [
   { pattern: /^\/warehouse\/transfers\/([^/]+)$/, pageType: 'transferDetail', params: ['transferId'] },
   { pattern: /^\/warehouse\/restock-history$/, pageType: 'restockHistory' },
   { pattern: /^\/warehouse\/restock-history\/([^/]+)$/, pageType: 'restockDetail', params: ['restockId'] },
+  { pattern: /^\/warehouse\/credit-history$/, pageType: 'creditHistory' },
+  { pattern: /^\/warehouse\/credit-history\/([^/]+)$/, pageType: 'creditDetail', params: ['creditId'] },
   { pattern: /^\/warehouse\/notifications$/, pageType: 'notifications' },
   { pattern: /^\/warehouse\/profile$/, pageType: 'profile' },
   { pattern: /^\/warehouse\/audit-log$/, pageType: 'auditLog' },
@@ -95,6 +97,10 @@ export function buildWarehouseBreadcrumbs(pageType, params = {}) {
         { label: 'Restock History', to: '/warehouse/restock-history' },
         { label: restock?.id ?? 'Restock Detail', to: `/warehouse/restock-history/${params.restockId}` },
       ];
+    case 'creditHistory':
+      return [...crumbs, { label: 'Customer Credit History', to: '/warehouse/credit-history' }];
+    case 'creditDetail':
+      return [...crumbs, { label: 'Customer Credit History', to: '/warehouse/credit-history' }, { label: 'Credit Record', to: `/warehouse/credit-history/${params.creditId}` }];
     case 'notifications':
       return [...crumbs, { label: 'Notifications', to: '/warehouse/notifications' }];
     case 'profile':
@@ -128,6 +134,8 @@ export function resolveWarehousePage(pathname) {
     transferDetail: 'Transfer Detail',
     restockHistory: 'Restock History',
     restockDetail: 'Restock Detail',
+    creditHistory: 'Customer Credit History',
+    creditDetail: 'Credit Record',
     notifications: 'Notifications',
     profile: 'Profile',
     auditLog: 'Audit Log',
@@ -154,6 +162,7 @@ export function isWarehouseNavActive(fullPath, navTo) {
   if (navTo === '/warehouse/movements') return pathname.startsWith('/warehouse/movements');
   if (navTo === '/warehouse/transfers') return pathname.startsWith('/warehouse/transfers');
   if (navTo === '/warehouse/restock-history') return pathname.startsWith('/warehouse/restock-history');
+  if (navTo === '/warehouse/credit-history') return pathname.startsWith('/warehouse/credit-history');
   if (navTo === '/warehouse/notifications') return pathname === '/warehouse/notifications';
   if (navTo === '/warehouse/profile') return pathname === '/warehouse/profile';
   return pathname === navTo;

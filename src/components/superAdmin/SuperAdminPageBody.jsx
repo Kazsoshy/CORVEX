@@ -393,12 +393,12 @@ function ProfilePage({ navigate, showToast }) {
     <div className="page">
       <section className="panel content-panel">
         <div className="panel-section-header"><h3>Super Admin Profile</h3></div>
-        <ul className="bullet-list">
-          <li>Name: {SUPER_ADMIN_PROFILE.name}</li>
-          <li>Employee ID: {SUPER_ADMIN_PROFILE.employeeId}</li>
-          <li>Email: {SUPER_ADMIN_PROFILE.email}</li>
-          <li>Phone: {SUPER_ADMIN_PROFILE.phone}</li>
-          <li>Role: {SUPER_ADMIN_PROFILE.role}</li>
+        <ul className="info-grid">
+          <li><span className="info-item-label">Name</span><span className="info-item-value">{SUPER_ADMIN_PROFILE.name}</span></li>
+          <li><span className="info-item-label">Employee ID</span><span className="info-item-value">{SUPER_ADMIN_PROFILE.employeeId}</span></li>
+          <li><span className="info-item-label">Email</span><span className="info-item-value">{SUPER_ADMIN_PROFILE.email}</span></li>
+          <li><span className="info-item-label">Phone</span><span className="info-item-value">{SUPER_ADMIN_PROFILE.phone}</span></li>
+          <li><span className="info-item-label">Role</span><span className="info-item-value">{SUPER_ADMIN_PROFILE.role}</span></li>
         </ul>
       </section>
       <Toolbar

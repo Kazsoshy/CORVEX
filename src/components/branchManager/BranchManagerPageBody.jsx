@@ -325,7 +325,7 @@ function SalesAgentDetailPage({ agentId, navigate }) {
     <div className="page">
       <Stats stats={[{label:'Visit Completion',value:`${a.visitCompletionRate}%`},{label:'Conversion',value:`${a.conversionRate}%`},{label:'Avg Sale',value:formatCurrency(a.avgSaleValue)},{label:'New Clients',value:String(a.newClientsAcquired)}]}/>
       <section className="panel content-panel">
-        {a.clients.length?(<><h4 className="subsection-title">Clients</h4><ul className="bullet-list">{a.clients.map((c)=><li key={c}>{c}</li>)}</ul></>):null}
+        {a.clients.length?(<><h4 className="subsection-title">Clients</h4><div style={{display:'flex',flexWrap:'wrap',gap:8,marginTop:8}}>{a.clients.map((c)=><span key={c} style={{padding:'5px 12px',borderRadius:999,background:'var(--surface)',border:'1px solid var(--surface-3)',fontSize:'0.88rem',fontWeight:500}}>{c}</span>)}</div></>):null}
         {a.productPerformance.length?(<><h4 className="subsection-title" style={{marginTop:16}}>Product Performance</h4><ul className="widget-list">{a.productPerformance.map((p)=><li key={p.product}><div><strong>{p.product}</strong></div><span>{p.units} units</span></li>)}</ul></>):null}
       </section>
       <Toolbar actions={[{label:'Back',to:'/branch-manager/field-operations',variant:'ghost'}]} onAction={(a)=>navigate(a.to)}/>
@@ -586,8 +586,8 @@ function CIDetailPage({ ciId, navigate, showToast }) {
     <div className="page">
       <Stats stats={[{label:'Client',value:ci.clientName},{label:'Risk Score',value:String(ci.riskScore)},{label:'Delinquency',value:ci.delinquencyStatus},{label:'GIS Zone',value:ci.gisClassification}]}/>
       <section className="panel content-panel">
-        <ul className="bullet-list"><li>Purpose: {ci.purpose}</li><li>Income: {formatCurrency(ci.monthlyIncome)}</li><li>Business: {ci.businessType}</li><li>References: {ci.references}</li><li>Remarks: {ci.formRemarks}</li></ul>
-        {ci.delinquencyFlags.length?(<div style={{marginTop:16,padding:12,background:'rgba(220,38,38,0.06)',borderRadius:12}}><strong>Delinquency Flags:</strong><ul className="bullet-list">{ci.delinquencyFlags.map((f)=><li key={f}>{f}</li>)}</ul></div>):null}
+        <ul className="info-grid"><li><span className="info-item-label">Purpose</span><span className="info-item-value">{ci.purpose}</span></li><li><span className="info-item-label">Monthly Income</span><span className="info-item-value">{formatCurrency(ci.monthlyIncome)}</span></li><li><span className="info-item-label">Business Type</span><span className="info-item-value">{ci.businessType}</span></li><li><span className="info-item-label">References</span><span className="info-item-value">{ci.references}</span></li><li><span className="info-item-label">Remarks</span><span className="info-item-value">{ci.formRemarks}</span></li></ul>
+        {ci.delinquencyFlags.length?(<div style={{marginTop:16,padding:12,background:'rgba(220,38,38,0.06)',borderRadius:12}}><strong>Delinquency Flags:</strong><ul className="flag-list" style={{marginTop:8}}>{ci.delinquencyFlags.map((f)=><li key={f}>{f}</li>)}</ul></div>):null}
         {ci.paymentHistory.length?(<><h4 className="subsection-title">Payment History</h4><div className="table-shell"><table className="data-table"><thead><tr><th>Date</th><th>Amount</th><th>Status</th></tr></thead><tbody>{ci.paymentHistory.map((p)=><tr key={p.date}><td>{p.date}</td><td>{formatCurrency(p.amount)}</td><td>{p.status}</td></tr>)}</tbody></table></div></>):null}
       </section>
       {showReject&&<section className="panel form-panel content-panel"><div className="form-group"><label>Rejection Reason<span className="required">*</span></label><textarea value={rejectReason} onChange={(e)=>setRejectReason(e.target.value)} placeholder="Mandatory reason..."/></div></section>}
@@ -693,7 +693,7 @@ function ProfilePage({ navigate, showToast }) {
           <div className="profile-avatar">{BRANCH_MANAGER_PROFILE.avatarInitials}</div>
           <div><h3>{BRANCH_MANAGER_PROFILE.name}</h3><p className="muted">{BRANCH_MANAGER_PROFILE.employeeId}</p></div>
         </div>
-        <ul className="bullet-list"><li>Branch: {BRANCH_MANAGER_PROFILE.branch}</li><li>Email: {BRANCH_MANAGER_PROFILE.email}</li><li>Phone: {BRANCH_MANAGER_PROFILE.phone}</li></ul>
+        <ul className="info-grid"><li><span className="info-item-label">Branch</span><span className="info-item-value">{BRANCH_MANAGER_PROFILE.branch}</span></li><li><span className="info-item-label">Email</span><span className="info-item-value">{BRANCH_MANAGER_PROFILE.email}</span></li><li><span className="info-item-label">Phone</span><span className="info-item-value">{BRANCH_MANAGER_PROFILE.phone}</span></li></ul>
       </section>
       <Toolbar actions={[{label:'Update Profile',action:'update'},{label:'Change Password',action:'password',variant:'secondary'},{label:'Approval Center',to:'/branch-manager/approval-center',variant:'ghost'},{label:'Audit Log',to:'/branch-manager/audit-log',variant:'ghost'},{label:'Logout',action:'logout',variant:'ghost'}]}
         onAction={(a)=>{if(a.to)navigate(a.to);else if(a.action==='logout'){showToast('Logged out.','success');navigate('/login');}else showToast(`${a.label} opened.`,'success');}}/>
@@ -702,16 +702,192 @@ function ProfilePage({ navigate, showToast }) {
 }
 
 function ApprovalCenterPage({ navigate, showToast }) {
+  const [tab, setTab] = useState('ci');
+  const [ciList, setCiList] = useState(CI_QUEUE);
+  const [transferList, setTransferList] = useState([
+    { id: 'TRF-301', product: '3-Seater Fabric Sofa (Beige)',         qty: 4, from: 'Davao Oriental Branch', to: 'Davao City Branch',    requestedBy: 'Ana Reyes',    date: '2026-06-25', status: 'Pending Approval', value: 114000 },
+    { id: 'TRF-300', product: '6-Seater Dining Table Set (Narra)',    qty: 2, from: 'Davao Oriental Branch', to: 'General Santos Branch', requestedBy: 'Ana Reyes',    date: '2026-06-24', status: 'Pending Approval', value: 84000  },
+    { id: 'TRF-297', product: 'Coffee Table (Tempered Glass & Steel)', qty: 5, from: 'Davao Oriental Branch', to: 'General Santos Branch', requestedBy: 'Ana Reyes',    date: '2026-06-25', status: 'Pending Approval', value: 37500  },
+  ]);
+  const [specialList, setSpecialList] = useState([
+    { id: 'SC-001', clientName: 'Mabuhay Sala Sets',       accountNumber: 'ACC-1006', requestType: 'Extended Payment Term', requestedBy: 'John Dela Cruz', date: '2026-06-24', amount: 38000, status: 'Pending', notes: 'Client requested 90-day extension due to business slowdown.' },
+    { id: 'SC-002', clientName: 'Hardin ng Bahay Home Store', accountNumber: 'ACC-1003', requestType: 'Partial Collection',    requestedBy: 'Maria Dela Cruz', date: '2026-06-23', amount: 10000, status: 'Pending', notes: 'Client can only settle ₱10,000 of ₱15,800 balance this week.' },
+  ]);
+
+  const tabs = [
+    { key: 'ci',        label: `Credit Investigations (${ciList.filter(c => c.status === 'Pending').length})` },
+    { key: 'transfers', label: `Inventory Transfers (${transferList.filter(t => t.status === 'Pending Approval').length})` },
+    { key: 'special',   label: `Special Collections (${specialList.filter(s => s.status === 'Pending').length})` },
+  ];
+
+  const totalPending = ciList.filter(c => c.status === 'Pending').length
+    + transferList.filter(t => t.status === 'Pending Approval').length
+    + specialList.filter(s => s.status === 'Pending').length;
+
+  const approveCI = (id) => { setCiList(p => p.map(c => c.id === id ? { ...c, status: 'Approved' } : c)); showToast('CI approved successfully.', 'success'); };
+  const rejectCI  = (id) => { setCiList(p => p.map(c => c.id === id ? { ...c, status: 'Rejected' } : c)); showToast('CI rejected.', 'success'); };
+  const approveTransfer = (id) => { setTransferList(p => p.map(t => t.id === id ? { ...t, status: 'Approved' } : t)); showToast('Transfer approved.', 'success'); };
+  const rejectTransfer  = (id) => { setTransferList(p => p.map(t => t.id === id ? { ...t, status: 'Rejected' } : t)); showToast('Transfer rejected.', 'success'); };
+  const approveSpecial  = (id) => { setSpecialList(p => p.map(s => s.id === id ? { ...s, status: 'Approved' } : s)); showToast('Special collection approved.', 'success'); };
+  const rejectSpecial   = (id) => { setSpecialList(p => p.map(s => s.id === id ? { ...s, status: 'Rejected' } : s)); showToast('Special collection rejected.', 'success'); };
+
+  const StatusBadge = ({ status }) => {
+    const map = {
+      'Pending':          { color: '#d97706', bg: 'rgba(217,119,6,0.1)'   },
+      'Pending Approval': { color: '#d97706', bg: 'rgba(217,119,6,0.1)'   },
+      'Approved':         { color: '#059669', bg: 'rgba(5,150,105,0.1)'   },
+      'Rejected':         { color: '#dc2626', bg: 'rgba(220,38,38,0.08)'  },
+    };
+    const s = map[status] ?? { color: '#64748b', bg: 'rgba(100,116,139,0.1)' };
+    return <span style={{ padding: '3px 10px', borderRadius: 999, fontSize: '0.72rem', fontWeight: 700, textTransform: 'uppercase', background: s.bg, color: s.color, whiteSpace: 'nowrap' }}>{status}</span>;
+  };
+
+  const RiskBadge = ({ score }) => {
+    const color = score >= 70 ? '#dc2626' : score >= 40 ? '#d97706' : '#059669';
+    const bg    = score >= 70 ? 'rgba(220,38,38,0.08)' : score >= 40 ? 'rgba(217,119,6,0.1)' : 'rgba(5,150,105,0.1)';
+    const label = score >= 70 ? 'High Risk' : score >= 40 ? 'Medium' : 'Low Risk';
+    return <span style={{ padding: '3px 10px', borderRadius: 999, fontSize: '0.72rem', fontWeight: 700, background: bg, color, whiteSpace: 'nowrap' }}>{label} ({score})</span>;
+  };
+
   return (
     <div className="page">
-      <section className="panel content-panel">
-        <div className="panel-section-header"><h3>Approval Center</h3></div>
-        <div className="analytics-grid three-up">
-          <button className="analytics-card report-card" type="button" onClick={()=>navigate('/branch-manager/ci-approvals')}><span className="metric-label">Credit Investigations</span><strong>{PENDING_APPROVALS.ci} pending</strong></button>
-          <button className="analytics-card report-card" type="button" onClick={()=>showToast('Transfer approvals opened.','success')}><span className="metric-label">Inventory Transfers</span><strong>{PENDING_APPROVALS.transfers} pending</strong></button>
-          <button className="analytics-card report-card" type="button" onClick={()=>showToast('Special collections opened.','success')}><span className="metric-label">Special Collections</span><strong>{PENDING_APPROVALS.specialCollections} pending</strong></button>
-        </div>
+      {/* Summary bar */}
+      <section className="stats-grid">
+        {[
+          { label: 'Total Pending',           value: String(totalPending),                                                    idx: 0 },
+          { label: 'CI Approvals',            value: String(ciList.filter(c => c.status === 'Pending').length),                idx: 1 },
+          { label: 'Transfer Approvals',      value: String(transferList.filter(t => t.status === 'Pending Approval').length), idx: 2 },
+          { label: 'Special Collections',     value: String(specialList.filter(s => s.status === 'Pending').length),           idx: 3 },
+        ].map((s, i) => (
+          <article key={s.label} className="stat-card" style={{ '--stat-index': i }}>
+            <div className="stat-card-top"><span className="stat-index">{String(i + 1).padStart(2, '0')}</span><span className="stat-dot" /></div>
+            <span className="stat-label">{s.label}</span>
+            <strong className="stat-value">{s.value}</strong>
+          </article>
+        ))}
       </section>
+
+      {/* Tab navigation */}
+      <div className="segmented-control" style={{ marginBottom: 0, flexWrap: 'wrap' }}>
+        {tabs.map(t => (
+          <button key={t.key} className={tab === t.key ? 'segment active' : 'segment'} type="button" onClick={() => setTab(t.key)}>{t.label}</button>
+        ))}
+      </div>
+
+      {/* ── CI Approvals ── */}
+      {tab === 'ci' && (
+        <section className="panel content-panel">
+          <div className="panel-section-header">
+            <h3>Credit Investigation Queue</h3>
+            <button className="button ghost" type="button" onClick={() => navigate('/branch-manager/ci-approvals')}>Open Full CI Queue</button>
+          </div>
+          {ciList.length ? (
+            <div className="table-shell">
+              <table className="data-table">
+                <thead>
+                  <tr><th>Client</th><th>Submitted By</th><th>Purpose</th><th>Income</th><th>Risk Score</th><th>Delinquency</th><th>Status</th><th>Actions</th></tr>
+                </thead>
+                <tbody>
+                  {ciList.map(ci => (
+                    <tr key={ci.id}>
+                      <td><strong>{ci.clientName}</strong><span className="muted" style={{ display: 'block', fontSize: '0.8rem' }}>{ci.id}</span></td>
+                      <td>{ci.submittedBy}<span className="muted" style={{ display: 'block', fontSize: '0.8rem' }}>{ci.submissionDate}</span></td>
+                      <td>{ci.purpose}</td>
+                      <td>{formatCurrency(ci.monthlyIncome)}</td>
+                      <td><RiskBadge score={ci.riskScore} /></td>
+                      <td style={{ color: ci.delinquencyStatus === 'Clear' ? '#059669' : '#dc2626', fontWeight: 600 }}>{ci.delinquencyStatus}</td>
+                      <td><StatusBadge status={ci.status} /></td>
+                      <td className="table-actions">
+                        <button className="link-button" type="button" onClick={() => navigate(`/branch-manager/ci-approvals/${ci.id}`)}>Review</button>
+                        {ci.status === 'Pending' && <>
+                          <button className="link-button" type="button" onClick={() => approveCI(ci.id)}>Approve</button>
+                          <button className="link-button" type="button" onClick={() => rejectCI(ci.id)}>Reject</button>
+                        </>}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ) : <EmptyState title="No CI records" description="No credit investigation forms on file." />}
+        </section>
+      )}
+
+      {/* ── Inventory Transfers ── */}
+      {tab === 'transfers' && (
+        <section className="panel content-panel">
+          <div className="panel-section-header">
+            <h3>Inventory Transfer Requests</h3>
+            <p className="muted" style={{ margin: 0, fontSize: '0.85rem' }}>Review and approve cross-branch stock movements.</p>
+          </div>
+          {transferList.length ? (
+            <div className="table-shell">
+              <table className="data-table">
+                <thead>
+                  <tr><th>Transfer ID</th><th>Product</th><th>Qty</th><th>From</th><th>To</th><th>Value</th><th>Requested By</th><th>Date</th><th>Status</th><th>Actions</th></tr>
+                </thead>
+                <tbody>
+                  {transferList.map(t => (
+                    <tr key={t.id}>
+                      <td><strong>{t.id}</strong></td>
+                      <td>{t.product}</td>
+                      <td>{t.qty} units</td>
+                      <td style={{ fontSize: '0.85rem' }}>{t.from.replace(' Branch', '')}</td>
+                      <td style={{ fontSize: '0.85rem' }}>{t.to.replace(' Branch', '')}</td>
+                      <td style={{ fontWeight: 600 }}>{formatCurrency(t.value)}</td>
+                      <td>{t.requestedBy}</td>
+                      <td>{t.date}</td>
+                      <td><StatusBadge status={t.status} /></td>
+                      <td className="table-actions">
+                        {t.status === 'Pending Approval' && <>
+                          <button className="link-button" type="button" onClick={() => approveTransfer(t.id)}>Approve</button>
+                          <button className="link-button" type="button" onClick={() => rejectTransfer(t.id)}>Reject</button>
+                        </>}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ) : <EmptyState title="No transfer requests" description="All transfers have been processed." />}
+        </section>
+      )}
+
+      {/* ── Special Collections ── */}
+      {tab === 'special' && (
+        <section className="panel content-panel">
+          <div className="panel-section-header">
+            <h3>Special Collection Requests</h3>
+            <p className="muted" style={{ margin: 0, fontSize: '0.85rem' }}>Extended terms and partial collection approvals submitted by field collectors.</p>
+          </div>
+          {specialList.length ? (
+            <div className="grid" style={{ gap: 16 }}>
+              {specialList.map(s => (
+                <article key={s.id} className="panel content-panel" style={{ padding: 20 }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 16, marginBottom: 12 }}>
+                    <div>
+                      <h4 style={{ margin: 0, fontSize: '1rem' }}>{s.clientName}</h4>
+                      <span className="muted" style={{ fontSize: '0.82rem' }}>{s.accountNumber} · submitted by {s.requestedBy} on {s.date}</span>
+                    </div>
+                    <StatusBadge status={s.status} />
+                  </div>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 12, marginBottom: 14 }}>
+                    <div><span className="metric-label" style={{ fontSize: '0.75rem', textTransform: 'uppercase', letterSpacing: '0.06em', color: '#64748b' }}>Request Type</span><strong style={{ display: 'block', marginTop: 2 }}>{s.requestType}</strong></div>
+                    <div><span className="metric-label" style={{ fontSize: '0.75rem', textTransform: 'uppercase', letterSpacing: '0.06em', color: '#64748b' }}>Amount Involved</span><strong style={{ display: 'block', marginTop: 2 }}>{formatCurrency(s.amount)}</strong></div>
+                  </div>
+                  <p style={{ margin: '0 0 14px', fontSize: '0.88rem', color: '#475569', padding: '10px 14px', background: '#f8fafc', borderRadius: 8, border: '1px solid #e2e8f0' }}>{s.notes}</p>
+                  {s.status === 'Pending' && (
+                    <div style={{ display: 'flex', gap: 10 }}>
+                      <button className="button" type="button" onClick={() => approveSpecial(s.id)}>Approve Request</button>
+                      <button className="button secondary" type="button" onClick={() => rejectSpecial(s.id)}>Reject</button>
+                    </div>
+                  )}
+                </article>
+              ))}
+            </div>
+          ) : <EmptyState title="No special collection requests" description="All requests have been processed." />}
+        </section>
+      )}
     </div>
   );
 }

@@ -247,9 +247,15 @@ function SchedulePage({ pageType, navigate, showToast }) {
         { label: 'Distance Today', value: '22 km' },
         { label: 'Completed', value: String(DASHBOARD_SUMMARY.completedVisits) },
       ]} />
+      <section className="panel content-panel" style={{ padding: '14px 20px' }}>
+        <p style={{ margin: 0, fontSize: '0.85rem', color: '#64748b' }}>
+          <strong style={{ color: '#1e293b' }}>SAW Priority Engine</strong> — Clients are ranked using Simple Additive Weighting:
+          purchase volume <strong>(40%)</strong>, delinquency risk <strong>(35%)</strong>, proximity <strong>(25%)</strong>. Highest score = visit first.
+        </p>
+      </section>
       <section className="panel content-panel">
         <div className="panel-section-header">
-          <h3>SOPA Ranked Client List</h3>
+          <h3>SAW Prioritized Visit Schedule</h3>
           <div className="inline-toolbar">
             <div className="segmented-control">
               {['All', 'Pending', 'Completed', 'Rescheduled'].map((item) => (
@@ -551,11 +557,11 @@ function CIFormPage({ clientId, parentContext, navigate, showToast }) {
       </section>
       <PageToolbar
         actions={[
-          { label: 'Submit to Branch Manager', action: 'submit' },
+          { label: 'Submit to Operating Manager', action: 'submit' },
           { label: 'Cancel', to: `/sales/client-detail/${client.id}${contextQuery}`, variant: 'secondary' },
         ]}
         onAction={(a) => {
-          if (a.action === 'submit') { showToast('CI Form sent to Branch Manager.', 'success'); navigate(`/sales/client-detail/${client.id}${contextQuery}`); }
+          if (a.action === 'submit') { showToast('CI Form sent to Operating Manager.', 'success'); navigate(`/sales/client-detail/${client.id}${contextQuery}`); }
           else navigate(a.to);
         }}
       />
@@ -630,13 +636,13 @@ function InventoryPage({ navigate, showToast }) {
             <h3>{selectedProduct.name}</h3>
             <button className="toast-dismiss" type="button" onClick={() => setSelectedProduct(null)} aria-label="Close">×</button>
           </div>
-          <ul className="bullet-list">
-            <li>SKU: {selectedProduct.sku}</li>
-            <li>Category: {selectedProduct.category}</li>
-            <li>Stock: {selectedProduct.stock} units</li>
-            <li>Unit Price: {formatCurrency(selectedProduct.unitPrice)}</li>
-            <li>Branch: {selectedProduct.branch}</li>
-            <li>Status: {selectedProduct.status}</li>
+          <ul className="info-grid">
+            <li><span className="info-item-label">SKU</span><span className="info-item-value">{selectedProduct.sku}</span></li>
+            <li><span className="info-item-label">Category</span><span className="info-item-value">{selectedProduct.category}</span></li>
+            <li><span className="info-item-label">Stock</span><span className="info-item-value">{selectedProduct.stock} units</span></li>
+            <li><span className="info-item-label">Unit Price</span><span className="info-item-value">{formatCurrency(selectedProduct.unitPrice)}</span></li>
+            <li><span className="info-item-label">Branch</span><span className="info-item-value">{selectedProduct.branch}</span></li>
+            <li><span className="info-item-label">Status</span><span className="info-item-value">{selectedProduct.status}</span></li>
           </ul>
           <button className="button" type="button" onClick={() => navigate(`/sales/inventory/${selectedProduct.id}`)}>Open Product Details</button>
         </aside>
@@ -656,12 +662,12 @@ function ProductDetailsPage({ productId, navigate }) {
         { label: 'Status', value: product.status },
       ]} />
       <section className="panel content-panel">
-        <ul className="bullet-list">
-          <li>Product: {product.name}</li>
-          <li>SKU: {product.sku}</li>
-          <li>Category: {product.category}</li>
-          <li>Branch: {product.branch}</li>
-          <li>Minimum Stock: {product.minStock} units</li>
+        <ul className="info-grid">
+          <li><span className="info-item-label">Product</span><span className="info-item-value">{product.name}</span></li>
+          <li><span className="info-item-label">SKU</span><span className="info-item-value">{product.sku}</span></li>
+          <li><span className="info-item-label">Category</span><span className="info-item-value">{product.category}</span></li>
+          <li><span className="info-item-label">Branch</span><span className="info-item-value">{product.branch}</span></li>
+          <li><span className="info-item-label">Minimum Stock</span><span className="info-item-value">{product.minStock} units</span></li>
         </ul>
       </section>
       <PageToolbar actions={[{ label: 'Back to Inventory', to: '/sales/inventory', variant: 'ghost' }]} onAction={(a) => navigate(a.to)} />
@@ -746,12 +752,12 @@ function SaleDetailsPage({ invoiceId, navigate, showToast }) {
         { label: 'Status', value: sale.status },
       ]} />
       <section className="panel content-panel">
-        <ul className="bullet-list">
-          <li>Client: {sale.clientName}</li>
-          <li>Branch: {sale.branch}</li>
-          <li>Payment Method: {sale.paymentMethod}</li>
-          <li>Date: {sale.date}</li>
-          <li>Notes: {sale.notes}</li>
+        <ul className="info-grid">
+          <li><span className="info-item-label">Client</span><span className="info-item-value">{sale.clientName}</span></li>
+          <li><span className="info-item-label">Branch</span><span className="info-item-value">{sale.branch}</span></li>
+          <li><span className="info-item-label">Payment Method</span><span className="info-item-value">{sale.paymentMethod}</span></li>
+          <li><span className="info-item-label">Date</span><span className="info-item-value">{sale.date}</span></li>
+          <li><span className="info-item-label">Notes</span><span className="info-item-value">{sale.notes}</span></li>
         </ul>
         <div className="table-shell">
           <table className="data-table">
@@ -819,10 +825,10 @@ function ProfilePage({ navigate, showToast }) {
           <div className="profile-avatar">{SALES_AGENT_PROFILE.avatarInitials}</div>
           <div><h3>{SALES_AGENT_PROFILE.name}</h3><p className="muted">{SALES_AGENT_PROFILE.employeeId}</p></div>
         </div>
-        <ul className="bullet-list">
-          <li>Assigned Branch: {SALES_AGENT_PROFILE.branch}</li>
-          <li>Email: {SALES_AGENT_PROFILE.email}</li>
-          <li>Phone: {SALES_AGENT_PROFILE.phone}</li>
+        <ul className="info-grid">
+          <li><span className="info-item-label">Assigned Branch</span><span className="info-item-value">{SALES_AGENT_PROFILE.branch}</span></li>
+          <li><span className="info-item-label">Email</span><span className="info-item-value">{SALES_AGENT_PROFILE.email}</span></li>
+          <li><span className="info-item-label">Phone</span><span className="info-item-value">{SALES_AGENT_PROFILE.phone}</span></li>
         </ul>
       </section>
       <PageToolbar

@@ -1,4 +1,4 @@
-// Furniture retail — Davao City branch manager
+// Furniture retail — Operating Manager operations data
 
 export const BRANCH_MANAGER_PROFILE = {
   name: 'Roberto Villanueva',

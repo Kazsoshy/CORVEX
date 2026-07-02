@@ -152,10 +152,24 @@ export const CLIENTS = [
   },
 ];
 
-export const SCHEDULE_STOPS = CLIENTS.filter((c) => c.assignedToday).map((client, index) => ({
-  ...client,
-  rank: index + 1,
-}));
+// SAW (Simple Additive Weighting) scoring for sales visit prioritization
+// Criteria: total purchase volume (weight 0.40), delinquency risk (weight 0.35), distance km (weight 0.25)
+// Delinquent clients are flagged as high priority; higher score = visit first
+function computeSAWScore(client) {
+  const maxVolume   = 842000;
+  const maxDistance = 7.1;
+  const normVolume    = maxVolume   > 0 ? client.totalPurchaseVolume / maxVolume              : 0;
+  const normDelinquent = client.delinquent ? 1 : (client.highValue ? 0.6 : 0.2);
+  // Closer is better — invert distance
+  const normDistance  = maxDistance > 0 ? 1 - (client.distanceKm / maxDistance)               : 0;
+  return (normVolume * 0.40) + (normDelinquent * 0.35) + (normDistance * 0.25);
+}
+
+export const SCHEDULE_STOPS = CLIENTS
+  .filter((c) => c.assignedToday)
+  .map((client) => ({ ...client, sawScore: computeSAWScore(client) }))
+  .sort((a, b) => b.sawScore - a.sawScore)
+  .map((client, index) => ({ ...client, rank: index + 1 }));
 
 export const PRODUCTS = [
   { id: 'p1', name: 'L-Shape Sofa (Gray)',          sku: 'SOF-LSH-001', category: 'Sofas',           unitPrice: 28500, stock: 14, branch: 'General Santos', status: 'Sufficient', minStock: 5 },

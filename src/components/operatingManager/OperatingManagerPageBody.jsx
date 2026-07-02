@@ -6,12 +6,14 @@ import {
   XAxis, YAxis, CartesianGrid, Tooltip, Legend,
   ResponsiveContainer, PieChart, Pie, Cell,
 } from 'recharts';
+import { AdminPageBody } from '../admin/AdminPageBody';
+import { BranchManagerPageBody } from '../branchManager/BranchManagerPageBody';
 import {
-  ALERTS, BRANCHES, BRANCH_RADAR, ENTERPRISE_KPIS, GIS_LAYERS,
+  ALERTS, BRANCHES, BRANCH_RADAR, CUSTOMER_RECORDS, ENTERPRISE_KPIS, GIS_LAYERS,
   MONTHLY_COLLECTIONS, MONTHLY_DELINQUENCY, MONTHLY_REVENUE,
   NOTIFICATIONS, OPERATING_MANAGER_PROFILE, REPORT_CATEGORIES,
   TREND_DATA, WEEKLY_COLLECTION_RATE, WEEKLY_SALES_RATE,
-  formatCurrency, getBranchById, getHighestPerformingBranch, getLowestPerformingBranch,
+  formatCurrency, getBranchById, getCustomerRecordById, getHighestPerformingBranch, getLowestPerformingBranch,
 } from '../../data/operatingManagerMockData';
 import { EmptyState } from '../collector/EmptyState';
 import { LoadingState } from '../collector/LoadingState';
@@ -177,6 +179,37 @@ function DashboardPage({ navigate }) {
           </ResponsiveContainer>
         </ChartCard>
       </div>
+
+      <section className="panel content-panel">
+        <div className="panel-section-header">
+          <h3>Operational Quick Access</h3>
+          <p className="muted">Manage accounts, branches, configuration, and live monitoring from one place.</p>
+        </div>
+        <div className="quick-link-grid">
+          {[
+            { label: 'User Management', to: '/operating-manager/admin/users', icon: 'accounts' },
+            { label: 'Customer Records', to: '/operating-manager/customers', icon: 'accounts' },
+            { label: 'Branch Management', to: '/operating-manager/admin/branches', icon: 'home' },
+            { label: 'System Configuration', to: '/operating-manager/operations/settings', icon: 'form' },
+            { label: 'Collection Performance', to: '/operating-manager/reports', icon: 'reports' },
+            { label: 'Sales Activities', to: '/operating-manager/operations/staff-performance', icon: 'compare' },
+            { label: 'Inventory Status', to: '/operating-manager/admin/inventory', icon: 'inventory' },
+            { label: 'GIS Maps', to: '/operating-manager/gis', icon: 'map' },
+          ].map((item) => (
+            <button
+              key={item.to}
+              className="quick-link-card"
+              type="button"
+              onClick={() => navigate(item.to)}
+              style={{ textAlign: 'left', border: 'none', background: 'none', padding: 0, cursor: 'pointer' }}
+            >
+              <span className="quick-link-icon"><NavIcon name={item.icon} /></span>
+              <span className="quick-link-copy"><strong>{item.label}</strong><span className="muted">Open</span></span>
+              <span className="quick-link-arrow">→</span>
+            </button>
+          ))}
+        </div>
+      </section>
 
       <div className="grid two-up">
         <section className="panel content-panel">
@@ -705,7 +738,7 @@ function GisPage({ navigate, subPage }) {
         <div className="panel-section-header">
           <h3>{subPage ? { delinquency: 'Delinquency Heatmap', profitability: 'Profitability Analysis', territory: 'Territory Analysis' }[subPage] : 'All-Branch GIS Map'}</h3>
         </div>
-        <div className="placeholder-map">Interactive multi-branch map · {layers.filter((l) => l.active).length} active layers</div>
+        <div className="placeholder-map" style={{ minHeight: 560 }}>Interactive multi-branch map · {layers.filter((l) => l.active).length} active layers</div>
         <div className="layer-toggles">
           {layers.map((layer) => (
             <label key={layer.id} className="toggle-label">
@@ -791,8 +824,171 @@ function NotificationsPage({ navigate, showToast }) {
   );
 }
 
-function ProfilePage({ navigate, showToast }) {
-  const [profile, setProfile] = useState({ ...OPERATING_MANAGER_PROFILE });
+// ── Customer Records ──────────────────────────────────────────────────────────
+function CustomerRecordsPage({ navigate }) {
+  const [search, setSearch] = useState('');
+  const [branchFilter, setBranchFilter] = useState('All');
+  const [statusFilter, setStatusFilter] = useState('All');
+  const [riskFilter, setRiskFilter] = useState('All');
+
+  const filtered = useMemo(() => {
+    const q = search.toLowerCase();
+    return CUSTOMER_RECORDS.filter((r) => {
+      const matchSearch = !q || r.clientName.toLowerCase().includes(q) || r.accountNumber.toLowerCase().includes(q);
+      const matchBranch = branchFilter === 'All' || r.branch === branchFilter;
+      const matchStatus = statusFilter === 'All' || r.status === statusFilter;
+      const matchRisk   = riskFilter   === 'All' || r.riskLevel === riskFilter;
+      return matchSearch && matchBranch && matchStatus && matchRisk;
+    });
+  }, [search, branchFilter, statusFilter, riskFilter]);
+
+  const riskBadge = (level) => {
+    const map = { Low: { color: '#059669', bg: 'rgba(5,150,105,0.1)' }, Medium: { color: '#d97706', bg: 'rgba(217,119,6,0.1)' }, High: { color: '#dc2626', bg: 'rgba(220,38,38,0.1)' }, Critical: { color: '#7f1d1d', bg: 'rgba(127,29,29,0.12)' } };
+    const s = map[level] ?? {};
+    return <span style={{ padding: '3px 10px', borderRadius: 999, fontSize: '0.72rem', fontWeight: 700, textTransform: 'uppercase', background: s.bg, color: s.color }}>{level}</span>;
+  };
+
+  return (
+    <div className="page">
+      <StatsGrid stats={[
+        { label: 'Total Accounts',   value: String(CUSTOMER_RECORDS.length) },
+        { label: 'Current',          value: String(CUSTOMER_RECORDS.filter(r => r.status === 'Current').length) },
+        { label: 'Overdue',          value: String(CUSTOMER_RECORDS.filter(r => r.status === 'Overdue').length) },
+        { label: 'Blacklisted',      value: String(CUSTOMER_RECORDS.filter(r => r.status === 'Blacklisted').length) },
+        { label: 'High / Critical Risk', value: String(CUSTOMER_RECORDS.filter(r => r.riskLevel === 'High' || r.riskLevel === 'Critical').length) },
+        { label: 'Total Outstanding', value: formatCurrency(CUSTOMER_RECORDS.reduce((s, r) => s + r.outstandingBalance, 0)) },
+      ]} />
+
+      <section className="panel content-panel">
+        <div className="panel-section-header"><h3>All Customer Accounts</h3></div>
+        <div className="accounts-toolbar">
+          <input className="search-input" type="search" placeholder="Search by client name or account number" value={search} onChange={e => setSearch(e.target.value)} />
+          <div className="accounts-filters">
+            <select value={branchFilter} onChange={e => setBranchFilter(e.target.value)}>
+              <option value="All">All Branches</option>
+              {BRANCHES.map(b => <option key={b.id} value={b.name}>{b.name}</option>)}
+            </select>
+            <select value={statusFilter} onChange={e => setStatusFilter(e.target.value)}>
+              {['All', 'Current', 'Pending', 'Overdue', 'Blacklisted'].map(s => <option key={s} value={s}>{s === 'All' ? 'All Statuses' : s}</option>)}
+            </select>
+            <select value={riskFilter} onChange={e => setRiskFilter(e.target.value)}>
+              {['All', 'Low', 'Medium', 'High', 'Critical'].map(r => <option key={r} value={r}>{r === 'All' ? 'All Risk Levels' : r}</option>)}
+            </select>
+          </div>
+        </div>
+      </section>
+
+      {filtered.length ? (
+        <section className="panel content-panel">
+          <div className="table-shell">
+            <table className="data-table">
+              <thead>
+                <tr><th>Account</th><th>Client</th><th>Branch</th><th>Outstanding</th><th>Days Overdue</th><th>Credit Limit</th><th>Risk</th><th>Last Visit</th><th>Actions</th></tr>
+              </thead>
+              <tbody>
+                {filtered.map(r => (
+                  <tr key={r.id}>
+                    <td>{r.accountNumber}</td>
+                    <td><strong>{r.clientName}</strong><span className="muted" style={{ display: 'block', fontSize: '0.8rem' }}>{r.businessType}</span></td>
+                    <td>{r.branch}</td>
+                    <td style={{ fontWeight: 600, color: r.outstandingBalance > 0 ? '#dc2626' : '#059669' }}>
+                      {r.outstandingBalance > 0 ? formatCurrency(r.outstandingBalance) : 'Clear'}
+                    </td>
+                    <td style={{ color: r.daysOverdue > 0 ? '#dc2626' : '#059669', fontWeight: 600 }}>{r.daysOverdue > 0 ? `${r.daysOverdue}d` : '—'}</td>
+                    <td>{formatCurrency(r.creditLimit)}</td>
+                    <td>{riskBadge(r.riskLevel)}</td>
+                    <td>{r.lastVisit}</td>
+                    <td className="table-actions">
+                      <button className="link-button" type="button" onClick={() => navigate(`/operating-manager/customers/${r.id}`)}>View</button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      ) : <EmptyState title="No records found" description="Adjust your search or filters." />}
+    </div>
+  );
+}
+
+function CustomerDetailPage({ customerId, navigate }) {
+  const record = getCustomerRecordById(customerId);
+  if (!record) return <EmptyState title="Customer not found" actionLabel="Back" onAction={() => navigate('/operating-manager/customers')} />;
+
+  const riskColor = { Low: '#059669', Medium: '#d97706', High: '#dc2626', Critical: '#7f1d1d' }[record.riskLevel] ?? '#64748b';
+  const utilizationPct = Math.round((record.outstandingBalance / record.creditLimit) * 100);
+
+  return (
+    <div className="page">
+      <section className="panel dashboard-greeting">
+        <div className="dashboard-greeting-main">
+          <p className="dashboard-eyebrow" style={{ color: riskColor }}>{record.riskLevel} Risk · {record.status}</p>
+          <h2>{record.clientName}</h2>
+          <p className="muted">{record.accountNumber} · {record.branch} Branch · {record.businessType}</p>
+        </div>
+      </section>
+
+      <StatsGrid stats={[
+        { label: 'Credit Limit',         value: formatCurrency(record.creditLimit) },
+        { label: 'Outstanding Balance',  value: formatCurrency(record.outstandingBalance) },
+        { label: 'Credit Utilization',   value: `${utilizationPct}%` },
+        { label: 'Days Overdue',         value: record.daysOverdue > 0 ? `${record.daysOverdue} days` : 'None' },
+        { label: 'Total Purchases',      value: formatCurrency(record.totalPurchases) },
+        { label: 'Account Since',        value: record.accountOpenDate },
+      ]} />
+
+      <div className="grid two-up">
+        <section className="panel content-panel">
+          <div className="panel-section-header"><h3>Account Information</h3></div>
+          <ul className="info-grid">
+            <li><span className="info-item-label">Contact Person</span><span className="info-item-value">{record.contactPerson}</span></li>
+            <li><span className="info-item-label">Phone</span><span className="info-item-value">{record.phone}</span></li>
+            <li><span className="info-item-label">Email</span><span className="info-item-value">{record.email}</span></li>
+            <li><span className="info-item-label">Address</span><span className="info-item-value">{record.address}</span></li>
+            <li><span className="info-item-label">Assigned Collector</span><span className="info-item-value">{record.assignedCollector}</span></li>
+            <li><span className="info-item-label">Last Visit</span><span className="info-item-value">{record.lastVisit}</span></li>
+          </ul>
+        </section>
+
+        <section className="panel content-panel">
+          <div className="panel-section-header"><h3>Credit Utilization</h3></div>
+          <div style={{ marginBottom: 12 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6, fontSize: '0.88rem' }}>
+              <span>Used: {formatCurrency(record.outstandingBalance)}</span>
+              <span className="muted">Limit: {formatCurrency(record.creditLimit)}</span>
+            </div>
+            <div style={{ height: 12, background: '#f1f5f9', borderRadius: 999, overflow: 'hidden' }}>
+              <div style={{ height: '100%', width: `${Math.min(utilizationPct, 100)}%`, background: utilizationPct > 70 ? '#dc2626' : '#2563eb', borderRadius: 999, transition: 'width 0.4s' }} />
+            </div>
+            <p className="muted" style={{ marginTop: 6, fontSize: '0.82rem' }}>{utilizationPct}% utilized</p>
+          </div>
+          <div style={{ marginTop: 16 }}>
+            <h4 style={{ margin: '0 0 10px', fontSize: '0.9rem', fontWeight: 700 }}>Payment Trend (last 4 months)</h4>
+            {record.paymentHistory.map(p => (
+              <div key={p.month} style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8 }}>
+                <span style={{ width: 72, fontSize: '0.8rem', color: '#64748b' }}>{p.month}</span>
+                <div style={{ flex: 1, height: 8, background: '#f1f5f9', borderRadius: 999, overflow: 'hidden' }}>
+                  <div style={{ height: '100%', width: `${Math.round((p.paid / p.due) * 100)}%`, background: p.onTime ? '#059669' : '#f59e0b', borderRadius: 999 }} />
+                </div>
+                <span style={{ fontSize: '0.8rem', color: p.onTime ? '#059669' : '#dc2626', fontWeight: 600, width: 40 }}>
+                  {Math.round((p.paid / p.due) * 100)}%
+                </span>
+                <span style={{ fontSize: '0.75rem', color: p.onTime ? '#059669' : '#dc2626' }}>{p.onTime ? '✓' : '!'}</span>
+              </div>
+            ))}
+          </div>
+        </section>
+      </div>
+
+      <PageToolbar actions={[
+        { label: 'Back to Customer Records', to: '/operating-manager/customers', variant: 'ghost' },
+      ]} onAction={a => navigate(a.to)} />
+    </div>
+  );
+}
+
+function ProfilePage({ navigate, showToast }) {  const [profile, setProfile] = useState({ ...OPERATING_MANAGER_PROFILE });
   return (
     <div className="page">
       <section className="panel form-panel content-panel">
@@ -816,7 +1012,9 @@ function ProfilePage({ navigate, showToast }) {
 
 export function OperatingManagerPageBody({ page, navigate, showToast }) {
   if (!page) return <EmptyState title="Page not found" description="Use the sidebar to open a supported screen." />;
-  const props = { branchId: page.params?.branchId, navigate, showToast };
+  if (page.module === 'admin') return <AdminPageBody page={page} navigate={navigate} showToast={showToast} />;
+  if (page.module === 'operations') return <BranchManagerPageBody page={page} navigate={navigate} showToast={showToast} />;
+  const props = { branchId: page.params?.branchId, customerId: page.params?.customerId, navigate, showToast };
   switch (page.pageType) {
     case 'dashboard': return <DashboardPage {...props} />;
     case 'branchPerformance': return <BranchPerformanceHub {...props} />;
@@ -836,6 +1034,8 @@ export function OperatingManagerPageBody({ page, navigate, showToast }) {
     case 'alerts': return <AlertsPage {...props} />;
     case 'notifications': return <NotificationsPage {...props} />;
     case 'profile': return <ProfilePage {...props} />;
+    case 'customers': return <CustomerRecordsPage {...props} />;
+    case 'customerDetail': return <CustomerDetailPage {...props} />;
     default: return <EmptyState title="Page not found" description="This screen is not configured yet." />;
   }
 }

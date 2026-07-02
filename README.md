@@ -4,7 +4,7 @@ This is a beginner-friendly working prototype of the CORVEX system.
 
 What is included:
 
-- A React app with click-through pages for collectors, sales agents, warehouse staff, branch managers, operating managers, and customers.
+- A React app with click-through pages for collectors, sales agents, warehouse staff, operating managers, and customers.
 - Mock forms, buttons, filters, and route changes so you can explore the flow right away.
 - A Python-ready FastAPI backend folder for future API work.
 

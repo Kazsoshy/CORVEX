@@ -233,6 +233,63 @@ select {
   margin-top: 0;
 }
 
+.nav-group {
+  display: grid;
+  gap: 8px;
+}
+
+.nav-group-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  list-style: none;
+  cursor: pointer;
+  padding: 10px 12px;
+  border-radius: var(--radius-md);
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  color: rgba(255, 255, 255, 0.84);
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  transition: background var(--transition), border-color var(--transition), color var(--transition);
+}
+
+.nav-group-summary::-webkit-details-marker {
+  display: none;
+}
+
+.nav-group-summary:hover {
+  background: rgba(255, 255, 255, 0.07);
+  border-color: rgba(255, 255, 255, 0.1);
+  color: #fff;
+}
+
+.nav-group[open] .nav-group-summary {
+  background: rgba(37, 99, 235, 0.14);
+  border-color: rgba(37, 99, 235, 0.22);
+  color: #fff;
+}
+
+.nav-group-chevron {
+  display: inline-flex;
+  flex-shrink: 0;
+  transition: transform var(--transition);
+}
+
+.nav-group[open] .nav-group-chevron {
+  transform: rotate(90deg);
+}
+
+.nav-group-items {
+  display: grid;
+  gap: 8px;
+  padding-left: 10px;
+  margin-bottom: 2px;
+}
+
 .nav-link {
   display: flex;
   align-items: center;
@@ -927,21 +984,19 @@ select {
 }
 
 .placeholder-map {
-  display: grid;
-  place-items: center;
-  min-height: 260px;
+  display: flex;
+  align-items: flex-end;
+  justify-content: flex-start;
+  min-height: 420px;
+  padding: 22px;
   border-radius: var(--radius-md);
   border: 1px dashed var(--blue-30);
   color: var(--navy-72);
-  text-align: center;
+  text-align: left;
+  font-weight: 600;
   background:
-    repeating-linear-gradient(
-      -45deg,
-      var(--sky-08),
-      var(--sky-08) 12px,
-      var(--mint) 12px,
-      var(--mint) 24px
-    );
+    linear-gradient(180deg, rgba(248, 250, 252, 0.1), rgba(248, 250, 252, 0.35)),
+    url('./assets/map.png') center/cover no-repeat;
 }
 
 .table-shell {
@@ -988,9 +1043,37 @@ select {
 }
 
 .bullet-list {
+  display: grid;
+  gap: 10px;
   margin: 0;
-  padding-left: 20px;
+  padding: 0;
+  list-style: none;
   color: var(--navy-84);
+}
+
+.bullet-list li {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 12px 14px;
+  border: 1px solid var(--surface-2);
+  border-radius: 14px;
+  background: var(--surface);
+  line-height: 1.5;
+}
+
+.bullet-list li::before {
+  content: '';
+  flex: 0 0 10px;
+  width: 10px;
+  height: 10px;
+  margin-top: 0.45em;
+  border-radius: 999px;
+  background: var(--blue);
+}
+
+.bullet-list li strong {
+  color: inherit;
 }
 
 .fact-card {
@@ -1681,10 +1764,51 @@ select {
   align-items: stretch;
 }
 
-.mini-map {
-  min-height: 120px;
+.transfer-detail-grid {
   display: grid;
-  place-items: center;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 14px;
+}
+
+.transfer-detail-card {
+  display: grid;
+  gap: 8px;
+  padding: 16px 18px;
+  border: 1px solid var(--surface-2);
+  border-radius: 16px;
+  background: var(--surface);
+  box-shadow: 0 10px 24px rgba(15, 23, 42, 0.04);
+}
+
+.transfer-detail-card span {
+  font-size: 0.74rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--navy-60);
+}
+
+.transfer-detail-card strong {
+  font-size: 0.96rem;
+  line-height: 1.45;
+  color: var(--navy);
+  word-break: break-word;
+}
+
+.transfer-detail-card-wide {
+  grid-column: 1 / -1;
+}
+
+.transfer-detail-notes {
+  background: linear-gradient(180deg, rgba(241, 245, 249, 0.8), rgba(255, 255, 255, 1));
+}
+
+.mini-map {
+  min-height: 600px;
+  display: flex;
+  align-items: flex-end;
+  justify-content: flex-start;
+  padding: 16px;
   font-size: 0.88rem;
 }
 
@@ -2086,7 +2210,7 @@ select {
   }
 }
 
-/* Branch manager module */
+/* Operating Manager operations module */
 .trend-chart {
   display: grid;
   gap: 8px;
@@ -2253,5 +2377,71 @@ select {
   width: 88px;
   height: 88px;
   object-fit: contain;
+  flex-shrink: 0;
+}
+
+/* Info grid — replaces bullet-list for key-value data */
+.info-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 12px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.info-grid li,
+.info-item {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 12px 14px;
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  border: 1px solid var(--surface-3);
+}
+
+.info-item-label {
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--navy-60);
+}
+
+.info-item-value {
+  font-size: 0.94rem;
+  font-weight: 600;
+  color: var(--ink);
+}
+
+/* Flag list — for delinquency/warning flags */
+.flag-list {
+  display: grid;
+  gap: 8px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.flag-list li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 14px;
+  border-radius: var(--radius-sm);
+  background: rgba(220, 38, 38, 0.06);
+  border: 1px solid rgba(220, 38, 38, 0.15);
+  color: #b91c1c;
+  font-size: 0.88rem;
+  font-weight: 500;
+}
+
+.flag-list li::before {
+  content: '';
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #dc2626;
   flex-shrink: 0;
 }

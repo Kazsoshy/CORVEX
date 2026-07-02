@@ -79,7 +79,7 @@ function DashboardPage({ navigate, showToast }) {
     <div className="page">
       <section className="panel dashboard-greeting">
         <div className="dashboard-greeting-main">
-          <p className="dashboard-eyebrow">Admin Panel</p>
+          <p className="dashboard-eyebrow">Operating Manager Administration</p>
           <h2>{ADMIN_PROFILE.name}</h2>
           <p className="muted">System Administration</p>
         </div>
@@ -123,7 +123,7 @@ function DashboardPage({ navigate, showToast }) {
       </div>
 
       <div className="grid two-up">
-        <Card title="Inventory Alerts" sub="Low stock & out of stock" action="Manage Inventory" onAction={() => navigate('/admin/inventory')}>
+        <Card title="Inventory Alerts" sub="Low stock & out of stock" action="Manage Inventory" onAction={() => navigate('/operating-manager/admin/inventory')}>
           <ul className="widget-list">
             {ADMIN_INVENTORY.filter(p => p.status !== 'Sufficient').map(p => (
               <li key={p.id}>
@@ -134,7 +134,7 @@ function DashboardPage({ navigate, showToast }) {
           </ul>
         </Card>
 
-        <Card title="Pending Transfer Requests" sub="Awaiting approval" action="View All" onAction={() => navigate('/admin/inventory')}>
+        <Card title="Pending Transfer Requests" sub="Awaiting approval" action="View All" onAction={() => navigate('/operating-manager/admin/inventory')}>
           <ul className="widget-list">
             {TRANSFER_REQUESTS.filter(t => t.status === 'Pending').map(t => (
               <li key={t.id}>
@@ -150,11 +150,11 @@ function DashboardPage({ navigate, showToast }) {
         <div className="panel-section-header"><h3>Quick Access</h3></div>
         <div className="quick-link-grid">
           {[
-            { label: 'User Management',      to: '/admin/users',      icon: 'account' },
-            { label: 'Branch Management',    to: '/admin/branches',   icon: 'home' },
-            { label: 'Inventory Management', to: '/admin/inventory',  icon: 'inventory' },
-            { label: 'System Reports',       to: '/admin/reports',    icon: 'reports' },
-            { label: 'Audit Logs',           to: '/admin/audit-logs', icon: 'log' },
+            { label: 'User Management',      to: '/operating-manager/admin/users',      icon: 'account' },
+            { label: 'Branch Management',    to: '/operating-manager/admin/branches',   icon: 'home' },
+            { label: 'Inventory Management', to: '/operating-manager/admin/inventory',  icon: 'inventory' },
+            { label: 'System Reports',       to: '/operating-manager/admin/reports',    icon: 'reports' },
+            { label: 'Audit Logs',           to: '/operating-manager/admin/audit-logs', icon: 'log' },
           ].map(item => (
             <button key={item.to} className="quick-link-card" type="button" onClick={() => navigate(item.to)} style={{ textAlign: 'left', border: 'none', background: 'none', padding: 0, cursor: 'pointer' }}>
               <span className="quick-link-icon"><NavIcon name={item.icon} /></span>
@@ -176,7 +176,7 @@ function UserListPage({ navigate, showToast }) {
   const [statusFilter, setStatusFilter] = useState('All');
   const [confirmDisable, setConfirmDisable] = useState(null);
 
-  const roles = ['All', 'Operating Manager', 'Branch Manager', 'Collector', 'Sales Agent', 'Warehouse Staff', 'Customer'];
+  const roles = ['All', 'Operating Manager', 'Collector', 'Sales Agent', 'Warehouse Staff', 'Customer'];
   const branches = ['All', ...ADMIN_BRANCHES.map(b => b.name)];
 
   const filtered = useMemo(() => USERS.filter(u => {
@@ -190,7 +190,7 @@ function UserListPage({ navigate, showToast }) {
 
   return (
     <div className="page">
-      <Toolbar actions={[{ label: '+ Add User', action: 'add' }]} onAction={() => navigate('/admin/users/add')} />
+      <Toolbar actions={[{ label: '+ Add User', action: 'add' }]} onAction={() => navigate('/operating-manager/admin/users/add')} />
 
       <section className="panel content-panel">
         <div className="accounts-toolbar">
@@ -237,7 +237,7 @@ function UserListPage({ navigate, showToast }) {
                     <td><StatusPill status={u.status} /></td>
                     <td>{u.lastLogin}</td>
                     <td className="table-actions">
-                      <button className="link-button" type="button" onClick={() => navigate(`/admin/users/${u.id}`)}>Edit</button>
+                      <button className="link-button" type="button" onClick={() => navigate(`/operating-manager/admin/users/${u.id}`)}>Edit</button>
                       <button className="link-button" type="button" onClick={() => setConfirmDisable(u)}>Disable</button>
                       <button className="link-button" type="button" onClick={() => showToast(`Password reset sent to ${u.email}.`, 'success')}>Reset PW</button>
                     </td>
@@ -265,7 +265,7 @@ function UserFormPage({ userId, navigate, showToast }) {
     status: existing?.status ?? 'Active',
   });
   const set = (k, v) => setForm(p => ({ ...p, [k]: v }));
-  const roles = ['Operating Manager', 'Branch Manager', 'Collector', 'Sales Agent', 'Warehouse Staff', 'Customer'];
+  const roles = ['Operating Manager', 'Collector', 'Sales Agent', 'Warehouse Staff', 'Customer'];
 
   return (
     <div className="page">
@@ -302,10 +302,10 @@ function UserFormPage({ userId, navigate, showToast }) {
       <Toolbar
         actions={[
           { label: existing ? 'Save Changes' : 'Create User', action: 'save' },
-          { label: 'Cancel', to: '/admin/users', variant: 'secondary' },
+          { label: 'Cancel', to: '/operating-manager/admin/users', variant: 'secondary' },
         ]}
         onAction={a => {
-          if (a.action === 'save') { showToast(existing ? 'User updated.' : 'User created.', 'success'); navigate('/admin/users'); }
+          if (a.action === 'save') { showToast(existing ? 'User updated.' : 'User created.', 'success'); navigate('/operating-manager/admin/users'); }
           else navigate(a.to);
         }}
       />
@@ -616,12 +616,12 @@ function ProfilePage({ navigate, showToast }) {
     <div className="page">
       <section className="panel content-panel">
         <div className="panel-section-header"><h3>Admin Profile</h3></div>
-        <ul className="bullet-list">
-          <li>Name: {ADMIN_PROFILE.name}</li>
-          <li>Employee ID: {ADMIN_PROFILE.employeeId}</li>
-          <li>Email: {ADMIN_PROFILE.email}</li>
-          <li>Phone: {ADMIN_PROFILE.phone}</li>
-          <li>Role: {ADMIN_PROFILE.role}</li>
+        <ul className="info-grid">
+          <li><span className="info-item-label">Name</span><span className="info-item-value">{ADMIN_PROFILE.name}</span></li>
+          <li><span className="info-item-label">Employee ID</span><span className="info-item-value">{ADMIN_PROFILE.employeeId}</span></li>
+          <li><span className="info-item-label">Email</span><span className="info-item-value">{ADMIN_PROFILE.email}</span></li>
+          <li><span className="info-item-label">Phone</span><span className="info-item-value">{ADMIN_PROFILE.phone}</span></li>
+          <li><span className="info-item-label">Role</span><span className="info-item-value">{ADMIN_PROFILE.role}</span></li>
         </ul>
       </section>
       <Toolbar actions={[{ label: 'Update Profile', action: 'update' }, { label: 'Change Password', action: 'pw', variant: 'secondary' }, { label: 'Logout', action: 'logout', variant: 'ghost' }]}

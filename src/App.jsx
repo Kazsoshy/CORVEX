@@ -4,10 +4,8 @@ import { Breadcrumbs } from './components/collector/Breadcrumbs';
 import { CollectorPageBody } from './components/collector/CollectorPageBody';
 import { SalesPageBody } from './components/sales/SalesPageBody';
 import { WarehousePageBody } from './components/warehouse/WarehousePageBody';
-import { BranchManagerPageBody } from './components/branchManager/BranchManagerPageBody';
 import { OperatingManagerPageBody } from './components/operatingManager/OperatingManagerPageBody';
 import { CustomerPageBody } from './components/customer/CustomerPageBody';
-import { AdminPageBody } from './components/admin/AdminPageBody';
 import { SuperAdminPageBody } from './components/superAdmin/SuperAdminPageBody';
 import { Toast, useToast } from './components/collector/Toast';
 import { quickFacts } from './pageData';
@@ -16,20 +14,16 @@ import { collectorRole } from './rolePages/collector';
 import { isCollectorNavActive, resolveCollectorPage } from './utils/collectorRoutes';
 import { isSalesNavActive, resolveSalesPage } from './utils/salesRoutes';
 import { isWarehouseNavActive, resolveWarehousePage } from './utils/warehouseRoutes';
-import { isBranchManagerNavActive, resolveBranchManagerPage } from './utils/branchManagerRoutes';
 import { isOperatingManagerNavActive, resolveOperatingManagerPage } from './utils/operatingManagerRoutes';
 import { isCustomerAuthPath, isCustomerNavActive, resolveCustomerPage } from './utils/customerRoutes';
 import { salesRole } from './rolePages/sales';
 import { warehouseRole } from './rolePages/warehouse';
-import { branchManagerRole } from './rolePages/branchManager';
 import { operatingManagerRole } from './rolePages/operatingManager';
 import { customerRole } from './rolePages/customer';
-import { adminRole } from './rolePages/admin';
 import { superAdminRole } from './rolePages/superAdmin';
-import { resolveAdminPage, isAdminNavActive } from './utils/adminRoutes';
 import { resolveSuperAdminPage, isSuperAdminNavActive } from './utils/superAdminRoutes';
 
-const ROLES = [collectorRole, salesRole, warehouseRole, branchManagerRole, operatingManagerRole, customerRole, adminRole, superAdminRole];
+const ROLES = [collectorRole, salesRole, warehouseRole, operatingManagerRole, customerRole, superAdminRole];
 const ROLE_BY_KEY = Object.fromEntries(ROLES.map((role) => [role.key, role]));
 const ROUTE_REGISTRY = Object.assign({}, ...ROLES.map((role) => role.routes));
 
@@ -41,10 +35,10 @@ function App() {
       <Route path="/collector" element={<Navigate to={collectorRole.entryPath} replace />} />
       <Route path="/sales" element={<Navigate to={salesRole.entryPath} replace />} />
       <Route path="/warehouse" element={<Navigate to={warehouseRole.entryPath} replace />} />
-      <Route path="/branch-manager" element={<Navigate to={branchManagerRole.entryPath} replace />} />
+      <Route path="/branch-manager" element={<Navigate to="/operating-manager/operations/dashboard" replace />} />
+      <Route path="/admin" element={<Navigate to="/operating-manager/admin/dashboard" replace />} />
       <Route path="/operating-manager" element={<Navigate to={operatingManagerRole.entryPath} replace />} />
       <Route path="/customer" element={<Navigate to={customerRole.entryPath} replace />} />
-      <Route path="/admin" element={<Navigate to={adminRole.entryPath} replace />} />
       <Route path="/super-admin" element={<Navigate to={superAdminRole.entryPath} replace />} />
       <Route path="*" element={<PrototypeShell />} />
     </Routes>
@@ -58,12 +52,10 @@ function PrototypeShell() {
   const isCollector = currentRole?.key === 'collector';
   const isSales = currentRole?.key === 'sales';
   const isWarehouse = currentRole?.key === 'warehouse';
-  const isBranchManager = currentRole?.key === 'branchManager';
   const isOperatingManager = currentRole?.key === 'operatingManager';
   const isCustomer = currentRole?.key === 'customer';
-  const isAdmin = currentRole?.key === 'admin';
   const isSuperAdmin = currentRole?.key === 'superAdmin';
-  const isRoleModule = isCollector || isSales || isWarehouse || isBranchManager || isOperatingManager || isCustomer || isAdmin || isSuperAdmin;
+  const isRoleModule = isCollector || isSales || isWarehouse || isOperatingManager || isCustomer || isSuperAdmin;
   const isCustomerLogin = isCustomerAuthPath(location.pathname);
   const fullPath = location.pathname + location.search;
   const page = isCollector
@@ -72,17 +64,13 @@ function PrototypeShell() {
       ? resolveSalesPage(location.pathname, location.search)
       : isWarehouse
         ? resolveWarehousePage(location.pathname)
-        : isBranchManager
-          ? resolveBranchManagerPage(location.pathname)
-          : isOperatingManager
-            ? resolveOperatingManagerPage(location.pathname)
-            : isCustomer
-              ? resolveCustomerPage(location.pathname)
-              : isAdmin
-                ? resolveAdminPage(location.pathname)
-                : isSuperAdmin
-                  ? resolveSuperAdminPage(location.pathname)
-                  : ROUTE_REGISTRY[location.pathname] ?? null;
+        : isOperatingManager
+          ? resolveOperatingManagerPage(location.pathname)
+          : isCustomer
+            ? resolveCustomerPage(location.pathname)
+            : isSuperAdmin
+              ? resolveSuperAdminPage(location.pathname)
+              : ROUTE_REGISTRY[location.pathname] ?? null;
   const [showMap, setShowMap] = useState(false);
   const [filter, setFilter] = useState('All');
   const { toast, showToast, clearToast } = useToast();
@@ -115,42 +103,82 @@ function PrototypeShell() {
 
         {currentRole && !isAuthPath(location.pathname) && !isCustomerLogin ? (
           <>
-            <p className="nav-section-label">Menu</p>
             <nav className="nav-links">
-              {topLinks.map((link) => (
-                <Link
-                  key={link.to}
-                  to={link.to}
-                  className={
-                    isRoleModule
-                      ? (isCollector
-                          ? isCollectorNavActive(fullPath, link.to)
-                          : isSales
-                            ? isSalesNavActive(fullPath, link.to)
-                            : isWarehouse
-                              ? isWarehouseNavActive(fullPath, link.to)
-                              : isBranchManager
-                              ? isBranchManagerNavActive(fullPath, link.to)
-                              : isOperatingManager
-                                ? isOperatingManagerNavActive(fullPath, link.to)
-                                : isAdmin
-                                  ? isAdminNavActive(fullPath, link.to)
+              {currentRole?.navSections?.length ? (
+                currentRole.navSections.map((section) => (
+                  <details key={section.title} className="nav-group" open>
+                    <summary className="nav-group-summary">
+                      <span>{section.title}</span>
+                      <span className="nav-group-chevron" aria-hidden="true">
+                        <NavIcon name="chevronRight" />
+                      </span>
+                    </summary>
+                    <div className="nav-group-items">
+                      {section.items.map((link) => (
+                        <Link
+                          key={link.to}
+                          to={link.to}
+                          className={
+                            isRoleModule
+                              ? (isCollector
+                                  ? isCollectorNavActive(fullPath, link.to)
+                                  : isSales
+                                    ? isSalesNavActive(fullPath, link.to)
+                                    : isWarehouse
+                                      ? isWarehouseNavActive(fullPath, link.to)
+                                      : isOperatingManager
+                                        ? isOperatingManagerNavActive(fullPath, link.to)
+                                        : isSuperAdmin
+                                            ? isSuperAdminNavActive(fullPath, link.to)
+                                            : isCustomerNavActive(fullPath, link.to))
+                                ? 'nav-link active'
+                                : 'nav-link'
+                              : location.pathname === link.to
+                                ? 'nav-link active'
+                                : 'nav-link'
+                          }
+                        >
+                          <span className="nav-link-icon">
+                            <NavIcon label={link.label} />
+                          </span>
+                          <span className="nav-link-text">{link.label}</span>
+                        </Link>
+                      ))}
+                    </div>
+                  </details>
+                ))
+              ) : (
+                topLinks.map((link) => (
+                  <Link
+                    key={link.to}
+                    to={link.to}
+                    className={
+                      isRoleModule
+                        ? (isCollector
+                            ? isCollectorNavActive(fullPath, link.to)
+                            : isSales
+                              ? isSalesNavActive(fullPath, link.to)
+                              : isWarehouse
+                                ? isWarehouseNavActive(fullPath, link.to)
+                                : isOperatingManager
+                                  ? isOperatingManagerNavActive(fullPath, link.to)
                                   : isSuperAdmin
-                                    ? isSuperAdminNavActive(fullPath, link.to)
-                                    : isCustomerNavActive(fullPath, link.to))
-                        ? 'nav-link active'
-                        : 'nav-link'
-                      : location.pathname === link.to
-                        ? 'nav-link active'
-                        : 'nav-link'
-                  }
-                >
-                  <span className="nav-link-icon">
-                    <NavIcon label={link.label} />
-                  </span>
-                  <span className="nav-link-text">{link.label}</span>
-                </Link>
-              ))}
+                                      ? isSuperAdminNavActive(fullPath, link.to)
+                                      : isCustomerNavActive(fullPath, link.to))
+                          ? 'nav-link active'
+                          : 'nav-link'
+                        : location.pathname === link.to
+                          ? 'nav-link active'
+                          : 'nav-link'
+                    }
+                  >
+                    <span className="nav-link-icon">
+                      <NavIcon label={link.label} />
+                    </span>
+                    <span className="nav-link-text">{link.label}</span>
+                  </Link>
+                ))
+              )}
             </nav>
             <div className="sidebar-footer">
               <button
@@ -241,11 +269,6 @@ function PrototypeShell() {
                   <WarehousePageBody page={page} navigate={navigate} showToast={showToast} />
                   <Toast toast={toast} onDismiss={clearToast} />
                 </>
-              ) : isBranchManager ? (
-                <>
-                  <BranchManagerPageBody page={page} navigate={navigate} showToast={showToast} />
-                  <Toast toast={toast} onDismiss={clearToast} />
-                </>
               ) : isOperatingManager ? (
                 <>
                   <OperatingManagerPageBody page={page} navigate={navigate} showToast={showToast} />
@@ -254,11 +277,6 @@ function PrototypeShell() {
               ) : isCustomer ? (
                 <>
                   <CustomerPageBody page={page} navigate={navigate} showToast={showToast} />
-                  <Toast toast={toast} onDismiss={clearToast} />
-                </>
-              ) : isAdmin ? (
-                <>
-                  <AdminPageBody page={page} navigate={navigate} showToast={showToast} />
                   <Toast toast={toast} onDismiss={clearToast} />
                 </>
               ) : isSuperAdmin ? (
@@ -289,10 +307,10 @@ function roleFromPath(pathname) {
   if (pathname.startsWith('/collector')) return collectorRole;
   if (pathname.startsWith('/sales')) return salesRole;
   if (pathname.startsWith('/warehouse')) return warehouseRole;
-  if (pathname.startsWith('/branch-manager')) return branchManagerRole;
+  if (pathname.startsWith('/branch-manager')) return operatingManagerRole;
   if (pathname.startsWith('/operating-manager')) return operatingManagerRole;
   if (pathname.startsWith('/customer')) return customerRole;
-  if (pathname.startsWith('/admin')) return adminRole;
+  if (pathname.startsWith('/admin')) return operatingManagerRole;
   if (pathname.startsWith('/super-admin')) return superAdminRole;
   return null;
 }
@@ -618,9 +636,9 @@ function PageBody({ showMap, setShowMap, filter, setFilter, page, currentRole, n
             <h3>{section.title}</h3>
           </div>
           {section.type === 'bullet-list' && (
-            <ul className="bullet-list">
+            <ul className="info-grid">
               {section.items?.map((item) => (
-                <li key={item}>{item}</li>
+                <li key={item}><span className="info-item-value">{item}</span></li>
               ))}
             </ul>
           )}

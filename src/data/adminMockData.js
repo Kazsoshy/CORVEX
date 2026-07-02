@@ -1,4 +1,4 @@
-// Furniture retail — Admin & Super Admin data (3 Davao branches)
+// Furniture retail — Operating Manager & Super Admin data (3 Davao branches)
 
 export const ADMIN_PROFILE = {
   name: 'Patricia Reyes',
@@ -6,7 +6,7 @@ export const ADMIN_PROFILE = {
   email: 'patricia.reyes@corvex.ph',
   phone: '+63 917 555 1100',
   avatarInitials: 'PR',
-  role: 'Admin',
+  role: 'Operating Manager',
 };
 
 export const SUPER_ADMIN_PROFILE = {
@@ -20,9 +20,9 @@ export const SUPER_ADMIN_PROFILE = {
 
 export const USERS = [
   { id: 'u1',  name: 'Elena Mercado',      email: 'elena.mercado@corvex.ph',      role: 'Operating Manager', branch: 'All Branches',        status: 'Active',   lastLogin: '2026-06-30 08:14 AM' },
-  { id: 'u2',  name: 'Roberto Villanueva', email: 'roberto.villanueva@corvex.ph',  role: 'Branch Manager',    branch: 'Davao City',          status: 'Active',   lastLogin: '2026-06-30 07:52 AM' },
-  { id: 'u3',  name: 'Miguel Flores',      email: 'miguel.f@corvex.ph',           role: 'Branch Manager',    branch: 'General Santos',      status: 'Active',   lastLogin: '2026-06-30 07:45 AM' },
-  { id: 'u4',  name: 'Grace Tan',          email: 'grace.t@corvex.ph',            role: 'Branch Manager',    branch: 'Davao Oriental',      status: 'Active',   lastLogin: '2026-06-30 07:50 AM' },
+  { id: 'u2',  name: 'Roberto Villanueva', email: 'roberto.villanueva@corvex.ph',  role: 'Operating Manager', branch: 'Davao City',          status: 'Active',   lastLogin: '2026-06-30 07:52 AM' },
+  { id: 'u3',  name: 'Miguel Flores',      email: 'miguel.f@corvex.ph',           role: 'Operating Manager', branch: 'General Santos',      status: 'Active',   lastLogin: '2026-06-30 07:45 AM' },
+  { id: 'u4',  name: 'Grace Tan',          email: 'grace.t@corvex.ph',            role: 'Operating Manager', branch: 'Davao Oriental',      status: 'Active',   lastLogin: '2026-06-30 07:50 AM' },
   { id: 'u5',  name: 'Maria Dela Cruz',    email: 'maria.dc@corvex.ph',           role: 'Collector',         branch: 'Davao City',          status: 'Active',   lastLogin: '2026-06-30 07:30 AM' },
   { id: 'u6',  name: 'John Dela Cruz',     email: 'john.dc@corvex.ph',            role: 'Collector',         branch: 'Davao City',          status: 'Active',   lastLogin: '2026-06-30 07:31 AM' },
   { id: 'u7',  name: 'Pedro Garcia',       email: 'pedro.g@corvex.ph',            role: 'Collector',         branch: 'Davao City',          status: 'Active',   lastLogin: '2026-06-30 07:29 AM' },
@@ -139,9 +139,7 @@ export const SERVER_METRICS = [
 
 export const ROLES_PERMISSIONS = [
   { role: 'Super Admin',       permissions: { view: true,  create: true,  edit: true,  delete: true,  approve: true,  export: true,  manageUsers: true,  manageBranches: true  } },
-  { role: 'Admin',             permissions: { view: true,  create: true,  edit: true,  delete: false, approve: true,  export: true,  manageUsers: true,  manageBranches: true  } },
-  { role: 'Operating Manager', permissions: { view: true,  create: false, edit: false, delete: false, approve: false, export: true,  manageUsers: false, manageBranches: false } },
-  { role: 'Branch Manager',    permissions: { view: true,  create: true,  edit: true,  delete: false, approve: true,  export: true,  manageUsers: false, manageBranches: false } },
+  { role: 'Operating Manager', permissions: { view: true,  create: true,  edit: true,  delete: false, approve: true,  export: true,  manageUsers: true, manageBranches: true } },
   { role: 'Warehouse Staff',   permissions: { view: true,  create: true,  edit: true,  delete: false, approve: false, export: false, manageUsers: false, manageBranches: false } },
   { role: 'Sales Agent',       permissions: { view: true,  create: true,  edit: false, delete: false, approve: false, export: false, manageUsers: false, manageBranches: false } },
   { role: 'Collector',         permissions: { view: true,  create: true,  edit: false, delete: false, approve: false, export: false, manageUsers: false, manageBranches: false } },

@@ -241,7 +241,7 @@ export const STOCK_MOVEMENTS = [
 
 export const TRANSFERS = [
   { id: 'TRF-301', productId: 'p1', productName: '3-Seater Fabric Sofa (Beige)',         quantity: 4, sourceBranch: 'Davao Oriental Branch', destinationBranch: 'Davao City Branch',    status: 'Pending Approval', submittedBy: 'Ana Reyes', submittedDate: '2026-06-25', approvalInfo: null,                             notes: 'Davao City showroom restock' },
-  { id: 'TRF-300', productId: 'p2', productName: '6-Seater Dining Table Set (Narra)',    quantity: 2, sourceBranch: 'Davao Oriental Branch', destinationBranch: 'General Santos Branch',status: 'Approved',          submittedBy: 'Ana Reyes', submittedDate: '2026-06-24', approvalInfo: 'Approved by Branch Manager', notes: 'Branch showroom replenishment' },
+  { id: 'TRF-300', productId: 'p2', productName: '6-Seater Dining Table Set (Narra)',    quantity: 2, sourceBranch: 'Davao Oriental Branch', destinationBranch: 'General Santos Branch',status: 'Approved',          submittedBy: 'Ana Reyes', submittedDate: '2026-06-24', approvalInfo: 'Approved by Operating Manager', notes: 'Branch showroom replenishment' },
   { id: 'TRF-299', productId: 'p1', productName: '3-Seater Fabric Sofa (Beige)',         quantity: 3, sourceBranch: 'Davao Oriental Branch', destinationBranch: 'Davao City Branch',    status: 'Completed',         submittedBy: 'Ana Reyes', submittedDate: '2026-06-18', approvalInfo: 'Completed by receiving branch', notes: 'Routine stock rebalancing' },
   { id: 'TRF-298', productId: 'p5', productName: '3-Door Wardrobe (White Gloss)',         quantity: 3, sourceBranch: 'Davao City Branch',    destinationBranch: 'General Santos Branch',status: 'Rejected',          submittedBy: 'Ana Reyes', submittedDate: '2026-06-18', approvalInfo: 'Rejected: insufficient stock',  notes: 'Cancelled' },
   { id: 'TRF-297', productId: 'p6', productName: 'Coffee Table (Tempered Glass & Steel)', quantity: 5, sourceBranch: 'Davao Oriental Branch', destinationBranch: 'General Santos Branch',status: 'Submitted',         submittedBy: 'Ana Reyes', submittedDate: '2026-06-25', approvalInfo: null,                             notes: 'Awaiting review' },
@@ -302,4 +302,122 @@ export function getStockStatus(stock, reorderPoint) {
   if (stock <= reorderPoint * 0.3) return 'Critical Stock';
   if (stock <= reorderPoint) return 'Low Stock';
   return 'Sufficient';
+}
+
+// ── Customer Credit History (maintained by Warehouse Personnel) ───────────────
+// Warehouse staff access this to verify credit standing before processing
+// large inventory releases or transfers tied to customer orders.
+
+export const CUSTOMER_CREDIT_RECORDS = [
+  {
+    id: 'CCR-001',
+    clientName: 'Luntiang Tahanan Interiors',
+    accountNumber: 'ACC-1001',
+    branch: 'Davao City Branch',
+    creditLimit: 200000,
+    outstandingBalance: 48500,
+    creditUtilization: 24,
+    status: 'Overdue',
+    daysOverdue: 14,
+    lastPaymentDate: '2026-06-20',
+    lastPaymentAmount: 12000,
+    totalPurchases: 842000,
+    paymentHistory: [
+      { date: '2026-06-20', amount: 12000, method: 'Bank Transfer', status: 'Confirmed', receipt: 'RCP-001' },
+      { date: '2026-06-18', amount: 8500,  method: 'Cash',          status: 'Confirmed', receipt: 'RCP-002' },
+      { date: '2026-06-15', amount: 5000,  method: 'Check',         status: 'Confirmed', receipt: 'RCP-003' },
+      { date: '2026-06-01', amount: 15000, method: 'Bank Transfer', status: 'Confirmed', receipt: 'RCP-004' },
+    ],
+    delinquencyFlags: ['14 days overdue — balance ₱48,500'],
+    riskLevel: 'Medium',
+  },
+  {
+    id: 'CCR-002',
+    clientName: 'Casa Moderna Furniture',
+    accountNumber: 'ACC-1002',
+    branch: 'Davao City Branch',
+    creditLimit: 150000,
+    outstandingBalance: 22000,
+    creditUtilization: 15,
+    status: 'Pending',
+    daysOverdue: 9,
+    lastPaymentDate: '2026-06-19',
+    lastPaymentAmount: 10000,
+    totalPurchases: 445000,
+    paymentHistory: [
+      { date: '2026-06-19', amount: 10000, method: 'Check', status: 'Confirmed', receipt: 'RCP-010' },
+      { date: '2026-06-05', amount: 8000,  method: 'Cash',  status: 'Confirmed', receipt: 'RCP-011' },
+    ],
+    delinquencyFlags: ['9 days overdue'],
+    riskLevel: 'Low',
+  },
+  {
+    id: 'CCR-003',
+    clientName: 'Furniture Plus GenSan',
+    accountNumber: 'ACC-2001',
+    branch: 'General Santos Branch',
+    creditLimit: 500000,
+    outstandingBalance: 0,
+    creditUtilization: 0,
+    status: 'Current',
+    daysOverdue: 0,
+    lastPaymentDate: '2026-06-25',
+    lastPaymentAmount: 128000,
+    totalPurchases: 842000,
+    paymentHistory: [
+      { date: '2026-06-25', amount: 128000, method: 'Bank Transfer', status: 'Confirmed', receipt: 'RCP-INV-0088' },
+      { date: '2026-06-14', amount: 95000,  method: 'Bank Transfer', status: 'Confirmed', receipt: 'RCP-INV-0085' },
+    ],
+    delinquencyFlags: [],
+    riskLevel: 'Low',
+  },
+  {
+    id: 'CCR-004',
+    clientName: 'Abode Furniture Warehouse',
+    accountNumber: 'ACC-2004',
+    branch: 'General Santos Branch',
+    creditLimit: 200000,
+    outstandingBalance: 82000,
+    creditUtilization: 41,
+    status: 'Overdue',
+    daysOverdue: 21,
+    lastPaymentDate: '2026-06-01',
+    lastPaymentAmount: 15000,
+    totalPurchases: 298000,
+    paymentHistory: [
+      { date: '2026-06-01', amount: 15000, method: 'Cash', status: 'Confirmed',     receipt: 'RCP-021' },
+      { date: '2026-05-15', amount: 10000, method: 'Cash', status: 'Confirmed',     receipt: 'RCP-018' },
+      { date: '2026-05-01', amount: 8000,  method: 'Check',status: 'Late',          receipt: 'RCP-014' },
+    ],
+    delinquencyFlags: ['21 days overdue', 'Late payment on record', 'Credit hold flagged'],
+    riskLevel: 'High',
+  },
+  {
+    id: 'CCR-005',
+    clientName: 'Mabuhay Sala Sets',
+    accountNumber: 'ACC-1006',
+    branch: 'Davao City Branch',
+    creditLimit: 100000,
+    outstandingBalance: 38000,
+    creditUtilization: 38,
+    status: 'Blacklisted',
+    daysOverdue: 28,
+    lastPaymentDate: '2026-05-28',
+    lastPaymentAmount: 5000,
+    totalPurchases: 155000,
+    paymentHistory: [
+      { date: '2026-05-28', amount: 5000,  method: 'Cash', status: 'Confirmed', receipt: 'RCP-030' },
+      { date: '2026-04-30', amount: 3000,  method: 'Cash', status: 'Late',      receipt: 'RCP-026' },
+    ],
+    delinquencyFlags: ['28 days overdue', 'Blacklisted — no new orders allowed', '3 consecutive missed payments'],
+    riskLevel: 'Critical',
+  },
+];
+
+export function getCreditRecordById(id) {
+  return CUSTOMER_CREDIT_RECORDS.find((r) => r.id === id) ?? null;
+}
+
+export function getCreditRecordByAccount(accountNumber) {
+  return CUSTOMER_CREDIT_RECORDS.find((r) => r.accountNumber === accountNumber) ?? null;
 }
