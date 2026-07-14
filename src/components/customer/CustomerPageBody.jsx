@@ -469,7 +469,7 @@ function ProfilePage({ navigate, showToast }) {
         { label: 'Change Password', variant: 'secondary' },
         { label: 'Logout', variant: 'ghost' },
       ]} onAction={(a) => {
-        if (a.label === 'Logout') navigate('/login');
+        if (a.label === 'Logout') requestLogout();
         else showToast(`${a.label} action recorded.`, 'success');
       }} />
     </div>

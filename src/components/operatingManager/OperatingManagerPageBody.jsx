@@ -8,8 +8,9 @@ import {
 } from 'recharts';
 import { AdminPageBody } from '../admin/AdminPageBody';
 import { BranchManagerPageBody } from '../branchManager/BranchManagerPageBody';
+import LeafletMap from '../common/LeafletMap';
 import {
-  ALERTS, BRANCHES, BRANCH_RADAR, CUSTOMER_RECORDS, ENTERPRISE_KPIS, GIS_LAYERS,
+  ALERTS, BRANCHES, BRANCH_RADAR, CUSTOMER_RECORDS, ENTERPRISE_KPIS, LEAFLET_LAYERS,
   MONTHLY_COLLECTIONS, MONTHLY_DELINQUENCY, MONTHLY_REVENUE,
   NOTIFICATIONS, OPERATING_MANAGER_PROFILE, REPORT_CATEGORIES,
   TREND_DATA, WEEKLY_COLLECTION_RATE, WEEKLY_SALES_RATE,
@@ -194,7 +195,7 @@ function DashboardPage({ navigate }) {
             { label: 'Collection Performance', to: '/operating-manager/reports', icon: 'reports' },
             { label: 'Sales Activities', to: '/operating-manager/operations/staff-performance', icon: 'compare' },
             { label: 'Inventory Status', to: '/operating-manager/admin/inventory', icon: 'inventory' },
-            { label: 'GIS Maps', to: '/operating-manager/gis', icon: 'map' },
+            { label: 'Leaflet | OpenStreetMap', to: '/operating-manager/leaflet', icon: 'map' },
           ].map((item) => (
             <button
               key={item.to}
@@ -250,7 +251,7 @@ function DashboardPage({ navigate }) {
 
       <PageToolbar actions={[
         { label: 'Compare Branches', to: '/operating-manager/branch-performance/comparison' },
-        { label: 'GIS Intelligence', to: '/operating-manager/gis', variant: 'secondary' },
+        { label: 'Leaflet | OpenStreetMap', to: '/operating-manager/leaflet', variant: 'secondary' },
         { label: 'Reports', to: '/operating-manager/reports', variant: 'secondary' },
       ]} onAction={(a) => navigate(a.to)} />
     </div>
@@ -510,7 +511,7 @@ function BranchDetailPage({ branchId, navigate }) {
       </div>
 
       <PageToolbar actions={[
-        { label: 'View GIS Map', to: '/operating-manager/gis', variant: 'secondary' },
+        { label: 'View Leaflet | OpenStreetMap', to: '/operating-manager/leaflet', variant: 'secondary' },
         { label: 'View Alerts', to: '/operating-manager/alerts', variant: 'secondary' },
         { label: 'Back', to: '/operating-manager/branch-performance', variant: 'ghost' },
       ]} onAction={(a) => navigate(a.to)} />
@@ -713,10 +714,16 @@ function ReportsHubPage({ navigate, showToast }) {
   );
 }
 
-function GisPage({ navigate, subPage }) {
-  const [layers, setLayers] = useState(GIS_LAYERS);
+function LeafletPage({ navigate, subPage }) {
+  const [layers, setLayers] = useState(LEAFLET_LAYERS);
   const [filters, setFilters] = useState({ branch: 'All Branches', dateRange: 'This Month', staffType: 'All Staff' });
   const toggleLayer = (id) => setLayers((prev) => prev.map((l) => (l.id === id ? { ...l, active: !l.active } : l)));
+
+  const mockBranchMarkers = useMemo(() => [
+    { id: 'davao-city', position: [7.1907, 125.4553], label: 'DC', color: '#2563eb', popup: 'Davao City Branch - Healthy' },
+    { id: 'general-santos', position: [6.1164, 125.1716], label: 'GS', color: '#10b981', popup: 'General Santos Branch - Top Performer' },
+    { id: 'davao-oriental', position: [6.9534, 126.1558], label: 'DO', color: '#ef4444', popup: 'Davao Oriental Branch - Needs Attention' },
+  ], []);
 
   return (
     <div className="page">
@@ -736,10 +743,10 @@ function GisPage({ navigate, subPage }) {
       </section>
       <section className="panel content-panel">
         <div className="panel-section-header">
-          <h3>{subPage ? { delinquency: 'Delinquency Heatmap', profitability: 'Profitability Analysis', territory: 'Territory Analysis' }[subPage] : 'All-Branch GIS Map'}</h3>
+          <h3>{subPage ? { delinquency: 'Delinquency Heatmap', profitability: 'Profitability Analysis', territory: 'Territory Analysis' }[subPage] : 'Leaflet | OpenStreetMap'}</h3>
         </div>
-        <div className="placeholder-map" style={{ minHeight: 560 }}>Interactive multi-branch map · {layers.filter((l) => l.active).length} active layers</div>
-        <div className="layer-toggles">
+        <LeafletMap markers={mockBranchMarkers} center={[6.7534, 125.6558]} zoom={8} height={560} />
+        <div className="layer-toggles" style={{ marginTop: 16 }}>
           {layers.map((layer) => (
             <label key={layer.id} className="toggle-label">
               <input type="checkbox" checked={layer.active} onChange={() => toggleLayer(layer.id)} />
@@ -749,9 +756,9 @@ function GisPage({ navigate, subPage }) {
         </div>
       </section>
       <PageToolbar actions={[
-        { label: 'Delinquency Heatmap', to: '/operating-manager/gis/delinquency', variant: 'secondary' },
-        { label: 'Profitability Analysis', to: '/operating-manager/gis/profitability', variant: 'secondary' },
-        { label: 'Territory Analysis', to: '/operating-manager/gis/territory', variant: 'secondary' },
+        { label: 'Delinquency Heatmap', to: '/operating-manager/leaflet/delinquency', variant: 'secondary' },
+        { label: 'Profitability Analysis', to: '/operating-manager/leaflet/profitability', variant: 'secondary' },
+        { label: 'Territory Analysis', to: '/operating-manager/leaflet/territory', variant: 'secondary' },
       ]} onAction={(a) => navigate(a.to)} />
     </div>
   );
@@ -899,7 +906,7 @@ function CustomerRecordsPage({ navigate }) {
                     <td>{riskBadge(r.riskLevel)}</td>
                     <td>{r.lastVisit}</td>
                     <td className="table-actions">
-                      <button className="link-button" type="button" onClick={() => navigate(`/operating-manager/customers/${r.id}`)}>View</button>
+                      <button className="icon-action-button" type="button" title="View" onClick={() => navigate(`/operating-manager/customers/${r.id}`)}><NavIcon name="view" /></button>
                     </td>
                   </tr>
                 ))}
@@ -1005,7 +1012,7 @@ function ProfilePage({ navigate, showToast }) {  const [profile, setProfile] = u
         { label: 'Update Profile' },
         { label: 'Change Password', variant: 'secondary' },
         { label: 'Logout', variant: 'ghost' },
-      ]} onAction={(a) => { if (a.label === 'Logout') navigate('/login'); else showToast(`${a.label} action recorded.`, 'success'); }} />
+      ]} onAction={(a) => { if (a.label === 'Logout') requestLogout(); else showToast(`${a.label} action recorded.`, 'success'); }} />
     </div>
   );
 }
@@ -1021,10 +1028,10 @@ export function OperatingManagerPageBody({ page, navigate, showToast }) {
     case 'branchComparison': return <BranchComparisonPage {...props} />;
     case 'branchDetail': return <BranchDetailPage {...props} />;
     case 'historicalTrends': return <HistoricalTrendsPage {...props} />;
-    case 'gisMap': return <GisPage {...props} />;
-    case 'gisDelinquency': return <GisPage {...props} subPage="delinquency" />;
-    case 'gisProfitability': return <GisPage {...props} subPage="profitability" />;
-    case 'gisTerritory': return <GisPage {...props} subPage="territory" />;
+    case 'leafletMap': return <LeafletPage {...props} />;
+    case 'leafletDelinquency': return <LeafletPage {...props} subPage="delinquency" />;
+    case 'leafletProfitability': return <LeafletPage {...props} subPage="profitability" />;
+    case 'leafletTerritory': return <LeafletPage {...props} subPage="territory" />;
     case 'reports':
     case 'reportCollections':
     case 'reportSales':

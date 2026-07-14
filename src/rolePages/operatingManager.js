@@ -34,7 +34,7 @@ export const operatingManagerRole = {
       items: [
         { label: 'Branch Performance', to: '/operating-manager/branch-performance' },
         { label: 'Staff Performance', to: '/operating-manager/operations/staff-performance' },
-        { label: 'GIS Intelligence', to: '/operating-manager/gis' },
+        { label: 'Map', to: '/operating-manager/leaflet' },
         { label: 'Reports & Analytics', to: '/operating-manager/reports' },
         { label: 'Operations Reports', to: '/operating-manager/operations/reports' },
       ],
@@ -67,7 +67,7 @@ export const operatingManagerRole = {
     { label: 'Approval Center', to: '/operating-manager/operations/approval-center' },
     { label: 'Branch Performance', to: '/operating-manager/branch-performance' },
     { label: 'Staff Performance', to: '/operating-manager/operations/staff-performance' },
-    { label: 'GIS Intelligence', to: '/operating-manager/gis' },
+    { label: 'Leaflet | OpenStreetMap', to: '/operating-manager/leaflet' },
     { label: 'Reports & Analytics', to: '/operating-manager/reports' },
     { label: 'Operations Reports', to: '/operating-manager/operations/reports' },
     { label: 'Administration', to: '/operating-manager/admin/dashboard' },

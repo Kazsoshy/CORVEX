@@ -23,6 +23,7 @@ import { ClientCard } from './ClientCard';
 import { EmptyState } from '../collector/EmptyState';
 import { LoadingState } from '../collector/LoadingState';
 import { NavIcon } from '../../navIcons';
+import LeafletMap from '../common/LeafletMap';
 
 function actionButtonClass(variant) {
   if (variant === 'secondary') return 'button secondary';
@@ -232,7 +233,20 @@ function SchedulePage({ pageType, navigate, showToast }) {
             <h3>Territory Route View</h3>
             <button className="button secondary" type="button" onClick={() => navigate('/sales/schedule')}>Show List View</button>
           </div>
-          <div className="placeholder-map">Territory map with SOPA-ranked client pins and GPS route overlay</div>
+          <div style={{ marginTop: 16 }}>
+            <LeafletMap 
+              center={[7.1907, 125.4553]} 
+              zoom={13} 
+              height={500}
+              markers={SCHEDULE_STOPS.map((stop, i) => ({
+                id: stop.id,
+                position: [7.1907 + (i * 0.006), 125.4553 + (i * 0.006)],
+                label: stop.id.replace('client-', ''),
+                color: stop.status === 'Completed' ? '#10b981' : '#2563eb',
+                popup: `${stop.clientName} - ${stop.status}`
+              }))}
+            />
+          </div>
           <p className="muted">GPS tracking active · Territory coverage: {ROUTE_TRACKING.territoryCoverage}% · Visits verified: {ROUTE_TRACKING.visitsVerified}/{ROUTE_TRACKING.visitsPlanned}</p>
         </section>
       </div>
@@ -496,7 +510,7 @@ function VisitLogPage({ clientId, parentContext, navigate, showToast }) {
                     <td><input type="number" min="1" value={row.quantity} onChange={(e) => updateRow(row.id, 'quantity', e.target.value)} /></td>
                     <td><input type="number" min="0" value={row.unitPrice} onChange={(e) => updateRow(row.id, 'unitPrice', e.target.value)} /></td>
                     <td>{formatCurrency(lineTotal(row))}</td>
-                    <td><button className="link-button" type="button" onClick={() => removeRow(row.id)} disabled={rows.length === 1}>Remove</button></td>
+                    <td><button className="icon-action-button danger" type="button" title="Remove" onClick={() => removeRow(row.id)} disabled={rows.length === 1}><NavIcon name="trash" /></button></td>
                   </tr>
                 );
               })}
@@ -620,8 +634,8 @@ function InventoryPage({ navigate, showToast }) {
                     <td>{product.branch}</td>
                     <td><span className={`stock-status stock-${product.status.toLowerCase()}`}>{product.status}</span></td>
                     <td>
-                      <button className="link-button" type="button" onClick={() => setSelectedProduct(product)}>Details</button>
-                      <button className="link-button" type="button" onClick={() => navigate(`/sales/inventory/${product.id}`)}>View</button>
+                      <button className="icon-action-button" type="button" title="Details" onClick={() => setSelectedProduct(product)}><NavIcon name="view" /></button>
+                      <button className="icon-action-button" type="button" title="View" onClick={() => navigate(`/sales/inventory/${product.id}`)}><NavIcon name="view" /></button>
                     </td>
                   </tr>
                 ))}
@@ -729,7 +743,7 @@ function SalesHistoryPage({ navigate }) {
                     <td>{formatCurrency(item.totalAmount)}</td>
                     <td>{item.date}</td>
                     <td>{item.status}</td>
-                    <td><button className="link-button" type="button" onClick={() => navigate(`/sales/history/${item.id}`)}>View</button></td>
+                    <td><button className="icon-action-button" type="button" title="View" onClick={() => navigate(`/sales/history/${item.id}`)}><NavIcon name="view" /></button></td>
                   </tr>
                 ))}
               </tbody>
@@ -840,7 +854,7 @@ function ProfilePage({ navigate, showToast }) {
         ]}
         onAction={(a) => {
           if (a.to) navigate(a.to);
-          else if (a.action === 'logout') { showToast('Logged out.', 'success'); navigate('/login'); }
+          else if (a.action === 'logout') { requestLogout(); }
           else showToast(`${a.label} form would open here.`, 'success');
         }}
       />
@@ -858,7 +872,25 @@ function RouteTrackingPage({ navigate }) {
       ]} />
       <section className="panel content-panel">
         <div className="panel-section-header"><h3>Territory Coverage Map</h3></div>
-        <div className="placeholder-map">GPS tracking map with visit verification pins and territory boundary</div>
+        <div style={{ marginTop: 16 }}>
+          <LeafletMap 
+            center={[7.1907, 125.4553]} 
+            zoom={13} 
+            height={500}
+            polylines={[{ 
+              id: 'route', 
+              positions: SCHEDULE_STOPS.map((stop, i) => [7.1907 + (i * 0.006), 125.4553 + (i * 0.006)]), 
+              color: '#10b981' 
+            }]}
+            markers={SCHEDULE_STOPS.map((stop, i) => ({
+              id: stop.id,
+              position: [7.1907 + (i * 0.006), 125.4553 + (i * 0.006)],
+              label: stop.id.replace('client-', ''),
+              color: stop.status === 'Completed' ? '#10b981' : '#f59e0b',
+              popup: `${stop.clientName} - ${stop.status}`
+            }))}
+          />
+        </div>
         <p className="muted">Current location: {ROUTE_TRACKING.currentLocation}</p>
       </section>
       <section className="panel content-panel">

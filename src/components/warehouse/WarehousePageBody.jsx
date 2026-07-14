@@ -24,6 +24,7 @@ import {
 import { EmptyState } from '../collector/EmptyState';
 import { LoadingState } from '../collector/LoadingState';
 import { NavIcon } from '../../navIcons';
+import { StatusBadge } from '../StatusBadge';
 
 function actionButtonClass(variant) {
   if (variant === 'secondary') return 'button secondary';
@@ -129,7 +130,7 @@ function DashboardPage({ navigate, showToast }) {
             {criticalProducts.map((p) => (
               <li key={p.id}>
                 <div><strong>{p.name}</strong><span className="muted">{p.sku} · {p.branch}</span></div>
-                <StockStatusBadge status={p.status} />
+                <StatusBadge status={p.status} />
               </li>
             ))}
           </ul>
@@ -247,13 +248,13 @@ function InventoryPage({ navigate, showToast }) {
                     <td>{product.stock}</td>
                     <td>{product.branch}</td>
                     <td>{product.lastUpdated}</td>
-                    <td><StockStatusBadge status={product.status} /></td>
+                    <td><StatusBadge status={product.status} /></td>
                     <td className="table-actions">
-                      <button className="link-button" type="button" onClick={() => navigate(`/warehouse/product/${product.id}`)}>View</button>
-                      <button className="link-button" type="button" onClick={() => showToast('Edit form would open here.', 'success')}>Edit</button>
-                      <button className="link-button" type="button" onClick={() => navigate(`/warehouse/product/${product.id}/stock-count`)}>Count</button>
-                      <button className="link-button" type="button" onClick={() => navigate(`/warehouse/product/${product.id}/restock`)}>Restock</button>
-                      <button className="link-button" type="button" onClick={() => navigate(`/warehouse/product/${product.id}/transfer`)}>Transfer</button>
+                      <button className="icon-action-button" type="button" title="View" onClick={() => navigate(`/warehouse/product/${product.id}`)}><NavIcon name="view" /></button>
+                      <button className="icon-action-button" type="button" title="Edit" onClick={() => showToast('Edit form would open here.', 'success')}><NavIcon name="edit" /></button>
+                      <button className="icon-action-button" type="button" title="Count" onClick={() => navigate(`/warehouse/product/${product.id}/stock-count`)}><NavIcon name="count" /></button>
+                      <button className="icon-action-button" type="button" title="Restock" onClick={() => navigate(`/warehouse/product/${product.id}/restock`)}><NavIcon name="restock" /></button>
+                      <button className="icon-action-button" type="button" title="Transfer" onClick={() => navigate(`/warehouse/product/${product.id}/transfer`)}><NavIcon name="transfer" /></button>
                     </td>
                   </tr>
                 ))}
@@ -287,7 +288,7 @@ function ProductDetailPage({ productId, navigate, showToast }) {
       <section className="panel content-panel">
         <div className="panel-section-header">
           <h3>{product.name}</h3>
-          <StockStatusBadge status={product.status} />
+          <StatusBadge status={product.status} />
         </div>
         <div className="account-detail-grid two-up">
           <div className="transfer-detail-grid">
@@ -618,7 +619,7 @@ function MovementsPage({ navigate }) {
                     <td>{m.type}</td>
                     <td>{m.branch}</td>
                     <td>{m.date}</td>
-                    <td><button className="link-button" type="button" onClick={() => navigate(`/warehouse/movements/${m.id}`)}>View</button></td>
+                    <td><button className="icon-action-button" type="button" title="View" onClick={() => navigate(`/warehouse/movements/${m.id}`)}><NavIcon name="view" /></button></td>
                   </tr>
                 ))}
               </tbody>
@@ -709,8 +710,8 @@ function TransfersPage({ navigate }) {
                     <td>{t.quantity}</td>
                     <td>{t.sourceBranch}</td>
                     <td>{t.destinationBranch}</td>
-                    <td><span className={`transfer-status status-${t.status.toLowerCase().replace(/\s+/g, '-')}`}>{t.status}</span></td>
-                    <td><button className="link-button" type="button" onClick={() => navigate(`/warehouse/transfers/${t.id}`)}>View</button></td>
+                    <td><StatusBadge status={t.status} /></td>
+                    <td><button className="icon-action-button" type="button" title="View" onClick={() => navigate(`/warehouse/transfers/${t.id}`)}><NavIcon name="view" /></button></td>
                   </tr>
                 ))}
               </tbody>
@@ -844,7 +845,7 @@ function RestockHistoryPage({ navigate }) {
                     <td>{r.supplier}</td>
                     <td>+{r.quantity}</td>
                     <td>{r.dateReceived}</td>
-                    <td><button className="link-button" type="button" onClick={() => navigate(`/warehouse/restock-history/${r.id}`)}>View</button></td>
+                    <td><button className="icon-action-button" type="button" title="View" onClick={() => navigate(`/warehouse/restock-history/${r.id}`)}><NavIcon name="view" /></button></td>
                   </tr>
                 ))}
               </tbody>
@@ -967,7 +968,7 @@ function ProfilePage({ navigate, showToast }) {
         { label: 'Logout', action: 'logout', variant: 'ghost' },
       ]} onAction={(a) => {
         if (a.to) navigate(a.to);
-        else if (a.action === 'logout') { showToast('Logged out.', 'success'); navigate('/login'); }
+        else if (a.action === 'logout') { requestLogout(); }
         else showToast(`${a.label} form would open here.`, 'success');
       }} />
     </div>
@@ -1094,7 +1095,7 @@ function CreditHistoryListPage({ navigate }) {
                         </span>
                       </td>
                       <td className="table-actions">
-                        <button className="link-button" type="button" onClick={() => navigate(`/warehouse/credit-history/${r.id}`)}>View</button>
+                        <button className="icon-action-button" type="button" title="View" onClick={() => navigate(`/warehouse/credit-history/${r.id}`)}><NavIcon name="view" /></button>
                       </td>
                     </tr>
                   );
@@ -1163,7 +1164,7 @@ function CreditHistoryDetailPage({ creditId, navigate }) {
                     <td>{p.date}</td>
                     <td>₱{p.amount.toLocaleString('en-PH')}</td>
                     <td>{p.method}</td>
-                    <td style={{ color: p.status === 'Late' ? '#dc2626' : '#059669', fontWeight: 600 }}>{p.status}</td>
+                    <td><StatusBadge status={p.status} /></td>
                     <td>{p.receipt}</td>
                   </tr>
                 ))}

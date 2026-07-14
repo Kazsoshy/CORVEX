@@ -14,6 +14,8 @@ import {
 import { EmptyState } from '../collector/EmptyState';
 import { LoadingState } from '../collector/LoadingState';
 import { NavIcon } from '../../navIcons';
+import LeafletMap from '../common/LeafletMap';
+import { StatusBadge } from '../StatusBadge';
 
 const C = ['#2563eb','#06b6d4','#10b981','#f59e0b','#ef4444'];
 
@@ -199,7 +201,7 @@ function DashboardPage({ navigate }) {
       <Toolbar actions={[
         {label:'Field Operations',to:'/branch-manager/field-operations'},
         {label:'Approve CIs',to:'/branch-manager/ci-approvals',variant:'secondary'},
-        {label:'GIS Map',to:'/branch-manager/gis',variant:'secondary'},
+        {label:'Leaflet | OpenStreetMap',to:'/branch-manager/leaflet',variant:'secondary'},
         {label:'Reports',to:'/branch-manager/reports',variant:'secondary'},
       ]} onAction={(a)=>navigate(a.to)}/>
     </div>
@@ -266,7 +268,7 @@ function FieldOperationsHub({ navigate, showToast }) {
             <StaffCard key={c.id} title={c.name}
               metrics={[{label:'Assigned',value:c.accountsAssigned},{label:'Visited',value:c.accountsVisited},{label:'Pending',value:c.accountsPending},{label:'Compliance',value:`${c.complianceScore}%`},{label:'Collected',value:formatCurrency(c.collectionAmount)}]}
               actions={[{label:'Expand Route',action:'detail'},{label:'View on Map',action:'map',variant:'ghost'}]}
-              onAction={(a)=>{ if(a.action==='detail') navigate(`/branch-manager/field-operations/collectors/${c.id}`); else navigate('/branch-manager/gis'); }}
+              onAction={(a)=>{ if(a.action==='detail') navigate(`/branch-manager/field-operations/collectors/${c.id}`); else navigate('/branch-manager/leaflet'); }}
             />
           ))}
         </div>
@@ -278,7 +280,7 @@ function FieldOperationsHub({ navigate, showToast }) {
             <StaffCard key={a.id} title={a.name}
               metrics={[{label:'Clients',value:a.clientsAssigned},{label:'Visits',value:a.visitsCompleted},{label:'Sales',value:a.salesLogged},{label:'Revenue',value:formatCurrency(a.totalSalesAmount)}]}
               actions={[{label:'Expand Schedule',action:'detail'},{label:'View on Map',action:'map',variant:'ghost'}]}
-              onAction={(act)=>{ if(act.action==='detail') navigate(`/branch-manager/field-operations/sales/${a.id}`); else navigate('/branch-manager/gis'); }}
+              onAction={(act)=>{ if(act.action==='detail') navigate(`/branch-manager/field-operations/sales/${a.id}`); else navigate('/branch-manager/leaflet'); }}
             />
           ))}
         </div>
@@ -311,9 +313,20 @@ function CollectorDetailPage({ collectorId, navigate }) {
       <section className="panel content-panel">
         <div className="panel-section-header"><h3>Route Timeline</h3><span className="muted">GPS: {c.gpsAttendance?'Active':'Off'}</span></div>
         {c.route.length?(<div className="table-shell"><table className="data-table"><thead><tr><th>Account</th><th>Status</th><th>Time</th><th>Amount</th></tr></thead><tbody>{c.route.map((r)=><tr key={r.account}><td>{r.account}</td><td>{r.status}</td><td>{r.time}</td><td>{r.amount?formatCurrency(r.amount):'—'}</td></tr>)}</tbody></table></div>):<EmptyState title="No route data"/>}
-        <div className="placeholder-map" style={{marginTop:16}}>GPS route playback</div>
+        <div style={{ marginTop: 16 }}>
+          <LeafletMap 
+            center={[7.1907, 125.4553]} 
+            zoom={13} 
+            height={400} 
+            polylines={[{ id: 'route', positions: [[7.1907, 125.4553], [7.1950, 125.4600], [7.2000, 125.4500]], color: '#2563eb' }]}
+            markers={[
+              { id: 'start', position: [7.1907, 125.4553], label: 'S', color: '#10b981', popup: 'Start Location' },
+              { id: 'end', position: [7.2000, 125.4500], label: 'E', color: '#ef4444', popup: 'End Location' }
+            ]}
+          />
+        </div>
       </section>
-      <Toolbar actions={[{label:'View on Map',to:'/branch-manager/gis',variant:'secondary'},{label:'Back',to:'/branch-manager/field-operations',variant:'ghost'}]} onAction={(a)=>navigate(a.to)}/>
+      <Toolbar actions={[{label:'View on Map',to:'/branch-manager/leaflet',variant:'secondary'},{label:'Back',to:'/branch-manager/field-operations',variant:'ghost'}]} onAction={(a)=>navigate(a.to)}/>
     </div>
   );
 }
@@ -567,8 +580,8 @@ function CIQueuePage({ navigate, showToast }) {
           <div className="table-shell"><table className="data-table">
             <thead><tr><th>Client</th><th>Submitted By</th><th>Date</th><th>Delinquency</th><th>Status</th><th>Actions</th></tr></thead>
             <tbody>{filtered.map((ci)=>(<tr key={ci.id}><td>{ci.clientName}</td><td>{ci.submittedBy}</td><td>{ci.submissionDate}</td><td>{ci.delinquencyStatus}</td><td>{ci.status}</td><td className="table-actions">
-              <button className="link-button" type="button" onClick={()=>navigate(`/branch-manager/ci-approvals/${ci.id}`)}>Open</button>
-              {ci.status==='Pending'&&<><button className="link-button" type="button" onClick={()=>showToast(`Approved CI for ${ci.clientName}.`,'success')}>Approve</button><button className="link-button" type="button" onClick={()=>showToast(`Rejected CI for ${ci.clientName}.`,'error')}>Reject</button></>}
+              <button className="icon-action-button" type="button" title="Open" onClick={()=>navigate(`/branch-manager/ci-approvals/${ci.id}`)}><NavIcon name="view" /></button>
+              {ci.status==='Pending'&&<><button className="icon-action-button" type="button" title="Approve" onClick={()=>showToast(`Approved CI for ${ci.clientName}.`,'success')}><NavIcon name="check" /></button><button className="icon-action-button danger" type="button" title="Reject" onClick={()=>showToast(`Rejected CI for ${ci.clientName}.`,'error')}><NavIcon name="close" /></button></>}
             </td></tr>))}</tbody>
           </table></div>
         </section>
@@ -584,7 +597,7 @@ function CIDetailPage({ ciId, navigate, showToast }) {
   if (!ci) return <EmptyState title="CI not found" actionLabel="Back" onAction={()=>navigate('/branch-manager/ci-approvals')}/>;
   return (
     <div className="page">
-      <Stats stats={[{label:'Client',value:ci.clientName},{label:'Risk Score',value:String(ci.riskScore)},{label:'Delinquency',value:ci.delinquencyStatus},{label:'GIS Zone',value:ci.gisClassification}]}/>
+      <Stats stats={[{label:'Client',value:ci.clientName},{label:'Risk Score',value:String(ci.riskScore)},{label:'Delinquency',value:ci.delinquencyStatus},{label:'Map Zone',value:ci.leafletClassification}]}/>
       <section className="panel content-panel">
         <ul className="info-grid"><li><span className="info-item-label">Purpose</span><span className="info-item-value">{ci.purpose}</span></li><li><span className="info-item-label">Monthly Income</span><span className="info-item-value">{formatCurrency(ci.monthlyIncome)}</span></li><li><span className="info-item-label">Business Type</span><span className="info-item-value">{ci.businessType}</span></li><li><span className="info-item-label">References</span><span className="info-item-value">{ci.references}</span></li><li><span className="info-item-label">Remarks</span><span className="info-item-value">{ci.formRemarks}</span></li></ul>
         {ci.delinquencyFlags.length?(<div style={{marginTop:16,padding:12,background:'rgba(220,38,38,0.06)',borderRadius:12}}><strong>Delinquency Flags:</strong><ul className="flag-list" style={{marginTop:8}}>{ci.delinquencyFlags.map((f)=><li key={f}>{f}</li>)}</ul></div>):null}
@@ -605,20 +618,33 @@ function CIDetailPage({ ciId, navigate, showToast }) {
 }
 
 // ── GIS, Alerts, Notifications, Profile, Audit ───────────────────────────────
-function GISPage({ pageType, navigate, showToast }) {
+function LeafletPage({ pageType, navigate, showToast }) {
   const [layers, setLayers] = useState(['Collector Routes','Delinquency Clusters']);
   const layerOptions = ['Collector Routes','Sales Territories','Payment Behavior Zones','Delinquency Clusters','Profitability Zones','High Collection Areas','Route Efficiency Layer'];
   const toggle = (l) => setLayers((p)=>p.includes(l)?p.filter((x)=>x!==l):[...p,l]);
   return (
     <div className="page">
       <section className="panel content-panel">
-        <div className="panel-section-header"><h3>GIS & Location Intelligence</h3></div>
+        <div className="panel-section-header"><h3>Leaflet | OpenStreetMap</h3></div>
         <div className="accounts-filters">
           <select><option>Today</option><option>This Week</option><option>This Month</option></select>
           <select><option>All Staff</option>{COLLECTORS.map((c)=><option key={c.id}>{c.name}</option>)}{SALES_AGENTS.map((a)=><option key={a.id}>{a.name}</option>)}</select>
         </div>
         <div className="layer-toggles">{layerOptions.map((l)=><label key={l} className="toggle-label"><input type="checkbox" checked={layers.includes(l)} onChange={()=>toggle(l)}/>{l}</label>)}</div>
-        <div className="placeholder-map">Interactive map · {layers.length} active layers</div>
+        <div style={{ marginTop: 16 }}>
+          <LeafletMap 
+            center={[7.1907, 125.4553]} 
+            zoom={12} 
+            height={560}
+            markers={MAP_ACCOUNTS.map((a, i) => ({
+              id: a.id,
+              position: [7.1907 + (i * 0.01) * (i % 2 === 0 ? 1 : -1), 125.4553 + (i * 0.015)],
+              label: a.clientName.substring(0, 2).toUpperCase(),
+              color: a.paymentStatus === 'Overdue' ? '#ef4444' : '#10b981',
+              popup: `${a.clientName} - ${a.paymentStatus}`
+            }))}
+          />
+        </div>
       </section>
       <section className="panel content-panel">
         <div className="panel-section-header"><h3>Client Pins</h3></div>
@@ -627,7 +653,7 @@ function GISPage({ pageType, navigate, showToast }) {
           <tbody>{MAP_ACCOUNTS.map((a)=><tr key={a.id}><td>{a.clientName}</td><td>{formatCurrency(a.balance)}</td><td>{a.paymentStatus}</td><td>{a.lastVisit}</td><td>{a.assignedStaff}</td></tr>)}</tbody>
         </table></div>
       </section>
-      <Toolbar actions={[{label:'Delinquency Heatmap',to:'/branch-manager/gis/delinquency',variant:'secondary'},{label:'Profitability Zones',to:'/branch-manager/gis/profitability',variant:'secondary'}]} onAction={(a)=>navigate(a.to)}/>
+      <Toolbar actions={[{label:'Delinquency Heatmap',to:'/branch-manager/leaflet/delinquency',variant:'secondary'},{label:'Profitability Zones',to:'/branch-manager/leaflet/profitability',variant:'secondary'}]} onAction={(a)=>navigate(a.to)}/>
     </div>
   );
 }
@@ -696,7 +722,7 @@ function ProfilePage({ navigate, showToast }) {
         <ul className="info-grid"><li><span className="info-item-label">Branch</span><span className="info-item-value">{BRANCH_MANAGER_PROFILE.branch}</span></li><li><span className="info-item-label">Email</span><span className="info-item-value">{BRANCH_MANAGER_PROFILE.email}</span></li><li><span className="info-item-label">Phone</span><span className="info-item-value">{BRANCH_MANAGER_PROFILE.phone}</span></li></ul>
       </section>
       <Toolbar actions={[{label:'Update Profile',action:'update'},{label:'Change Password',action:'password',variant:'secondary'},{label:'Approval Center',to:'/branch-manager/approval-center',variant:'ghost'},{label:'Audit Log',to:'/branch-manager/audit-log',variant:'ghost'},{label:'Logout',action:'logout',variant:'ghost'}]}
-        onAction={(a)=>{if(a.to)navigate(a.to);else if(a.action==='logout'){showToast('Logged out.','success');navigate('/login');}else showToast(`${a.label} opened.`,'success');}}/>
+        onAction={(a)=>{if(a.to)navigate(a.to);else if (a.action === 'logout') { requestLogout(); }else showToast(`${a.label} opened.`,'success');}}/>
     </div>
   );
 }
@@ -798,10 +824,10 @@ function ApprovalCenterPage({ navigate, showToast }) {
                       <td style={{ color: ci.delinquencyStatus === 'Clear' ? '#059669' : '#dc2626', fontWeight: 600 }}>{ci.delinquencyStatus}</td>
                       <td><StatusBadge status={ci.status} /></td>
                       <td className="table-actions">
-                        <button className="link-button" type="button" onClick={() => navigate(`/branch-manager/ci-approvals/${ci.id}`)}>Review</button>
+                        <button className="icon-action-button" type="button" title="Review" onClick={() => navigate(`/branch-manager/ci-approvals/${ci.id}`)}><NavIcon name="view" /></button>
                         {ci.status === 'Pending' && <>
-                          <button className="link-button" type="button" onClick={() => approveCI(ci.id)}>Approve</button>
-                          <button className="link-button" type="button" onClick={() => rejectCI(ci.id)}>Reject</button>
+                          <button className="icon-action-button" type="button" title="Approve" onClick={() => approveCI(ci.id)}><NavIcon name="check" /></button>
+                          <button className="icon-action-button danger" type="button" title="Reject" onClick={() => rejectCI(ci.id)}><NavIcon name="close" /></button>
                         </>}
                       </td>
                     </tr>
@@ -840,8 +866,8 @@ function ApprovalCenterPage({ navigate, showToast }) {
                       <td><StatusBadge status={t.status} /></td>
                       <td className="table-actions">
                         {t.status === 'Pending Approval' && <>
-                          <button className="link-button" type="button" onClick={() => approveTransfer(t.id)}>Approve</button>
-                          <button className="link-button" type="button" onClick={() => rejectTransfer(t.id)}>Reject</button>
+                          <button className="icon-action-button" type="button" title="Approve" onClick={() => approveTransfer(t.id)}><NavIcon name="check" /></button>
+                          <button className="icon-action-button danger" type="button" title="Reject" onClick={() => rejectTransfer(t.id)}><NavIcon name="close" /></button>
                         </>}
                       </td>
                     </tr>
@@ -918,10 +944,10 @@ export function BranchManagerPageBody({ page, navigate, showToast }) {
     case 'salesAgentDetail':    return <SalesAgentDetailPage {...p} />;
     case 'ciQueue':             return <CIQueuePage {...p} />;
     case 'ciDetail':            return <CIDetailPage {...p} />;
-    case 'gisMap':
-    case 'gisTerritory':
-    case 'gisDelinquency':
-    case 'gisProfitability':    return <GISPage pageType={page.pageType} {...p} />;
+    case 'leafletMap':
+    case 'leafletTerritory':
+    case 'leafletDelinquency':
+    case 'leafletProfitability':    return <LeafletPage pageType={page.pageType} {...p} />;
     case 'reports':
     case 'reportCollection':
     case 'reportSales':

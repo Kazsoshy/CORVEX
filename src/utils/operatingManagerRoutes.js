@@ -9,10 +9,10 @@ const ROUTE_DEFINITIONS = [
   { pattern: /^\/operating-manager\/branch-performance\/comparison$/, pageType: 'branchComparison' },
   { pattern: /^\/operating-manager\/branch-performance\/branch\/([^/]+)$/, pageType: 'branchDetail', params: ['branchId'] },
   { pattern: /^\/operating-manager\/branch-performance\/trends$/, pageType: 'historicalTrends' },
-  { pattern: /^\/operating-manager\/gis$/, pageType: 'gisMap' },
-  { pattern: /^\/operating-manager\/gis\/delinquency$/, pageType: 'gisDelinquency' },
-  { pattern: /^\/operating-manager\/gis\/profitability$/, pageType: 'gisProfitability' },
-  { pattern: /^\/operating-manager\/gis\/territory$/, pageType: 'gisTerritory' },
+  { pattern: /^\/operating-manager\/leaflet$/, pageType: 'leafletMap' },
+  { pattern: /^\/operating-manager\/leaflet\/delinquency$/, pageType: 'leafletDelinquency' },
+  { pattern: /^\/operating-manager\/leaflet\/profitability$/, pageType: 'leafletProfitability' },
+  { pattern: /^\/operating-manager\/leaflet\/territory$/, pageType: 'leafletTerritory' },
   { pattern: /^\/operating-manager\/reports$/, pageType: 'reports' },
   { pattern: /^\/operating-manager\/reports\/collections$/, pageType: 'reportCollections' },
   { pattern: /^\/operating-manager\/reports\/sales$/, pageType: 'reportSales' },
@@ -25,7 +25,7 @@ const ROUTE_DEFINITIONS = [
   { pattern: /^\/operating-manager\/customers$/, pageType: 'customers' },
   { pattern: /^\/operating-manager\/customers\/([^/]+)$/, pageType: 'customerDetail', params: ['customerId'] },
   // Legacy redirects support
-  { pattern: /^\/operating-manager\/gis-map$/, pageType: 'gisMap' },
+  { pattern: /^\/operating-manager\/leaflet-map$/, pageType: 'leafletMap' },
   { pattern: /^\/operating-manager\/compare$/, pageType: 'branchComparison' },
 ];
 
@@ -46,7 +46,7 @@ export function buildOperatingManagerBreadcrumbs(pageType, params = {}) {
   const crumbs = [{ label: 'Executive Dashboard', to: '/operating-manager/dashboard' }];
   const branch = params.branchId ? getOperatingBranchById(params.branchId) : null;
   const branchPerf = [{ label: 'Branch Performance', to: '/operating-manager/branch-performance' }];
-  const gis = [{ label: 'GIS Intelligence', to: '/operating-manager/gis' }];
+  const gis = [{ label: 'Leaflet | OpenStreetMap', to: '/operating-manager/leaflet' }];
   const reports = [{ label: 'Reports & Analytics', to: '/operating-manager/reports' }];
 
   switch (pageType) {
@@ -60,14 +60,14 @@ export function buildOperatingManagerBreadcrumbs(pageType, params = {}) {
       return [...crumbs, ...branchPerf, { label: branch?.name ?? 'Branch Detail', to: `/operating-manager/branch-performance/branch/${params.branchId}` }];
     case 'historicalTrends':
       return [...crumbs, ...branchPerf, { label: 'Historical Trends', to: '/operating-manager/branch-performance/trends' }];
-    case 'gisMap':
+    case 'leafletMap':
       return [...crumbs, ...gis];
-    case 'gisDelinquency':
-      return [...crumbs, ...gis, { label: 'Delinquency Heatmap', to: '/operating-manager/gis/delinquency' }];
-    case 'gisProfitability':
-      return [...crumbs, ...gis, { label: 'Profitability Analysis', to: '/operating-manager/gis/profitability' }];
-    case 'gisTerritory':
-      return [...crumbs, ...gis, { label: 'Territory Analysis', to: '/operating-manager/gis/territory' }];
+    case 'leafletDelinquency':
+      return [...crumbs, ...gis, { label: 'Delinquency Heatmap', to: '/operating-manager/leaflet/delinquency' }];
+    case 'leafletProfitability':
+      return [...crumbs, ...gis, { label: 'Profitability Analysis', to: '/operating-manager/leaflet/profitability' }];
+    case 'leafletTerritory':
+      return [...crumbs, ...gis, { label: 'Territory Analysis', to: '/operating-manager/leaflet/territory' }];
     case 'reports':
       return [...crumbs, ...reports];
     case 'reportCollections':
@@ -133,10 +133,10 @@ export function resolveOperatingManagerPage(pathname) {
     branchComparison: 'Branch Comparison',
     branchDetail: 'Branch Detail',
     historicalTrends: 'Historical Trends',
-    gisMap: 'GIS Intelligence',
-    gisDelinquency: 'Delinquency Heatmap',
-    gisProfitability: 'Profitability Analysis',
-    gisTerritory: 'Territory Analysis',
+    leafletMap: 'Leaflet | OpenStreetMap',
+    leafletDelinquency: 'Delinquency Heatmap',
+    leafletProfitability: 'Profitability Analysis',
+    leafletTerritory: 'Territory Analysis',
     reports: 'Reports & Analytics',
     reportCollections: 'Collection Reports',
     reportSales: 'Sales Reports',
@@ -168,8 +168,8 @@ export function isOperatingManagerNavActive(fullPath, navTo) {
   if (navTo === '/operating-manager/branch-performance') {
     return pathname.startsWith('/operating-manager/branch-performance') || pathname === '/operating-manager/compare';
   }
-  if (navTo === '/operating-manager/gis') {
-    return pathname.startsWith('/operating-manager/gis') || pathname === '/operating-manager/gis-map';
+  if (navTo === '/operating-manager/leaflet') {
+    return pathname.startsWith('/operating-manager/leaflet') || pathname === '/operating-manager/leaflet-map';
   }
   if (navTo === '/operating-manager/reports') {
     return pathname.startsWith('/operating-manager/reports');
@@ -207,10 +207,10 @@ const OPERATION_TITLES = {
   salesAgentDetail: 'Sales Agent Detail',
   ciQueue: 'CI Approval Queue',
   ciDetail: 'CI Detail',
-  gisMap: 'GIS & Location Intelligence',
-  gisTerritory: 'Territory Map',
-  gisDelinquency: 'Delinquency Heatmap',
-  gisProfitability: 'Profitability Zones',
+  leafletMap: 'Leaflet | OpenStreetMap',
+  leafletTerritory: 'Territory Map',
+  leafletDelinquency: 'Delinquency Heatmap',
+  leafletProfitability: 'Profitability Zones',
   accountLocationDetail: 'Account Location Detail',
   reports: 'Reports & Analytics',
   reportCollection: 'Collection Reports',

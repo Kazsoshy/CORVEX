@@ -84,7 +84,7 @@ export const AUDIT_LOGS = [
   { id: 'al7',  timestamp: '2026-06-29 10:22 AM', user: 'Ben Cruz',           action: 'Login Failed',         module: 'Auth',                 ip: '192.168.1.55', status: 'Failed'  },
   { id: 'al8',  timestamp: '2026-06-28 09:14 AM', user: 'Patricia Reyes',     action: 'User Disabled',        module: 'User Management',      ip: '192.168.1.10', status: 'Success' },
   { id: 'al9',  timestamp: '2026-06-28 08:00 AM', user: 'Marcus Santos',      action: 'System Settings Updated', module: 'System Settings',   ip: '192.168.1.2',  status: 'Success' },
-  { id: 'al10', timestamp: '2026-06-27 05:30 PM', user: 'Elena Mercado',      action: 'GIS Layer Accessed',   module: 'GIS',                  ip: '192.168.1.20', status: 'Success' },
+  { id: 'al10', timestamp: '2026-06-27 05:30 PM', user: 'Elena Mercado',      action: 'Leaflet | OpenStreetMap Layer Accessed',   module: 'Leaflet | OpenStreetMap',                  ip: '192.168.1.20', status: 'Success' },
 ];
 
 export const SYSTEM_MONTHLY_COLLECTIONS = [
@@ -159,7 +159,7 @@ export const SYSTEM_SETTINGS = {
   companyEmail: 'ops@corvex.ph',
   smsEnabled: true,
   otpEnabled: true,
-  gisApiKey: 'CORVEX-GIS-****-****-1234',
+  leafletApiKey: 'CORVEX-GIS-****-****-1234',
   backupSchedule: 'Daily at 02:00 AM',
   notificationsEmail: true,
   notificationsSms: true,

@@ -1,4 +1,5 @@
-import { useState } from 'react';
+import { useState, useEffect, useCallback } from 'react';
+import apiClient from '../../api/apiClient';
 import {
   LineChart, Line, AreaChart, Area, BarChart, Bar,
   XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
@@ -9,6 +10,7 @@ import {
 } from '../../data/adminMockData';
 import { EmptyState } from '../collector/EmptyState';
 import { NavIcon } from '../../navIcons';
+import { StatusBadge } from '../StatusBadge';
 
 function btn(v) {
   if (v === 'secondary') return 'button secondary';
@@ -145,6 +147,7 @@ function DashboardPage({ navigate }) {
         <div className="quick-link-grid">
           {[
             { label: 'System Settings',       to: '/super-admin/settings',    icon: 'form' },
+            { label: 'User Management',       to: '/super-admin/users',       icon: 'accounts' },
             { label: 'Role & Permissions',    to: '/super-admin/roles',       icon: 'accounts' },
             { label: 'Backup & Restore',      to: '/super-admin/backup',      icon: 'history' },
             { label: 'Database Monitoring',   to: '/super-admin/monitoring',  icon: 'reports' },
@@ -229,7 +232,7 @@ function SettingsPage({ showToast }) {
       <section className="panel form-panel content-panel">
         <div className="panel-section-header"><h3>Integrations & API</h3></div>
         <div className="grid two-up">
-          <div className="form-group"><label>GIS API Key</label><input value={settings.gisApiKey} onChange={e => set('gisApiKey', e.target.value)} /></div>
+          <div className="form-group"><label>Leaflet API Key</label><input value={settings.leafletApiKey} onChange={e => set('leafletApiKey', e.target.value)} /></div>
           <div className="form-group"><label>Backup Schedule</label><input value={settings.backupSchedule} onChange={e => set('backupSchedule', e.target.value)} /></div>
         </div>
       </section>
@@ -294,10 +297,10 @@ function BackupPage({ showToast }) {
               {BACKUP_HISTORY.map(b => (
                 <tr key={b.id}>
                   <td>{b.type}</td><td>{b.date}</td><td>{b.size}</td><td>{b.by}</td>
-                  <td><span style={{ color: '#059669', fontWeight: 700, fontSize: '0.8rem' }}>{b.status}</span></td>
+                  <td><StatusBadge status={b.status} /></td>
                   <td className="table-actions">
-                    <button className="link-button" type="button" onClick={() => showToast(`Downloading ${b.date} backup.`, 'success')}>Download</button>
-                    <button className="link-button" type="button" onClick={() => setConfirmRestore(b)}>Restore</button>
+                    <button className="icon-action-button" type="button" title="Download" onClick={() => showToast(`Downloading ${b.date} backup.`, 'success')}><NavIcon name="download" /></button>
+                    <button className="icon-action-button" type="button" title="Restore" onClick={() => setConfirmRestore(b)}><NavIcon name="history" /></button>
                   </td>
                 </tr>
               ))}
@@ -377,7 +380,7 @@ function AuditLogsPage({ showToast }) {
               {AUDIT_LOGS.map(l => (
                 <tr key={l.id}>
                   <td>{l.timestamp}</td><td>{l.user}</td><td>{l.action}</td><td>{l.module}</td><td>{l.ip}</td>
-                  <td><span style={{ color: l.status === 'Success' ? '#059669' : '#dc2626', fontWeight: 700, fontSize: '0.8rem' }}>{l.status}</span></td>
+                  <td><StatusBadge status={l.status} /></td>
                 </tr>
               ))}
             </tbody>
@@ -403,8 +406,178 @@ function ProfilePage({ navigate, showToast }) {
       </section>
       <Toolbar
         actions={[{ label: 'Update Profile', action: 'update' }, { label: 'Change Password', action: 'pw', variant: 'secondary' }, { label: 'Logout', action: 'logout', variant: 'ghost' }]}
-        onAction={a => { if (a.action === 'logout') navigate('/login'); else showToast(`${a.label} opened.`, 'success'); }}
+        onAction={a => { if (a.action === 'logout') requestLogout(); else showToast(`${a.label} opened.`, 'success'); }}
       />
+    </div>
+  );
+}
+
+// ── Users Management (API-Backed) ─────────────────────────────────────────────
+function UsersPage({ showToast }) {
+  const [users, setUsers] = useState([]);
+  const [roles, setRoles] = useState([]);
+  const [branches, setBranches] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [showModal, setShowModal] = useState(false);
+  const [editingUser, setEditingUser] = useState(null);
+
+  const [formData, setFormData] = useState({
+    full_name: '', username: '', email: '', password: '', role_id: '', branch_id: '',
+    contact_number: '', employee_id: '', status: 'Active'
+  });
+
+  const fetchData = useCallback(async () => {
+    setLoading(true);
+    try {
+      const [uRes, rRes, bRes] = await Promise.all([
+        apiClient.get('/api/users?limit=100'),
+        apiClient.get('/api/roles'),
+        apiClient.get('/api/dashboard/branches') // using branches summary for dropdown
+      ]);
+      setUsers(uRes.data.data || []);
+      setRoles(rRes.data.data.roles || []);
+      setBranches(bRes.data.data || []);
+    } catch (err) {
+      showToast('Failed to load users data.', 'error');
+    } finally {
+      setLoading(false);
+    }
+  }, [showToast]);
+
+  useEffect(() => { fetchData(); }, [fetchData]);
+
+  const openAdd = () => {
+    setEditingUser(null);
+    setFormData({ full_name: '', username: '', email: '', password: '', role_id: '', branch_id: '', contact_number: '', employee_id: '', status: 'Active' });
+    setShowModal(true);
+  };
+
+  const openEdit = (u) => {
+    setEditingUser(u);
+    setFormData({
+      full_name: u.fullName, username: u.username, email: u.email, password: '',
+      role_id: u.role?.id || '', branch_id: u.branch?.id || '',
+      contact_number: u.contactNumber || '', employee_id: u.employeeId || '', status: u.status
+    });
+    setShowModal(true);
+  };
+
+  const handleSave = async (e) => {
+    e.preventDefault();
+    try {
+      if (editingUser) {
+        // password is optional on edit
+        const payload = { ...formData };
+        if (!payload.password) delete payload.password;
+        await apiClient.put(`/api/users/${editingUser.id}`, payload);
+        showToast('User updated successfully.', 'success');
+      } else {
+        await apiClient.post('/api/users', formData);
+        showToast('User created successfully.', 'success');
+      }
+      setShowModal(false);
+      fetchData();
+    } catch (err) {
+      showToast(err.response?.data?.message || 'Failed to save user.', 'error');
+    }
+  };
+
+  const deactivateUser = async (id) => {
+    if (!window.confirm('Are you sure you want to deactivate this user?')) return;
+    try {
+      await apiClient.delete(`/api/users/${id}`);
+      showToast('User deactivated.', 'success');
+      fetchData();
+    } catch (err) {
+      showToast('Failed to deactivate user.', 'error');
+    }
+  };
+
+  return (
+    <div className="page">
+      <Toolbar actions={[{ label: 'Add User', action: 'add' }]} onAction={openAdd} />
+      <section className="panel content-panel">
+        <div className="panel-section-header"><h3>User Directory</h3></div>
+        <div className="table-shell">
+          <table className="data-table">
+            <thead>
+              <tr><th>Name</th><th>Email / Username</th><th>Role</th><th>Branch</th><th>Status</th><th>Actions</th></tr>
+            </thead>
+            <tbody>
+              {loading ? (
+                <tr><td colSpan="6" style={{ textAlign: 'center', padding: '20px' }}>Loading...</td></tr>
+              ) : users.length === 0 ? (
+                <tr><td colSpan="6" style={{ textAlign: 'center', padding: '20px' }}>No users found.</td></tr>
+              ) : (
+                users.map(u => (
+                  <tr key={u.id}>
+                    <td><strong>{u.fullName}</strong><br/><span className="muted" style={{fontSize:'0.75rem'}}>{u.employeeId}</span></td>
+                    <td>{u.email}<br/><span className="muted" style={{fontSize:'0.75rem'}}>@{u.username}</span></td>
+                    <td>{u.role?.name}</td>
+                    <td>{u.branch?.name || '—'}</td>
+                    <td>
+                      <StatusBadge status={u.status} />
+                    </td>
+                    <td className="table-actions">
+                      <button className="icon-action-button" type="button" title="Edit" onClick={() => openEdit(u)}><NavIcon name="edit" /></button>
+                      <button className="icon-action-button danger" type="button" title="Deactivate" onClick={() => deactivateUser(u.id)}><NavIcon name="trash" /></button>
+                    </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      {showModal && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, padding: 20 }}>
+          <div className="panel form-panel" style={{ width: '100%', maxWidth: 600, background: '#fff', maxHeight: '90vh', overflowY: 'auto' }}>
+            <div className="panel-section-header">
+              <h3>{editingUser ? 'Edit User' : 'Create User'}</h3>
+            </div>
+            <form onSubmit={handleSave} style={{ padding: '0 20px 20px' }}>
+              <div className="grid two-up" style={{ marginBottom: 16 }}>
+                <div className="form-group"><label>Full Name</label><input required value={formData.full_name} onChange={e => setFormData({...formData, full_name: e.target.value})} /></div>
+                <div className="form-group"><label>Username</label><input required value={formData.username} onChange={e => setFormData({...formData, username: e.target.value})} /></div>
+                <div className="form-group"><label>Email</label><input required type="email" value={formData.email} onChange={e => setFormData({...formData, email: e.target.value})} /></div>
+                <div className="form-group">
+                  <label>Password {editingUser && <span className="muted">(leave blank to keep)</span>}</label>
+                  <input type="password" required={!editingUser} value={formData.password} onChange={e => setFormData({...formData, password: e.target.value})} />
+                </div>
+                <div className="form-group">
+                  <label>Role</label>
+                  <select required value={formData.role_id} onChange={e => setFormData({...formData, role_id: e.target.value})}>
+                    <option value="">Select Role</option>
+                    {roles.map(r => <option key={r.id} value={r.id}>{r.name}</option>)}
+                  </select>
+                </div>
+                <div className="form-group">
+                  <label>Branch <span className="muted">(optional)</span></label>
+                  <select value={formData.branch_id} onChange={e => setFormData({...formData, branch_id: e.target.value})}>
+                    <option value="">No Branch (Head Office)</option>
+                    {branches.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
+                  </select>
+                </div>
+                <div className="form-group"><label>Employee ID</label><input value={formData.employee_id} onChange={e => setFormData({...formData, employee_id: e.target.value})} /></div>
+                <div className="form-group"><label>Contact Number</label><input value={formData.contact_number} onChange={e => setFormData({...formData, contact_number: e.target.value})} /></div>
+                <div className="form-group">
+                  <label>Status</label>
+                  <select value={formData.status} onChange={e => setFormData({...formData, status: e.target.value})}>
+                    <option value="Active">Active</option>
+                    <option value="Inactive">Inactive</option>
+                    <option value="Suspended">Suspended</option>
+                  </select>
+                </div>
+              </div>
+              <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
+                <button className="button secondary" type="button" onClick={() => setShowModal(false)}>Cancel</button>
+                <button className="button" type="submit">Save</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -415,6 +588,7 @@ export function SuperAdminPageBody({ page, navigate, showToast }) {
   const p = { navigate, showToast };
   switch (page.pageType) {
     case 'dashboard':     return <DashboardPage {...p} />;
+    case 'users':         return <UsersPage {...p} />;
     case 'roles':         return <RolesPage {...p} />;
     case 'settings':      return <SettingsPage {...p} />;
     case 'backup':        return <BackupPage {...p} />;

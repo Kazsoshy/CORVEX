@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useState, useCallback, useEffect } from 'react';
 import { Link, Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
 import { Breadcrumbs } from './components/collector/Breadcrumbs';
 import { CollectorPageBody } from './components/collector/CollectorPageBody';
@@ -9,7 +9,11 @@ import { CustomerPageBody } from './components/customer/CustomerPageBody';
 import { SuperAdminPageBody } from './components/superAdmin/SuperAdminPageBody';
 import { Toast, useToast } from './components/collector/Toast';
 import { quickFacts } from './pageData';
+import { login as apiLogin, getEntryPathForRole, logout } from './api/authService.js';
+import { LoginPage } from './components/auth/LoginPage';
 import { NavIcon } from './navIcons';
+import LeafletMap from './components/common/LeafletMap';
+import { LogoutConfirmDialog } from './components/LogoutConfirmDialog';
 import { collectorRole } from './rolePages/collector';
 import { isCollectorNavActive, resolveCollectorPage } from './utils/collectorRoutes';
 import { isSalesNavActive, resolveSalesPage } from './utils/salesRoutes';
@@ -73,7 +77,35 @@ function PrototypeShell() {
               : ROUTE_REGISTRY[location.pathname] ?? null;
   const [showMap, setShowMap] = useState(false);
   const [filter, setFilter] = useState('All');
+  const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
   const { toast, showToast, clearToast } = useToast();
+
+  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(() => localStorage.getItem('corvex_sidebar_collapsed') === 'true');
+  const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
+
+  useEffect(() => {
+    localStorage.setItem('corvex_sidebar_collapsed', isSidebarCollapsed);
+  }, [isSidebarCollapsed]);
+
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      if (e.key === 'Escape') setIsMobileSidebarOpen(false);
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, []);
+
+  useEffect(() => {
+    const handleRequestLogout = () => setShowLogoutConfirm(true);
+    window.addEventListener('request-logout', handleRequestLogout);
+    return () => window.removeEventListener('request-logout', handleRequestLogout);
+  }, []);
+
+  const handleLogoutConfirm = () => {
+    logout();
+    setShowLogoutConfirm(false);
+    navigate('/login');
+  };
 
   const topLinks = useMemo(() => {
     if (isAuthPath(location.pathname) || !currentRole) {
@@ -89,11 +121,27 @@ function PrototypeShell() {
   const pageTitle = page?.title ?? (currentRole ? currentRole.label : 'CORVEX');
 
   return (
-    <div className="app-shell">
+    <div className={`app-shell ${isSidebarCollapsed ? 'collapsed' : ''} ${isMobileSidebarOpen ? 'mobile-open' : ''}`}>
+      <LogoutConfirmDialog 
+        isOpen={showLogoutConfirm} 
+        onConfirm={handleLogoutConfirm} 
+        onCancel={() => setShowLogoutConfirm(false)} 
+      />
+      {isMobileSidebarOpen && (
+        <div className="sidebar-overlay" onClick={() => setIsMobileSidebarOpen(false)} aria-hidden="true" />
+      )}
       <aside className="sidebar">
-        <div className="sidebar-header">
+        <button 
+          className="sidebar-toggle-btn"
+          onClick={() => setIsSidebarCollapsed(!isSidebarCollapsed)}
+          aria-label={isSidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
+        >
+          <NavIcon name={isSidebarCollapsed ? 'chevronRight' : 'chevronLeft'} />
+        </button>
+        <div className="sidebar-inner">
+          <div className="sidebar-header">
           <div className="brand-card">
-            <img src="/src/assets/logo.png.png" alt="CORVEX logo" className="brand-logo" />
+            <img src="/src/assets/corvex-logo.png" alt="CORVEX logo" className="brand-logo" />
             <div className="brand-copy">
               <div className="brand-title">CORVEX</div>
               {currentRole ? <div className="brand-subtitle">{currentRole.label}</div> : null}
@@ -137,6 +185,7 @@ function PrototypeShell() {
                                 ? 'nav-link active'
                                 : 'nav-link'
                           }
+                          data-tooltip={link.label}
                         >
                           <span className="nav-link-icon">
                             <NavIcon label={link.label} />
@@ -171,6 +220,7 @@ function PrototypeShell() {
                           ? 'nav-link active'
                           : 'nav-link'
                     }
+                    data-tooltip={link.label}
                   >
                     <span className="nav-link-icon">
                       <NavIcon label={link.label} />
@@ -184,12 +234,12 @@ function PrototypeShell() {
               <button
                 className="button ghost sidebar-switch"
                 type="button"
-                onClick={() => navigate('/login')}
+                onClick={() => setShowLogoutConfirm(true)}
               >
                 <span className="sidebar-switch-icon">
-                  <NavIcon name="switch" />
+                  <NavIcon name="login" />
                 </span>
-                <span className="sidebar-switch-text">Switch user</span>
+                <span className="sidebar-switch-text">Logout</span>
               </button>
             </div>
           </>
@@ -200,6 +250,7 @@ function PrototypeShell() {
                 key={link.to}
                 to={link.to}
                 className={location.pathname === link.to ? 'nav-link active' : 'nav-link'}
+                data-tooltip={link.label}
               >
                 <span className="nav-link-icon">
                   <NavIcon label={link.label} />
@@ -209,12 +260,22 @@ function PrototypeShell() {
             ))}
           </nav>
         )}
+        </div>
       </aside>
 
       <main className="content">
         <div className="content-ambient" aria-hidden="true" />
         <header className="topbar">
           <div className="topbar-main">
+            <div className="mobile-header-actions">
+              <button className="mobile-menu-btn" type="button" onClick={() => setIsMobileSidebarOpen(true)} aria-label="Open menu">
+                <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <line x1="3" y1="12" x2="21" y2="12"></line>
+                  <line x1="3" y1="6" x2="21" y2="6"></line>
+                  <line x1="3" y1="18" x2="21" y2="18"></line>
+                </svg>
+              </button>
+            </div>
             {currentRole && page ? (
               isRoleModule && page.breadcrumbs?.length ? (
                 <Breadcrumbs items={page.breadcrumbs} />
@@ -349,72 +410,8 @@ function PageActions({ actions, navigate, className }) {
   );
 }
 
-function LoginPage() {
-  const navigate = useNavigate();
-  const [selectedKey, setSelectedKey] = useState(ROLES[0].key);
-  const selectedRole = ROLE_BY_KEY[selectedKey];
 
-  const handleLogin = () => {
-    navigate(selectedRole?.entryPath ?? '/login');
-  };
 
-  return (
-    <div className="login-screen">
-      <div className="login-backdrop" aria-hidden="true">
-        <div className="login-orb login-orb-one" />
-        <div className="login-orb login-orb-two" />
-        <div className="login-grid" />
-      </div>
-
-      <div className="login-layout">
-        <aside className="login-showcase" aria-hidden="true">
-          <p className="login-showcase-label">CORVEX Platform</p>
-          <h2>Field operations, unified.</h2>
-          <p>Access for collectors, sales, warehouse, managers, and customers.</p>
-          <ul className="login-showcase-list">
-            <li>Role-based dashboards</li>
-            <li>Streamlined daily workflows</li>
-            <li>One-click user switching</li>
-          </ul>
-        </aside>
-
-        <div className="login-card">
-        <div className="login-brand">
-          <img src="/src/assets/logo.png.png" alt="CORVEX logo" className="login-logo" />
-          <div>
-            <span className="login-eyebrow">Operations platform</span>
-            <h1>CORVEX</h1>
-          </div>
-        </div>
-
-        <p className="login-lead">Choose a user to continue.</p>
-
-        <label className="login-field">
-          <span>Sign in as</span>
-          <select value={selectedKey} onChange={(event) => setSelectedKey(event.target.value)}>
-            {ROLES.map((role) => (
-              <option key={role.key} value={role.key}>
-                {role.label}
-              </option>
-            ))}
-          </select>
-        </label>
-
-        {selectedRole ? (
-          <div className="login-role-preview">
-            <strong>{selectedRole.label}</strong>
-            <span>{selectedRole.accent}</span>
-          </div>
-        ) : null}
-
-        <button className="button login-submit" type="button" onClick={handleLogin}>
-          Continue
-        </button>
-        </div>
-      </div>
-    </div>
-  );
-}
 
 function PrototypeLanding({ quickFacts }) {
   return (
@@ -512,7 +509,21 @@ function PageBody({ showMap, setShowMap, filter, setFilter, page, currentRole, n
               </button>
             </div>
           </div>
-          <div className="placeholder-map">{showMap ? 'Leaflet.js map placeholder showing route and territory pins' : `List view for ${filter} records`}</div>
+          {showMap ? (
+            <div style={{ marginTop: 16 }}>
+              <LeafletMap 
+                center={[7.1907, 125.4553]} 
+                zoom={12} 
+                height={500}
+                markers={[
+                  { id: '1', position: [7.1907, 125.4553], label: 'A', color: '#2563eb', popup: 'Marker A' },
+                  { id: '2', position: [7.2000, 125.4500], label: 'B', color: '#10b981', popup: 'Marker B' }
+                ]}
+              />
+            </div>
+          ) : (
+            <div className="placeholder-map">List view for {filter} records</div>
+          )}
         </section>
       )}
 
@@ -540,7 +551,17 @@ function PageBody({ showMap, setShowMap, filter, setFilter, page, currentRole, n
           )}
 
           {showMap && page.table.hasMap ? (
-            <div className="placeholder-map">Map view with pins and territory</div>
+            <div style={{ marginTop: 16 }}>
+              <LeafletMap 
+                center={[7.1907, 125.4553]} 
+                zoom={12} 
+                height={500}
+                markers={[
+                  { id: '1', position: [7.1907, 125.4553], label: 'P1', color: '#2563eb', popup: 'Location 1' },
+                  { id: '2', position: [7.2000, 125.4500], label: 'P2', color: '#10b981', popup: 'Location 2' }
+                ]}
+              />
+            </div>
           ) : (
             <div className="table-shell">
               <table className="data-table">

@@ -144,7 +144,7 @@ export const CI_QUEUE = [
       { date: '2026-06-15', amount: 8500,  status: 'Paid' },
     ],
     delinquencyFlags: [],
-    gisClassification: 'High Collection Area',
+    leafletClassification: 'High Collection Area',
     riskScore: 18,
     formRemarks: 'Consistent payer, requesting credit limit increase for Q3 orders.',
   },
@@ -161,7 +161,7 @@ export const CI_QUEUE = [
     references: '1 reference pending verification',
     paymentHistory: [{ date: '2026-05-28', amount: 5000, status: 'Late' }],
     delinquencyFlags: ['28 days overdue', 'Missed 3 collector visits'],
-    gisClassification: 'Delinquency Cluster Zone B',
+    leafletClassification: 'Delinquency Cluster Zone B',
     riskScore: 72,
     formRemarks: 'Review required — long overdue balance.',
   },
@@ -178,7 +178,7 @@ export const CI_QUEUE = [
     references: 'Verified',
     paymentHistory: [],
     delinquencyFlags: [],
-    gisClassification: 'Moderate Collection Area',
+    leafletClassification: 'Moderate Collection Area',
     riskScore: 28,
     formRemarks: 'New client onboarding for Sandawa district.',
   },
@@ -195,7 +195,7 @@ export const CI_QUEUE = [
     references: 'Incomplete',
     paymentHistory: [],
     delinquencyFlags: ['Multiple partial payments', '9 days overdue'],
-    gisClassification: 'Low Collection Area',
+    leafletClassification: 'Low Collection Area',
     riskScore: 68,
     formRemarks: 'Rejected — incomplete documentation.',
   },
@@ -222,7 +222,7 @@ export const ALERTS = [
 export const NOTIFICATIONS = [
   { id: 'bn1', type: 'ci',          title: 'CI pending review',    message: 'Mabuhay Sala Sets CI submitted by John Dela Cruz.',          time: '9:10 AM',   read: false, relatedTo: '/branch-manager/ci-approvals/ci2' },
   { id: 'bn2', type: 'route',       title: 'Route alert',          message: 'Pedro Garcia route deviation flagged in McArthur cluster.',  time: '8:50 AM',   read: false, relatedTo: '/branch-manager/alerts' },
-  { id: 'bn3', type: 'delinquency', title: 'Delinquency spike',    message: 'JP Laurel Ave zone delinquency rate increased.',            time: '8:30 AM',   read: false, relatedTo: '/branch-manager/gis/delinquency' },
+  { id: 'bn3', type: 'delinquency', title: 'Delinquency spike',    message: 'JP Laurel Ave zone delinquency rate increased.',            time: '8:30 AM',   read: false, relatedTo: '/branch-manager/leaflet/delinquency' },
   { id: 'bn4', type: 'inventory',   title: 'Critical stock alert', message: 'Ergonomic Office Chair out of stock at Davao City Branch.', time: 'Yesterday', read: true,  relatedTo: '/branch-manager/alerts' },
   { id: 'bn5', type: 'staff',       title: 'Staff check-in',       message: 'All collectors checked in via GPS.',                        time: '8:00 AM',   read: true,  relatedTo: '/branch-manager/staff-performance' },
 ];
@@ -237,7 +237,7 @@ export const AUDIT_LOGS = [
   { id: 'ba1', action: 'CI Approval',   detail: 'Approved CI for Dreamspace Living (ci3)',             timestamp: '2026-06-23 03:15 PM' },
   { id: 'ba2', action: 'CI Rejection',  detail: 'Rejected CI for Casa Moderna — incomplete docs',      timestamp: '2026-06-22 11:40 AM' },
   { id: 'ba3', action: 'Report Export', detail: 'Exported Collection Report (PDF)',                    timestamp: '2026-06-22 09:00 AM' },
-  { id: 'ba4', action: 'GIS Access',    detail: 'Viewed Delinquency Heatmap layer — Davao City',       timestamp: '2026-06-21 04:30 PM' },
+  { id: 'ba4', action: 'Leaflet | OpenStreetMap Access',    detail: 'Viewed Delinquency Heatmap layer — Davao City',       timestamp: '2026-06-21 04:30 PM' },
   { id: 'ba5', action: 'Staff Monitor', detail: 'Reviewed Pedro Garcia GPS route playback',            timestamp: '2026-06-21 02:00 PM' },
 ];
 

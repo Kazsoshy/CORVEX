@@ -15,6 +15,7 @@ import { AccountCard } from './AccountCard';
 import { EmptyState } from './EmptyState';
 import { LoadingState } from './LoadingState';
 import { NavIcon } from '../../navIcons';
+import LeafletMap from '../common/LeafletMap';
 
 function actionButtonClass(variant) {
   if (variant === 'secondary') return 'button secondary';
@@ -308,7 +309,25 @@ function RoutePage({ pageType, navigate, showToast }) {
           </div>
         </div>
         {showMap || pageType === 'routeMap' ? (
-          <div className="placeholder-map">Leaflet.js map placeholder showing ranked route stops and territory pins</div>
+          <div style={{ marginTop: 16 }}>
+            <LeafletMap 
+              center={[7.1907, 125.4553]} 
+              zoom={13} 
+              height={500}
+              markers={ROUTE_STOPS.map((stop, i) => ({
+                id: stop.id,
+                position: [7.1907 + (i * 0.005), 125.4553 + (i * 0.005)],
+                label: stop.rank.toString(),
+                color: stop.status === 'Completed' ? '#10b981' : '#2563eb',
+                popup: `${stop.clientName} - ${stop.status}`
+              }))}
+              polylines={[{ 
+                id: 'route', 
+                positions: ROUTE_STOPS.map((stop, i) => [7.1907 + (i * 0.005), 125.4553 + (i * 0.005)]), 
+                color: '#2563eb' 
+              }]}
+            />
+          </div>
         ) : filteredStops.length ? (
           <div className="table-shell">
             <table className="data-table">
@@ -340,9 +359,9 @@ function RoutePage({ pageType, navigate, showToast }) {
                       </span>
                     </td>
                     <td>
-                      <button className="link-button" type="button" onClick={() => navigate(`/collector/account-detail/${stop.id}?from=route`)}>
+                      <button className="icon-action-button" type="button" title="
                         View
-                      </button>
+                      " onClick={() => navigate(`/collector/account-detail/${stop.id}?from=route`)}><NavIcon name="view" /></button>
                     </td>
                   </tr>
                 ))}
@@ -512,7 +531,20 @@ function AccountDetailPage({ accountId, parentContext, navigate, showToast }) {
             <p><strong>Contact:</strong> {account.phone}</p>
             <p><strong>Last Visit:</strong> {account.lastVisitDate}</p>
           </div>
-          <div className="placeholder-map mini-map">Mini map placeholder for account location</div>
+          <div style={{ minHeight: 200, width: '100%', borderRadius: 8, overflow: 'hidden' }}>
+            <LeafletMap 
+              center={[7.1907, 125.4553]} 
+              zoom={15} 
+              height={200}
+              markers={[{
+                id: account.id,
+                position: [7.1907, 125.4553],
+                label: account.clientName.substring(0, 2).toUpperCase(),
+                color: '#2563eb',
+                popup: account.clientName
+              }]}
+            />
+          </div>
         </div>
       </section>
 
@@ -857,9 +889,9 @@ function CollectionHistoryPage({ navigate, showToast }) {
                     <td>{item.date}</td>
                     <td>{item.status}</td>
                     <td>
-                      <button className="link-button" type="button" onClick={() => navigate(`/collector/history/${item.id}`)}>
+                      <button className="icon-action-button" type="button" title="
                         View
-                      </button>
+                      " onClick={() => navigate(`/collector/history/${item.id}`)}><NavIcon name="view" /></button>
                     </td>
                   </tr>
                 ))}

@@ -138,7 +138,7 @@ export const BRANCH_RADAR = [
   { metric: 'Growth',     'Davao City': 82, 'General Santos': 88, 'Davao Oriental': 68 },
 ];
 
-export const GIS_LAYERS = [
+export const LEAFLET_LAYERS = [
   { id: 'routes',       label: 'Collector Routes',         active: true  },
   { id: 'territories',  label: 'Sales Territories',        active: true  },
   { id: 'delinquency',  label: 'Delinquency Clusters',     active: false },

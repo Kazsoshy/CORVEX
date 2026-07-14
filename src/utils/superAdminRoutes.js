@@ -1,5 +1,6 @@
 const ROUTES = [
   { pattern: /^\/super-admin\/dashboard$/,   pageType: 'dashboard' },
+  { pattern: /^\/super-admin\/users$/,       pageType: 'users' },
   { pattern: /^\/super-admin\/roles$/,       pageType: 'roles' },
   { pattern: /^\/super-admin\/settings$/,    pageType: 'settings' },
   { pattern: /^\/super-admin\/backup$/,      pageType: 'backup' },
@@ -11,6 +12,7 @@ const ROUTES = [
 
 const TITLES = {
   dashboard:     'Super Admin Dashboard',
+  users:         'User Management',
   roles:         'Role & Permission Management',
   settings:      'System Settings',
   backup:        'Backup & Restore',

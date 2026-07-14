@@ -13,11 +13,11 @@ const ROUTE_DEFINITIONS = [
   { pattern: /^\/branch-manager\/field-operations\/sales\/([^/]+)$/, pageType: 'salesAgentDetail', params: ['agentId'] },
   { pattern: /^\/branch-manager\/ci-approvals$/, pageType: 'ciQueue' },
   { pattern: /^\/branch-manager\/ci-approvals\/([^/]+)$/, pageType: 'ciDetail', params: ['ciId'] },
-  { pattern: /^\/branch-manager\/gis$/, pageType: 'gisMap' },
-  { pattern: /^\/branch-manager\/gis\/territory$/, pageType: 'gisTerritory' },
-  { pattern: /^\/branch-manager\/gis\/delinquency$/, pageType: 'gisDelinquency' },
-  { pattern: /^\/branch-manager\/gis\/profitability$/, pageType: 'gisProfitability' },
-  { pattern: /^\/branch-manager\/gis\/account\/([^/]+)$/, pageType: 'accountLocationDetail', params: ['accountId'] },
+  { pattern: /^\/branch-manager\/leaflet$/, pageType: 'leafletMap' },
+  { pattern: /^\/branch-manager\/leaflet\/territory$/, pageType: 'leafletTerritory' },
+  { pattern: /^\/branch-manager\/leaflet\/delinquency$/, pageType: 'leafletDelinquency' },
+  { pattern: /^\/branch-manager\/leaflet\/profitability$/, pageType: 'leafletProfitability' },
+  { pattern: /^\/branch-manager\/leaflet\/account\/([^/]+)$/, pageType: 'accountLocationDetail', params: ['accountId'] },
   { pattern: /^\/branch-manager\/reports$/, pageType: 'reports' },
   { pattern: /^\/branch-manager\/reports\/collection$/, pageType: 'reportCollection' },
   { pattern: /^\/branch-manager\/reports\/sales$/, pageType: 'reportSales' },
@@ -54,7 +54,7 @@ export function buildBranchManagerBreadcrumbs(pageType, params = {}) {
 
   const fieldOps = [{ label: 'Field Operations', to: '/branch-manager/field-operations' }];
   const ciCrumbs = [{ label: 'Credit Investigation Approvals', to: '/branch-manager/ci-approvals' }];
-  const gisCrumbs = [{ label: 'GIS & Location Intelligence', to: '/branch-manager/gis' }];
+  const leafletCrumbs = [{ label: 'Leaflet | OpenStreetMap', to: '/branch-manager/leaflet' }];
   const reportsCrumbs = [{ label: 'Reports & Analytics', to: '/branch-manager/reports' }];
   const staffCrumbs = [{ label: 'Staff Performance', to: '/branch-manager/staff-performance' }];
 
@@ -71,11 +71,11 @@ export function buildBranchManagerBreadcrumbs(pageType, params = {}) {
     case 'salesAgentDetail': return [...crumbs, ...fieldOps, { label: 'Sales Schedule Overview', to: '/branch-manager/field-operations/sales' }, { label: agent?.name ?? 'Sales Agent Detail', to: `/branch-manager/field-operations/sales/${params.agentId}` }];
     case 'ciQueue': return [...crumbs, ...ciCrumbs];
     case 'ciDetail': return [...crumbs, ...ciCrumbs, { label: ci?.clientName ?? 'CI Detail', to: `/branch-manager/ci-approvals/${params.ciId}` }];
-    case 'gisMap': return [...crumbs, ...gisCrumbs];
-    case 'gisTerritory': return [...crumbs, ...gisCrumbs, { label: 'Territory Map', to: '/branch-manager/gis/territory' }];
-    case 'gisDelinquency': return [...crumbs, ...gisCrumbs, { label: 'Delinquency Heatmap', to: '/branch-manager/gis/delinquency' }];
-    case 'gisProfitability': return [...crumbs, ...gisCrumbs, { label: 'Profitability Zones', to: '/branch-manager/gis/profitability' }];
-    case 'accountLocationDetail': return [...crumbs, ...gisCrumbs, { label: account?.clientName ?? 'Account Location', to: `/branch-manager/gis/account/${params.accountId}` }];
+    case 'leafletMap': return [...crumbs, ...leafletCrumbs];
+    case 'leafletTerritory': return [...crumbs, ...leafletCrumbs, { label: 'Territory Map', to: '/branch-manager/leaflet/territory' }];
+    case 'leafletDelinquency': return [...crumbs, ...leafletCrumbs, { label: 'Delinquency Heatmap', to: '/branch-manager/leaflet/delinquency' }];
+    case 'leafletProfitability': return [...crumbs, ...leafletCrumbs, { label: 'Profitability Zones', to: '/branch-manager/leaflet/profitability' }];
+    case 'accountLocationDetail': return [...crumbs, ...leafletCrumbs, { label: account?.clientName ?? 'Account Location', to: `/branch-manager/leaflet/account/${params.accountId}` }];
     case 'reports': return [...crumbs, ...reportsCrumbs];
     case 'reportCollection': return [...crumbs, ...reportsCrumbs, { label: 'Collection Reports', to: '/branch-manager/reports/collection' }];
     case 'reportSales': return [...crumbs, ...reportsCrumbs, { label: 'Sales Reports', to: '/branch-manager/reports/sales' }];
@@ -109,10 +109,10 @@ export function resolveBranchManagerPage(pathname) {
     salesAgentDetail: 'Sales Agent Detail',
     ciQueue: 'CI Approval Queue',
     ciDetail: 'CI Detail',
-    gisMap: 'GIS & Location Intelligence',
-    gisTerritory: 'Territory Map',
-    gisDelinquency: 'Delinquency Heatmap',
-    gisProfitability: 'Profitability Zones',
+    leafletMap: 'Leaflet | OpenStreetMap',
+    leafletTerritory: 'Territory Map',
+    leafletDelinquency: 'Delinquency Heatmap',
+    leafletProfitability: 'Profitability Zones',
     accountLocationDetail: 'Account Location Detail',
     reports: 'Reports & Analytics',
     reportCollection: 'Collection Reports',
@@ -144,7 +144,7 @@ export function isBranchManagerNavActive(fullPath, navTo) {
   }
   if (navTo === '/branch-manager/field-operations') return pathname.startsWith('/branch-manager/field-operations');
   if (navTo === '/branch-manager/ci-approvals') return pathname.startsWith('/branch-manager/ci-approvals');
-  if (navTo === '/branch-manager/gis') return pathname.startsWith('/branch-manager/gis');
+  if (navTo === '/branch-manager/leaflet') return pathname.startsWith('/branch-manager/leaflet');
   if (navTo === '/branch-manager/reports') return pathname.startsWith('/branch-manager/reports');
   if (navTo === '/branch-manager/staff-performance') return pathname.startsWith('/branch-manager/staff-performance');
   if (navTo === '/branch-manager/alerts') return pathname === '/branch-manager/alerts';

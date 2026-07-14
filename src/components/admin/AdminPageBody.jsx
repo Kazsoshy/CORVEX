@@ -237,9 +237,9 @@ function UserListPage({ navigate, showToast }) {
                     <td><StatusPill status={u.status} /></td>
                     <td>{u.lastLogin}</td>
                     <td className="table-actions">
-                      <button className="link-button" type="button" onClick={() => navigate(`/operating-manager/admin/users/${u.id}`)}>Edit</button>
-                      <button className="link-button" type="button" onClick={() => setConfirmDisable(u)}>Disable</button>
-                      <button className="link-button" type="button" onClick={() => showToast(`Password reset sent to ${u.email}.`, 'success')}>Reset PW</button>
+                      <button className="icon-action-button" type="button" title="Edit" onClick={() => navigate(`/operating-manager/admin/users/${u.id}`)}><NavIcon name="edit" /></button>
+                      <button className="icon-action-button danger" type="button" title="Disable" onClick={() => setConfirmDisable(u)}><NavIcon name="trash" /></button>
+                      <button className="icon-action-button" type="button" title="Reset PW" onClick={() => showToast(`Password reset sent to ${u.email}.`, 'success')}><NavIcon name="reset" /></button>
                     </td>
                   </tr>
                 ))}
@@ -335,10 +335,10 @@ function BranchListPage({ navigate, showToast }) {
                   <td>{b.warehouseStaff}</td>
                   <td><StatusPill status={b.status} /></td>
                   <td className="table-actions">
-                    <button className="link-button" type="button" onClick={() => navigate(`/admin/branches/${b.id}`)}>View</button>
-                    <button className="link-button" type="button" onClick={() => showToast(`Editing ${b.name}.`, 'success')}>Edit</button>
-                    <button className="link-button" type="button" onClick={() => showToast(`Assign Manager form for ${b.name}.`, 'success')}>Assign Manager</button>
-                    <button className="link-button" type="button" onClick={() => setConfirmDisable(b)}>Disable</button>
+                    <button className="icon-action-button" type="button" title="View" onClick={() => navigate(`/admin/branches/${b.id}`)}><NavIcon name="view" /></button>
+                    <button className="icon-action-button" type="button" title="Edit" onClick={() => showToast(`Editing ${b.name}.`, 'success')}><NavIcon name="edit" /></button>
+                    <button className="icon-action-button" type="button" title="Assign Manager" onClick={() => showToast(`Assign Manager form for ${b.name}.`, 'success')}><NavIcon name="accounts" /></button>
+                    <button className="icon-action-button danger" type="button" title="Disable" onClick={() => setConfirmDisable(b)}><NavIcon name="trash" /></button>
                   </td>
                 </tr>
               ))}
@@ -418,7 +418,7 @@ function InventoryPage({ navigate, showToast }) {
                       <td><strong>{p.name}</strong></td><td>{p.sku}</td><td>{p.branch}</td><td>{p.quantity}</td>
                       <td><StatusPill status={p.status === 'Sufficient' ? 'Active' : p.status === 'Low Stock' ? 'Pending' : 'Inactive'} /></td>
                       <td>{p.lastUpdated}</td>
-                      <td className="table-actions"><button className="link-button" type="button" onClick={() => showToast(`${p.name} details.`, 'success')}>Details</button></td>
+                      <td className="table-actions"><button className="icon-action-button" type="button" title="Details" onClick={() => showToast(`${p.name} details.`, 'success')}><NavIcon name="view" /></button></td>
                     </tr>
                   ))}
                 </tbody>
@@ -442,8 +442,8 @@ function InventoryPage({ navigate, showToast }) {
                     <td><StatusPill status={t.status} /></td>
                     <td className="table-actions">
                       {t.status === 'Pending' && <>
-                        <button className="link-button" type="button" onClick={() => showToast(`Transfer approved.`, 'success')}>Approve</button>
-                        <button className="link-button" type="button" onClick={() => showToast(`Transfer rejected.`, 'success')}>Reject</button>
+                        <button className="icon-action-button" type="button" title="Approve" onClick={() => showToast(`Transfer approved.`, 'success')}><NavIcon name="check" /></button>
+                        <button className="icon-action-button danger" type="button" title="Reject" onClick={() => showToast(`Transfer rejected.`, 'success')}><NavIcon name="close" /></button>
                       </>}
                     </td>
                   </tr>
@@ -467,7 +467,7 @@ function InventoryPage({ navigate, showToast }) {
                     <td>{r.requestedBy}</td><td>{r.date}</td>
                     <td><StatusPill status={r.status} /></td>
                     <td className="table-actions">
-                      {r.status === 'Pending' && <button className="link-button" type="button" onClick={() => showToast('Restock approved.', 'success')}>Approve</button>}
+                      {r.status === 'Pending' && <button className="icon-action-button" type="button" title="Approve" onClick={() => showToast('Restock approved.', 'success')}><NavIcon name="check" /></button>}
                     </td>
                   </tr>
                 ))}
@@ -564,7 +564,7 @@ function ReportsPage({ showToast }) {
 function AuditLogsPage({ showToast }) {
   const [moduleFilter, setModuleFilter] = useState('All');
   const [statusFilter, setStatusFilter] = useState('All');
-  const modules = ['All', 'User Management', 'Branch Management', 'Reports', 'Auth', 'System', 'GIS', 'Credit Investigation'];
+  const modules = ['All', 'User Management', 'Branch Management', 'Reports', 'Auth', 'System', 'Leaflet | OpenStreetMap', 'Credit Investigation'];
   const filtered = useMemo(() => AUDIT_LOGS.filter(l => {
     if (moduleFilter !== 'All' && l.module !== moduleFilter) return false;
     if (statusFilter !== 'All' && l.status !== statusFilter) return false;
@@ -625,7 +625,7 @@ function ProfilePage({ navigate, showToast }) {
         </ul>
       </section>
       <Toolbar actions={[{ label: 'Update Profile', action: 'update' }, { label: 'Change Password', action: 'pw', variant: 'secondary' }, { label: 'Logout', action: 'logout', variant: 'ghost' }]}
-        onAction={a => { if (a.action === 'logout') navigate('/login'); else showToast(`${a.label} opened.`, 'success'); }} />
+        onAction={a => { if (a.action === 'logout') requestLogout(); else showToast(`${a.label} opened.`, 'success'); }} />
     </div>
   );
 }
