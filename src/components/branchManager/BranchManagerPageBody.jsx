@@ -16,6 +16,7 @@ import { LoadingState } from '../collector/LoadingState';
 import { NavIcon } from '../../navIcons';
 import LeafletMap from '../common/LeafletMap';
 import { StatusBadge } from '../StatusBadge';
+import { requestLogout } from '../../api/authService.js';
 
 const C = ['#2563eb','#06b6d4','#10b981','#f59e0b','#ef4444'];
 
@@ -121,14 +122,14 @@ const COMPLIANCE_W = [
 ];
 
 // ── Dashboard ─────────────────────────────────────────────────────────────────
-function DashboardPage({ navigate }) {
+function DashboardPage({ navigate, branchName }) {
   const unread = NOTIFICATIONS.filter((n) => !n.read).length;
   const critical = ALERTS.filter((a) => a.severity === 'Critical');
   return (
     <div className="page">
       <section className="panel dashboard-greeting">
         <div className="dashboard-greeting-main">
-          <p className="dashboard-eyebrow">{BRANCH_MANAGER_PROFILE.branch}</p>
+          <p className="dashboard-eyebrow">{branchName ?? BRANCH_MANAGER_PROFILE.branch}</p>
           <h2>{BRANCH_MANAGER_PROFILE.name}</h2>
           <p className="muted">Branch Health: <strong>{BRANCH_ANALYTICS.healthScore}/100</strong></p>
         </div>
@@ -711,7 +712,7 @@ function NotificationsPage({ navigate, showToast }) {
   );
 }
 
-function ProfilePage({ navigate, showToast }) {
+function ProfilePage({ navigate, showToast, branchName }) {
   return (
     <div className="page">
       <section className="panel content-panel">
@@ -719,7 +720,7 @@ function ProfilePage({ navigate, showToast }) {
           <div className="profile-avatar">{BRANCH_MANAGER_PROFILE.avatarInitials}</div>
           <div><h3>{BRANCH_MANAGER_PROFILE.name}</h3><p className="muted">{BRANCH_MANAGER_PROFILE.employeeId}</p></div>
         </div>
-        <ul className="info-grid"><li><span className="info-item-label">Branch</span><span className="info-item-value">{BRANCH_MANAGER_PROFILE.branch}</span></li><li><span className="info-item-label">Email</span><span className="info-item-value">{BRANCH_MANAGER_PROFILE.email}</span></li><li><span className="info-item-label">Phone</span><span className="info-item-value">{BRANCH_MANAGER_PROFILE.phone}</span></li></ul>
+        <ul className="info-grid"><li><span className="info-item-label">Branch</span><span className="info-item-value">{branchName ?? BRANCH_MANAGER_PROFILE.branch}</span></li><li><span className="info-item-label">Email</span><span className="info-item-value">{BRANCH_MANAGER_PROFILE.email}</span></li><li><span className="info-item-label">Phone</span><span className="info-item-value">{BRANCH_MANAGER_PROFILE.phone}</span></li></ul>
       </section>
       <Toolbar actions={[{label:'Update Profile',action:'update'},{label:'Change Password',action:'password',variant:'secondary'},{label:'Approval Center',to:'/branch-manager/approval-center',variant:'ghost'},{label:'Audit Log',to:'/branch-manager/audit-log',variant:'ghost'},{label:'Logout',action:'logout',variant:'ghost'}]}
         onAction={(a)=>{if(a.to)navigate(a.to);else if (a.action === 'logout') { requestLogout(); }else showToast(`${a.label} opened.`,'success');}}/>
@@ -931,9 +932,23 @@ function AuditLogPage({ navigate }) {
 }
 
 // ── Main export ───────────────────────────────────────────────────────────────
-export function BranchManagerPageBody({ page, navigate, showToast }) {
+export function BranchManagerPageBody({ page, navigate, showToast, currentUser }) {
+  // Branch guard: a Branch Manager must have an assigned branch.
+  // If the session has no branch (e.g. the user is an OM accessing this path directly),
+  // show a clear error instead of rendering with mock data for the wrong branch.
+  if (!currentUser?.branch) {
+    return (
+      <section className="panel empty-state">
+        <h3>Branch not assigned</h3>
+        <p className="muted">Your account is not linked to a branch. Please contact an administrator.</p>
+      </section>
+    );
+  }
+
+  const branchName = currentUser.branch.name;
+
   if (!page) return <EmptyState title="Page not found" description="Use the sidebar to open a supported screen." />;
-  const p = { collectorId: page.params?.collectorId, agentId: page.params?.agentId, ciId: page.params?.ciId, accountId: page.params?.accountId, navigate, showToast };
+  const p = { collectorId: page.params?.collectorId, agentId: page.params?.agentId, ciId: page.params?.ciId, accountId: page.params?.accountId, navigate, showToast, branchName };
   switch (page.pageType) {
     case 'dashboard':           return <DashboardPage {...p} />;
     case 'fieldOperations':

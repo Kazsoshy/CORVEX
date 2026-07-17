@@ -5,11 +5,12 @@ import { CollectorPageBody } from './components/collector/CollectorPageBody';
 import { SalesPageBody } from './components/sales/SalesPageBody';
 import { WarehousePageBody } from './components/warehouse/WarehousePageBody';
 import { OperatingManagerPageBody } from './components/operatingManager/OperatingManagerPageBody';
+import { BranchManagerPageBody } from './components/branchManager/BranchManagerPageBody';
 import { CustomerPageBody } from './components/customer/CustomerPageBody';
 import { SuperAdminPageBody } from './components/superAdmin/SuperAdminPageBody';
 import { Toast, useToast } from './components/collector/Toast';
 import { quickFacts } from './pageData';
-import { login as apiLogin, getEntryPathForRole, logout } from './api/authService.js';
+import { login as apiLogin, getEntryPathForRole, logout, getCurrentUser } from './api/authService.js';
 import { LoginPage } from './components/auth/LoginPage';
 import { NavIcon } from './navIcons';
 import LeafletMap from './components/common/LeafletMap';
@@ -23,11 +24,13 @@ import { isCustomerAuthPath, isCustomerNavActive, resolveCustomerPage } from './
 import { salesRole } from './rolePages/sales';
 import { warehouseRole } from './rolePages/warehouse';
 import { operatingManagerRole } from './rolePages/operatingManager';
+import { branchManagerRole } from './rolePages/branchManager';
 import { customerRole } from './rolePages/customer';
 import { superAdminRole } from './rolePages/superAdmin';
 import { resolveSuperAdminPage, isSuperAdminNavActive } from './utils/superAdminRoutes';
+import { isBranchManagerNavActive, resolveBranchManagerPage } from './utils/branchManagerRoutes';
 
-const ROLES = [collectorRole, salesRole, warehouseRole, operatingManagerRole, customerRole, superAdminRole];
+const ROLES = [collectorRole, salesRole, warehouseRole, operatingManagerRole, branchManagerRole, customerRole, superAdminRole];
 const ROLE_BY_KEY = Object.fromEntries(ROLES.map((role) => [role.key, role]));
 const ROUTE_REGISTRY = Object.assign({}, ...ROLES.map((role) => role.routes));
 
@@ -39,7 +42,7 @@ function App() {
       <Route path="/collector" element={<Navigate to={collectorRole.entryPath} replace />} />
       <Route path="/sales" element={<Navigate to={salesRole.entryPath} replace />} />
       <Route path="/warehouse" element={<Navigate to={warehouseRole.entryPath} replace />} />
-      <Route path="/branch-manager" element={<Navigate to="/operating-manager/operations/dashboard" replace />} />
+      <Route path="/branch-manager" element={<Navigate to={branchManagerRole.entryPath} replace />} />
       <Route path="/admin" element={<Navigate to="/operating-manager/admin/dashboard" replace />} />
       <Route path="/operating-manager" element={<Navigate to={operatingManagerRole.entryPath} replace />} />
       <Route path="/customer" element={<Navigate to={customerRole.entryPath} replace />} />
@@ -57,9 +60,10 @@ function PrototypeShell() {
   const isSales = currentRole?.key === 'sales';
   const isWarehouse = currentRole?.key === 'warehouse';
   const isOperatingManager = currentRole?.key === 'operatingManager';
+  const isBranchManager = currentRole?.key === 'branchManager';
   const isCustomer = currentRole?.key === 'customer';
   const isSuperAdmin = currentRole?.key === 'superAdmin';
-  const isRoleModule = isCollector || isSales || isWarehouse || isOperatingManager || isCustomer || isSuperAdmin;
+  const isRoleModule = isCollector || isSales || isWarehouse || isOperatingManager || isBranchManager || isCustomer || isSuperAdmin;
   const isCustomerLogin = isCustomerAuthPath(location.pathname);
   const fullPath = location.pathname + location.search;
   const page = isCollector
@@ -70,11 +74,13 @@ function PrototypeShell() {
         ? resolveWarehousePage(location.pathname)
         : isOperatingManager
           ? resolveOperatingManagerPage(location.pathname)
-          : isCustomer
-            ? resolveCustomerPage(location.pathname)
-            : isSuperAdmin
-              ? resolveSuperAdminPage(location.pathname)
-              : ROUTE_REGISTRY[location.pathname] ?? null;
+          : isBranchManager
+            ? resolveBranchManagerPage(location.pathname)
+            : isCustomer
+              ? resolveCustomerPage(location.pathname)
+              : isSuperAdmin
+                ? resolveSuperAdminPage(location.pathname)
+                : ROUTE_REGISTRY[location.pathname] ?? null;
   const [showMap, setShowMap] = useState(false);
   const [filter, setFilter] = useState('All');
   const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
@@ -176,9 +182,11 @@ function PrototypeShell() {
                                       ? isWarehouseNavActive(fullPath, link.to)
                                       : isOperatingManager
                                         ? isOperatingManagerNavActive(fullPath, link.to)
-                                        : isSuperAdmin
-                                            ? isSuperAdminNavActive(fullPath, link.to)
-                                            : isCustomerNavActive(fullPath, link.to))
+                                        : isBranchManager
+                                          ? isBranchManagerNavActive(fullPath, link.to)
+                                          : isSuperAdmin
+                                              ? isSuperAdminNavActive(fullPath, link.to)
+                                              : isCustomerNavActive(fullPath, link.to))
                                 ? 'nav-link active'
                                 : 'nav-link'
                               : location.pathname === link.to
@@ -211,9 +219,11 @@ function PrototypeShell() {
                                 ? isWarehouseNavActive(fullPath, link.to)
                                 : isOperatingManager
                                   ? isOperatingManagerNavActive(fullPath, link.to)
-                                  : isSuperAdmin
-                                      ? isSuperAdminNavActive(fullPath, link.to)
-                                      : isCustomerNavActive(fullPath, link.to))
+                                  : isBranchManager
+                                    ? isBranchManagerNavActive(fullPath, link.to)
+                                    : isSuperAdmin
+                                        ? isSuperAdminNavActive(fullPath, link.to)
+                                        : isCustomerNavActive(fullPath, link.to))
                           ? 'nav-link active'
                           : 'nav-link'
                         : location.pathname === link.to
@@ -335,6 +345,11 @@ function PrototypeShell() {
                   <OperatingManagerPageBody page={page} navigate={navigate} showToast={showToast} />
                   <Toast toast={toast} onDismiss={clearToast} />
                 </>
+              ) : isBranchManager ? (
+                <>
+                  <BranchManagerPageBody page={page} navigate={navigate} showToast={showToast} currentUser={getCurrentUser()} />
+                  <Toast toast={toast} onDismiss={clearToast} />
+                </>
               ) : isCustomer ? (
                 <>
                   <CustomerPageBody page={page} navigate={navigate} showToast={showToast} />
@@ -368,7 +383,7 @@ function roleFromPath(pathname) {
   if (pathname.startsWith('/collector')) return collectorRole;
   if (pathname.startsWith('/sales')) return salesRole;
   if (pathname.startsWith('/warehouse')) return warehouseRole;
-  if (pathname.startsWith('/branch-manager')) return operatingManagerRole;
+  if (pathname.startsWith('/branch-manager')) return branchManagerRole;
   if (pathname.startsWith('/operating-manager')) return operatingManagerRole;
   if (pathname.startsWith('/customer')) return customerRole;
   if (pathname.startsWith('/admin')) return operatingManagerRole;

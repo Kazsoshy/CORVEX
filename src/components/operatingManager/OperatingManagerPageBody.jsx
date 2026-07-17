@@ -14,6 +14,7 @@ import {
   MONTHLY_COLLECTIONS, MONTHLY_DELINQUENCY, MONTHLY_REVENUE,
   NOTIFICATIONS, OPERATING_MANAGER_PROFILE, REPORT_CATEGORIES,
   TREND_DATA, WEEKLY_COLLECTION_RATE, WEEKLY_SALES_RATE,
+  SALES_ANALYTICS, INVENTORY_ANALYTICS, PAYMENT_ANALYTICS,
   formatCurrency, getBranchById, getCustomerRecordById, getHighestPerformingBranch, getLowestPerformingBranch,
 } from '../../data/operatingManagerMockData';
 import { EmptyState } from '../collector/EmptyState';
@@ -22,9 +23,9 @@ import { NavIcon } from '../../navIcons';
 
 const COLORS = ['#2563eb', '#06b6d4', '#ef4444', '#f59e0b'];
 const BRANCH_COLORS = {
-  'Davao City':    '#2563eb',
-  'General Santos':'#10b981',
-  'Davao Oriental':'#ef4444',
+  'Davao City': '#2563eb',
+  'General Santos': '#10b981',
+  'Davao Oriental': '#ef4444',
 };
 
 function actionButtonClass(v) {
@@ -105,19 +106,28 @@ function DashboardPage({ navigate }) {
 
   return (
     <div className="page">
-      <section className="panel dashboard-greeting">
-        <div className="dashboard-greeting-main">
-          <p className="dashboard-eyebrow">Executive overview</p>
-          <h2>{OPERATING_MANAGER_PROFILE.name}</h2>
-          <p className="muted">{OPERATING_MANAGER_PROFILE.region}</p>
+      <section className="panel" style={{ padding: '12px 16px', marginBottom: '16px', borderRadius: '12px', boxShadow: '0 1px 3px rgba(0,0,0,0.05)' }}>
+        <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '16px' }}>
+          <div style={{ flex: 1 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px' }}>
+              <span style={{ color: 'var(--accent, #2563eb)', display: 'flex', alignItems: 'center' }}>
+                <NavIcon name="dashboard" />
+              </span>
+              <h2 style={{ fontSize: '1.1rem', margin: 0, fontWeight: '600' }}>Operational Overview</h2>
+            </div>
+            <p className="muted" style={{ margin: 0, fontSize: '0.85rem', lineHeight: '1.4' }}>
+              This dashboard provides centralized monitoring for Sales Performance, Inventory Analytics, Customer Payment Analytics, Branch Performance, Collection Performance, Staff Performance, and Operational KPIs and Business Trends. Use this overview to effectively track and manage branch operations across all regions.
+            </p>
+          </div>
+          <Link to="/operating-manager/notifications" className="notification-bell" aria-label={`${unread} unread notifications`} style={{ flexShrink: 0, alignSelf: 'flex-start' }}>
+            <NavIcon name="bell" />
+            {unread > 0 ? <span className="notification-badge">{unread}</span> : null}
+          </Link>
         </div>
-        <Link to="/operating-manager/notifications" className="notification-bell" aria-label={`${unread} unread notifications`}>
-          <NavIcon name="bell" />
-          {unread > 0 ? <span className="notification-badge">{unread}</span> : null}
-        </Link>
       </section>
 
       <StatsGrid stats={[
+        { label: 'Sales Today', value: formatCurrency(SALES_ANALYTICS.salesToday) },
         { label: 'Total Revenue', value: formatCurrency(ENTERPRISE_KPIS.totalRevenue) },
         { label: 'Total Collections', value: formatCurrency(ENTERPRISE_KPIS.totalCollections) },
         { label: 'Total Sales', value: formatCurrency(ENTERPRISE_KPIS.totalSales) },
@@ -181,36 +191,7 @@ function DashboardPage({ navigate }) {
         </ChartCard>
       </div>
 
-      <section className="panel content-panel">
-        <div className="panel-section-header">
-          <h3>Operational Quick Access</h3>
-          <p className="muted">Manage accounts, branches, configuration, and live monitoring from one place.</p>
-        </div>
-        <div className="quick-link-grid">
-          {[
-            { label: 'User Management', to: '/operating-manager/admin/users', icon: 'accounts' },
-            { label: 'Customer Records', to: '/operating-manager/customers', icon: 'accounts' },
-            { label: 'Branch Management', to: '/operating-manager/admin/branches', icon: 'home' },
-            { label: 'System Configuration', to: '/operating-manager/operations/settings', icon: 'form' },
-            { label: 'Collection Performance', to: '/operating-manager/reports', icon: 'reports' },
-            { label: 'Sales Activities', to: '/operating-manager/operations/staff-performance', icon: 'compare' },
-            { label: 'Inventory Status', to: '/operating-manager/admin/inventory', icon: 'inventory' },
-            { label: 'Leaflet | OpenStreetMap', to: '/operating-manager/leaflet', icon: 'map' },
-          ].map((item) => (
-            <button
-              key={item.to}
-              className="quick-link-card"
-              type="button"
-              onClick={() => navigate(item.to)}
-              style={{ textAlign: 'left', border: 'none', background: 'none', padding: 0, cursor: 'pointer' }}
-            >
-              <span className="quick-link-icon"><NavIcon name={item.icon} /></span>
-              <span className="quick-link-copy"><strong>{item.label}</strong><span className="muted">Open</span></span>
-              <span className="quick-link-arrow">→</span>
-            </button>
-          ))}
-        </div>
-      </section>
+
 
       <div className="grid two-up">
         <section className="panel content-panel">
@@ -332,7 +313,7 @@ function BranchPerformanceHub({ navigate }) {
         </>
       )}
 
-      {activeTab === 'comparison' && <BranchComparisonPage navigate={navigate} showToast={() => {}} />}
+      {activeTab === 'comparison' && <BranchComparisonPage navigate={navigate} showToast={() => { }} />}
       {activeTab === 'trends' && <HistoricalTrendsPage />}
     </div>
   );
@@ -525,7 +506,7 @@ function ReportsHubPage({ navigate, showToast }) {
     { key: 'collections', label: 'Collections' },
     { key: 'sales', label: 'Sales' },
     { key: 'inventory', label: 'Inventory' },
-    { key: 'delinquency', label: 'Delinquency' },
+    { key: 'delinquency', label: 'Payments & Delinquency' },
     { key: 'executive', label: 'Executive' },
   ];
 
@@ -592,6 +573,12 @@ function ReportsHubPage({ navigate, showToast }) {
 
       {activeTab === 'sales' && (
         <>
+          <StatsGrid stats={[
+            { label: 'Sales Today', value: formatCurrency(SALES_ANALYTICS.salesToday) },
+            { label: 'Total Sales (YTD)', value: formatCurrency(ENTERPRISE_KPIS.totalSales) },
+            { label: 'Total Revenue (YTD)', value: formatCurrency(ENTERPRISE_KPIS.totalRevenue) },
+          ]} />
+
           <div className="grid two-up">
             <ChartCard title="Monthly Revenue by Branch" subtitle="6-month trend">
               <ResponsiveContainer width="100%" height={230}>
@@ -620,6 +607,21 @@ function ReportsHubPage({ navigate, showToast }) {
             </ChartCard>
           </div>
 
+          <ChartCard title="Top-Selling Products">
+            <div className="table-shell">
+              <table className="data-table">
+                <thead><tr><th>Product Name</th><th>Category</th><th>Qty Sold</th><th>Revenue</th></tr></thead>
+                <tbody>
+                  {SALES_ANALYTICS.topSellingProducts.map((p) => (
+                    <tr key={p.id}>
+                      <td>{p.name}</td><td>{p.category}</td><td>{p.quantitySold}</td><td>{formatCurrency(p.revenue)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </ChartCard>
+
           <ChartCard title="Sales Summary">
             <div className="table-shell">
               <table className="data-table">
@@ -636,27 +638,69 @@ function ReportsHubPage({ navigate, showToast }) {
 
       {activeTab === 'inventory' && (
         <>
-          <ChartCard title="Inventory Health by Branch" subtitle="Current health scores">
-            <ResponsiveContainer width="100%" height={230}>
-              <BarChart data={BRANCHES.map((b) => ({ name: b.name, health: b.inventoryHealth, value: b.inventoryValue / 1000000 }))}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
-                <XAxis dataKey="name" tick={{ fontSize: 12 }} />
-                <YAxis yAxisId="left" domain={[0, 100]} tick={{ fontSize: 12 }} unit="%" />
-                <YAxis yAxisId="right" orientation="right" tick={{ fontSize: 11 }} tickFormatter={(v) => `${v.toFixed(1)}M`} />
-                <Tooltip />
-                <Legend />
-                <Bar yAxisId="left" dataKey="health" name="Health %" fill="#2563eb" radius={[4, 4, 0, 0]} />
-                <Bar yAxisId="right" dataKey="value" name="Value (M PHP)" fill="#06b6d4" radius={[4, 4, 0, 0]} />
-              </BarChart>
-            </ResponsiveContainer>
-          </ChartCard>
+          <StatsGrid stats={[
+            { label: 'Current Stock Levels', value: INVENTORY_ANALYTICS.currentStockLevels.toLocaleString() },
+            { label: 'Inbound Stock', value: INVENTORY_ANALYTICS.stockMovement.inbound.toLocaleString() },
+            { label: 'Outbound Stock', value: INVENTORY_ANALYTICS.stockMovement.outbound.toLocaleString() },
+            { label: 'Sync Status', value: INVENTORY_ANALYTICS.syncStatus.status },
+          ]} />
+
+          <div className="grid two-up">
+            <ChartCard title="Inventory Health by Branch" subtitle="Current health scores">
+              <ResponsiveContainer width="100%" height={230}>
+                <BarChart data={BRANCHES.map((b) => ({ name: b.name, health: b.inventoryHealth, value: b.inventoryValue / 1000000 }))}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
+                  <XAxis dataKey="name" tick={{ fontSize: 12 }} />
+                  <YAxis yAxisId="left" domain={[0, 100]} tick={{ fontSize: 12 }} unit="%" />
+                  <YAxis yAxisId="right" orientation="right" tick={{ fontSize: 11 }} tickFormatter={(v) => `${v.toFixed(1)}M`} />
+                  <Tooltip />
+                  <Legend />
+                  <Bar yAxisId="left" dataKey="health" name="Health %" fill="#2563eb" radius={[4, 4, 0, 0]} />
+                  <Bar yAxisId="right" dataKey="value" name="Value (M PHP)" fill="#06b6d4" radius={[4, 4, 0, 0]} />
+                </BarChart>
+              </ResponsiveContainer>
+            </ChartCard>
+
+            <ChartCard title="Low Stock Items" subtitle="Requires immediate attention">
+              <div className="table-shell">
+                <table className="data-table">
+                  <thead><tr><th>Product Name</th><th>Branch</th><th>Current Stock</th><th>Status</th></tr></thead>
+                  <tbody>
+                    {INVENTORY_ANALYTICS.lowStockItems.map((item) => (
+                      <tr key={item.id}>
+                        <td>{item.name}</td><td>{item.branch}</td><td>{item.currentStock}</td>
+                        <td><SeverityBadge severity={item.status} /></td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </ChartCard>
+          </div>
           {exportRow}
         </>
       )}
 
       {activeTab === 'delinquency' && (
         <>
+          <StatsGrid stats={[
+            { label: 'Outstanding Receivables', value: formatCurrency(PAYMENT_ANALYTICS.outstandingReceivables) },
+            { label: 'Current Accounts', value: PAYMENT_ANALYTICS.currentAccountsCount.toLocaleString() },
+            { label: 'Credit Utilization', value: `${PAYMENT_ANALYTICS.creditUtilizationRate}%` },
+          ]} />
+
           <div className="grid two-up">
+            <ChartCard title="Aging of Receivables" subtitle="Amount by age bucket">
+              <ResponsiveContainer width="100%" height={230}>
+                <BarChart data={PAYMENT_ANALYTICS.agingOfReceivables}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
+                  <XAxis dataKey="bucket" tick={{ fontSize: 12 }} />
+                  <YAxis tick={{ fontSize: 11 }} tickFormatter={(v) => `${(v / 1000).toFixed(0)}k`} />
+                  <Tooltip formatter={(v) => formatCurrency(v)} />
+                  <Bar dataKey="amount" name="Amount" fill="#2563eb" radius={[4, 4, 0, 0]} />
+                </BarChart>
+              </ResponsiveContainer>
+            </ChartCard>
             <ChartCard title="Monthly Delinquency Trend" subtitle="Overdue accounts per branch">
               <ResponsiveContainer width="100%" height={230}>
                 <AreaChart data={MONTHLY_DELINQUENCY}>
@@ -844,7 +888,7 @@ function CustomerRecordsPage({ navigate }) {
       const matchSearch = !q || r.clientName.toLowerCase().includes(q) || r.accountNumber.toLowerCase().includes(q);
       const matchBranch = branchFilter === 'All' || r.branch === branchFilter;
       const matchStatus = statusFilter === 'All' || r.status === statusFilter;
-      const matchRisk   = riskFilter   === 'All' || r.riskLevel === riskFilter;
+      const matchRisk = riskFilter === 'All' || r.riskLevel === riskFilter;
       return matchSearch && matchBranch && matchStatus && matchRisk;
     });
   }, [search, branchFilter, statusFilter, riskFilter]);
@@ -858,10 +902,10 @@ function CustomerRecordsPage({ navigate }) {
   return (
     <div className="page">
       <StatsGrid stats={[
-        { label: 'Total Accounts',   value: String(CUSTOMER_RECORDS.length) },
-        { label: 'Current',          value: String(CUSTOMER_RECORDS.filter(r => r.status === 'Current').length) },
-        { label: 'Overdue',          value: String(CUSTOMER_RECORDS.filter(r => r.status === 'Overdue').length) },
-        { label: 'Blacklisted',      value: String(CUSTOMER_RECORDS.filter(r => r.status === 'Blacklisted').length) },
+        { label: 'Total Accounts', value: String(CUSTOMER_RECORDS.length) },
+        { label: 'Current', value: String(CUSTOMER_RECORDS.filter(r => r.status === 'Current').length) },
+        { label: 'Overdue', value: String(CUSTOMER_RECORDS.filter(r => r.status === 'Overdue').length) },
+        { label: 'Blacklisted', value: String(CUSTOMER_RECORDS.filter(r => r.status === 'Blacklisted').length) },
         { label: 'High / Critical Risk', value: String(CUSTOMER_RECORDS.filter(r => r.riskLevel === 'High' || r.riskLevel === 'Critical').length) },
         { label: 'Total Outstanding', value: formatCurrency(CUSTOMER_RECORDS.reduce((s, r) => s + r.outstandingBalance, 0)) },
       ]} />
@@ -937,12 +981,12 @@ function CustomerDetailPage({ customerId, navigate }) {
       </section>
 
       <StatsGrid stats={[
-        { label: 'Credit Limit',         value: formatCurrency(record.creditLimit) },
-        { label: 'Outstanding Balance',  value: formatCurrency(record.outstandingBalance) },
-        { label: 'Credit Utilization',   value: `${utilizationPct}%` },
-        { label: 'Days Overdue',         value: record.daysOverdue > 0 ? `${record.daysOverdue} days` : 'None' },
-        { label: 'Total Purchases',      value: formatCurrency(record.totalPurchases) },
-        { label: 'Account Since',        value: record.accountOpenDate },
+        { label: 'Credit Limit', value: formatCurrency(record.creditLimit) },
+        { label: 'Outstanding Balance', value: formatCurrency(record.outstandingBalance) },
+        { label: 'Credit Utilization', value: `${utilizationPct}%` },
+        { label: 'Days Overdue', value: record.daysOverdue > 0 ? `${record.daysOverdue} days` : 'None' },
+        { label: 'Total Purchases', value: formatCurrency(record.totalPurchases) },
+        { label: 'Account Since', value: record.accountOpenDate },
       ]} />
 
       <div className="grid two-up">
@@ -995,7 +1039,8 @@ function CustomerDetailPage({ customerId, navigate }) {
   );
 }
 
-function ProfilePage({ navigate, showToast }) {  const [profile, setProfile] = useState({ ...OPERATING_MANAGER_PROFILE });
+function ProfilePage({ navigate, showToast }) {
+  const [profile, setProfile] = useState({ ...OPERATING_MANAGER_PROFILE });
   return (
     <div className="page">
       <section className="panel form-panel content-panel">

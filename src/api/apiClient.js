@@ -11,12 +11,24 @@ const apiClient = axios.create({
   },
 });
 
-// Request interceptor — attach auth token if stored
+// Request interceptor — attach auth token and user identity if stored
 apiClient.interceptors.request.use(
   (config) => {
     const token = localStorage.getItem('corvex_token');
     if (token) {
       config.headers.Authorization = `Bearer ${token}`;
+    }
+    // Send user identity header so the backend can enforce role/branch middleware
+    try {
+      const raw = localStorage.getItem('corvex_user');
+      if (raw) {
+        const user = JSON.parse(raw);
+        if (user?.id) {
+          config.headers['X-User-Id'] = String(user.id);
+        }
+      }
+    } catch {
+      // malformed localStorage entry — ignore
     }
     return config;
   },

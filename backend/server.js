@@ -9,6 +9,7 @@ import rolesRouter     from './routes/roles.js';
 import productsRouter  from './routes/products.js';
 import clientsRouter   from './routes/clients.js';
 import dashboardRouter from './routes/dashboard.js';
+import { requireAuth, requireBranchScope } from './middleware/auth.js';
 
 dotenv.config();
 
@@ -61,13 +62,22 @@ connectDatabase();
 
 // ──────────────────────────────────────────────────────────────────────────────
 // ROUTES
+// Auth is public (no middleware before it).
+// All other routes require a valid session (requireAuth).
+// Data routes that are branch-scoped also run requireBranchScope so that
+// Branch Manager users can never read or write another branch's data even via
+// direct API calls.
 // ──────────────────────────────────────────────────────────────────────────────
 app.use('/api/auth',      authRouter);
-app.use('/api/users',     usersRouter);
-app.use('/api/roles',     rolesRouter);
-app.use('/api/products',  productsRouter);
-app.use('/api/clients',   clientsRouter);
-app.use('/api/dashboard', dashboardRouter);
+
+// Protected routes — identity required
+app.use('/api/users',     requireAuth, usersRouter);
+app.use('/api/roles',     requireAuth, rolesRouter);
+app.use('/api/products',  requireAuth, productsRouter);
+
+// Branch-scoped routes — identity + branch enforcement
+app.use('/api/clients',   requireAuth, requireBranchScope, clientsRouter);
+app.use('/api/dashboard', requireAuth, requireBranchScope, dashboardRouter);
 
 // Health Check
 app.get('/', (req, res) => {
@@ -96,6 +106,7 @@ app.get('/', (req, res) => {
       'GET  /api/dashboard/inventory-health',
       'GET  /api/dashboard/recent-audit',
       'GET  /api/dashboard/branches',
+      'GET  /api/dashboard/branch-summary?branch_id=<id>',
     ],
     timestamp: new Date().toISOString(),
   });

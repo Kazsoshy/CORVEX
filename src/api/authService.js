@@ -45,6 +45,7 @@ export function getCurrentUser() {
 const ROLE_SLUG_TO_PATH = {
   super_admin:       '/super-admin/dashboard',
   operating_manager: '/operating-manager/operations/dashboard',
+  branch_manager:    '/branch-manager/dashboard',
   inventory_staff:   '/warehouse/dashboard',
   sales_staff:       '/sales/dashboard',
   collector:         '/collector/dashboard',

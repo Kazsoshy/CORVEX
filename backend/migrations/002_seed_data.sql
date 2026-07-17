@@ -13,7 +13,7 @@
 -- Using a consistent hash for seed data:
 DO $$
 DECLARE
-    hash_default TEXT := '$2a$12$LQv3c1yqBWVHxkd0LHAkCOYz6TtxMqJqhg3bQ6S8K1X7VsMeRyVEe';
+    hash_default TEXT := '$2b$12$B67sR9t9LbsT8ig/8RcpL.X0kll/Rta9tqJOJHC.9btNekutqMlRm';
 BEGIN
 
 -- ============================================================

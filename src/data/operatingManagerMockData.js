@@ -315,3 +315,55 @@ export const CUSTOMER_RECORDS = [
 export function getCustomerRecordById(id) {
   return CUSTOMER_RECORDS.find((r) => r.id === id) ?? null;
 }
+
+// ── Additional Analytics Modules (Descriptive Analytics) ────────────────────
+
+export const SALES_ANALYTICS = {
+  salesToday: 425000,
+  salesTodayByBranch: [
+    { branch: 'Davao City', amount: 185000 },
+    { branch: 'General Santos', amount: 155000 },
+    { branch: 'Davao Oriental', amount: 85000 }
+  ],
+  topSellingProducts: [
+    { id: 'P-100', name: 'Ergonomic Office Chair', category: 'Seating', quantitySold: 145, revenue: 870000 },
+    { id: 'P-202', name: 'Minimalist Dining Set', category: 'Sets', quantitySold: 42, revenue: 1050000 },
+    { id: 'P-050', name: 'L-Shaped Sofa', category: 'Seating', quantitySold: 38, revenue: 950000 },
+    { id: 'P-440', name: 'Wooden Bookshelf', category: 'Storage', quantitySold: 85, revenue: 425000 },
+    { id: 'P-310', name: 'Queen Size Bed Frame', category: 'Bedroom', quantitySold: 55, revenue: 1100000 },
+  ]
+};
+
+export const INVENTORY_ANALYTICS = {
+  currentStockLevels: 14520,
+  stockMovement: {
+    inbound: 1250,
+    outbound: 3420,
+    transfers: 150
+  },
+  syncStatus: {
+    status: 'Synced',
+    lastUpdate: '2026-07-16T14:30:00+08:00',
+    pendingItems: 0
+  },
+  lowStockItems: [
+    { id: 'P-100', name: 'Ergonomic Office Chair', branch: 'Davao Oriental', currentStock: 2, minimumThreshold: 10, status: 'Critical' },
+    { id: 'P-501', name: 'Standing Desk', branch: 'Davao City', currentStock: 5, minimumThreshold: 15, status: 'Warning' },
+    { id: 'P-220', name: 'Glass Coffee Table', branch: 'General Santos', currentStock: 3, minimumThreshold: 8, status: 'Critical' },
+    { id: 'P-050', name: 'L-Shaped Sofa', branch: 'Davao Oriental', currentStock: 1, minimumThreshold: 5, status: 'Critical' }
+  ]
+};
+
+export const PAYMENT_ANALYTICS = {
+  outstandingReceivables: 1285000,
+  currentAccountsCount: 1450,
+  currentAccountsAmount: 5450000,
+  creditUtilizationRate: 68,
+  agingOfReceivables: [
+    { bucket: '0-30 Days', amount: 450000 },
+    { bucket: '31-60 Days', amount: 320000 },
+    { bucket: '61-90 Days', amount: 215000 },
+    { bucket: '90+ Days', amount: 300000 }
+  ]
+};
+
