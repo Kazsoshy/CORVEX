@@ -10,16 +10,18 @@ import { AdminPageBody } from '../admin/AdminPageBody';
 import { BranchManagerPageBody } from '../branchManager/BranchManagerPageBody';
 import LeafletMap from '../common/LeafletMap';
 import {
-  ALERTS, BRANCHES, BRANCH_RADAR, CUSTOMER_RECORDS, ENTERPRISE_KPIS, LEAFLET_LAYERS,
+  ALERTS, BRANCHES, BRANCH_RADAR, ENTERPRISE_KPIS, LEAFLET_LAYERS,
   MONTHLY_COLLECTIONS, MONTHLY_DELINQUENCY, MONTHLY_REVENUE,
   NOTIFICATIONS, OPERATING_MANAGER_PROFILE, REPORT_CATEGORIES,
   TREND_DATA, WEEKLY_COLLECTION_RATE, WEEKLY_SALES_RATE,
   SALES_ANALYTICS, INVENTORY_ANALYTICS, PAYMENT_ANALYTICS,
-  formatCurrency, getBranchById, getCustomerRecordById, getHighestPerformingBranch, getLowestPerformingBranch,
+  formatCurrency, getBranchById, getHighestPerformingBranch, getLowestPerformingBranch,
 } from '../../data/operatingManagerMockData';
+import { fetchCustomers, fetchCustomerById } from '../../api/salesService';
 import { EmptyState } from '../collector/EmptyState';
 import { LoadingState } from '../collector/LoadingState';
 import { NavIcon } from '../../navIcons';
+import { getCurrentUser } from '../../api/authService';
 
 const COLORS = ['#2563eb', '#06b6d4', '#ef4444', '#f59e0b'];
 const BRANCH_COLORS = {
@@ -106,24 +108,16 @@ function DashboardPage({ navigate }) {
 
   return (
     <div className="page">
-      <section className="panel" style={{ padding: '12px 16px', marginBottom: '16px', borderRadius: '12px', boxShadow: '0 1px 3px rgba(0,0,0,0.05)' }}>
-        <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '16px' }}>
-          <div style={{ flex: 1 }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px' }}>
-              <span style={{ color: 'var(--accent, #2563eb)', display: 'flex', alignItems: 'center' }}>
-                <NavIcon name="dashboard" />
-              </span>
-              <h2 style={{ fontSize: '1.1rem', margin: 0, fontWeight: '600' }}>Operational Overview</h2>
-            </div>
-            <p className="muted" style={{ margin: 0, fontSize: '0.85rem', lineHeight: '1.4' }}>
-              This dashboard provides centralized monitoring for Sales Performance, Inventory Analytics, Customer Payment Analytics, Branch Performance, Collection Performance, Staff Performance, and Operational KPIs and Business Trends. Use this overview to effectively track and manage branch operations across all regions.
-            </p>
-          </div>
-          <Link to="/operating-manager/notifications" className="notification-bell" aria-label={`${unread} unread notifications`} style={{ flexShrink: 0, alignSelf: 'flex-start' }}>
-            <NavIcon name="bell" />
-            {unread > 0 ? <span className="notification-badge">{unread}</span> : null}
-          </Link>
+      <section className="panel dashboard-greeting">
+        <div className="dashboard-greeting-main">
+          <p className="dashboard-eyebrow">Operating Manager</p>
+          <h2>Elena Mercado</h2>
+          <p className="muted">{new Date().toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}</p>
         </div>
+        <Link to="/operating-manager/notifications" className="notification-bell" aria-label={`${unread} unread notifications`} style={{ flexShrink: 0, alignSelf: 'flex-start' }}>
+          <NavIcon name="bell" />
+          {unread > 0 ? <span className="notification-badge">{unread}</span> : null}
+        </Link>
       </section>
 
       <StatsGrid stats={[
@@ -880,50 +874,50 @@ function CustomerRecordsPage({ navigate }) {
   const [search, setSearch] = useState('');
   const [branchFilter, setBranchFilter] = useState('All');
   const [statusFilter, setStatusFilter] = useState('All');
-  const [riskFilter, setRiskFilter] = useState('All');
+  const [customers, setCustomers] = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    async function load() {
+      setLoading(true);
+      const result = await fetchCustomers();
+      if (result.success) setCustomers(result.data);
+      setLoading(false);
+    }
+    load();
+  }, []);
 
   const filtered = useMemo(() => {
     const q = search.toLowerCase();
-    return CUSTOMER_RECORDS.filter((r) => {
-      const matchSearch = !q || r.clientName.toLowerCase().includes(q) || r.accountNumber.toLowerCase().includes(q);
-      const matchBranch = branchFilter === 'All' || r.branch === branchFilter;
+    return customers.filter((r) => {
+      const matchSearch = !q || `${r.first_name} ${r.last_name}`.toLowerCase().includes(q) || (r.address || '').toLowerCase().includes(q) || (r.contact_phone || '').includes(q);
+      const matchBranch = branchFilter === 'All' || r.branch_name === branchFilter;
       const matchStatus = statusFilter === 'All' || r.status === statusFilter;
-      const matchRisk = riskFilter === 'All' || r.riskLevel === riskFilter;
-      return matchSearch && matchBranch && matchStatus && matchRisk;
+      return matchSearch && matchBranch && matchStatus;
     });
-  }, [search, branchFilter, statusFilter, riskFilter]);
+  }, [search, branchFilter, statusFilter, customers]);
 
-  const riskBadge = (level) => {
-    const map = { Low: { color: '#059669', bg: 'rgba(5,150,105,0.1)' }, Medium: { color: '#d97706', bg: 'rgba(217,119,6,0.1)' }, High: { color: '#dc2626', bg: 'rgba(220,38,38,0.1)' }, Critical: { color: '#7f1d1d', bg: 'rgba(127,29,29,0.12)' } };
-    const s = map[level] ?? {};
-    return <span style={{ padding: '3px 10px', borderRadius: 999, fontSize: '0.72rem', fontWeight: 700, textTransform: 'uppercase', background: s.bg, color: s.color }}>{level}</span>;
-  };
+  if (loading) return <LoadingState message="Loading customer records..." />;
 
   return (
     <div className="page">
       <StatsGrid stats={[
-        { label: 'Total Accounts', value: String(CUSTOMER_RECORDS.length) },
-        { label: 'Current', value: String(CUSTOMER_RECORDS.filter(r => r.status === 'Current').length) },
-        { label: 'Overdue', value: String(CUSTOMER_RECORDS.filter(r => r.status === 'Overdue').length) },
-        { label: 'Blacklisted', value: String(CUSTOMER_RECORDS.filter(r => r.status === 'Blacklisted').length) },
-        { label: 'High / Critical Risk', value: String(CUSTOMER_RECORDS.filter(r => r.riskLevel === 'High' || r.riskLevel === 'Critical').length) },
-        { label: 'Total Outstanding', value: formatCurrency(CUSTOMER_RECORDS.reduce((s, r) => s + r.outstandingBalance, 0)) },
+        { label: 'Total Accounts', value: String(customers.length) },
+        { label: 'Active', value: String(customers.filter(r => r.status === 'Active').length) },
+        { label: 'Inactive', value: String(customers.filter(r => r.status === 'Inactive').length) },
       ]} />
 
       <section className="panel content-panel">
         <div className="panel-section-header"><h3>All Customer Accounts</h3></div>
         <div className="accounts-toolbar">
-          <input className="search-input" type="search" placeholder="Search by client name or account number" value={search} onChange={e => setSearch(e.target.value)} />
+          <input className="search-input" type="search" placeholder="Search by customer name, address, or contact phone" value={search} onChange={e => setSearch(e.target.value)} />
           <div className="accounts-filters">
             <select value={branchFilter} onChange={e => setBranchFilter(e.target.value)}>
               <option value="All">All Branches</option>
               {BRANCHES.map(b => <option key={b.id} value={b.name}>{b.name}</option>)}
             </select>
             <select value={statusFilter} onChange={e => setStatusFilter(e.target.value)}>
-              {['All', 'Current', 'Pending', 'Overdue', 'Blacklisted'].map(s => <option key={s} value={s}>{s === 'All' ? 'All Statuses' : s}</option>)}
-            </select>
-            <select value={riskFilter} onChange={e => setRiskFilter(e.target.value)}>
-              {['All', 'Low', 'Medium', 'High', 'Critical'].map(r => <option key={r} value={r}>{r === 'All' ? 'All Risk Levels' : r}</option>)}
+              {['All', 'Active', 'Inactive'].map(s => <option key={s} value={s}>{s === 'All' ? 'All Statuses' : s}</option>)}
             </select>
           </div>
         </div>
@@ -934,23 +928,18 @@ function CustomerRecordsPage({ navigate }) {
           <div className="table-shell">
             <table className="data-table">
               <thead>
-                <tr><th>Account</th><th>Client</th><th>Branch</th><th>Outstanding</th><th>Days Overdue</th><th>Credit Limit</th><th>Risk</th><th>Last Visit</th><th>Actions</th></tr>
+                <tr><th>Name</th><th>Branch</th><th>Address</th><th>Contact Phone</th><th>Status</th><th>Actions</th></tr>
               </thead>
               <tbody>
                 {filtered.map(r => (
-                  <tr key={r.id}>
-                    <td>{r.accountNumber}</td>
-                    <td><strong>{r.clientName}</strong><span className="muted" style={{ display: 'block', fontSize: '0.8rem' }}>{r.businessType}</span></td>
-                    <td>{r.branch}</td>
-                    <td style={{ fontWeight: 600, color: r.outstandingBalance > 0 ? '#dc2626' : '#059669' }}>
-                      {r.outstandingBalance > 0 ? formatCurrency(r.outstandingBalance) : 'Clear'}
-                    </td>
-                    <td style={{ color: r.daysOverdue > 0 ? '#dc2626' : '#059669', fontWeight: 600 }}>{r.daysOverdue > 0 ? `${r.daysOverdue}d` : '—'}</td>
-                    <td>{formatCurrency(r.creditLimit)}</td>
-                    <td>{riskBadge(r.riskLevel)}</td>
-                    <td>{r.lastVisit}</td>
+                  <tr key={r.customer_id}>
+                    <td><strong>{r.first_name} {r.last_name}</strong></td>
+                    <td>{r.branch_name}</td>
+                    <td>{r.address}</td>
+                    <td>{r.contact_phone}</td>
+                    <td><span className={`status-badge ${r.status === 'Active' ? 'status-completed' : 'status-inactive'}`}>{r.status}</span></td>
                     <td className="table-actions">
-                      <button className="icon-action-button" type="button" title="View" onClick={() => navigate(`/operating-manager/customers/${r.id}`)}><NavIcon name="view" /></button>
+                      <button className="icon-action-button" type="button" title="View" onClick={() => navigate(`/operating-manager/customers/${r.customer_id}`)}><NavIcon name="view" /></button>
                     </td>
                   </tr>
                 ))}
@@ -964,73 +953,78 @@ function CustomerRecordsPage({ navigate }) {
 }
 
 function CustomerDetailPage({ customerId, navigate }) {
-  const record = getCustomerRecordById(customerId);
-  if (!record) return <EmptyState title="Customer not found" actionLabel="Back" onAction={() => navigate('/operating-manager/customers')} />;
+  const [customer, setCustomer] = useState(null);
+  const [loading, setLoading] = useState(true);
 
-  const riskColor = { Low: '#059669', Medium: '#d97706', High: '#dc2626', Critical: '#7f1d1d' }[record.riskLevel] ?? '#64748b';
-  const utilizationPct = Math.round((record.outstandingBalance / record.creditLimit) * 100);
+  useEffect(() => {
+    async function load() {
+      setLoading(true);
+      const result = await fetchCustomerById(customerId);
+      if (result.success) setCustomer(result.data);
+      setLoading(false);
+    }
+    load();
+  }, [customerId]);
+
+  if (loading) return <LoadingState message="Loading customer details..." />;
+  if (!customer) return <EmptyState title="Customer not found" actionLabel="Back" onAction={() => navigate('/operating-manager/customers')} />;
+
+  const name = `${customer.first_name} ${customer.last_name}`;
 
   return (
     <div className="page">
       <section className="panel dashboard-greeting">
         <div className="dashboard-greeting-main">
-          <p className="dashboard-eyebrow" style={{ color: riskColor }}>{record.riskLevel} Risk · {record.status}</p>
-          <h2>{record.clientName}</h2>
-          <p className="muted">{record.accountNumber} · {record.branch} Branch · {record.businessType}</p>
+          <p className="dashboard-eyebrow">{customer.status}</p>
+          <h2>{name}</h2>
+          <p className="muted">{customer.branch_name} Branch · {customer.address}</p>
         </div>
       </section>
 
       <StatsGrid stats={[
-        { label: 'Credit Limit', value: formatCurrency(record.creditLimit) },
-        { label: 'Outstanding Balance', value: formatCurrency(record.outstandingBalance) },
-        { label: 'Credit Utilization', value: `${utilizationPct}%` },
-        { label: 'Days Overdue', value: record.daysOverdue > 0 ? `${record.daysOverdue} days` : 'None' },
-        { label: 'Total Purchases', value: formatCurrency(record.totalPurchases) },
-        { label: 'Account Since', value: record.accountOpenDate },
+        { label: 'Branch', value: customer.branch_name || '—' },
+        { label: 'Contact Phone', value: customer.contact_phone || '—' },
+        { label: 'Contact Person', value: `${customer.contact_person_fname} ${customer.contact_person_lname}` },
       ]} />
 
       <div className="grid two-up">
         <section className="panel content-panel">
           <div className="panel-section-header"><h3>Account Information</h3></div>
           <ul className="info-grid">
-            <li><span className="info-item-label">Contact Person</span><span className="info-item-value">{record.contactPerson}</span></li>
-            <li><span className="info-item-label">Phone</span><span className="info-item-value">{record.phone}</span></li>
-            <li><span className="info-item-label">Email</span><span className="info-item-value">{record.email}</span></li>
-            <li><span className="info-item-label">Address</span><span className="info-item-value">{record.address}</span></li>
-            <li><span className="info-item-label">Assigned Collector</span><span className="info-item-value">{record.assignedCollector}</span></li>
-            <li><span className="info-item-label">Last Visit</span><span className="info-item-value">{record.lastVisit}</span></li>
+            <li><span className="info-item-label">Name</span><span className="info-item-value">{name}</span></li>
+            <li><span className="info-item-label">Address</span><span className="info-item-value">{customer.address}</span></li>
+            <li><span className="info-item-label">Contact Phone</span><span className="info-item-value">{customer.contact_phone}</span></li>
+            <li><span className="info-item-label">Contact Person</span><span className="info-item-value">{customer.contact_person_fname} {customer.contact_person_lname}</span></li>
+            <li><span className="info-item-label">Contact Person Phone</span><span className="info-item-value">{customer.contact_person_phone}</span></li>
+            <li><span className="info-item-label">Status</span><span className="info-item-value">{customer.status}</span></li>
           </ul>
         </section>
 
-        <section className="panel content-panel">
-          <div className="panel-section-header"><h3>Credit Utilization</h3></div>
-          <div style={{ marginBottom: 12 }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6, fontSize: '0.88rem' }}>
-              <span>Used: {formatCurrency(record.outstandingBalance)}</span>
-              <span className="muted">Limit: {formatCurrency(record.creditLimit)}</span>
-            </div>
-            <div style={{ height: 12, background: '#f1f5f9', borderRadius: 999, overflow: 'hidden' }}>
-              <div style={{ height: '100%', width: `${Math.min(utilizationPct, 100)}%`, background: utilizationPct > 70 ? '#dc2626' : '#2563eb', borderRadius: 999, transition: 'width 0.4s' }} />
-            </div>
-            <p className="muted" style={{ marginTop: 6, fontSize: '0.82rem' }}>{utilizationPct}% utilized</p>
-          </div>
-          <div style={{ marginTop: 16 }}>
-            <h4 style={{ margin: '0 0 10px', fontSize: '0.9rem', fontWeight: 700 }}>Payment Trend (last 4 months)</h4>
-            {record.paymentHistory.map(p => (
-              <div key={p.month} style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8 }}>
-                <span style={{ width: 72, fontSize: '0.8rem', color: '#64748b' }}>{p.month}</span>
-                <div style={{ flex: 1, height: 8, background: '#f1f5f9', borderRadius: 999, overflow: 'hidden' }}>
-                  <div style={{ height: '100%', width: `${Math.round((p.paid / p.due) * 100)}%`, background: p.onTime ? '#059669' : '#f59e0b', borderRadius: 999 }} />
-                </div>
-                <span style={{ fontSize: '0.8rem', color: p.onTime ? '#059669' : '#dc2626', fontWeight: 600, width: 40 }}>
-                  {Math.round((p.paid / p.due) * 100)}%
-                </span>
-                <span style={{ fontSize: '0.75rem', color: p.onTime ? '#059669' : '#dc2626' }}>{p.onTime ? '✓' : '!'}</span>
-              </div>
-            ))}
-          </div>
-        </section>
+        {customer.activity && (
+          <section className="panel content-panel">
+            <div className="panel-section-header"><h3>Account Activity</h3></div>
+            <ul className="info-grid">
+              <li><span className="info-item-label">Outstanding Balance</span><span className="info-item-value">{formatCurrency(Number(customer.activity.outstanding_balance || 0))}</span></li>
+              <li><span className="info-item-label">Purchase Volume</span><span className="info-item-value">{formatCurrency(Number(customer.activity.purchase_volume || 0))}</span></li>
+              <li><span className="info-item-label">Last Collection</span><span className="info-item-value">{customer.activity.last_collection_date || '—'}</span></li>
+              <li><span className="info-item-label">Last Sales Visit</span><span className="info-item-value">{customer.activity.last_sales_visit || '—'}</span></li>
+            </ul>
+          </section>
+        )}
       </div>
+
+      {customer.creditInfo && (
+        <section className="panel content-panel">
+          <div className="panel-section-header"><h3>Credit Information</h3></div>
+          <ul className="info-grid">
+            <li><span className="info-item-label">Credit Limit</span><span className="info-item-value">{formatCurrency(Number(customer.creditInfo.credit_limit || 0))}</span></li>
+            <li><span className="info-item-label">Monthly Income</span><span className="info-item-value">{formatCurrency(Number(customer.creditInfo.monthly_income || 0))}</span></li>
+            <li><span className="info-item-label">Credit Score</span><span className="info-item-value">{customer.creditInfo.credit_score || '—'}</span></li>
+            <li><span className="info-item-label">Employment Status</span><span className="info-item-value">{customer.creditInfo.employment_status || '—'}</span></li>
+            <li><span className="info-item-label">Approved Date</span><span className="info-item-value">{customer.creditInfo.approved_date || '—'}</span></li>
+          </ul>
+        </section>
+      )}
 
       <PageToolbar actions={[
         { label: 'Back to Customer Records', to: '/operating-manager/customers', variant: 'ghost' },
@@ -1065,7 +1059,7 @@ function ProfilePage({ navigate, showToast }) {
 export function OperatingManagerPageBody({ page, navigate, showToast }) {
   if (!page) return <EmptyState title="Page not found" description="Use the sidebar to open a supported screen." />;
   if (page.module === 'admin') return <AdminPageBody page={page} navigate={navigate} showToast={showToast} />;
-  if (page.module === 'operations') return <BranchManagerPageBody page={page} navigate={navigate} showToast={showToast} />;
+  if (page.module === 'operations') return <BranchManagerPageBody page={page} navigate={navigate} showToast={showToast} currentUser={getCurrentUser()} />;
   const props = { branchId: page.params?.branchId, customerId: page.params?.customerId, navigate, showToast };
   switch (page.pageType) {
     case 'dashboard': return <DashboardPage {...props} />;

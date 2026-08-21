@@ -8,7 +8,7 @@ import apiClient from './apiClient.js';
  * @returns {Promise<{success: boolean, user?: object, message?: string}>}
  */
 export async function login(email, password) {
-  const response = await apiClient.post('/api/auth/login', { email, password });
+  const response = await apiClient.post('/auth/login', { email, password });
   const data = response.data;
 
   if (data.success && data.user) {
@@ -44,12 +44,12 @@ export function getCurrentUser() {
  */
 const ROLE_SLUG_TO_PATH = {
   super_admin:       '/super-admin/dashboard',
-  operating_manager: '/operating-manager/operations/dashboard',
+  operating_manager: '/operating-manager/dashboard',
   branch_manager:    '/branch-manager/dashboard',
   inventory_staff:   '/warehouse/dashboard',
   sales_staff:       '/sales/dashboard',
   collector:         '/collector/dashboard',
-  client:            '/customer/home',
+  customer:            '/customer/home',
 };
 
 /**

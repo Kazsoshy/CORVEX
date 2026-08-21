@@ -140,7 +140,7 @@ function HomePage({ navigate }) {
       <section className="panel dashboard-greeting customer-greeting">
         <div className="dashboard-greeting-main">
           <p className="dashboard-eyebrow">Welcome back</p>
-          <h2>{CUSTOMER_ACCOUNT.clientName}</h2>
+          <h2>{CUSTOMER_ACCOUNT.customerName}</h2>
           <p className="muted">Account {CUSTOMER_ACCOUNT.accountNumber}</p>
         </div>
         <Link to="/customer/notifications" className="notification-bell" aria-label={`${unread} unread notifications`}>
@@ -211,7 +211,7 @@ function AccountDetailsPage({ navigate, showToast }) {
       <section className="panel content-panel">
         <div className="panel-section-header"><h3>Account Information</h3></div>
         <ul className="detail-list">
-          <li><span>Client Name</span><strong>{CUSTOMER_ACCOUNT.clientName}</strong></li>
+          <li><span>Customer Name</span><strong>{CUSTOMER_ACCOUNT.customerName}</strong></li>
           <li><span>Account Number</span><strong>{CUSTOMER_ACCOUNT.accountNumber}</strong></li>
           <li><span>Address</span><strong>{CUSTOMER_ACCOUNT.address}</strong></li>
           <li><span>Branch</span><strong>{CUSTOMER_ACCOUNT.branch}</strong></li>
@@ -340,7 +340,7 @@ function ReceiptDetailPage({ receiptId, showToast }) {
           <li><span>Date</span><strong>{receipt.date}</strong></li>
           <li><span>Amount</span><strong>{formatCurrency(receipt.amount)}</strong></li>
           <li><span>Account</span><strong>{CUSTOMER_ACCOUNT.accountNumber}</strong></li>
-          <li><span>Client</span><strong>{CUSTOMER_ACCOUNT.clientName}</strong></li>
+          <li><span>Customer</span><strong>{CUSTOMER_ACCOUNT.customerName}</strong></li>
         </ul>
       </section>
       <PageToolbar actions={[{ label: 'Download PDF' }]} onAction={() => showToast(`Downloading ${receipt.receiptNumber}.pdf`, 'success')} />
@@ -442,7 +442,7 @@ function ProfilePage({ navigate, showToast }) {
       <section className="panel content-panel">
         <div className="panel-section-header"><h3>Personal Information</h3></div>
         <ul className="detail-list">
-          <li><span>Name</span><strong>{CUSTOMER_ACCOUNT.clientName}</strong></li>
+          <li><span>Name</span><strong>{CUSTOMER_ACCOUNT.customerName}</strong></li>
           <li><span>Account Number</span><strong>{CUSTOMER_ACCOUNT.accountNumber}</strong></li>
           <li><span>Business Type</span><strong>{CUSTOMER_ACCOUNT.businessType}</strong></li>
         </ul>

@@ -1,7 +1,7 @@
 // Furniture retail — Operating Manager & Super Admin data (3 Davao branches)
 
 export const ADMIN_PROFILE = {
-  name: 'Patricia Reyes',
+  name: 'Elena Mercado',
   employeeId: 'ADM-1001',
   email: 'patricia.reyes@corvex.ph',
   phone: '+63 917 555 1100',
@@ -75,14 +75,14 @@ export const RESTOCK_REQUESTS = [
 ];
 
 export const AUDIT_LOGS = [
-  { id: 'al1',  timestamp: '2026-06-30 08:32 AM', user: 'Patricia Reyes',     action: 'User Created',         module: 'User Management',      ip: '192.168.1.10', status: 'Success' },
+  { id: 'al1',  timestamp: '2026-06-30 08:32 AM', user: 'Elena Mercado',     action: 'User Created',         module: 'User Management',      ip: '192.168.1.10', status: 'Success' },
   { id: 'al2',  timestamp: '2026-06-30 08:15 AM', user: 'Marcus Santos',      action: 'Permission Updated',   module: 'Role Management',      ip: '192.168.1.2',  status: 'Success' },
   { id: 'al3',  timestamp: '2026-06-30 08:00 AM', user: 'Elena Mercado',      action: 'Report Exported',      module: 'Reports',              ip: '192.168.1.20', status: 'Success' },
   { id: 'al4',  timestamp: '2026-06-29 04:45 PM', user: 'Roberto Villanueva', action: 'CI Approved',          module: 'Credit Investigation', ip: '192.168.1.22', status: 'Success' },
-  { id: 'al5',  timestamp: '2026-06-29 03:10 PM', user: 'Patricia Reyes',     action: 'Branch Updated',       module: 'Branch Management',    ip: '192.168.1.10', status: 'Success' },
+  { id: 'al5',  timestamp: '2026-06-29 03:10 PM', user: 'Elena Mercado',     action: 'Branch Updated',       module: 'Branch Management',    ip: '192.168.1.10', status: 'Success' },
   { id: 'al6',  timestamp: '2026-06-29 11:00 AM', user: 'Marcus Santos',      action: 'Backup Created',       module: 'System',               ip: '192.168.1.2',  status: 'Success' },
   { id: 'al7',  timestamp: '2026-06-29 10:22 AM', user: 'Ben Cruz',           action: 'Login Failed',         module: 'Auth',                 ip: '192.168.1.55', status: 'Failed'  },
-  { id: 'al8',  timestamp: '2026-06-28 09:14 AM', user: 'Patricia Reyes',     action: 'User Disabled',        module: 'User Management',      ip: '192.168.1.10', status: 'Success' },
+  { id: 'al8',  timestamp: '2026-06-28 09:14 AM', user: 'Elena Mercado',     action: 'User Disabled',        module: 'User Management',      ip: '192.168.1.10', status: 'Success' },
   { id: 'al9',  timestamp: '2026-06-28 08:00 AM', user: 'Marcus Santos',      action: 'System Settings Updated', module: 'System Settings',   ip: '192.168.1.2',  status: 'Success' },
   { id: 'al10', timestamp: '2026-06-27 05:30 PM', user: 'Elena Mercado',      action: 'Leaflet | OpenStreetMap Layer Accessed',   module: 'Leaflet | OpenStreetMap',                  ip: '192.168.1.20', status: 'Success' },
 ];

@@ -35,11 +35,11 @@ const userPasswords = [
   { email: 'pedro.g@corvex.ph',               password: 'Collector@2026' },
   { email: 'luz.b@corvex.ph',                 password: 'Collector@2026' },
   { email: 'ramon.a@corvex.ph',               password: 'Collector@2026' },
-  { email: 'luntiang.tahanan@email.com',      password: 'Client@2026' },
-  { email: 'furniture.plus@gensan.ph',        password: 'Client@2026' },
-  { email: 'casa.moderna@email.com',          password: 'Client@2026' },
-  { email: 'abode.furniture@gensan.ph',       password: 'Client@2026' },
-  { email: 'mabuhay.sala@davao.ph',           password: 'Client@2026' },
+  { email: 'luntiang.tahanan@email.com',      password: 'Customer@2026' },
+  { email: 'furniture.plus@gensan.ph',        password: 'Customer@2026' },
+  { email: 'casa.moderna@email.com',          password: 'Customer@2026' },
+  { email: 'abode.furniture@gensan.ph',       password: 'Customer@2026' },
+  { email: 'mabuhay.sala@davao.ph',           password: 'Customer@2026' },
 ];
 
 async function run() {

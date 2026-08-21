@@ -1,16 +1,13 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import {
-  ACCOUNTS,
   COLLECTION_HISTORY,
-  COLLECTOR_PROFILE,
-  DASHBOARD_SUMMARY,
   NOTIFICATIONS,
-  ROUTE_STOPS,
   formatCurrency,
-  getAccountById,
   getReceiptById,
 } from '../../data/collectorMockData';
+import { fetchAccounts, fetchAccountById } from '../../api/collectorService';
+import { getCurrentUser } from '../../api/authService.js';
 import { AccountCard } from './AccountCard';
 import { EmptyState } from './EmptyState';
 import { LoadingState } from './LoadingState';
@@ -136,17 +133,20 @@ function FormPanel({ title, fields, formData, onChange, errors = {} }) {
 }
 
 function DashboardPage({ navigate, showToast }) {
+  const currentUser = getCurrentUser();
   const today = new Date().toLocaleDateString('en-PH', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
-  const recentCollections = COLLECTION_HISTORY.slice(0, 3);
-  const recentIncidents = NOTIFICATIONS.filter((n) => n.type === 'incident').slice(0, 2);
   const unreadCount = NOTIFICATIONS.filter((n) => !n.read).length;
+  const agentName = currentUser?.fullName || 'Collector';
+  const branchName = currentUser?.branch?.name || '—';
+  const recentCollections = COLLECTION_HISTORY.slice(0, 3);
+  const recentIncidents = NOTIFICATIONS.filter((n) => n.type === 'incident').slice(0, 3);
 
   return (
     <div className="page">
       <section className="panel dashboard-greeting">
         <div className="dashboard-greeting-main">
           <p className="dashboard-eyebrow">Good morning</p>
-          <h2>{COLLECTOR_PROFILE.name}</h2>
+          <h2>{agentName}</h2>
           <p className="muted">{today}</p>
         </div>
         <Link to="/collector/notifications" className="notification-bell" aria-label={`${unreadCount} unread notifications`}>
@@ -157,10 +157,9 @@ function DashboardPage({ navigate, showToast }) {
 
       <StatsGrid
         stats={[
-          { label: 'Accounts Assigned', value: String(DASHBOARD_SUMMARY.accountsAssigned) },
-          { label: 'Collected Today', value: String(DASHBOARD_SUMMARY.collectedToday) },
-          { label: 'Pending Visits', value: String(DASHBOARD_SUMMARY.pendingVisits) },
-          { label: 'Completed Visits', value: String(DASHBOARD_SUMMARY.completedVisits) },
+          { label: 'Branch', value: branchName },
+          { label: 'Notifications', value: String(unreadCount) },
+          { label: 'Recent Collections', value: String(COLLECTION_HISTORY.length) },
         ]}
       />
 
@@ -183,7 +182,7 @@ function DashboardPage({ navigate, showToast }) {
               {recentCollections.map((item) => (
                 <li key={item.id}>
                   <div>
-                    <strong>{item.clientName}</strong>
+                    <strong>{item.customerName}</strong>
                     <span className="muted">{item.date}</span>
                   </div>
                   <span>{formatCurrency(item.amount)}</span>
@@ -219,13 +218,13 @@ function DashboardPage({ navigate, showToast }) {
       <section className="panel content-panel">
         <div className="panel-section-header">
           <h3>Today&apos;s Route Progress</h3>
-          <span className="muted">{DASHBOARD_SUMMARY.routeProgress}% complete</span>
+          <span className="muted">View route for updates</span>
         </div>
-        <div className="progress-bar" role="progressbar" aria-valuenow={DASHBOARD_SUMMARY.routeProgress} aria-valuemin={0} aria-valuemax={100}>
-          <div className="progress-fill" style={{ width: `${DASHBOARD_SUMMARY.routeProgress}%` }} />
+        <div className="progress-bar" role="progressbar" aria-valuenow={0} aria-valuemin={0} aria-valuemax={100}>
+          <div className="progress-fill" style={{ width: `0%` }} />
         </div>
         <p className="muted progress-caption">
-          {DASHBOARD_SUMMARY.completedVisits} of {DASHBOARD_SUMMARY.accountsAssigned} stops completed
+          Visit the route page for live status
         </p>
       </section>
     </div>
@@ -233,14 +232,32 @@ function DashboardPage({ navigate, showToast }) {
 }
 
 function RoutePage({ pageType, navigate, showToast }) {
+  const [customers, setCustomers] = useState([]);
+  const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState('All');
   const [showMap, setShowMap] = useState(pageType === 'routeMap');
 
+  useEffect(() => {
+    async function load() {
+      setLoading(true);
+      const result = await fetchAccounts();
+      if (result.success) {
+        const prioritized = result.data
+          .filter((a) => a.status === 'Active' || a.status === 'Pending' || a.status === 'Overdue')
+          .map((a, i) => ({ ...a, rank: i + 1 }))
+          .sort((a, b) => (b.outstandingBalance || 0) - (a.outstandingBalance || 0));
+        setCustomers(prioritized);
+      }
+      setLoading(false);
+    }
+    load();
+  }, []);
+
   const filteredStops = useMemo(() => {
-    if (filter === 'All') return ROUTE_STOPS;
-    if (filter === 'Pending') return ROUTE_STOPS.filter((s) => s.status === 'Pending' || s.status === 'Overdue');
-    return ROUTE_STOPS.filter((s) => s.status === 'Completed');
-  }, [filter]);
+    if (filter === 'All') return customers;
+    if (filter === 'Pending') return customers.filter((s) => s.status === 'Pending' || s.status === 'Overdue');
+    return customers.filter((s) => s.status === 'Completed');
+  }, [filter, customers]);
 
   const actions = [
     { label: 'Route List', to: '/collector/route', variant: pageType === 'routeList' ? undefined : 'secondary' },
@@ -248,16 +265,18 @@ function RoutePage({ pageType, navigate, showToast }) {
     { label: 'Route Summary', to: '/collector/route/summary', variant: pageType === 'routeSummary' ? undefined : 'secondary' },
   ];
 
+  if (loading) return <LoadingState message="Loading route..." />;
+
   if (pageType === 'routeSummary') {
     return (
       <div className="page">
         <PageToolbar actions={actions} onAction={(a) => navigate(a.to)} />
         <StatsGrid
           stats={[
-            { label: "Today's Stops", value: String(ROUTE_STOPS.length) },
-            { label: 'Overdue Accounts', value: String(ROUTE_STOPS.filter((s) => s.status === 'Overdue').length) },
-            { label: 'Distance Planned', value: '18 km' },
-            { label: 'Estimated Time', value: '4h 30m' },
+            { label: "Today's Stops", value: String(customers.length) },
+            { label: 'Overdue Customers', value: String(customers.filter((s) => s.status === 'Overdue').length) },
+            { label: 'Distance Planned', value: '—' },
+            { label: 'Estimated Time', value: '—' },
           ]}
         />
         <section className="panel content-panel">
@@ -265,9 +284,9 @@ function RoutePage({ pageType, navigate, showToast }) {
             <h3>Route Summary</h3>
           </div>
           <ul className="info-grid">
-            <li><span className="info-item-label">Total Outstanding on Route</span><span className="info-item-value">{formatCurrency(ROUTE_STOPS.reduce((sum, s) => sum + s.outstandingBalance, 0))}</span></li>
-            <li><span className="info-item-label">Completed Collections</span><span className="info-item-value">{ROUTE_STOPS.filter((s) => s.status === 'Completed').length} stops</span></li>
-            <li><span className="info-item-label">Remaining Visits</span><span className="info-item-value">{ROUTE_STOPS.filter((s) => s.status !== 'Completed').length} stops</span></li>
+            <li><span className="info-item-label">Total Outstanding on Route</span><span className="info-item-value">{formatCurrency(customers.reduce((sum, s) => sum + (s.outstandingBalance || 0), 0))}</span></li>
+            <li><span className="info-item-label">Pending / Overdue Visits</span><span className="info-item-value">{customers.filter((s) => s.status !== 'Completed').length} stops</span></li>
+            <li><span className="info-item-label">Completed Visits</span><span className="info-item-value">{customers.filter((s) => s.status === 'Completed').length} stops</span></li>
           </ul>
         </section>
       </div>
@@ -279,20 +298,19 @@ function RoutePage({ pageType, navigate, showToast }) {
       <PageToolbar actions={actions} onAction={(a) => navigate(a.to)} />
       <StatsGrid
         stats={[
-          { label: "Today's Stops", value: String(ROUTE_STOPS.length) },
-          { label: 'Overdue Accounts', value: String(ROUTE_STOPS.filter((s) => s.status === 'Overdue').length) },
-          { label: 'Distance Planned', value: '18 km' },
+          { label: "Today's Stops", value: String(customers.length) },
+          { label: 'Overdue Customers', value: String(customers.filter((s) => s.status === 'Overdue').length) },
+          { label: 'Distance Planned', value: '—' },
         ]}
       />
       <section className="panel content-panel" style={{ padding: '14px 20px' }}>
         <p style={{ margin: 0, fontSize: '0.85rem', color: '#64748b' }}>
-          <strong style={{ color: '#1e293b' }}>SAW Priority Engine</strong> — Accounts are ranked using Simple Additive Weighting:
-          outstanding balance <strong>(45%)</strong>, days overdue <strong>(35%)</strong>, proximity <strong>(20%)</strong>. Highest score = visit first.
+          <strong style={{ color: '#1e293b' }}>Customer Priority List</strong> — Customers are ordered by outstanding balance and urgency.
         </p>
       </section>
       <section className="panel content-panel">
         <div className="panel-section-header">
-          <h3>{showMap || pageType === 'routeMap' ? 'Route Map View' : 'SAW Prioritized Collection List'}</h3>
+          <h3>{showMap || pageType === 'routeMap' ? 'Route Map View' : 'Customer Priority List'}</h3>
           <div className="inline-toolbar">
             <div className="segmented-control">
               {['All', 'Pending', 'Completed'].map((item) => (
@@ -314,16 +332,16 @@ function RoutePage({ pageType, navigate, showToast }) {
               center={[7.1907, 125.4553]} 
               zoom={13} 
               height={500}
-              markers={ROUTE_STOPS.map((stop, i) => ({
+              markers={customers.map((stop, i) => ({
                 id: stop.id,
                 position: [7.1907 + (i * 0.005), 125.4553 + (i * 0.005)],
-                label: stop.rank.toString(),
+                label: stop.customerName.substring(0, 2).toUpperCase(),
                 color: stop.status === 'Completed' ? '#10b981' : '#2563eb',
-                popup: `${stop.clientName} - ${stop.status}`
+                popup: `${stop.customerName} - ${stop.status}`
               }))}
               polylines={[{ 
                 id: 'route', 
-                positions: ROUTE_STOPS.map((stop, i) => [7.1907 + (i * 0.005), 125.4553 + (i * 0.005)]), 
+                positions: customers.map((stop, i) => [7.1907 + (i * 0.005), 125.4553 + (i * 0.005)]), 
                 color: '#2563eb' 
               }]}
             />
@@ -334,34 +352,23 @@ function RoutePage({ pageType, navigate, showToast }) {
               <thead>
                 <tr>
                   <th>Rank</th>
-                  <th>Client</th>
+                  <th>Customer</th>
                   <th>Address</th>
                   <th>Balance</th>
-                  <th>Days Overdue</th>
-                  <th>SAW Score</th>
+                  <th>Status</th>
                   <th>Actions</th>
                 </tr>
               </thead>
               <tbody>
-                {filteredStops.map((stop) => (
+                {filteredStops.map((stop, idx) => (
                   <tr key={stop.id}>
-                    <td><strong>#{stop.rank}</strong></td>
-                    <td>{stop.clientName}</td>
+                    <td><strong>#{idx + 1}</strong></td>
+                    <td>{stop.customerName}</td>
                     <td>{stop.address}</td>
-                    <td>{formatCurrency(stop.outstandingBalance)}</td>
-                    <td style={{ color: stop.daysOverdue > 0 ? '#dc2626' : 'inherit', fontWeight: stop.daysOverdue > 0 ? 600 : 400 }}>{stop.daysOverdue}d</td>
+                    <td>{formatCurrency(stop.outstandingBalance || 0)}</td>
+                    <td><span className={`status-badge ${stop.status === 'Completed' ? 'status-completed' : stop.status === 'Overdue' ? 'status-inactive' : ''}`}>{stop.status}</span></td>
                     <td>
-                      <span style={{ display:'inline-flex', alignItems:'center', gap:6 }}>
-                        <span style={{ width: 60, height: 6, background: '#f1f5f9', borderRadius: 999, overflow: 'hidden', display: 'inline-block' }}>
-                          <span style={{ display: 'block', height: '100%', width: `${(stop.sawScore ?? 0) * 100}%`, background: '#2563eb', borderRadius: 999 }} />
-                        </span>
-                        <span style={{ fontSize: '0.8rem', color: '#64748b' }}>{((stop.sawScore ?? 0) * 100).toFixed(0)}%</span>
-                      </span>
-                    </td>
-                    <td>
-                      <button className="icon-action-button" type="button" title="
-                        View
-                      " onClick={() => navigate(`/collector/account-detail/${stop.id}?from=route`)}><NavIcon name="view" /></button>
+                      <button className="icon-action-button" type="button" title="View" onClick={() => navigate(`/collector/account-detail/${stop.id}?from=route`)}><NavIcon name="view" /></button>
                     </td>
                   </tr>
                 ))}
@@ -369,7 +376,7 @@ function RoutePage({ pageType, navigate, showToast }) {
             </table>
           </div>
         ) : (
-          <EmptyState title="No stops match this filter" description="Try a different status filter." />
+          <EmptyState title="No customers match this filter" description="Try a different status filter." />
         )}
       </section>
     </div>
@@ -378,25 +385,31 @@ function RoutePage({ pageType, navigate, showToast }) {
 
 function AccountsPage({ navigate, showToast }) {
   const [search, setSearch] = useState('');
-  const [filter, setFilter] = useState('All Accounts');
+  const [filter, setFilter] = useState('All Customers');
   const [sortBy, setSortBy] = useState('Name');
   const [loading, setLoading] = useState(true);
+  const [customers, setCustomers] = useState([]);
 
   useEffect(() => {
-    const timer = window.setTimeout(() => setLoading(false), 400);
-    return () => window.clearTimeout(timer);
+    async function load() {
+      setLoading(true);
+      const result = await fetchAccounts();
+      if (result.success) setCustomers(result.data);
+      setLoading(false);
+    }
+    load();
   }, []);
 
-  const filteredAccounts = useMemo(() => {
-    let results = [...ACCOUNTS];
+  const filteredCustomers = useMemo(() => {
+    let results = [...customers];
     const query = search.trim().toLowerCase();
 
     if (query) {
       results = results.filter(
-        (account) =>
-          account.clientName.toLowerCase().includes(query) ||
-          account.accountNumber.toLowerCase().includes(query) ||
-          account.phone.includes(query),
+        (customer) =>
+          (customer.customerName || '').toLowerCase().includes(query) ||
+          (customer.accountNumber || '').toLowerCase().includes(query) ||
+          (customer.phone || '').includes(query),
       );
     }
 
@@ -422,41 +435,41 @@ function AccountsPage({ navigate, showToast }) {
 
     switch (sortBy) {
       case 'Outstanding Balance':
-        results.sort((a, b) => b.outstandingBalance - a.outstandingBalance);
+        results.sort((a, b) => (b.outstandingBalance || 0) - (a.outstandingBalance || 0));
         break;
       case 'Days Overdue':
-        results.sort((a, b) => b.daysOverdue - a.daysOverdue);
+        results.sort((a, b) => (b.daysOverdue || 0) - (a.daysOverdue || 0));
         break;
       case 'Distance':
-        results.sort((a, b) => a.distanceKm - b.distanceKm);
+        results.sort((a, b) => (a.distanceKm || 0) - (b.distanceKm || 0));
         break;
       default:
-        results.sort((a, b) => a.clientName.localeCompare(b.clientName));
+        results.sort((a, b) => (a.customerName || '').localeCompare(b.customerName || ''));
         break;
     }
 
     return results;
-  }, [search, filter, sortBy]);
+  }, [customers, search, filter, sortBy]);
 
-  if (loading) return <LoadingState message="Loading accounts..." />;
+  if (loading) return <LoadingState message="Loading customers..." />;
 
   return (
     <div className="page">
       <section className="panel content-panel">
         <div className="panel-section-header">
-          <h3>Account List</h3>
+          <h3>Customer List</h3>
         </div>
         <div className="accounts-toolbar">
           <input
             className="search-input"
             type="search"
-            placeholder="Search by client name, account number, or phone"
+            placeholder="Search by customer name, account number, or phone"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
           />
           <div className="accounts-filters">
             <select value={filter} onChange={(e) => setFilter(e.target.value)}>
-              {['All Accounts', 'Assigned Today', 'Pending', 'Completed', 'Overdue', 'Blacklisted'].map((option) => (
+              {['All Customers', 'Assigned Today', 'Pending', 'Completed', 'Overdue', 'Blacklisted'].map((option) => (
                 <option key={option} value={option}>
                   {option}
                 </option>
@@ -473,26 +486,26 @@ function AccountsPage({ navigate, showToast }) {
         </div>
       </section>
 
-      {filteredAccounts.length ? (
+      {filteredCustomers.length ? (
         <div className="account-card-grid">
-          {filteredAccounts.map((account) => (
+          {filteredCustomers.map((customer) => (
             <AccountCard
-              key={account.id}
-              account={account}
+              key={customer.id}
+              account={customer}
               onViewDetails={(item) => navigate(`/collector/account-detail/${item.id}?from=accounts`)}
-              onCall={() => showToast(`Calling ${account.clientName}...`, 'success')}
-              onNavigate={() => showToast(`Opening navigation to ${account.address}`, 'success')}
+              onCall={() => showToast(`Calling ${customer.customerName}...`, 'success')}
+              onNavigate={() => showToast(`Opening navigation to ${customer.address}`, 'success')}
             />
           ))}
         </div>
       ) : (
         <EmptyState
-          title="No accounts found"
-          description="Adjust your search or filters to find accounts."
+          title="No customers found"
+          description="Adjust your search or filters to find customers."
           actionLabel="Clear search"
           onAction={() => {
             setSearch('');
-            setFilter('All Accounts');
+            setFilter('All Customers');
           }}
         />
       )}
@@ -501,10 +514,22 @@ function AccountsPage({ navigate, showToast }) {
 }
 
 function AccountDetailPage({ accountId, parentContext, navigate, showToast }) {
-  const account = getAccountById(accountId);
+  const [account, setAccount] = useState(null);
+  const [loading, setLoading] = useState(true);
 
+  useEffect(() => {
+    async function load() {
+      setLoading(true);
+      const result = await fetchAccountById(accountId);
+      if (result.success) setAccount(result.data);
+      setLoading(false);
+    }
+    load();
+  }, [accountId]);
+
+  if (loading) return <LoadingState message="Loading customer..." />;
   if (!account) {
-    return <EmptyState title="Account not found" description="This account may have been removed or is unavailable." actionLabel="Back to Accounts" onAction={() => navigate('/collector/accounts')} />;
+    return <EmptyState title="Customer not found" description="This customer may have been removed or is unavailable." actionLabel="Back to Customers" onAction={() => navigate('/collector/accounts')} />;
   }
 
   const backTo = parentContext === 'route' ? '/collector/route' : '/collector/accounts';
@@ -514,15 +539,15 @@ function AccountDetailPage({ accountId, parentContext, navigate, showToast }) {
     <div className="page">
       <StatsGrid
         stats={[
-          { label: 'Outstanding Balance', value: formatCurrency(account.outstandingBalance) },
-          { label: 'Days Overdue', value: String(account.daysOverdue) },
+          { label: 'Outstanding Balance', value: formatCurrency(account.outstandingBalance || 0) },
+          { label: 'Days Overdue', value: String(account.daysOverdue || 0) },
           { label: 'Delinquency Status', value: account.status },
         ]}
       />
 
       <section className="panel content-panel account-detail-panel">
         <div className="panel-section-header">
-          <h3>{account.clientName}</h3>
+          <h3>{account.customerName}</h3>
           <p className="muted">{account.accountNumber}</p>
         </div>
         <div className="account-detail-grid two-up">
@@ -533,15 +558,15 @@ function AccountDetailPage({ accountId, parentContext, navigate, showToast }) {
           </div>
           <div style={{ minHeight: 200, width: '100%', borderRadius: 8, overflow: 'hidden' }}>
             <LeafletMap 
-              center={[7.1907, 125.4553]} 
+              center={account.latitude && account.longitude ? [account.latitude, account.longitude] : [7.1907, 125.4553]} 
               zoom={15} 
               height={200}
               markers={[{
                 id: account.id,
-                position: [7.1907, 125.4553],
-                label: account.clientName.substring(0, 2).toUpperCase(),
+                position: account.latitude && account.longitude ? [account.latitude, account.longitude] : [7.1907, 125.4553],
+                label: (account.customerName || 'CU').substring(0, 2).toUpperCase(),
                 color: '#2563eb',
-                popup: account.clientName
+                popup: account.customerName
               }]}
             />
           </div>
@@ -552,7 +577,7 @@ function AccountDetailPage({ accountId, parentContext, navigate, showToast }) {
         <div className="panel-section-header">
           <h3>Payment History</h3>
         </div>
-        {account.paymentHistory.length ? (
+        {account.paymentHistory && account.paymentHistory.length ? (
           <div className="table-shell">
             <table className="data-table">
               <thead>
@@ -576,7 +601,7 @@ function AccountDetailPage({ accountId, parentContext, navigate, showToast }) {
             </table>
           </div>
         ) : (
-          <EmptyState title="No payment history" description="Previous collections for this account will appear here." />
+          <EmptyState title="No payment history" description="Previous collections for this customer will appear here." />
         )}
       </section>
 
@@ -585,12 +610,12 @@ function AccountDetailPage({ accountId, parentContext, navigate, showToast }) {
           { label: 'Log Collection', to: `/collector/collection-log/${account.id}${contextQuery}` },
           { label: 'Submit CI Form', to: `/collector/ci-form/${account.id}${contextQuery}`, variant: 'secondary' },
           { label: 'Report Incident', to: `/collector/incident/${account.id}${contextQuery}`, variant: 'secondary' },
-          { label: 'Call Client', action: 'call', variant: 'secondary' },
+          { label: 'Call Customer', action: 'call', variant: 'secondary' },
           { label: 'Open Navigation', action: 'navigate', variant: 'secondary' },
           { label: 'Back', to: backTo, variant: 'ghost' },
         ]}
         onAction={(action) => {
-          if (action.action === 'call') showToast(`Calling ${account.clientName}...`, 'success');
+          if (action.action === 'call') showToast(`Calling ${account.customerName}...`, 'success');
           else if (action.action === 'navigate') showToast(`Opening navigation to ${account.address}`, 'success');
           else if (action.to) navigate(action.to);
         }}
@@ -600,9 +625,10 @@ function AccountDetailPage({ accountId, parentContext, navigate, showToast }) {
 }
 
 function CollectionLogPage({ accountId, parentContext, navigate, showToast }) {
-  const account = getAccountById(accountId);
+  const [account, setAccount] = useState(null);
+  const [loading, setLoading] = useState(true);
   const [formData, setFormData] = useState({
-    clientName: account?.clientName ?? '',
+    customerName: '',
     amountCollected: '',
     paymentMethod: '',
     notes: '',
@@ -614,11 +640,25 @@ function CollectionLogPage({ accountId, parentContext, navigate, showToast }) {
   const [submitted, setSubmitted] = useState(false);
   const contextQuery = `?from=${parentContext}`;
 
+  useEffect(() => {
+    async function load() {
+      setLoading(true);
+      const result = await fetchAccountById(accountId);
+      if (result.success) {
+        setAccount(result.data);
+        setFormData((prev) => ({ ...prev, customerName: result.data.customerName || '' }));
+      }
+      setLoading(false);
+    }
+    load();
+  }, [accountId]);
+
+  if (loading) return <LoadingState message="Loading customer..." />;
   if (!account) {
-    return <EmptyState title="Account not found" actionLabel="Back to Accounts" onAction={() => navigate('/collector/accounts')} />;
+    return <EmptyState title="Customer not found" actionLabel="Back to Customers" onAction={() => navigate('/collector/accounts')} />;
   }
 
-  const remainingBalance = Math.max(account.outstandingBalance - (Number(formData.amountCollected) || 0), 0);
+  const remainingBalance = Math.max((account.outstandingBalance || 0) - (Number(formData.amountCollected) || 0), 0);
 
   const handleChange = (name, value) => {
     setFormData((prev) => ({ ...prev, [name]: value }));
@@ -630,7 +670,7 @@ function CollectionLogPage({ accountId, parentContext, navigate, showToast }) {
     const nextErrors = {};
 
     if (!amount || amount <= 0) nextErrors.amountCollected = 'Enter a valid amount greater than zero.';
-    if (amount > account.outstandingBalance) nextErrors.amountCollected = 'Amount cannot exceed outstanding balance.';
+    if (amount > (account.outstandingBalance || 0)) nextErrors.amountCollected = 'Amount cannot exceed outstanding balance.';
     if (!formData.paymentMethod) nextErrors.paymentMethod = 'Select a payment method.';
     if (submitted) nextErrors.amountCollected = 'This collection has already been submitted.';
 
@@ -653,8 +693,8 @@ function CollectionLogPage({ accountId, parentContext, navigate, showToast }) {
         onChange={handleChange}
         errors={errors}
         fields={[
-          { name: 'clientName', label: 'Client Name', type: 'text', disabled: true, defaultValue: account.clientName },
-          { name: 'amountCollected', label: 'Amount Collected', type: 'number', required: true, min: 0, max: account.outstandingBalance, placeholder: 'Enter amount' },
+          { name: 'customerName', label: 'Customer Name', type: 'text', disabled: true, defaultValue: account.customerName },
+          { name: 'amountCollected', label: 'Amount Collected', type: 'number', required: true, min: 0, max: account.outstandingBalance || 0, placeholder: 'Enter amount' },
           { name: 'paymentMethod', label: 'Payment Method', type: 'select', required: true, placeholder: 'Select payment method', options: ['Cash', 'Check', 'Bank Transfer', 'Mobile Money'] },
           { name: 'notes', label: 'Notes', type: 'textarea', placeholder: 'Add notes about the transaction...' },
           { name: 'proofPhoto', label: 'Proof Photo Upload', type: 'file', accept: 'image/*' },
@@ -675,20 +715,36 @@ function CollectionLogPage({ accountId, parentContext, navigate, showToast }) {
 }
 
 function DigitalReceiptPage({ accountId, parentContext, navigate, showToast }) {
-  const account = getAccountById(accountId);
+  const [account, setAccount] = useState(null);
+  const [loading, setLoading] = useState(true);
   const contextQuery = `?from=${parentContext}`;
   const receiptNumber = `RCP-2024-${String(accountId).padStart(4, '0')}`;
 
+  useEffect(() => {
+    async function load() {
+      setLoading(true);
+      const result = await fetchAccountById(accountId);
+      if (result.success) setAccount(result.data);
+      setLoading(false);
+    }
+    load();
+  }, [accountId]);
+
+  if (loading) return <LoadingState message="Loading receipt..." />;
   if (!account) {
-    return <EmptyState title="Receipt unavailable" actionLabel="Back to Accounts" onAction={() => navigate('/collector/accounts')} />;
+    return <EmptyState title="Receipt unavailable" actionLabel="Back to Customers" onAction={() => navigate('/collector/accounts')} />;
   }
+
+  const currentUser = getCurrentUser();
+  const collectorName = currentUser?.fullName || 'Collector';
+  const branchName = currentUser?.branch?.name || '—';
 
   return (
     <div className="page">
       <StatsGrid
         stats={[
           { label: 'Receipt #', value: receiptNumber },
-          { label: 'Amount Paid', value: formatCurrency(5000) },
+          { label: 'Amount Paid', value: formatCurrency(0) },
           { label: 'Payment Method', value: 'Cash' },
         ]}
       />
@@ -697,9 +753,9 @@ function DigitalReceiptPage({ accountId, parentContext, navigate, showToast }) {
           <h3>Receipt Information</h3>
         </div>
         <ul className="info-grid">
-          <li><span className="info-item-label">Client</span><span className="info-item-value">{account.clientName}</span></li>
-          <li><span className="info-item-label">Collector</span><span className="info-item-value">{COLLECTOR_PROFILE.name}</span></li>
-          <li><span className="info-item-label">Branch</span><span className="info-item-value">{COLLECTOR_PROFILE.branch}</span></li>
+          <li><span className="info-item-label">Customer</span><span className="info-item-value">{account.customerName}</span></li>
+          <li><span className="info-item-label">Collector</span><span className="info-item-value">{collectorName}</span></li>
+          <li><span className="info-item-label">Branch</span><span className="info-item-value">{branchName}</span></li>
           <li><span className="info-item-label">Date & Time</span><span className="info-item-value">{new Date().toLocaleString('en-PH')}</span></li>
         </ul>
       </section>
@@ -720,12 +776,27 @@ function DigitalReceiptPage({ accountId, parentContext, navigate, showToast }) {
 }
 
 function CIFormPage({ accountId, parentContext, navigate, showToast }) {
-  const account = getAccountById(accountId);
-  const [formData, setFormData] = useState({ clientName: account?.clientName ?? '' });
+  const [account, setAccount] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [formData, setFormData] = useState({ customerName: '' });
   const contextQuery = `?from=${parentContext}`;
 
+  useEffect(() => {
+    async function load() {
+      setLoading(true);
+      const result = await fetchAccountById(accountId);
+      if (result.success) {
+        setAccount(result.data);
+        setFormData((prev) => ({ ...prev, customerName: result.data.customerName || '' }));
+      }
+      setLoading(false);
+    }
+    load();
+  }, [accountId]);
+
+  if (loading) return <LoadingState message="Loading customer..." />;
   if (!account) {
-    return <EmptyState title="Account not found" actionLabel="Back to Accounts" onAction={() => navigate('/collector/accounts')} />;
+    return <EmptyState title="Customer not found" actionLabel="Back to Customers" onAction={() => navigate('/collector/accounts')} />;
   }
 
   return (
@@ -735,8 +806,8 @@ function CIFormPage({ accountId, parentContext, navigate, showToast }) {
         formData={formData}
         onChange={(name, value) => setFormData((prev) => ({ ...prev, [name]: value }))}
         fields={[
-          { name: 'clientName', label: 'Client Name', type: 'text', disabled: true, defaultValue: account.clientName },
-          { name: 'purpose', label: 'Purpose of CI', type: 'select', required: true, placeholder: 'Select purpose', options: ['Credit Limit Increase', 'New Client', 'Delinquency Review', 'Account Restructure'] },
+          { name: 'customerName', label: 'Customer Name', type: 'text', disabled: true, defaultValue: account.customerName },
+          { name: 'purpose', label: 'Purpose of CI', type: 'select', required: true, placeholder: 'Select purpose', options: ['Credit Limit Increase', 'New Customer', 'Delinquency Review', 'Account Restructure'] },
           { name: 'monthlyIncome', label: 'Monthly Income', type: 'number', required: true, placeholder: 'PHP amount' },
           { name: 'businessType', label: 'Business Type', type: 'select', required: true, placeholder: 'Select type', options: ['Sari-Sari Store', 'Convenience Store', 'General Store', 'Wholesale', 'Retail', 'Service'] },
           { name: 'reference1', label: 'Character Reference 1', type: 'text', placeholder: 'Name and contact' },
@@ -766,16 +837,30 @@ function CIFormPage({ accountId, parentContext, navigate, showToast }) {
 }
 
 function IncidentReportPage({ accountId, parentContext, navigate, showToast }) {
-  const account = accountId ? getAccountById(accountId) : null;
+  const [account, setAccount] = useState(null);
+  const [loading, setLoading] = useState(true);
   const [formData, setFormData] = useState({});
   const contextQuery = parentContext ? `?from=${parentContext}` : '';
   const backTo = account ? `/collector/account-detail/${account.id}${contextQuery}` : '/collector/dashboard';
+
+  useEffect(() => {
+    async function load() {
+      if (!accountId) return;
+      setLoading(true);
+      const result = await fetchAccountById(accountId);
+      if (result.success) setAccount(result.data);
+      setLoading(false);
+    }
+    load();
+  }, [accountId]);
+
+  if (loading) return <LoadingState message="Loading customer..." />;
 
   return (
     <div className="page">
       {account ? (
         <section className="panel content-panel">
-          <p className="muted">Reporting incident for <strong>{account.clientName}</strong> ({account.accountNumber})</p>
+          <p className="muted">Reporting incident for <strong>{account.customerName}</strong> ({account.accountNumber})</p>
         </section>
       ) : null}
       <FormPanel
@@ -828,7 +913,7 @@ function CollectionHistoryPage({ navigate, showToast }) {
     const query = search.trim().toLowerCase();
     return COLLECTION_HISTORY.filter((item) => {
       const matchesSearch =
-        !query || item.clientName.toLowerCase().includes(query) || item.receiptNumber.toLowerCase().includes(query);
+        !query || item.customerName.toLowerCase().includes(query) || item.receiptNumber.toLowerCase().includes(query);
       const matchesStatus = statusFilter === 'All' || item.status === statusFilter;
       const matchesFrom = !dateFrom || item.date >= dateFrom;
       const matchesTo = !dateTo || item.date <= dateTo;
@@ -848,7 +933,7 @@ function CollectionHistoryPage({ navigate, showToast }) {
           <input
             className="search-input"
             type="search"
-            placeholder="Search by client or receipt number"
+            placeholder="Search by customer or receipt number"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
           />
@@ -873,7 +958,7 @@ function CollectionHistoryPage({ navigate, showToast }) {
               <thead>
                 <tr>
                   <th>Receipt Number</th>
-                  <th>Client Name</th>
+                  <th>Customer Name</th>
                   <th>Amount</th>
                   <th>Date</th>
                   <th>Status</th>
@@ -884,7 +969,7 @@ function CollectionHistoryPage({ navigate, showToast }) {
                 {filteredHistory.map((item) => (
                   <tr key={item.id}>
                     <td>{item.receiptNumber}</td>
-                    <td>{item.clientName}</td>
+                    <td>{item.customerName}</td>
                     <td>{formatCurrency(item.amount)}</td>
                     <td>{item.date}</td>
                     <td>{item.status}</td>
@@ -927,7 +1012,7 @@ function ReceiptDetailsPage({ receiptId, navigate, showToast }) {
           <h3>Receipt Details</h3>
         </div>
         <ul className="info-grid">
-          <li><span className="info-item-label">Client</span><span className="info-item-value">{receipt.clientName}</span></li>
+          <li><span className="info-item-label">Customer</span><span className="info-item-value">{receipt.customerName}</span></li>
           <li><span className="info-item-label">Account</span><span className="info-item-value">{receipt.accountNumber}</span></li>
           <li><span className="info-item-label">Collector</span><span className="info-item-value">{receipt.collectorName}</span></li>
           <li><span className="info-item-label">Branch</span><span className="info-item-value">{receipt.branch}</span></li>
@@ -1023,20 +1108,23 @@ function NotificationsPage({ navigate, showToast }) {
 }
 
 function ProfilePage({ navigate, showToast }) {
+  const currentUser = getCurrentUser();
+  const profile = currentUser || {};
+
   return (
     <div className="page">
       <section className="panel content-panel profile-panel">
         <div className="profile-header">
-          <div className="profile-avatar">{COLLECTOR_PROFILE.avatarInitials}</div>
+          <div className="profile-avatar">{(profile.fullName || 'CO').split(' ').map((n) => n[0]).join('').slice(0, 2).toUpperCase()}</div>
           <div>
-            <h3>{COLLECTOR_PROFILE.name}</h3>
-            <p className="muted">{COLLECTOR_PROFILE.employeeId}</p>
+            <h3>{profile.fullName || 'Collector'}</h3>
+            <p className="muted">{profile.email || ''}</p>
           </div>
         </div>
         <ul className="info-grid">
-          <li><span className="info-item-label">Branch Assignment</span><span className="info-item-value">{COLLECTOR_PROFILE.branch}</span></li>
-          <li><span className="info-item-label">Email</span><span className="info-item-value">{COLLECTOR_PROFILE.email}</span></li>
-          <li><span className="info-item-label">Phone</span><span className="info-item-value">{COLLECTOR_PROFILE.phone}</span></li>
+          <li><span className="info-item-label">Branch Assignment</span><span className="info-item-value">{profile.branch?.name || '—'}</span></li>
+          <li><span className="info-item-label">Role</span><span className="info-item-value">{profile.role?.name || '—'}</span></li>
+          <li><span className="info-item-label">Status</span><span className="info-item-value">{profile.status || '—'}</span></li>
         </ul>
       </section>
       <PageToolbar

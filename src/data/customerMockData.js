@@ -2,7 +2,7 @@
 
 export const CUSTOMER_ACCOUNT = {
   accountNumber: 'ACC-2026-00123',
-  clientName: 'Luntiang Tahanan Interiors',
+  customerName: 'Luntiang Tahanan Interiors',
   businessType: 'Furniture Retail Store',
   address: '42 Ilustre Ave, Barangay Poblacion, Davao City',
   contactNumber: '+63 912 345 6789',

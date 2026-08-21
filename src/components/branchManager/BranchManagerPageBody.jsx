@@ -6,17 +6,21 @@ import {
   ResponsiveContainer, PieChart, Pie, Cell,
 } from 'recharts';
 import {
-  ALERTS, AUDIT_LOGS, BRANCH_ANALYTICS, BRANCH_MANAGER_PROFILE,
-  CI_QUEUE, COLLECTORS, MAP_ACCOUNTS, NOTIFICATIONS, PENDING_APPROVALS,
-  SALES_AGENTS, TRENDS, formatCurrency, getCIById,
-  getCollectorById, getMapAccountById, getSalesAgentById,
+  AUDIT_LOGS, ALERTS, BRANCH_ANALYTICS, CI_QUEUE, formatCurrency, getCIById,
+  getMapAccountById, MAP_ACCOUNTS, NOTIFICATIONS,
 } from '../../data/branchManagerMockData';
 import { EmptyState } from '../collector/EmptyState';
 import { LoadingState } from '../collector/LoadingState';
 import { NavIcon } from '../../navIcons';
 import LeafletMap from '../common/LeafletMap';
 import { StatusBadge } from '../StatusBadge';
-import { requestLogout } from '../../api/authService.js';
+import { requestLogout, getCurrentUser } from '../../api/authService.js';
+import { getBranchAnalytics, getBranchStaff, getBranchCustomers, getBranchCustomerById, getBranchAlerts } from '../../api/branchManagerService.js';
+import { getReportCollection, getReportSales, getReportInventory, getReportDelinquency, getReportCompliance, getReportKPI } from '../../api/reportsService.js';
+import { CreditHistoryListPage, CreditHistoryDetailPage } from '../shared/CreditHistoryPages';
+
+// Re-export for use in other components
+export { getBranchAnalytics, getBranchStaff, getBranchCustomers, getBranchAlerts };
 
 const C = ['#2563eb','#06b6d4','#10b981','#f59e0b','#ef4444'];
 
@@ -86,52 +90,60 @@ function StaffCard({ title, metrics, actions, onAction }) {
   );
 }
 
-// ── chart data derived from mock ──────────────────────────────────────────────
-const DAILY_COL = [
-  {day:'Mon',  amount:170000, target:180000},
-  {day:'Tue',  amount:178000, target:180000},
-  {day:'Wed',  amount:182000, target:185000},
-  {day:'Thu',  amount:186000, target:185000},
-  {day:'Fri',  amount:189000, target:190000},
-  {day:'Sat',  amount:192000, target:190000},
-  {day:'Today',amount:186500, target:190000},
-];
-const WEEKLY_SALES_D = [
-  {day:'Mon',  actual:220000, target:230000},
-  {day:'Tue',  actual:235000, target:230000},
-  {day:'Wed',  actual:241000, target:240000},
-  {day:'Thu',  actual:248000, target:245000},
-  {day:'Fri',  actual:252000, target:250000},
-  {day:'Sat',  actual:258000, target:255000},
-  {day:'Today',actual:248000, target:260000},
-];
-const DELINQUENCY_W = [
-  {week:'W1', accounts:9,  rate:14},
-  {week:'W2', accounts:10, rate:15},
-  {week:'W3', accounts:9,  rate:13},
-  {week:'W4', accounts:10, rate:16},
-  {week:'W5', accounts:11, rate:17},
-  {week:'W6', accounts:10, rate:16},
-  {week:'W7', accounts:11, rate:18},
-];
-const COMPLIANCE_W = [
-  {week:'W1', Maria:92, John:96, Pedro:82},
-  {week:'W2', Maria:93, John:97, Pedro:83},
-  {week:'W3', Maria:91, John:97, Pedro:84},
-  {week:'W4', Maria:94, John:97, Pedro:85},
-];
-
 // ── Dashboard ─────────────────────────────────────────────────────────────────
 function DashboardPage({ navigate, branchName }) {
-  const unread = NOTIFICATIONS.filter((n) => !n.read).length;
-  const critical = ALERTS.filter((a) => a.severity === 'Critical');
+  const currentUser = getCurrentUser();
+  const userName = currentUser?.fullName || 'User';
+  const userBranch = currentUser?.branch?.name || branchName || 'Branch';
+  
+  const [analytics, setAnalytics] = useState(null);
+  const [alerts, setAlerts] = useState([]);
+  const [staff, setStaff] = useState({ collectors: [], salesAgents: [] });
+  const [customers, setCustomers] = useState({ mapAccounts: [] });
+  const [collectionData, setCollectionData] = useState(null);
+  const [salesData, setSalesData] = useState(null);
+  const [delinquencyData, setDelinquencyData] = useState(null);
+  const [kpi, setKpi] = useState(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    async function fetchData() {
+      setLoading(true);
+      const [analyticsData, alertsData, staffData, customersData, reportCollection, reportSales, reportDelinquency, reportKpi] = await Promise.all([
+        getBranchAnalytics(),
+        getBranchAlerts(),
+        getBranchStaff(),
+        getBranchCustomers(),
+        getReportCollection(),
+        getReportSales(),
+        getReportDelinquency(),
+        getReportKPI(),
+      ]);
+      if (analyticsData.success) setAnalytics(analyticsData.data);
+      if (alertsData.success) setAlerts(alertsData.data.alerts);
+      if (staffData.success) setStaff(staffData.data);
+      if (customersData.success) setCustomers(customersData.data);
+      if (reportCollection.success) setCollectionData(reportCollection.data);
+      if (reportSales.success) setSalesData(reportSales.data);
+      if (reportDelinquency.success) setDelinquencyData(reportDelinquency.data);
+      if (reportKpi.success) setKpi(reportKpi.data);
+      setLoading(false);
+    }
+    fetchData();
+  }, []);
+
+  const unread = 0; // Would come from notifications API
+  const critical = alerts.filter((a) => a.severity === 'Critical');
+
+  if (loading) return <LoadingState />;
+
   return (
     <div className="page">
       <section className="panel dashboard-greeting">
         <div className="dashboard-greeting-main">
-          <p className="dashboard-eyebrow">{branchName ?? BRANCH_MANAGER_PROFILE.branch}</p>
-          <h2>{BRANCH_MANAGER_PROFILE.name}</h2>
-          <p className="muted">Branch Health: <strong>{BRANCH_ANALYTICS.healthScore}/100</strong></p>
+          <p className="dashboard-eyebrow">{userBranch}</p>
+          <h2>{userName}</h2>
+          <p className="muted">Branch Health: <strong>{analytics?.healthScore || 0}/100</strong></p>
         </div>
         <Link to="/branch-manager/notifications" className="notification-bell" aria-label={`${unread} unread`}>
           <NavIcon name="bell" />{unread>0&&<span className="notification-badge">{unread}</span>}
@@ -139,18 +151,18 @@ function DashboardPage({ navigate, branchName }) {
       </section>
 
       <Stats stats={[
-        {label:'Collection Rate',value:`${BRANCH_ANALYTICS.collectionRateToday}%`},
-        {label:'Route Compliance',value:`${BRANCH_ANALYTICS.routeCompliance}%`},
-        {label:'Sales Visit Completion',value:`${BRANCH_ANALYTICS.salesVisitCompletion}%`},
-        {label:'Pending CI Approvals',value:String(BRANCH_ANALYTICS.pendingCI)},
-        {label:'Overdue Accounts',value:String(BRANCH_ANALYTICS.overdueAccounts)},
-        {label:'Stock Alerts',value:String(BRANCH_ANALYTICS.stockAlertsCount)},
+        {label:'Collection Rate',value:`${analytics?.collectionRateToday || kpi?.collectionRate || 0}%`},
+        {label:'Route Compliance',value:`${analytics?.routeCompliance || 0}%`},
+        {label:'Sales Visit Completion',value:`${analytics?.salesVisitCompletion || 0}%`},
+        {label:'Pending CI Approvals',value:String(analytics?.pendingCI || 0)},
+        {label:'Overdue Accounts',value:String(kpi?.totalOutstanding > 0 ? Math.round(kpi.totalOutstanding / 1000) : 0)},
+        {label:'Stock Alerts',value:String(kpi?.stockAlertsCount || analytics?.stockAlertsCount || 0)},
       ]} />
 
       <div className="grid two-up">
         <Card title="Daily Collection vs Target" sub="This week">
           <ResponsiveContainer width="100%" height={220}>
-            <AreaChart data={DAILY_COL}>
+            <AreaChart data={collectionData?.daily || []}>
               <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9"/>
               <XAxis dataKey="day" tick={{fontSize:12}}/>
               <YAxis tick={{fontSize:11}} tickFormatter={(v)=>`${(v/1000).toFixed(0)}k`}/>
@@ -163,7 +175,7 @@ function DashboardPage({ navigate, branchName }) {
         </Card>
         <Card title="Sales vs Target" sub="This week">
           <ResponsiveContainer width="100%" height={220}>
-            <BarChart data={WEEKLY_SALES_D}>
+            <BarChart data={salesData?.weekly || []}>
               <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9"/>
               <XAxis dataKey="day" tick={{fontSize:12}}/>
               <YAxis tick={{fontSize:11}} tickFormatter={(v)=>`${(v/1000).toFixed(0)}k`}/>
@@ -178,9 +190,8 @@ function DashboardPage({ navigate, branchName }) {
       <div className="grid two-up">
         <Card title="Delinquency Trend" sub="Weekly overdue accounts">
           <ResponsiveContainer width="100%" height={200}>
-            <AreaChart data={DELINQUENCY_W}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9"/>
-              <XAxis dataKey="week" tick={{fontSize:12}}/><YAxis tick={{fontSize:12}}/><Tooltip/><Legend/>
+            <AreaChart data={delinquencyData?.delinquency || []}>
+              <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9"/><XAxis dataKey="week" tick={{fontSize:12}}/><YAxis tick={{fontSize:12}}/><Tooltip/><Legend/>
               <Area type="monotone" dataKey="accounts" name="Overdue" stroke="#ef4444" fill="#ef4444" fillOpacity={0.1} strokeWidth={2}/>
               <Area type="monotone" dataKey="rate" name="Rate %" stroke="#f59e0b" fill="#f59e0b" fillOpacity={0.08} strokeWidth={2}/>
             </AreaChart>
@@ -201,6 +212,7 @@ function DashboardPage({ navigate, branchName }) {
 
       <Toolbar actions={[
         {label:'Field Operations',to:'/branch-manager/field-operations'},
+        {label:'Customers',to:'/branch-manager/customers',variant:'secondary'},
         {label:'Approve CIs',to:'/branch-manager/ci-approvals',variant:'secondary'},
         {label:'Leaflet | OpenStreetMap',to:'/branch-manager/leaflet',variant:'secondary'},
         {label:'Reports',to:'/branch-manager/reports',variant:'secondary'},
@@ -212,10 +224,30 @@ function DashboardPage({ navigate, branchName }) {
 // ── Field Operations (combined hub + tab navigation) ─────────────────────────
 function FieldOperationsHub({ navigate, showToast }) {
   const [tab, setTab] = useState('overview');
+  const [staff, setStaff] = useState({ collectors: [], salesAgents: [] });
+  const [analytics, setAnalytics] = useState(null);
+  const [loading, setLoading] = useState(true);
+
   const tabs = [{key:'overview',label:'Overview'},{key:'collectors',label:'Collector Routes'},{key:'sales',label:'Sales Schedules'},{key:'performance',label:'Route Performance'}];
 
-  const collectorChart = COLLECTORS.map((c)=>({name:c.name.split(' ')[0],compliance:c.complianceScore,recovery:c.recoveryRate}));
-  const salesChart = SALES_AGENTS.map((a)=>({name:a.name.split(' ')[0],visits:a.visitCompletionRate,conversion:a.conversionRate}));
+  useEffect(() => {
+    async function fetchData() {
+      setLoading(true);
+      const [staffData, analyticsData] = await Promise.all([
+        getBranchStaff(),
+        getBranchAnalytics(),
+      ]);
+      if (staffData.success) setStaff(staffData.data);
+      if (analyticsData.success) setAnalytics(analyticsData.data);
+      setLoading(false);
+    }
+    fetchData();
+  }, []);
+
+  const collectorChart = staff.collectors.map((c)=>({name:c.name.split(' ')[0],compliance:c.complianceScore,recovery:c.recoveryRate}));
+  const salesChart = staff.salesAgents.map((a)=>({name:a.name.split(' ')[0],visits:a.visitCompletionRate,conversion:a.conversionRate}));
+
+  if (loading) return <LoadingState />;
 
   return (
     <div className="page">
@@ -225,10 +257,10 @@ function FieldOperationsHub({ navigate, showToast }) {
 
       {tab==='overview'&&(<>
         <Stats stats={[
-          {label:'Active Collectors',value:String(BRANCH_ANALYTICS.activeCollectors)},
-          {label:'Active Sales Agents',value:String(BRANCH_ANALYTICS.activeSalesAgents)},
-          {label:'Route Compliance',value:`${BRANCH_ANALYTICS.routeCompliance}%`},
-          {label:'Sales Completion',value:`${BRANCH_ANALYTICS.salesVisitCompletion}%`},
+          {label:'Active Collectors',value:String(staff.collectors.length)},
+          {label:'Active Sales Agents',value:String(staff.salesAgents.length)},
+          {label:'Route Compliance',value:`${analytics?.routeCompliance || 0}%`},
+          {label:'Sales Completion',value:`${analytics?.salesVisitCompletion || 0}%`},
         ]}/>
         <div className="grid two-up">
           <Card title="Collector Performance" sub="Compliance & recovery">
@@ -252,20 +284,27 @@ function FieldOperationsHub({ navigate, showToast }) {
             </ResponsiveContainer>
           </Card>
         </div>
-        <Card title="Route Compliance Trend" sub="Weekly by collector">
-          <ResponsiveContainer width="100%" height={200}>
-            <LineChart data={COMPLIANCE_W}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9"/>
-              <XAxis dataKey="week" tick={{fontSize:12}}/><YAxis domain={[80,100]} unit="%" tick={{fontSize:12}}/><Tooltip formatter={(v)=>`${v}%`}/><Legend/>
-              {['Maria','John','Pedro'].map((n,i)=><Line key={n} type="monotone" dataKey={n} stroke={C[i]} strokeWidth={2} dot={false}/>)}
-            </LineChart>
-          </ResponsiveContainer>
+        <Card title="Collector Performance Summary" sub="Current branch metrics">
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 16, padding: '12px 0' }}>
+            {staff.collectors.slice(0, 4).map((c) => (
+              <div key={c.id} style={{ background: '#f8fafc', padding: 12, borderRadius: 8, border: '1px solid #e2e8f0' }}>
+                <strong style={{ fontSize: '0.9rem' }}>{c.name}</strong>
+                <div style={{ marginTop: 8, display: 'flex', flexDirection: 'column', gap: 4, fontSize: '0.85rem', color: '#475569' }}>
+                  <span>Assigned: {c.accountsAssigned}</span>
+                  <span>Visited: {c.accountsVisited}</span>
+                  <span>Pending: {c.accountsPending}</span>
+                  <span>Compliance: {c.complianceScore}%</span>
+                  <span>Collected: {formatCurrency(c.collectionAmount)}</span>
+                </div>
+              </div>
+            ))}
+          </div>
         </Card>
       </>)}
 
       {tab==='collectors'&&(
         <div className="account-card-grid">
-          {COLLECTORS.map((c)=>(
+          {staff.collectors.map((c)=>(
             <StaffCard key={c.id} title={c.name}
               metrics={[{label:'Assigned',value:c.accountsAssigned},{label:'Visited',value:c.accountsVisited},{label:'Pending',value:c.accountsPending},{label:'Compliance',value:`${c.complianceScore}%`},{label:'Collected',value:formatCurrency(c.collectionAmount)}]}
               actions={[{label:'Expand Route',action:'detail'},{label:'View on Map',action:'map',variant:'ghost'}]}
@@ -277,9 +316,9 @@ function FieldOperationsHub({ navigate, showToast }) {
 
       {tab==='sales'&&(
         <div className="account-card-grid">
-          {SALES_AGENTS.map((a)=>(
+          {staff.salesAgents.map((a)=>(
             <StaffCard key={a.id} title={a.name}
-              metrics={[{label:'Clients',value:a.clientsAssigned},{label:'Visits',value:a.visitsCompleted},{label:'Sales',value:a.salesLogged},{label:'Revenue',value:formatCurrency(a.totalSalesAmount)}]}
+              metrics={[{label:'Customers',value:a.customersAssigned},{label:'Visits',value:a.visitsCompleted},{label:'Sales',value:a.salesLogged},{label:'Revenue',value:formatCurrency(a.totalSalesAmount)}]}
               actions={[{label:'Expand Schedule',action:'detail'},{label:'View on Map',action:'map',variant:'ghost'}]}
               onAction={(act)=>{ if(act.action==='detail') navigate(`/branch-manager/field-operations/sales/${a.id}`); else navigate('/branch-manager/leaflet'); }}
             />
@@ -294,8 +333,8 @@ function FieldOperationsHub({ navigate, showToast }) {
             <table className="data-table">
               <thead><tr><th>Staff</th><th>Type</th><th>Compliance</th><th>Recovery / Revenue</th><th>Missed</th></tr></thead>
               <tbody>
-                {COLLECTORS.map((c)=><tr key={c.id}><td>{c.name}</td><td>Collector</td><td>{c.complianceScore}%</td><td>{c.recoveryRate}%</td><td>{c.missedVisits}</td></tr>)}
-                {SALES_AGENTS.map((a)=><tr key={a.id}><td>{a.name}</td><td>Sales</td><td>{a.visitCompletionRate}%</td><td>{formatCurrency(a.totalSalesAmount)}</td><td>—</td></tr>)}
+                {staff.collectors.map((c)=><tr key={c.id}><td>{c.name}</td><td>Collector</td><td>{c.complianceScore}%</td><td>{c.recoveryRate}%</td><td>{c.missedVisits}</td></tr>)}
+                {staff.salesAgents.map((a)=><tr key={a.id}><td>{a.name}</td><td>Sales</td><td>{a.visitCompletionRate}%</td><td>{formatCurrency(a.totalSalesAmount)}</td><td>—</td></tr>)}
               </tbody>
             </table>
           </div>
@@ -306,7 +345,21 @@ function FieldOperationsHub({ navigate, showToast }) {
 }
 
 function CollectorDetailPage({ collectorId, navigate }) {
-  const c = getCollectorById(collectorId);
+  const [staff, setStaff] = useState({ collectors: [], salesAgents: [] });
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    async function load() {
+      setLoading(true);
+      const result = await getBranchStaff();
+      if (result.success) setStaff(result.data);
+      setLoading(false);
+    }
+    load();
+  }, []);
+
+  const c = staff.collectors.find((x) => x.id === String(collectorId));
+  if (loading) return <LoadingState />;
   if (!c) return <EmptyState title="Collector not found" actionLabel="Back" onAction={()=>navigate('/branch-manager/field-operations')}/>;
   return (
     <div className="page">
@@ -333,13 +386,27 @@ function CollectorDetailPage({ collectorId, navigate }) {
 }
 
 function SalesAgentDetailPage({ agentId, navigate }) {
-  const a = getSalesAgentById(agentId);
+  const [staff, setStaff] = useState({ collectors: [], salesAgents: [] });
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    async function load() {
+      setLoading(true);
+      const result = await getBranchStaff();
+      if (result.success) setStaff(result.data);
+      setLoading(false);
+    }
+    load();
+  }, []);
+
+  const a = staff.salesAgents.find((x) => x.id === String(agentId));
+  if (loading) return <LoadingState />;
   if (!a) return <EmptyState title="Agent not found" actionLabel="Back" onAction={()=>navigate('/branch-manager/field-operations')}/>;
   return (
     <div className="page">
-      <Stats stats={[{label:'Visit Completion',value:`${a.visitCompletionRate}%`},{label:'Conversion',value:`${a.conversionRate}%`},{label:'Avg Sale',value:formatCurrency(a.avgSaleValue)},{label:'New Clients',value:String(a.newClientsAcquired)}]}/>
+      <Stats stats={[{label:'Visit Completion',value:`${a.visitCompletionRate}%`},{label:'Conversion',value:`${a.conversionRate}%`},{label:'Avg Sale',value:formatCurrency(a.avgSaleValue)},{label:'New Customers',value:String(a.newCustomersAcquired)}]}/>
       <section className="panel content-panel">
-        {a.clients.length?(<><h4 className="subsection-title">Clients</h4><div style={{display:'flex',flexWrap:'wrap',gap:8,marginTop:8}}>{a.clients.map((c)=><span key={c} style={{padding:'5px 12px',borderRadius:999,background:'var(--surface)',border:'1px solid var(--surface-3)',fontSize:'0.88rem',fontWeight:500}}>{c}</span>)}</div></>):null}
+        {a.customers.length?(<><h4 className="subsection-title">Customers</h4><div style={{display:'flex',flexWrap:'wrap',gap:8,marginTop:8}}>{a.customers.map((c)=><span key={c} style={{padding:'5px 12px',borderRadius:999,background:'var(--surface)',border:'1px solid var(--surface-3)',fontSize:'0.88rem',fontWeight:500}}>{c}</span>)}</div></>):null}
         {a.productPerformance.length?(<><h4 className="subsection-title" style={{marginTop:16}}>Product Performance</h4><ul className="widget-list">{a.productPerformance.map((p)=><li key={p.product}><div><strong>{p.product}</strong></div><span>{p.units} units</span></li>)}</ul></>):null}
       </section>
       <Toolbar actions={[{label:'Back',to:'/branch-manager/field-operations',variant:'ghost'}]} onAction={(a)=>navigate(a.to)}/>
@@ -350,23 +417,66 @@ function SalesAgentDetailPage({ agentId, navigate }) {
 // ── Reports & Analytics (combined with tab nav) ───────────────────────────────
 function ReportsHubPage({ navigate, showToast }) {
   const [tab, setTab] = useState('collection');
+  const [staff, setStaff] = useState({ collectors: [], salesAgents: [] });
+  const [collectionData, setCollectionData] = useState(null);
+  const [salesData, setSalesData] = useState(null);
+  const [inventoryData, setInventoryData] = useState(null);
+  const [delinquencyData, setDelinquencyData] = useState(null);
+  const [complianceData, setComplianceData] = useState(null);
+  const [kpi, setKpi] = useState(null);
+  const [loading, setLoading] = useState(true);
   const tabs = [{key:'collection',label:'Collections'},{key:'sales',label:'Sales'},{key:'inventory',label:'Inventory'},{key:'delinquency',label:'Delinquency'}];
-  const exportRow = <Toolbar actions={[{label:'Export PDF',action:'pdf'},{label:'Export Excel',action:'excel',variant:'secondary'}]} onAction={(a)=>showToast(`${a.label} initiated.`,'success')}/>;
-  const collectorAmt = COLLECTORS.map((c)=>({name:c.name.split(' ')[0],amount:c.collectionAmount,compliance:c.complianceScore}));
-  const agentRev = SALES_AGENTS.map((a)=>({name:a.name.split(' ')[0],revenue:a.totalSalesAmount,visits:a.visitCompletionRate}));
+
+  useEffect(() => {
+    async function load() {
+      setLoading(true);
+      const [staffResult, collectionResult, salesResult, inventoryResult, delinquencyResult, complianceResult, kpiResult] = await Promise.all([
+        getBranchStaff(),
+        getReportCollection(),
+        getReportSales(),
+        getReportInventory(),
+        getReportDelinquency(),
+        getReportCompliance(),
+        getReportKPI(),
+      ]);
+      if (staffResult.success) setStaff(staffResult.data);
+      if (collectionResult.success) setCollectionData(collectionResult.data);
+      if (salesResult.success) setSalesData(salesResult.data);
+      if (inventoryResult.success) setInventoryData(inventoryResult.data);
+      if (delinquencyResult.success) setDelinquencyData(delinquencyResult.data);
+      if (complianceResult.success) setComplianceData(complianceResult.data);
+      if (kpiResult.success) setKpi(kpiResult.data);
+      setLoading(false);
+    }
+    load();
+  }, []);
+
+  const collectorAmt = staff.collectors.map((c)=>({name:c.name.split(' ')[0],amount:c.collectionAmount,compliance:c.complianceScore}));
+  const agentRev = staff.salesAgents.map((a)=>({name:a.name.split(' ')[0],revenue:a.totalSalesAmount,visits:a.visitCompletionRate}));
+
+  if (loading) return <LoadingState message="Loading reports..." />;
 
   return (
     <div className="page">
       <div className="segmented-control" style={{marginBottom:24,flexWrap:'wrap'}}>
         {tabs.map((t)=><button key={t.key} className={tab===t.key?'segment active':'segment'} type="button" onClick={()=>setTab(t.key)}>{t.label}</button>)}
       </div>
+      <div style={{display:'flex',justifyContent:'flex-end',gap:8,marginBottom:16}}>
+        <button className="button secondary" type="button" onClick={()=>showToast('Export PDF initiated.','success')}>Export PDF</button>
+        <button className="button secondary" type="button" onClick={()=>showToast('Export Excel initiated.','success')}>Export Excel</button>
+      </div>
 
       {tab==='collection'&&(<>
-        <Stats stats={[{label:'Collections Today',value:formatCurrency(BRANCH_ANALYTICS.totalCollectionsToday)},{label:'Collection Rate',value:`${BRANCH_ANALYTICS.collectionRateToday}%`},{label:'Efficiency',value:`${BRANCH_ANALYTICS.collectionEfficiency}%`},{label:'Overdue',value:String(BRANCH_ANALYTICS.overdueAccounts)}]}/>
+        <Stats stats={[
+          {label:'Collections (7 days)',value:formatCurrency(collectionData?.summary?.totalCollected || 0)},
+          {label:'Collection Rate',value:`${collectionData?.summary?.collectionRate || 0}%`},
+          {label:'Target',value:formatCurrency(collectionData?.summary?.totalTarget || 0)},
+          {label:'Active Days',value:String(collectionData?.summary?.daysWithCollections || 0)},
+        ]}/>
         <div className="grid two-up">
-          <Card title="Daily Collection vs Target">
+          <Card title="Daily Collection vs Target" sub="Last 7 days">
             <ResponsiveContainer width="100%" height={220}>
-              <AreaChart data={DAILY_COL}>
+              <AreaChart data={collectionData?.daily || []}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9"/><XAxis dataKey="day" tick={{fontSize:12}}/><YAxis tick={{fontSize:11}} tickFormatter={(v)=>`${(v/1000).toFixed(0)}k`}/><Tooltip formatter={(v)=>formatCurrency(v)}/><Legend/>
                 <Area type="monotone" dataKey="target" name="Target" stroke="#e2e8f0" fill="#f1f5f9" strokeWidth={2} strokeDasharray="5 5"/>
                 <Area type="monotone" dataKey="amount" name="Collected" stroke="#2563eb" fill="#2563eb" fillOpacity={0.12} strokeWidth={2}/>
@@ -382,15 +492,20 @@ function ReportsHubPage({ navigate, showToast }) {
               </BarChart>
             </ResponsiveContainer>
           </Card>
-        </div>{exportRow}
+        </div>
       </>)}
 
       {tab==='sales'&&(<>
-        <Stats stats={[{label:'Sales Today',value:formatCurrency(BRANCH_ANALYTICS.totalSalesToday)},{label:'Sales Efficiency',value:`${BRANCH_ANALYTICS.salesEfficiency}%`},{label:'Agents',value:String(BRANCH_ANALYTICS.activeSalesAgents)},{label:'Visit Completion',value:`${BRANCH_ANALYTICS.salesVisitCompletion}%`}]}/>
+        <Stats stats={[
+          {label:'Sales (7 days)',value:formatCurrency(salesData?.summary?.totalActual || 0)},
+          {label:'Sales Efficiency',value:`${salesData?.summary?.salesEfficiency || 0}%`},
+          {label:'Invoices',value:String(salesData?.summary?.totalInvoices || 0)},
+          {label:'Target',value:formatCurrency(salesData?.summary?.totalTarget || 0)},
+        ]}/>
         <div className="grid two-up">
-          <Card title="Sales vs Target">
+          <Card title="Sales vs Target" sub="Last 7 days">
             <ResponsiveContainer width="100%" height={220}>
-              <BarChart data={WEEKLY_SALES_D}>
+              <BarChart data={salesData?.weekly || []}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9"/><XAxis dataKey="day" tick={{fontSize:12}}/><YAxis tick={{fontSize:11}} tickFormatter={(v)=>`${(v/1000).toFixed(0)}k`}/><Tooltip formatter={(v)=>formatCurrency(v)}/><Legend/>
                 <Bar dataKey="target" name="Target" fill="#e2e8f0" radius={[4,4,0,0]}/>
                 <Bar dataKey="actual" name="Actual" fill="#06b6d4" radius={[4,4,0,0]}/>
@@ -406,37 +521,106 @@ function ReportsHubPage({ navigate, showToast }) {
               </BarChart>
             </ResponsiveContainer>
           </Card>
-        </div>{exportRow}
+        </div>
       </>)}
 
       {tab==='inventory'&&(<>
-        <Stats stats={[{label:'Inventory Health',value:`${BRANCH_ANALYTICS.inventoryHealth}%`},{label:'Stock Alerts',value:String(BRANCH_ANALYTICS.stockAlertsCount)}]}/>
-        <Card title="Inventory Status"><div className="placeholder-map" style={{minHeight:160}}>Inventory chart — connect to warehouse data</div></Card>
-        {exportRow}
+        <Stats stats={[
+          {label:'Inventory Health',value:`${inventoryData?.healthPct || 0}%`},
+          {label:'Stock Alerts',value:String(inventoryData?.alertsCount || 0)},
+          {label:'Total Products',value:String(inventoryData?.totalProducts || 0)},
+          {label:'Out of Stock',value:String(inventoryData?.summary?.outOfStock || 0)},
+        ]}/>
+        <div className="grid two-up">
+          <Card title="Inventory Status">
+            <ResponsiveContainer width="100%" height={220}>
+              <PieChart>
+                <Pie data={[
+                  { name: 'Sufficient', value: inventoryData?.summary?.sufficient || 0, color: '#10b981' },
+                  { name: 'Low Stock', value: inventoryData?.summary?.low || 0, color: '#f59e0b' },
+                  { name: 'Critical', value: inventoryData?.summary?.critical || 0, color: '#ef4444' },
+                  { name: 'Out of Stock', value: inventoryData?.summary?.outOfStock || 0, color: '#64748b' },
+                ]} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={80} label={({ name, value }) => `${name}: ${value}`}>
+                  {[
+                    { name: 'Sufficient', color: '#10b981' },
+                    { name: 'Low Stock', color: '#f59e0b' },
+                    { name: 'Critical', color: '#ef4444' },
+                    { name: 'Out of Stock', color: '#64748b' },
+                  ].map((entry) => <Cell key={entry.name} fill={entry.color} />)}
+                </Pie>
+                <Tooltip />
+                <Legend />
+              </PieChart>
+            </ResponsiveContainer>
+          </Card>
+          <Card title="Items Requiring Attention">
+            <div className="table-shell">
+              <table className="data-table">
+                <thead><tr><th>Product</th><th>SKU</th><th>Stock</th><th>Status</th></tr></thead>
+                <tbody>
+                  {(inventoryData?.lowStockItems || []).length ? inventoryData.lowStockItems.map((item) => (
+                    <tr key={item.sku}>
+                      <td>{item.product_name}</td>
+                      <td>{item.sku}</td>
+                      <td>{item.available_stock}</td>
+                      <td><StatusBadge status={item.status} /></td>
+                    </tr>
+                  )) : (
+                    <tr><td colSpan={4}>All products are at sufficient stock levels.</td></tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </Card>
+        </div>
       </>)}
 
       {tab==='delinquency'&&(<>
-        <Stats stats={[{label:'Overdue Accounts',value:String(BRANCH_ANALYTICS.overdueAccounts)},{label:'Branch Health',value:`${BRANCH_ANALYTICS.healthScore}/100`}]}/>
+        <Stats stats={[
+          {label:'Overdue Accounts',value:String(delinquencyData?.summary?.totalOverdue || 0)},
+          {label:'Avg Rate',value:`${delinquencyData?.summary?.avgRate || 0}%`},
+          {label:'Trend',value:delinquencyData?.summary?.trend || 'stable'},
+          {label:'Branch Health',value:`${kpi?.healthScore || 0}/100`},
+        ]}/>
         <div className="grid two-up">
-          <Card title="Delinquency Trend">
+          <Card title="Delinquency Trend" sub="Weekly overdue accounts">
             <ResponsiveContainer width="100%" height={220}>
-              <AreaChart data={DELINQUENCY_W}>
+              <AreaChart data={delinquencyData?.delinquency || []}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9"/><XAxis dataKey="week" tick={{fontSize:12}}/><YAxis tick={{fontSize:12}}/><Tooltip/><Legend/>
                 <Area type="monotone" dataKey="accounts" name="Overdue" stroke="#ef4444" fill="#ef4444" fillOpacity={0.1} strokeWidth={2}/>
                 <Area type="monotone" dataKey="rate" name="Rate %" stroke="#f59e0b" fill="#f59e0b" fillOpacity={0.08} strokeWidth={2}/>
               </AreaChart>
             </ResponsiveContainer>
           </Card>
-          <Card title="Route Compliance Trend">
+          <Card title="Route Compliance Trend" sub="Weekly per collector">
             <ResponsiveContainer width="100%" height={220}>
-              <LineChart data={COMPLIANCE_W}>
+              <LineChart data={complianceData?.compliance?.[0]?.data?.map((d, i) => {
+                const point = { week: d.week };
+                complianceData.compliance.forEach((c) => { point[c.name] = c.data[i]?.rate || 0; });
+                return point;
+              }) || []}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9"/><XAxis dataKey="week" tick={{fontSize:12}}/><YAxis domain={[80,100]} unit="%" tick={{fontSize:12}}/><Tooltip formatter={(v)=>`${v}%`}/><Legend/>
-                {['Maria','John','Pedro'].map((n,i)=><Line key={n} type="monotone" dataKey={n} stroke={C[i]} strokeWidth={2} dot={false}/>)}
+                {complianceData?.compliance?.map((c, i) => <Line key={c.name} type="monotone" dataKey={c.name} stroke={['#2563eb','#06b6d4','#10b981','#f59e0b','#ef4444'][i % 5]} strokeWidth={2} dot={false}/>)}
               </LineChart>
             </ResponsiveContainer>
           </Card>
-        </div>{exportRow}
+        </div>
       </>)}
+
+      <div style={{ marginTop: 24 }}>
+        <Card title="Overall KPI Summary">
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 16, padding: '12px 0' }}>
+            <div><strong>Health Score</strong><div style={{ fontSize: '1.5rem', color: '#2563eb' }}>{kpi?.healthScore || 0}/100</div></div>
+            <div><strong>Active Collectors</strong><div style={{ fontSize: '1.5rem', color: '#10b981' }}>{kpi?.activeCollectors || 0}</div></div>
+            <div><strong>Active Sales Agents</strong><div style={{ fontSize: '1.5rem', color: '#8b5cf6' }}>{kpi?.activeSalesAgents || 0}</div></div>
+            <div><strong>Total Customers</strong><div style={{ fontSize: '1.5rem' }}>{kpi?.totalCustomers || 0}</div></div>
+            <div><strong>Outstanding Balance</strong><div style={{ fontSize: '1.5rem', color: '#ef4444' }}>{formatCurrency(kpi?.totalOutstanding || 0)}</div></div>
+            <div><strong>Collections (7d)</strong><div style={{ fontSize: '1.5rem', color: '#059669' }}>{formatCurrency(kpi?.totalCollectionsAmount || 0)}</div></div>
+            <div><strong>Sales (7d)</strong><div style={{ fontSize: '1.5rem', color: '#2563eb' }}>{formatCurrency(kpi?.totalSalesAmount || 0)}</div></div>
+            <div><strong>Inventory Health</strong><div style={{ fontSize: '1.5rem' }}>{kpi?.inventoryHealth || 0}%</div></div>
+          </div>
+        </Card>
+      </div>
     </div>
   );
 }
@@ -445,17 +629,37 @@ function ReportsHubPage({ navigate, showToast }) {
 function StaffPerformancePage({ navigate }) {
   const [tab, setTab] = useState('overview');
   const [period, setPeriod] = useState('Daily');
+  const [staff, setStaff] = useState({ collectors: [], salesAgents: [] });
+  const [complianceData, setComplianceData] = useState(null);
   const tabs = [{key:'overview',label:'Overview'},{key:'collectors',label:'Collectors'},{key:'sales',label:'Sales Agents'},{key:'scorecards',label:'Scorecards'}];
 
-  const topCollector = [...COLLECTORS].sort((a,b)=>b.complianceScore-a.complianceScore)[0];
-  const topAgent = [...SALES_AGENTS].sort((a,b)=>b.totalSalesAmount-a.totalSalesAmount)[0];
+  useEffect(() => {
+    async function load() {
+      const [staffResult, complianceResult] = await Promise.all([
+        getBranchStaff(),
+        getReportCompliance(),
+      ]);
+      if (staffResult.success) setStaff(staffResult.data);
+      if (complianceResult.success) setComplianceData(complianceResult.data);
+    }
+    load();
+  }, []);
+
+  const topCollector = [...staff.collectors].sort((a,b)=>b.complianceScore-a.complianceScore)[0];
+  const topAgent = [...staff.salesAgents].sort((a,b)=>b.totalSalesAmount-a.totalSalesAmount)[0];
   const combined = [
-    ...COLLECTORS.map((c)=>({name:c.name,role:'Collector',score:c.complianceScore,metric:`${c.recoveryRate}% recovery`})),
-    ...SALES_AGENTS.map((a)=>({name:a.name,role:'Sales',score:a.visitCompletionRate,metric:formatCurrency(a.totalSalesAmount)})),
+    ...staff.collectors.map((c)=>({name:c.name,role:'Collector',score:c.complianceScore,metric:`${c.recoveryRate}% recovery`})),
+    ...staff.salesAgents.map((a)=>({name:a.name,role:'Sales',score:a.visitCompletionRate,metric:formatCurrency(a.totalSalesAmount)})),
   ].sort((a,b)=>b.score-a.score);
 
-  const collectorBar = COLLECTORS.map((c)=>({name:c.name.split(' ')[0],score:c.complianceScore,recovery:c.recoveryRate,missed:c.missedVisits}));
-  const salesBar = SALES_AGENTS.map((a)=>({name:a.name.split(' ')[0],visits:a.visitCompletionRate,conversion:a.conversionRate,newClients:a.newClientsAcquired}));
+  const collectorBar = staff.collectors.map((c)=>({name:c.name.split(' ')[0],score:c.complianceScore,recovery:c.recoveryRate,missed:c.missedVisits}));
+  const salesBar = staff.salesAgents.map((a)=>({name:a.name.split(' ')[0],visits:a.visitCompletionRate,conversion:a.conversionRate,newCustomers:a.newCustomersAcquired}));
+
+  const complianceChartData = complianceData?.compliance?.[0]?.data?.map((d, i) => {
+    const point = { week: d.week };
+    complianceData.compliance.forEach((c) => { point[c.name] = c.data[i]?.rate || 0; });
+    return point;
+  }) || [];
 
   return (
     <div className="page">
@@ -465,10 +669,10 @@ function StaffPerformancePage({ navigate }) {
 
       {tab==='overview'&&(<>
         <Stats stats={[
-          {label:'Active Collectors',value:String(BRANCH_ANALYTICS.activeCollectors)},
-          {label:'Active Sales Agents',value:String(BRANCH_ANALYTICS.activeSalesAgents)},
-          {label:'Top Collector',value:topCollector.name.split(' ')[0]},
-          {label:'Top Sales Agent',value:topAgent.name.split(' ')[0]},
+          {label:'Active Collectors',value:String(staff.collectors.length)},
+          {label:'Active Sales Agents',value:String(staff.salesAgents.length)},
+          {label:'Top Collector',value:topCollector?topCollector.name.split(' ')[0]:'—'},
+          {label:'Top Sales Agent',value:topAgent?topAgent.name.split(' ')[0]:'—'},
         ]}/>
         <div className="grid two-up">
           <Card title="Collector Scorecard" sub="Compliance & recovery rates">
@@ -492,9 +696,9 @@ function StaffPerformancePage({ navigate }) {
         </div>
         <Card title="Route Compliance Trend" sub="Weekly per collector">
           <ResponsiveContainer width="100%" height={200}>
-            <LineChart data={COMPLIANCE_W}>
+            <LineChart data={complianceChartData}>
               <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9"/><XAxis dataKey="week" tick={{fontSize:12}}/><YAxis domain={[80,100]} unit="%" tick={{fontSize:12}}/><Tooltip formatter={(v)=>`${v}%`}/><Legend/>
-              {['Maria','John','Pedro'].map((n,i)=><Line key={n} type="monotone" dataKey={n} stroke={C[i]} strokeWidth={2} dot={false}/>)}
+              {complianceData?.compliance?.map((c, i) => <Line key={c.name} type="monotone" dataKey={c.name} stroke={['#2563eb','#06b6d4','#10b981','#f59e0b','#ef4444'][i % 5]} strokeWidth={2} dot={false}/>)}
             </LineChart>
           </ResponsiveContainer>
         </Card>
@@ -512,7 +716,7 @@ function StaffPerformancePage({ navigate }) {
             <table className="data-table">
               <thead><tr><th>#</th><th>Collector</th><th>Compliance</th><th>Collections</th><th>Recovery</th><th>Missed</th></tr></thead>
               <tbody>
-                {[...COLLECTORS].sort((a,b)=>b.complianceScore-a.complianceScore).map((c,i)=>(
+                {[...staff.collectors].sort((a,b)=>b.complianceScore-a.complianceScore).map((c,i)=>(
                   <tr key={c.id}><td>{i+1}</td><td>{c.name}</td><td>{c.complianceScore}%</td><td>{formatCurrency(c.collectionAmount)}</td><td>{c.recoveryRate}%</td><td>{c.missedVisits}</td></tr>
                 ))}
               </tbody>
@@ -531,10 +735,10 @@ function StaffPerformancePage({ navigate }) {
           </div>
           <div className="table-shell">
             <table className="data-table">
-              <thead><tr><th>#</th><th>Agent</th><th>Visit Completion</th><th>Revenue</th><th>New Clients</th><th>Sales</th></tr></thead>
+              <thead><tr><th>#</th><th>Agent</th><th>Visit Completion</th><th>Revenue</th><th>New Customers</th><th>Sales</th></tr></thead>
               <tbody>
-                {[...SALES_AGENTS].sort((a,b)=>b.totalSalesAmount-a.totalSalesAmount).map((a,i)=>(
-                  <tr key={a.id}><td>{i+1}</td><td>{a.name}</td><td>{a.visitCompletionRate}%</td><td>{formatCurrency(a.totalSalesAmount)}</td><td>{a.newClientsAcquired}</td><td>{a.salesLogged}</td></tr>
+                {[...staff.salesAgents].sort((a,b)=>b.totalSalesAmount-a.totalSalesAmount).map((a,i)=>(
+                  <tr key={a.id}><td>{i+1}</td><td>{a.name}</td><td>{a.visitCompletionRate}%</td><td>{formatCurrency(a.totalSalesAmount)}</td><td>{a.newCustomersAcquired}</td><td>{a.salesLogged}</td></tr>
                 ))}
               </tbody>
             </table>
@@ -579,10 +783,10 @@ function CIQueuePage({ navigate, showToast }) {
       {filtered.length?(
         <section className="panel content-panel">
           <div className="table-shell"><table className="data-table">
-            <thead><tr><th>Client</th><th>Submitted By</th><th>Date</th><th>Delinquency</th><th>Status</th><th>Actions</th></tr></thead>
-            <tbody>{filtered.map((ci)=>(<tr key={ci.id}><td>{ci.clientName}</td><td>{ci.submittedBy}</td><td>{ci.submissionDate}</td><td>{ci.delinquencyStatus}</td><td>{ci.status}</td><td className="table-actions">
+            <thead><tr><th>Customer</th><th>Submitted By</th><th>Date</th><th>Delinquency</th><th>Status</th><th>Actions</th></tr></thead>
+            <tbody>{filtered.map((ci)=>(<tr key={ci.id}><td>{ci.customerName}</td><td>{ci.submittedBy}</td><td>{ci.submissionDate}</td><td>{ci.delinquencyStatus}</td><td>{ci.status}</td><td className="table-actions">
               <button className="icon-action-button" type="button" title="Open" onClick={()=>navigate(`/branch-manager/ci-approvals/${ci.id}`)}><NavIcon name="view" /></button>
-              {ci.status==='Pending'&&<><button className="icon-action-button" type="button" title="Approve" onClick={()=>showToast(`Approved CI for ${ci.clientName}.`,'success')}><NavIcon name="check" /></button><button className="icon-action-button danger" type="button" title="Reject" onClick={()=>showToast(`Rejected CI for ${ci.clientName}.`,'error')}><NavIcon name="close" /></button></>}
+              {ci.status==='Pending'&&<><button className="icon-action-button" type="button" title="Approve" onClick={()=>showToast(`Approved CI for ${ci.customerName}.`,'success')}><NavIcon name="check" /></button><button className="icon-action-button danger" type="button" title="Reject" onClick={()=>showToast(`Rejected CI for ${ci.customerName}.`,'error')}><NavIcon name="close" /></button></>}
             </td></tr>))}</tbody>
           </table></div>
         </section>
@@ -598,7 +802,7 @@ function CIDetailPage({ ciId, navigate, showToast }) {
   if (!ci) return <EmptyState title="CI not found" actionLabel="Back" onAction={()=>navigate('/branch-manager/ci-approvals')}/>;
   return (
     <div className="page">
-      <Stats stats={[{label:'Client',value:ci.clientName},{label:'Risk Score',value:String(ci.riskScore)},{label:'Delinquency',value:ci.delinquencyStatus},{label:'Map Zone',value:ci.leafletClassification}]}/>
+      <Stats stats={[{label:'Customer',value:ci.customerName},{label:'Risk Score',value:String(ci.riskScore)},{label:'Delinquency',value:ci.delinquencyStatus},{label:'Map Zone',value:ci.leafletClassification}]}/>
       <section className="panel content-panel">
         <ul className="info-grid"><li><span className="info-item-label">Purpose</span><span className="info-item-value">{ci.purpose}</span></li><li><span className="info-item-label">Monthly Income</span><span className="info-item-value">{formatCurrency(ci.monthlyIncome)}</span></li><li><span className="info-item-label">Business Type</span><span className="info-item-value">{ci.businessType}</span></li><li><span className="info-item-label">References</span><span className="info-item-value">{ci.references}</span></li><li><span className="info-item-label">Remarks</span><span className="info-item-value">{ci.formRemarks}</span></li></ul>
         {ci.delinquencyFlags.length?(<div style={{marginTop:16,padding:12,background:'rgba(220,38,38,0.06)',borderRadius:12}}><strong>Delinquency Flags:</strong><ul className="flag-list" style={{marginTop:8}}>{ci.delinquencyFlags.map((f)=><li key={f}>{f}</li>)}</ul></div>):null}
@@ -618,41 +822,294 @@ function CIDetailPage({ ciId, navigate, showToast }) {
   );
 }
 
+// ── Customers ─────────────────────────────────────────────────────────────────
+function CustomersPage({ navigate, branchName }) {
+  const [search, setSearch] = useState('');
+  const [statusFilter, setStatusFilter] = useState('All');
+  const [paymentFilter, setPaymentFilter] = useState('All');
+  const [customers, setCustomers] = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    async function load() {
+      setLoading(true);
+      const result = await getBranchCustomers();
+      if (result.success) setCustomers(result.data.customers || []);
+      setLoading(false);
+    }
+    load();
+  }, []);
+
+  const filtered = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    return customers.filter((c) => {
+      const matchSearch = !q
+        || c.customerName.toLowerCase().includes(q)
+        || (c.address || '').toLowerCase().includes(q)
+        || (c.contact_phone || '').includes(q);
+      const matchStatus = statusFilter === 'All' || c.status === statusFilter;
+      const matchPayment = paymentFilter === 'All' || c.paymentStatus === paymentFilter;
+      return matchSearch && matchStatus && matchPayment;
+    });
+  }, [search, statusFilter, paymentFilter, customers]);
+
+  const totalOutstanding = customers.reduce((sum, c) => sum + (c.outstanding_balance || 0), 0);
+
+  if (loading) return <LoadingState message="Loading customers..." />;
+
+  return (
+    <div className="page">
+      <Stats stats={[
+        { label: 'Total Customers', value: String(customers.length) },
+        { label: 'Active', value: String(customers.filter((c) => c.status === 'Active').length) },
+        { label: 'With Balance', value: String(customers.filter((c) => c.outstanding_balance > 0).length) },
+        { label: 'Total Outstanding', value: formatCurrency(totalOutstanding) },
+      ]} />
+
+      <section className="panel content-panel">
+        <div className="panel-section-header">
+          <h3>Branch Customers</h3>
+          <span className="muted">{branchName}</span>
+        </div>
+        <div className="accounts-toolbar">
+          <input
+            className="search-input"
+            type="search"
+            placeholder="Search by customer name, address, or phone"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+          />
+          <div className="accounts-filters">
+            <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}>
+              {['All', 'Active', 'Inactive'].map((s) => (
+                <option key={s} value={s}>{s === 'All' ? 'All Statuses' : s}</option>
+              ))}
+            </select>
+            <select value={paymentFilter} onChange={(e) => setPaymentFilter(e.target.value)}>
+              {['All', 'Current', 'Overdue'].map((s) => (
+                <option key={s} value={s}>{s === 'All' ? 'All Payment Status' : s}</option>
+              ))}
+            </select>
+          </div>
+        </div>
+      </section>
+
+      {filtered.length ? (
+        <section className="panel content-panel">
+          <div className="table-shell">
+            <table className="data-table">
+              <thead>
+                <tr>
+                  <th>Customer</th>
+                  <th>Address</th>
+                  <th>Contact</th>
+                  <th>Outstanding</th>
+                  <th>Payment</th>
+                  <th>Status</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filtered.map((c) => (
+                  <tr key={c.id}>
+                    <td><strong>{c.customerName}</strong></td>
+                    <td>{c.address || '—'}</td>
+                    <td>{c.contact_phone || '—'}</td>
+                    <td>{formatCurrency(c.outstanding_balance || 0)}</td>
+                    <td><StatusBadge status={c.paymentStatus} /></td>
+                    <td><StatusBadge status={c.status} /></td>
+                    <td className="table-actions">
+                      <button className="icon-action-button" type="button" title="View" onClick={() => navigate(`/branch-manager/customers/${c.id}`)}>
+                        <NavIcon name="view" />
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      ) : (
+        <EmptyState title="No customers found" description="Adjust your search or filters, or add customers through the system." />
+      )}
+    </div>
+  );
+}
+
+function CustomerDetailPage({ customerId, navigate, branchName }) {
+  const [customer, setCustomer] = useState(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    async function load() {
+      setLoading(true);
+      const result = await getBranchCustomerById(customerId);
+      if (result.success) setCustomer(result.data);
+      setLoading(false);
+    }
+    load();
+  }, [customerId]);
+
+  if (loading) return <LoadingState message="Loading customer..." />;
+  if (!customer) {
+    return (
+      <EmptyState
+        title="Customer not found"
+        description="This customer may not belong to your branch or no longer exists."
+        actionLabel="Back to Customers"
+        onAction={() => navigate('/branch-manager/customers')}
+      />
+    );
+  }
+
+  const name = `${customer.first_name} ${customer.last_name}`;
+  const paymentStatus = Number(customer.activity?.outstanding_balance || 0) > 0 ? 'Overdue' : 'Current';
+
+  return (
+    <div className="page">
+      <section className="panel dashboard-greeting">
+        <div className="dashboard-greeting-main">
+          <p className="dashboard-eyebrow">{customer.branch_name || branchName}</p>
+          <h2>{name}</h2>
+          <p className="muted">{customer.address || 'No address on file'}</p>
+        </div>
+      </section>
+
+      <Stats stats={[
+        { label: 'Status', value: customer.status || '—' },
+        { label: 'Payment Status', value: paymentStatus },
+        { label: 'Outstanding', value: formatCurrency(Number(customer.activity?.outstanding_balance || 0)) },
+        { label: 'Purchase Volume', value: formatCurrency(Number(customer.activity?.purchase_volume || 0)) },
+      ]} />
+
+      <div className="grid two-up">
+        <section className="panel content-panel">
+          <div className="panel-section-header"><h3>Contact Information</h3></div>
+          <ul className="info-grid">
+            <li><span className="info-item-label">Customer Name</span><span className="info-item-value">{name}</span></li>
+            <li><span className="info-item-label">Branch</span><span className="info-item-value">{customer.branch_name || branchName}</span></li>
+            <li><span className="info-item-label">Address</span><span className="info-item-value">{customer.address || '—'}</span></li>
+            <li><span className="info-item-label">Contact Phone</span><span className="info-item-value">{customer.contact_phone || '—'}</span></li>
+            <li><span className="info-item-label">Contact Person</span><span className="info-item-value">{customer.contact_person_fname} {customer.contact_person_lname}</span></li>
+            <li><span className="info-item-label">Contact Person Phone</span><span className="info-item-value">{customer.contact_person_phone || '—'}</span></li>
+          </ul>
+        </section>
+
+        <section className="panel content-panel">
+          <div className="panel-section-header"><h3>Account Activity</h3></div>
+          <ul className="info-grid">
+            <li><span className="info-item-label">Outstanding Balance</span><span className="info-item-value">{formatCurrency(Number(customer.activity?.outstanding_balance || 0))}</span></li>
+            <li><span className="info-item-label">Purchase Volume</span><span className="info-item-value">{formatCurrency(Number(customer.activity?.purchase_volume || 0))}</span></li>
+            <li><span className="info-item-label">Last Collection</span><span className="info-item-value">{customer.activity?.last_collection_date || '—'}</span></li>
+            <li><span className="info-item-label">Last Sales Visit</span><span className="info-item-value">{customer.activity?.last_sales_visit || '—'}</span></li>
+          </ul>
+        </section>
+      </div>
+
+      {customer.creditInfo ? (
+        <section className="panel content-panel">
+          <div className="panel-section-header"><h3>Credit Information</h3></div>
+          <ul className="info-grid">
+            <li><span className="info-item-label">Credit Limit</span><span className="info-item-value">{formatCurrency(Number(customer.creditInfo.credit_limit || 0))}</span></li>
+            <li><span className="info-item-label">Monthly Income</span><span className="info-item-value">{formatCurrency(Number(customer.creditInfo.monthly_income || 0))}</span></li>
+            <li><span className="info-item-label">Credit Score</span><span className="info-item-value">{customer.creditInfo.credit_score || '—'}</span></li>
+            <li><span className="info-item-label">Employment Status</span><span className="info-item-value">{customer.creditInfo.employment_status || '—'}</span></li>
+            <li><span className="info-item-label">Approved Date</span><span className="info-item-value">{customer.creditInfo.approved_date || '—'}</span></li>
+          </ul>
+        </section>
+      ) : null}
+
+      {(customer.latitude && customer.longitude) ? (
+        <section className="panel content-panel">
+          <div className="panel-section-header"><h3>Location</h3></div>
+          <div style={{ minHeight: 220, borderRadius: 8, overflow: 'hidden' }}>
+            <LeafletMap
+              center={[Number(customer.latitude), Number(customer.longitude)]}
+              zoom={15}
+              height={220}
+              markers={[{
+                id: customer.customer_id,
+                position: [Number(customer.latitude), Number(customer.longitude)],
+                label: name.substring(0, 2).toUpperCase(),
+                color: paymentStatus === 'Overdue' ? '#ef4444' : '#2563eb',
+                popup: name,
+              }]}
+            />
+          </div>
+        </section>
+      ) : null}
+
+      <Toolbar actions={[
+        { label: 'View on Map', to: '/branch-manager/leaflet', variant: 'secondary' },
+        { label: 'Back to Customers', to: '/branch-manager/customers', variant: 'ghost' },
+      ]} onAction={(a) => navigate(a.to)} />
+    </div>
+  );
+}
+
 // ── GIS, Alerts, Notifications, Profile, Audit ───────────────────────────────
 function LeafletPage({ pageType, navigate, showToast }) {
   const [layers, setLayers] = useState(['Collector Routes','Delinquency Clusters']);
+  const [mapAccounts, setMapAccounts] = useState([]);
+  const [staff, setStaff] = useState({ collectors: [], salesAgents: [] });
+  const [loading, setLoading] = useState(true);
   const layerOptions = ['Collector Routes','Sales Territories','Payment Behavior Zones','Delinquency Clusters','Profitability Zones','High Collection Areas','Route Efficiency Layer'];
   const toggle = (l) => setLayers((p)=>p.includes(l)?p.filter((x)=>x!==l):[...p,l]);
+
+  useEffect(() => {
+    async function load() {
+      setLoading(true);
+      const [customersResult, staffResult] = await Promise.all([
+        getBranchCustomers(),
+        getBranchStaff(),
+      ]);
+      if (customersResult.success) setMapAccounts(customersResult.data.mapAccounts || []);
+      if (staffResult.success) setStaff(staffResult.data);
+      setLoading(false);
+    }
+    load();
+  }, []);
+
+  const mapCenter = mapAccounts.find((a) => a.lat && a.lng)
+    ? [mapAccounts.find((a) => a.lat && a.lng).lat, mapAccounts.find((a) => a.lat && a.lng).lng]
+    : [7.1907, 125.4553];
+
+  if (loading) return <LoadingState message="Loading map data..." />;
+
   return (
     <div className="page">
       <section className="panel content-panel">
         <div className="panel-section-header"><h3>Leaflet | OpenStreetMap</h3></div>
         <div className="accounts-filters">
           <select><option>Today</option><option>This Week</option><option>This Month</option></select>
-          <select><option>All Staff</option>{COLLECTORS.map((c)=><option key={c.id}>{c.name}</option>)}{SALES_AGENTS.map((a)=><option key={a.id}>{a.name}</option>)}</select>
+          <select><option>All Staff</option>{staff.collectors.map((c)=><option key={c.id}>{c.name}</option>)}{staff.salesAgents.map((a)=><option key={a.id}>{a.name}</option>)}</select>
         </div>
         <div className="layer-toggles">{layerOptions.map((l)=><label key={l} className="toggle-label"><input type="checkbox" checked={layers.includes(l)} onChange={()=>toggle(l)}/>{l}</label>)}</div>
         <div style={{ marginTop: 16 }}>
           <LeafletMap 
-            center={[7.1907, 125.4553]} 
+            center={mapCenter}
             zoom={12} 
             height={560}
-            markers={MAP_ACCOUNTS.map((a, i) => ({
+            markers={mapAccounts.filter((a) => a.lat && a.lng).map((a) => ({
               id: a.id,
-              position: [7.1907 + (i * 0.01) * (i % 2 === 0 ? 1 : -1), 125.4553 + (i * 0.015)],
-              label: a.clientName.substring(0, 2).toUpperCase(),
+              position: [a.lat, a.lng],
+              label: a.customerName.substring(0, 2).toUpperCase(),
               color: a.paymentStatus === 'Overdue' ? '#ef4444' : '#10b981',
-              popup: `${a.clientName} - ${a.paymentStatus}`
+              popup: `${a.customerName} - ${a.paymentStatus}`,
             }))}
           />
         </div>
       </section>
       <section className="panel content-panel">
-        <div className="panel-section-header"><h3>Client Pins</h3></div>
-        <div className="table-shell"><table className="data-table">
-          <thead><tr><th>Client</th><th>Balance</th><th>Status</th><th>Last Visit</th><th>Staff</th></tr></thead>
-          <tbody>{MAP_ACCOUNTS.map((a)=><tr key={a.id}><td>{a.clientName}</td><td>{formatCurrency(a.balance)}</td><td>{a.paymentStatus}</td><td>{a.lastVisit}</td><td>{a.assignedStaff}</td></tr>)}</tbody>
-        </table></div>
+        <div className="panel-section-header"><h3>Customer Pins</h3></div>
+        {mapAccounts.length ? (
+          <div className="table-shell"><table className="data-table">
+            <thead><tr><th>Customer</th><th>Balance</th><th>Status</th><th>Last Visit</th><th>Staff</th><th>Actions</th></tr></thead>
+            <tbody>{mapAccounts.map((a)=><tr key={a.id}><td>{a.customerName}</td><td>{formatCurrency(a.balance)}</td><td>{a.paymentStatus}</td><td>{a.lastVisit}</td><td>{a.assignedStaff}</td><td className="table-actions"><button className="icon-action-button" type="button" title="View" onClick={()=>navigate(`/branch-manager/customers/${a.id}`)}><NavIcon name="view" /></button></td></tr>)}</tbody>
+          </table></div>
+        ) : (
+          <EmptyState title="No customers on map" description="Customers for your branch will appear here once they have location data." />
+        )}
       </section>
       <Toolbar actions={[{label:'Delinquency Heatmap',to:'/branch-manager/leaflet/delinquency',variant:'secondary'},{label:'Profitability Zones',to:'/branch-manager/leaflet/profitability',variant:'secondary'}]} onAction={(a)=>navigate(a.to)}/>
     </div>
@@ -713,14 +1170,20 @@ function NotificationsPage({ navigate, showToast }) {
 }
 
 function ProfilePage({ navigate, showToast, branchName }) {
+  const currentUser = getCurrentUser();
+  const userName = currentUser?.fullName || 'User';
+  const userBranch = currentUser?.branch?.name || branchName || 'Branch';
+  const userEmail = currentUser?.email || 'N/A';
+  const userInitials = userName.split(' ').map(n => n[0]).join('').toUpperCase();
+  
   return (
     <div className="page">
       <section className="panel content-panel">
         <div className="profile-header">
-          <div className="profile-avatar">{BRANCH_MANAGER_PROFILE.avatarInitials}</div>
-          <div><h3>{BRANCH_MANAGER_PROFILE.name}</h3><p className="muted">{BRANCH_MANAGER_PROFILE.employeeId}</p></div>
+          <div className="profile-avatar">{userInitials}</div>
+          <div><h3>{userName}</h3><p className="muted">Branch Manager</p></div>
         </div>
-        <ul className="info-grid"><li><span className="info-item-label">Branch</span><span className="info-item-value">{branchName ?? BRANCH_MANAGER_PROFILE.branch}</span></li><li><span className="info-item-label">Email</span><span className="info-item-value">{BRANCH_MANAGER_PROFILE.email}</span></li><li><span className="info-item-label">Phone</span><span className="info-item-value">{BRANCH_MANAGER_PROFILE.phone}</span></li></ul>
+        <ul className="info-grid"><li><span className="info-item-label">Branch</span><span className="info-item-value">{userBranch}</span></li><li><span className="info-item-label">Email</span><span className="info-item-value">{userEmail}</span></li><li><span className="info-item-label">Phone</span><span className="info-item-value">N/A</span></li></ul>
       </section>
       <Toolbar actions={[{label:'Update Profile',action:'update'},{label:'Change Password',action:'password',variant:'secondary'},{label:'Approval Center',to:'/branch-manager/approval-center',variant:'ghost'},{label:'Audit Log',to:'/branch-manager/audit-log',variant:'ghost'},{label:'Logout',action:'logout',variant:'ghost'}]}
         onAction={(a)=>{if(a.to)navigate(a.to);else if (a.action === 'logout') { requestLogout(); }else showToast(`${a.label} opened.`,'success');}}/>
@@ -737,8 +1200,8 @@ function ApprovalCenterPage({ navigate, showToast }) {
     { id: 'TRF-297', product: 'Coffee Table (Tempered Glass & Steel)', qty: 5, from: 'Davao Oriental Branch', to: 'General Santos Branch', requestedBy: 'Ana Reyes',    date: '2026-06-25', status: 'Pending Approval', value: 37500  },
   ]);
   const [specialList, setSpecialList] = useState([
-    { id: 'SC-001', clientName: 'Mabuhay Sala Sets',       accountNumber: 'ACC-1006', requestType: 'Extended Payment Term', requestedBy: 'John Dela Cruz', date: '2026-06-24', amount: 38000, status: 'Pending', notes: 'Client requested 90-day extension due to business slowdown.' },
-    { id: 'SC-002', clientName: 'Hardin ng Bahay Home Store', accountNumber: 'ACC-1003', requestType: 'Partial Collection',    requestedBy: 'Maria Dela Cruz', date: '2026-06-23', amount: 10000, status: 'Pending', notes: 'Client can only settle ₱10,000 of ₱15,800 balance this week.' },
+    { id: 'SC-001', customerName: 'Mabuhay Sala Sets',       accountNumber: 'ACC-1006', requestType: 'Extended Payment Term', requestedBy: 'John Dela Cruz', date: '2026-06-24', amount: 38000, status: 'Pending', notes: 'Customer requested 90-day extension due to business slowdown.' },
+    { id: 'SC-002', customerName: 'Hardin ng Bahay Home Store', accountNumber: 'ACC-1003', requestType: 'Partial Collection',    requestedBy: 'Maria Dela Cruz', date: '2026-06-23', amount: 10000, status: 'Pending', notes: 'Customer can only settle ₱10,000 of ₱15,800 balance this week.' },
   ]);
 
   const tabs = [
@@ -812,12 +1275,12 @@ function ApprovalCenterPage({ navigate, showToast }) {
             <div className="table-shell">
               <table className="data-table">
                 <thead>
-                  <tr><th>Client</th><th>Submitted By</th><th>Purpose</th><th>Income</th><th>Risk Score</th><th>Delinquency</th><th>Status</th><th>Actions</th></tr>
+                  <tr><th>Customer</th><th>Submitted By</th><th>Purpose</th><th>Income</th><th>Risk Score</th><th>Delinquency</th><th>Status</th><th>Actions</th></tr>
                 </thead>
                 <tbody>
                   {ciList.map(ci => (
                     <tr key={ci.id}>
-                      <td><strong>{ci.clientName}</strong><span className="muted" style={{ display: 'block', fontSize: '0.8rem' }}>{ci.id}</span></td>
+                      <td><strong>{ci.customerName}</strong><span className="muted" style={{ display: 'block', fontSize: '0.8rem' }}>{ci.id}</span></td>
                       <td>{ci.submittedBy}<span className="muted" style={{ display: 'block', fontSize: '0.8rem' }}>{ci.submissionDate}</span></td>
                       <td>{ci.purpose}</td>
                       <td>{formatCurrency(ci.monthlyIncome)}</td>
@@ -893,7 +1356,7 @@ function ApprovalCenterPage({ navigate, showToast }) {
                 <article key={s.id} className="panel content-panel" style={{ padding: 20 }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 16, marginBottom: 12 }}>
                     <div>
-                      <h4 style={{ margin: 0, fontSize: '1rem' }}>{s.clientName}</h4>
+                      <h4 style={{ margin: 0, fontSize: '1rem' }}>{s.customerName}</h4>
                       <span className="muted" style={{ fontSize: '0.82rem' }}>{s.accountNumber} · submitted by {s.requestedBy} on {s.date}</span>
                     </div>
                     <StatusBadge status={s.status} />
@@ -933,10 +1396,8 @@ function AuditLogPage({ navigate }) {
 
 // ── Main export ───────────────────────────────────────────────────────────────
 export function BranchManagerPageBody({ page, navigate, showToast, currentUser }) {
-  // Branch guard: a Branch Manager must have an assigned branch.
-  // If the session has no branch (e.g. the user is an OM accessing this path directly),
-  // show a clear error instead of rendering with mock data for the wrong branch.
-  if (!currentUser?.branch) {
+  const isOperatingManager = currentUser?.role?.slug === 'operating_manager';
+  if (!isOperatingManager && !currentUser?.branch) {
     return (
       <section className="panel empty-state">
         <h3>Branch not assigned</h3>
@@ -945,12 +1406,14 @@ export function BranchManagerPageBody({ page, navigate, showToast, currentUser }
     );
   }
 
-  const branchName = currentUser.branch.name;
+  const branchName = currentUser?.branch?.name || 'All Branches';
 
   if (!page) return <EmptyState title="Page not found" description="Use the sidebar to open a supported screen." />;
-  const p = { collectorId: page.params?.collectorId, agentId: page.params?.agentId, ciId: page.params?.ciId, accountId: page.params?.accountId, navigate, showToast, branchName };
+  const p = { collectorId: page.params?.collectorId, agentId: page.params?.agentId, ciId: page.params?.ciId, accountId: page.params?.accountId, customerId: page.params?.customerId, navigate, showToast, branchName };
   switch (page.pageType) {
     case 'dashboard':           return <DashboardPage {...p} />;
+    case 'customers':           return <CustomersPage {...p} />;
+    case 'customerDetail':      return <CustomerDetailPage {...p} />;
     case 'fieldOperations':
     case 'collectorRoutes':
     case 'salesSchedules':
@@ -973,6 +1436,8 @@ export function BranchManagerPageBody({ page, navigate, showToast, currentUser }
     case 'staffSales':
     case 'staffScorecards':     return <StaffPerformancePage {...p} />;
     case 'alerts':              return <AlertsPage {...p} />;
+    case 'creditHistory':       return <CreditHistoryListPage navigate={navigate} showToast={showToast} basePath="/branch-manager/credit-history" userBranch={currentUser?.branch?.name} />;
+    case 'creditDetail':        return <CreditHistoryDetailPage creditId={page.params?.creditId} navigate={navigate} basePath="/branch-manager/credit-history" />;
     case 'notifications':       return <NotificationsPage {...p} />;
     case 'approvalCenter':      return <ApprovalCenterPage {...p} />;
     case 'profile':             return <ProfilePage {...p} />;

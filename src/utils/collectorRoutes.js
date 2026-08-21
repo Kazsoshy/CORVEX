@@ -46,7 +46,7 @@ export function buildCollectorBreadcrumbs(pageType, params = {}, parentContext =
   const crumbs = [{ label: 'Dashboard', to: '/collector/dashboard' }];
 
   const account = params.accountId ? getAccountById(params.accountId) : null;
-  const accountLabel = account?.clientName ?? 'Account Detail';
+  const accountLabel = account?.customerName ?? 'Account Detail';
 
   switch (pageType) {
     case 'dashboard':
@@ -69,13 +69,13 @@ export function buildCollectorBreadcrumbs(pageType, params = {}, parentContext =
       ];
 
     case 'accounts':
-      return [...crumbs, { label: 'Accounts', to: '/collector/accounts' }];
+      return [...crumbs, { label: 'Customers', to: '/collector/accounts' }];
 
     case 'accountDetail': {
       const parentCrumb =
         parentContext === 'route'
           ? { label: "Today's Route", to: '/collector/route' }
-          : { label: 'Accounts', to: '/collector/accounts' };
+          : { label: 'Customers', to: '/collector/accounts' };
       return [...crumbs, parentCrumb, { label: accountLabel, to: `/collector/account-detail/${params.accountId}?from=${parentContext}` }];
     }
 
@@ -146,8 +146,8 @@ export function resolveCollectorPage(pathname, search = '') {
     routeList: "Today's Route",
     routeMap: 'Route Map View',
     routeSummary: 'Route Summary',
-    accounts: 'Accounts',
-    accountDetail: 'Account Detail',
+    accounts: 'Customers',
+    accountDetail: 'Customer Detail',
     collectionLog: 'Collection Log',
     digitalReceipt: 'Digital Receipt',
     ciForm: 'Credit Investigation Form',

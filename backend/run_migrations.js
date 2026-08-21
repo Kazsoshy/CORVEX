@@ -9,52 +9,83 @@ const { Pool } = pkg;
 const pool = new Pool({
   user:     process.env.DB_USER     || 'postgres',
   host:     process.env.DB_HOST     || 'localhost',
-  database: process.env.DB_NAME     || 'corvex_db',
+  database: process.env.DB_NAME     || 'corvex',
   password: process.env.DB_PASSWORD || '100802',
   port:     Number(process.env.DB_PORT) || 5432,
 });
 
+const MIGRATIONS_DIR = path.join(process.cwd(), 'backend', 'migrations');
+
+const MIGRATIONS = [
+  { file: '001_initial_schema.sql',          label: '001_initial_schema.sql' },
+  { file: '000_prepare_existing_tables.sql', label: '000_prepare_existing_tables.sql' },
+  { file: '002_seed_data.sql',               label: '002_seed_data.sql' },
+  { file: '004_fix_password_hash.sql',       label: '004_fix_password_hash.sql' },
+  { file: '008_seed_customers.sql',          label: '008_seed_customers.sql' },
+  { file: '009_seed_customer_activity.sql',  label: '009_seed_customer_activity.sql' },
+  { file: '010_seed_field_operations.sql',    label: '010_seed_field_operations.sql' },
+  { file: '011_seed_reports.sql',             label: '011_seed_reports.sql' },
+  { file: '012_seed_customer_activity.sql',  label: '012_seed_customer_activity.sql' },
+];
+
+async function ensureMigrationsTable() {
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS schema_migrations (
+      migration VARCHAR(255) PRIMARY KEY,
+      applied_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+}
+
+async function getAppliedMigrations() {
+  const result = await pool.query(`SELECT migration FROM schema_migrations`);
+  return new Set(result.rows.map((row) => row.migration));
+}
+
+async function recordMigration(label) {
+  await pool.query(`INSERT INTO schema_migrations (migration) VALUES ($1) ON CONFLICT (migration) DO NOTHING`, [label]);
+}
+
+function isAlreadyExistsError(err) {
+  const message = (err.message || '').toLowerCase();
+  return message.includes('already exists') || message.includes('duplicate key') || err.code === '42P07' || err.code === '42710';
+}
+
 async function runMigrations() {
   try {
-    const s000 = fs.readFileSync(path.join(process.cwd(), 'backend', 'migrations', '000_prepare_existing_tables.sql'), 'utf-8');
-    const schemaSql = fs.readFileSync(path.join(process.cwd(), 'backend', 'migrations', '001_initial_schema.sql'), 'utf-8');
-    const seedSql = fs.readFileSync(path.join(process.cwd(), 'backend', 'migrations', '002_seed_data.sql'), 'utf-8');
+    await ensureMigrationsTable();
+    const applied = await getAppliedMigrations();
+    const pending = MIGRATIONS.filter((m) => !applied.has(m.label));
 
-    console.log('Running 000_prepare_existing_tables.sql...');
-    await pool.query(s000);
-    console.log('Preparation successful.');
+    if (!pending.length) {
+      console.log('No pending migrations. All up to date.');
+      process.exit(0);
+    }
 
-    console.log('Running 001_initial_schema.sql...');
-    await pool.query(schemaSql);
-    console.log('Schema created successfully.');
+    for (const { file, label } of pending) {
+      const filePath = path.join(MIGRATIONS_DIR, file);
+      if (!fs.existsSync(filePath)) {
+        console.log(`Skipping ${label} — file not found.`);
+        await recordMigration(label);
+        continue;
+      }
+      const sql = fs.readFileSync(filePath, 'utf-8');
+      console.log(`Running ${label}...`);
+      try {
+        await pool.query(sql);
+        await recordMigration(label);
+        console.log(`${label} completed.`);
+      } catch (err) {
+        if (isAlreadyExistsError(err)) {
+          console.log(`${label} skipped — objects already exist in database.`);
+          await recordMigration(label);
+        } else {
+          throw err;
+        }
+      }
+    }
 
-    // Add constraints to existing tables safely
-    const fkSql = `
-      DO $$ BEGIN
-        IF NOT EXISTS (SELECT 1 FROM information_schema.table_constraints WHERE constraint_name='users_role_id_fkey') THEN
-          ALTER TABLE users ADD CONSTRAINT users_role_id_fkey FOREIGN KEY (role_id) REFERENCES roles(id);
-        END IF;
-        IF NOT EXISTS (SELECT 1 FROM information_schema.table_constraints WHERE constraint_name='users_branch_id_fkey') THEN
-          ALTER TABLE users ADD CONSTRAINT users_branch_id_fkey FOREIGN KEY (branch_id) REFERENCES branches(id);
-        END IF;
-        IF NOT EXISTS (SELECT 1 FROM information_schema.table_constraints WHERE constraint_name='clients_user_id_fkey') THEN
-          ALTER TABLE clients ADD CONSTRAINT clients_user_id_fkey FOREIGN KEY (user_id) REFERENCES users(id);
-        END IF;
-        IF NOT EXISTS (SELECT 1 FROM information_schema.table_constraints WHERE constraint_name='clients_branch_id_fkey') THEN
-          ALTER TABLE clients ADD CONSTRAINT clients_branch_id_fkey FOREIGN KEY (branch_id) REFERENCES branches(id);
-        END IF;
-        IF NOT EXISTS (SELECT 1 FROM information_schema.table_constraints WHERE constraint_name='clients_assigned_collector_fkey') THEN
-          ALTER TABLE clients ADD CONSTRAINT clients_assigned_collector_fkey FOREIGN KEY (assigned_collector) REFERENCES users(id);
-        END IF;
-      END $$;
-    `;
-    await pool.query(fkSql);
-    console.log('Constraints added successfully.');
-
-    console.log('Running 002_seed_data.sql...');
-    await pool.query(seedSql);
-    console.log('Seed data inserted successfully.');
-
+    console.log(`All migrations completed successfully (${pending.length} processed).`);
     process.exit(0);
   } catch (err) {
     console.error('Migration failed:', err.message);

@@ -7,8 +7,10 @@ import authRouter      from './routes/auth.js';
 import usersRouter     from './routes/users.js';
 import rolesRouter     from './routes/roles.js';
 import productsRouter  from './routes/products.js';
-import clientsRouter   from './routes/clients.js';
+import customersRouter from './routes/customers.js';
 import dashboardRouter from './routes/dashboard.js';
+import branchManagerRouter from './routes/branchManager.js';
+import reportsRouter  from './routes/reports.js';
 import { requireAuth, requireBranchScope } from './middleware/auth.js';
 
 dotenv.config();
@@ -34,7 +36,7 @@ app.use(express.urlencoded({ extended: true }));
 const pool = new Pool({
   user:     process.env.DB_USER     || 'postgres',
   host:     process.env.DB_HOST     || 'localhost',
-  database: process.env.DB_NAME     || 'corvex_db',
+  database: process.env.DB_NAME     || 'corvex',
   password: process.env.DB_PASSWORD || '100802',
   port:     Number(process.env.DB_PORT) || 5432,
   max:      10,          // max connections in pool
@@ -75,9 +77,11 @@ app.use('/api/users',     requireAuth, usersRouter);
 app.use('/api/roles',     requireAuth, rolesRouter);
 app.use('/api/products',  requireAuth, productsRouter);
 
-// Branch-scoped routes — identity + branch enforcement
-app.use('/api/clients',   requireAuth, requireBranchScope, clientsRouter);
-app.use('/api/dashboard', requireAuth, requireBranchScope, dashboardRouter);
+// Branch-scoped routes — identify + branch enforcement
+app.use('/api/customers', requireAuth, requireBranchScope, customersRouter);
+app.use('/api/dashboard', requireAuth, dashboardRouter);
+app.use('/api/branch-manager', requireAuth, branchManagerRouter);
+app.use('/api/reports', requireAuth, reportsRouter);
 
 // Health Check
 app.get('/', (req, res) => {
@@ -97,16 +101,22 @@ app.get('/', (req, res) => {
       'GET  /api/products/:id',
       'POST /api/products',
       'PUT  /api/products/:id',
-      'GET  /api/clients',
-      'GET  /api/clients/:id',
-      'POST /api/clients',
-      'PUT  /api/clients/:id',
+      'GET  /api/customers',
+      'GET  /api/customers/:id',
+      'POST /api/customers',
+      'PUT  /api/customers/:id',
       'GET  /api/dashboard/system-health',
       'GET  /api/dashboard/user-stats',
       'GET  /api/dashboard/inventory-health',
       'GET  /api/dashboard/recent-audit',
       'GET  /api/dashboard/branches',
       'GET  /api/dashboard/branch-summary?branch_id=<id>',
+      'GET  /api/reports/collection',
+      'GET  /api/reports/sales',
+      'GET  /api/reports/inventory',
+      'GET  /api/reports/delinquency',
+      'GET  /api/reports/compliance',
+      'GET  /api/reports/kpi',
     ],
     timestamp: new Date().toISOString(),
   });
@@ -136,3 +146,4 @@ app.listen(PORT, () => {
   console.log(`🚀 CORVEX API running at http://localhost:${PORT}`);
   console.log(`   Environment: ${process.env.NODE_ENV || 'development'}`);
 });
+

@@ -11,7 +11,7 @@ router.get('/', async (req, res) => {
     const pool = req.app.locals.pool;
     const { branch_id, category, status, search, page = 1, limit = 50 } = req.query;
 
-    const conditions = ['p.status = \'Active\''];
+    const conditions = ["p.status = 'Active'"];
     const params = [];
     let pIdx = 1;
 
@@ -42,27 +42,27 @@ router.get('/', async (req, res) => {
     if (branch_id) {
       query = `
         SELECT
-          p.id, p.name, p.sku, p.category, p.description,
+          p.product_id, p.product_name, p.sku, p.category, p.description,
           p.unit_price, p.unit_type, p.barcode, p.reorder_point,
           p.status, p.created_at, p.updated_at,
-          s.name AS supplier_name,
+          s.supplier_name,
           i.quantity, i.stock_status, i.last_updated,
           b.name AS branch_name
         FROM products p
-        LEFT JOIN suppliers s ON s.id = p.supplier_id
-        LEFT JOIN inventory i ON i.product_id = p.id AND i.branch_id = $${params.indexOf(Number(branch_id)) + 1}
+        LEFT JOIN suppliers s ON s.suppliers_id = p.supplier_id
+        LEFT JOIN branch_inventory i ON i.product_id = p.product_id AND i.branch_id = $${params.indexOf(Number(branch_id)) + 1}
         LEFT JOIN branches b ON b.id = i.branch_id
         ${where}
-        ORDER BY p.name
+        ORDER BY p.product_name
         LIMIT $${pIdx++} OFFSET $${pIdx++}
       `;
     } else {
       query = `
         SELECT
-          p.id, p.name, p.sku, p.category, p.description,
+          p.product_id, p.product_name, p.sku, p.category, p.description,
           p.unit_price, p.unit_type, p.barcode, p.reorder_point,
           p.status, p.created_at, p.updated_at,
-          s.name AS supplier_name,
+          s.supplier_name,
           COALESCE(SUM(i.quantity), 0) AS total_quantity,
           CASE
             WHEN COALESCE(SUM(i.quantity), 0) = 0 THEN 'Out of Stock'
@@ -71,13 +71,13 @@ router.get('/', async (req, res) => {
             ELSE 'Sufficient'
           END AS stock_status
         FROM products p
-        LEFT JOIN suppliers s ON s.id = p.supplier_id
-        LEFT JOIN inventory i ON i.product_id = p.id
+        LEFT JOIN suppliers s ON s.suppliers_id = p.supplier_id
+        LEFT JOIN branch_inventory i ON i.product_id = p.product_id
         WHERE p.status = 'Active'
-        ${search ? `AND (p.name ILIKE $1 OR p.sku ILIKE $1)` : ''}
+        ${search ? `AND (p.product_name ILIKE $1 OR p.sku ILIKE $1)` : ''}
         ${category ? `AND p.category = $${search ? 2 : 1}` : ''}
-        GROUP BY p.id, s.name
-        ORDER BY p.name
+        GROUP BY p.product_id, s.supplier_name
+        ORDER BY p.product_name
         LIMIT $${pIdx - 1} OFFSET $${pIdx}
       `;
     }
@@ -106,10 +106,13 @@ router.get('/:id', async (req, res) => {
     const pool = req.app.locals.pool;
 
     const productResult = await pool.query(
-      `SELECT p.*, s.name AS supplier_name
+      `SELECT p.product_id, p.product_name, p.sku, p.category, p.description,
+              p.unit_price, p.unit_type, p.barcode, p.reorder_point,
+              p.status, p.created_at, p.updated_at,
+              s.supplier_name
        FROM products p
-       LEFT JOIN suppliers s ON s.id = p.supplier_id
-       WHERE p.id = $1`,
+       LEFT JOIN suppliers s ON s.suppliers_id = p.supplier_id
+       WHERE p.product_id = $1`,
       [req.params.id]
     );
     if (productResult.rows.length === 0) {
@@ -118,7 +121,7 @@ router.get('/:id', async (req, res) => {
 
     const inventoryResult = await pool.query(
       `SELECT i.quantity, i.stock_status, i.last_updated, b.id AS branch_id, b.name AS branch_name
-       FROM inventory i
+       FROM branch_inventory i
        JOIN branches b ON b.id = i.branch_id
        WHERE i.product_id = $1
        ORDER BY b.name`,
@@ -163,15 +166,15 @@ router.post('/', async (req, res) => {
     }
 
     // Check SKU uniqueness
-    const skuCheck = await pool.query(`SELECT id FROM products WHERE sku = $1`, [sku.toUpperCase().trim()]);
+    const skuCheck = await pool.query(`SELECT product_id FROM products WHERE sku = $1`, [sku.toUpperCase().trim()]);
     if (skuCheck.rows.length > 0) {
       return res.status(409).json({ success: false, message: 'SKU already exists.' });
     }
 
     const result = await pool.query(
-      `INSERT INTO products (name, sku, category, description, unit_price, unit_type, barcode, supplier_id, reorder_point)
+      `INSERT INTO products (product_name, sku, category, description, unit_price, unit_type, barcode, supplier_id, reorder_point)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
-       RETURNING *`,
+       RETURNING product_id`,
       [
         name.trim(), sku.toUpperCase().trim(), category || null,
         description || null, Number(unit_price) || 0, unit_type || 'Unit',
@@ -194,11 +197,18 @@ router.put('/:id', async (req, res) => {
     const pool = req.app.locals.pool;
     const { name, category, description, unit_price, unit_type, barcode, supplier_id, reorder_point, status } = req.body;
 
+    // Check product exists
+    const existing = await pool.query(`SELECT product_id FROM products WHERE product_id = $1`, [Number(req.params.id)]);
+    if (existing.rows.length === 0) {
+      return res.status(404).json({ success: false, message: 'Product not found.' });
+    }
+
+    // Build update fields dynamically
     const updates = [];
     const params = [];
     let pIdx = 1;
 
-    if (name)            { updates.push(`name = $${pIdx++}`);          params.push(name.trim()); }
+    if (name)            { updates.push(`product_name = $${pIdx++}`);          params.push(name.trim()); }
     if (category !== undefined) { updates.push(`category = $${pIdx++}`); params.push(category || null); }
     if (description !== undefined) { updates.push(`description = $${pIdx++}`); params.push(description || null); }
     if (unit_price !== undefined)  { updates.push(`unit_price = $${pIdx++}`);  params.push(Number(unit_price)); }
@@ -212,7 +222,7 @@ router.put('/:id', async (req, res) => {
 
     params.push(Number(req.params.id));
     const result = await pool.query(
-      `UPDATE products SET ${updates.join(', ')}, updated_at = NOW() WHERE id = $${pIdx} RETURNING *`,
+      `UPDATE products SET ${updates.join(', ')}, updated_at = NOW() WHERE product_id = $${pIdx} RETURNING product_id`,
       params
     );
 

@@ -18,6 +18,7 @@ export const branchManagerRole = {
       title: 'Operations',
       items: [
         { label: 'Field Operations',               to: '/branch-manager/field-operations' },
+        { label: 'Customers',                      to: '/branch-manager/customers' },
         { label: 'Credit Investigation Approvals', to: '/branch-manager/ci-approvals' },
         { label: 'Approval Center',                to: '/branch-manager/approval-center' },
       ],
@@ -28,6 +29,7 @@ export const branchManagerRole = {
         { label: 'Staff Performance',   to: '/branch-manager/staff-performance' },
         { label: 'Map',                 to: '/branch-manager/leaflet' },
         { label: 'Reports & Analytics', to: '/branch-manager/reports' },
+        { label: 'Customer Credit History', to: '/branch-manager/credit-history' },
       ],
     },
     {
@@ -49,11 +51,13 @@ export const branchManagerRole = {
   navPages: [
     { label: 'Dashboard',                          to: '/branch-manager/dashboard' },
     { label: 'Field Operations',                   to: '/branch-manager/field-operations' },
+    { label: 'Customers',                          to: '/branch-manager/customers' },
     { label: 'Credit Investigation Approvals',     to: '/branch-manager/ci-approvals' },
     { label: 'Approval Center',                    to: '/branch-manager/approval-center' },
     { label: 'Staff Performance',                  to: '/branch-manager/staff-performance' },
     { label: 'Leaflet | OpenStreetMap',            to: '/branch-manager/leaflet' },
     { label: 'Reports & Analytics',                to: '/branch-manager/reports' },
+    { label: 'Customer Credit History',            to: '/branch-manager/credit-history' },
     { label: 'Alerts & Exceptions',                to: '/branch-manager/alerts' },
     { label: 'Audit Log',                          to: '/branch-manager/audit-log' },
     { label: 'Notifications',                      to: '/branch-manager/notifications' },

@@ -12,7 +12,7 @@ export const COLLECTOR_PROFILE = {
 export const ACCOUNTS = [
   {
     id: '1',
-    clientName: 'Luntiang Tahanan Interiors',
+    customerName: 'Luntiang Tahanan Interiors',
     accountNumber: 'ACC-1001',
     address: '42 Ilustre Ave, Davao City',
     phone: '+63 912 345 6789',
@@ -31,7 +31,7 @@ export const ACCOUNTS = [
   },
   {
     id: '2',
-    clientName: 'Casa Moderna Furniture',
+    customerName: 'Casa Moderna Furniture',
     accountNumber: 'ACC-1002',
     address: '18 JP Laurel Ave, Davao City',
     phone: '+63 918 765 4321',
@@ -48,7 +48,7 @@ export const ACCOUNTS = [
   },
   {
     id: '3',
-    clientName: 'Hardin ng Bahay Home Store',
+    customerName: 'Hardin ng Bahay Home Store',
     accountNumber: 'ACC-1003',
     address: '7 Quirino Ave, Davao City',
     phone: '+63 905 111 2233',
@@ -63,7 +63,7 @@ export const ACCOUNTS = [
   },
   {
     id: '4',
-    clientName: 'Soledad Furniture Gallery',
+    customerName: 'Soledad Furniture Gallery',
     accountNumber: 'ACC-1004',
     address: '55 McArthur Highway, Davao City',
     phone: '+63 927 888 9900',
@@ -80,7 +80,7 @@ export const ACCOUNTS = [
   },
   {
     id: '5',
-    clientName: 'Dreamspace Living',
+    customerName: 'Dreamspace Living',
     accountNumber: 'ACC-1005',
     address: '91 Sandawa Rd, Davao City',
     phone: '+63 916 444 5566',
@@ -97,7 +97,7 @@ export const ACCOUNTS = [
   },
   {
     id: '6',
-    clientName: 'Mabuhay Sala Sets',
+    customerName: 'Mabuhay Sala Sets',
     accountNumber: 'ACC-1006',
     address: '33 R. Castillo St, Davao City',
     phone: '+63 919 333 2211',
@@ -136,7 +136,7 @@ export const COLLECTION_HISTORY = [
   {
     id: 'RCP-2024-0042',
     receiptNumber: 'RCP-2024-0042',
-    clientName: 'Soledad Furniture Gallery',
+    customerName: 'Soledad Furniture Gallery',
     accountNumber: 'ACC-1004',
     amount: 9200,
     date: '2026-06-24',
@@ -149,7 +149,7 @@ export const COLLECTION_HISTORY = [
   {
     id: 'RCP-2024-0041',
     receiptNumber: 'RCP-2024-0041',
-    clientName: 'Dreamspace Living',
+    customerName: 'Dreamspace Living',
     accountNumber: 'ACC-1005',
     amount: 6500,
     date: '2026-06-24',
@@ -162,7 +162,7 @@ export const COLLECTION_HISTORY = [
   {
     id: 'RCP-001',
     receiptNumber: 'RCP-001',
-    clientName: 'Luntiang Tahanan Interiors',
+    customerName: 'Luntiang Tahanan Interiors',
     accountNumber: 'ACC-1001',
     amount: 12000,
     date: '2026-06-20',
@@ -175,7 +175,7 @@ export const COLLECTION_HISTORY = [
   {
     id: 'RCP-010',
     receiptNumber: 'RCP-010',
-    clientName: 'Casa Moderna Furniture',
+    customerName: 'Casa Moderna Furniture',
     accountNumber: 'ACC-1002',
     amount: 10000,
     date: '2026-06-19',

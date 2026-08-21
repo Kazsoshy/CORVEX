@@ -1,14 +1,14 @@
-import { getClientById, getProductById, getSaleById } from '../data/salesMockData';
+import { getCustomerById, getProductById, getSaleById } from '../data/salesMockData';
 
 const ROUTE_DEFINITIONS = [
   { pattern: /^\/sales\/dashboard$/, pageType: 'dashboard' },
   { pattern: /^\/sales\/settings$/, pageType: 'settings' },
   { pattern: /^\/sales\/schedule\/map$/, pageType: 'scheduleMap' },
   { pattern: /^\/sales\/schedule$/, pageType: 'scheduleList' },
-  { pattern: /^\/sales\/clients$/, pageType: 'clients' },
-  { pattern: /^\/sales\/client-detail\/(\d+)$/, pageType: 'clientDetail', params: ['clientId'] },
-  { pattern: /^\/sales\/visit-log\/(\d+)$/, pageType: 'visitLog', params: ['clientId'] },
-  { pattern: /^\/sales\/ci-form\/(\d+)$/, pageType: 'ciForm', params: ['clientId'] },
+  { pattern: /^\/sales\/customers$/, pageType: 'customers' },
+  { pattern: /^\/sales\/customer-detail\/([^/]+)$/, pageType: 'customerDetail', params: ['customerId'] },
+  { pattern: /^\/sales\/visit-log\/(\d+)$/, pageType: 'visitLog', params: ['customerId'] },
+  { pattern: /^\/sales\/ci-form\/(\d+)$/, pageType: 'ciForm', params: ['customerId'] },
   { pattern: /^\/sales\/history$/, pageType: 'history' },
   { pattern: /^\/sales\/history\/([^/]+)$/, pageType: 'saleDetails', params: ['invoiceId'] },
   { pattern: /^\/sales\/inventory\/([^/]+)$/, pageType: 'productDetails', params: ['productId'] },
@@ -16,6 +16,8 @@ const ROUTE_DEFINITIONS = [
   { pattern: /^\/sales\/notifications$/, pageType: 'notifications' },
   { pattern: /^\/sales\/profile$/, pageType: 'profile' },
   { pattern: /^\/sales\/route-tracking$/, pageType: 'routeTracking' },
+  { pattern: /^\/sales\/credit-history$/, pageType: 'creditHistory' },
+  { pattern: /^\/sales\/credit-history\/([^/]+)$/, pageType: 'creditDetail', params: ['creditId'] },
   { pattern: /^\/sales\/audit-log$/, pageType: 'auditLog' },
 ];
 
@@ -38,16 +40,18 @@ export function matchSalesRoute(pathname) {
 export function getParentContext(search) {
   const params = new URLSearchParams(search);
   const from = params.get('from');
-  if (from === 'schedule' || from === 'clients') return from;
-  return 'clients';
+  if (from === 'schedule' || from === 'customers') return from;
+  return 'customers';
 }
 
-export function buildSalesBreadcrumbs(pageType, params = {}, parentContext = 'clients') {
+export function buildSalesBreadcrumbs(pageType, params = {}, parentContext = 'customers') {
   const crumbs = [{ label: 'Dashboard', to: '/sales/dashboard' }];
-  const client = params.clientId ? getClientById(params.clientId) : null;
-  const clientLabel = client?.clientName ?? 'Client Detail';
+  const customer = params.customerId ? getCustomerById(params.customerId) : null;
+  const customerLabel = customer ? `${customer.first_name} ${customer.last_name}` : 'Customer Detail';
   const product = params.productId ? getProductById(params.productId) : null;
   const sale = params.invoiceId ? getSaleById(params.invoiceId) : null;
+
+  const creditCrumbs = [{ label: 'Customer Credit History', to: '/sales/credit-history' }];
 
   switch (pageType) {
     case 'dashboard':
@@ -64,29 +68,29 @@ export function buildSalesBreadcrumbs(pageType, params = {}, parentContext = 'cl
         ...(pageType === 'scheduleMap' ? [{ label: 'Territory Map', to: '/sales/schedule/map' }] : []),
       ];
 
-    case 'clients':
-      return [...crumbs, { label: 'Clients', to: '/sales/clients' }];
+    case 'customers':
+      return [...crumbs, { label: 'Customers', to: '/sales/customers' }];
 
-    case 'clientDetail': {
+    case 'customerDetail': {
       const parentCrumb =
         parentContext === 'schedule'
           ? { label: "Today's Schedule", to: '/sales/schedule' }
-          : { label: 'Clients', to: '/sales/clients' };
-      return [...crumbs, parentCrumb, { label: clientLabel, to: `/sales/client-detail/${params.clientId}?from=${parentContext}` }];
+          : { label: 'Customers', to: '/sales/customers' };
+      return [...crumbs, parentCrumb, { label: customerLabel, to: `/sales/customer-detail/${params.customerId}?from=${parentContext}` }];
     }
 
     case 'visitLog':
       return [
-        ...buildSalesBreadcrumbs('clientDetail', params, parentContext).slice(0, -1),
-        { label: clientLabel, to: `/sales/client-detail/${params.clientId}?from=${parentContext}` },
-        { label: 'Sales Visit Log', to: `/sales/visit-log/${params.clientId}?from=${parentContext}` },
+        ...buildSalesBreadcrumbs('customerDetail', params, parentContext).slice(0, -1),
+        { label: customerLabel, to: `/sales/customer-detail/${params.customerId}?from=${parentContext}` },
+        { label: 'Sales Visit Log', to: `/sales/visit-log/${params.customerId}?from=${parentContext}` },
       ];
 
     case 'ciForm':
       return [
-        ...buildSalesBreadcrumbs('clientDetail', params, parentContext).slice(0, -1),
-        { label: clientLabel, to: `/sales/client-detail/${params.clientId}?from=${parentContext}` },
-        { label: 'Credit Investigation Form', to: `/sales/ci-form/${params.clientId}?from=${parentContext}` },
+        ...buildSalesBreadcrumbs('customerDetail', params, parentContext).slice(0, -1),
+        { label: customerLabel, to: `/sales/customer-detail/${params.customerId}?from=${parentContext}` },
+        { label: 'Credit Investigation Form', to: `/sales/ci-form/${params.customerId}?from=${parentContext}` },
       ];
 
     case 'history':
@@ -108,6 +112,12 @@ export function buildSalesBreadcrumbs(pageType, params = {}, parentContext = 'cl
         { label: 'Inventory', to: '/sales/inventory' },
         { label: product?.name ?? 'Product Details', to: `/sales/inventory/${params.productId}` },
       ];
+
+    case 'creditHistory':
+      return [...crumbs, ...creditCrumbs];
+
+    case 'creditDetail':
+      return [...crumbs, ...creditCrumbs, { label: 'Credit Record', to: `/sales/credit-history/${params.creditId}` }];
 
     case 'notifications':
       return [...crumbs, { label: 'Notifications', to: '/sales/notifications' }];
@@ -138,8 +148,8 @@ export function resolveSalesPage(pathname, search = '') {
     settings: 'Settings',
     scheduleList: "Today's Schedule",
     scheduleMap: 'Territory Map',
-    clients: 'Clients',
-    clientDetail: 'Client Detail',
+    customers: 'Customers',
+    customerDetail: 'Customer Detail',
     visitLog: 'Sales Visit Log',
     ciForm: 'Credit Investigation Form',
     history: 'Sales History',
@@ -150,6 +160,8 @@ export function resolveSalesPage(pathname, search = '') {
     profile: 'Profile',
     routeTracking: 'Route Tracking',
     auditLog: 'Audit Log',
+    creditHistory: 'Customer Credit History',
+    creditDetail: 'Credit Record',
   };
 
   return {
@@ -166,10 +178,11 @@ export function isSalesNavActive(fullPath, navTo) {
   const pathname = fullPath.split('?')[0];
   if (navTo === '/sales/dashboard') return pathname === '/sales/dashboard' || pathname === '/sales/settings' || pathname === '/sales/route-tracking' || pathname === '/sales/audit-log';
   if (navTo === '/sales/schedule') return pathname.startsWith('/sales/schedule') || fullPath.includes('from=schedule');
-  if (navTo === '/sales/clients') return pathname === '/sales/clients' || fullPath.includes('from=clients');
+  if (navTo === '/sales/customers') return pathname === '/sales/customers' || fullPath.includes('from=customers');
   if (navTo === '/sales/history') return pathname.startsWith('/sales/history');
   if (navTo === '/sales/inventory') return pathname.startsWith('/sales/inventory');
   if (navTo === '/sales/notifications') return pathname === '/sales/notifications';
+  if (navTo === '/sales/credit-history') return pathname.startsWith('/sales/credit-history');
   if (navTo === '/sales/profile') return pathname === '/sales/profile';
   return pathname === navTo || pathname.startsWith(`${navTo}/`);
 }

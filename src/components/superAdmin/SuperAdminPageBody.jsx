@@ -430,9 +430,9 @@ function UsersPage({ showToast }) {
     setLoading(true);
     try {
       const [uRes, rRes, bRes] = await Promise.all([
-        apiClient.get('/api/users?limit=100'),
-        apiClient.get('/api/roles'),
-        apiClient.get('/api/dashboard/branches') // using branches summary for dropdown
+        apiClient.get('/users?limit=100'),
+        apiClient.get('/roles'),
+        apiClient.get('/dashboard/branches') // using branches summary for dropdown
       ]);
       setUsers(uRes.data.data || []);
       setRoles(rRes.data.data.roles || []);
@@ -469,10 +469,10 @@ function UsersPage({ showToast }) {
         // password is optional on edit
         const payload = { ...formData };
         if (!payload.password) delete payload.password;
-        await apiClient.put(`/api/users/${editingUser.id}`, payload);
+        await apiClient.put(`/users/${editingUser.id}`, payload);
         showToast('User updated successfully.', 'success');
       } else {
-        await apiClient.post('/api/users', formData);
+        await apiClient.post('/users', formData);
         showToast('User created successfully.', 'success');
       }
       setShowModal(false);
@@ -485,7 +485,7 @@ function UsersPage({ showToast }) {
   const deactivateUser = async (id) => {
     if (!window.confirm('Are you sure you want to deactivate this user?')) return;
     try {
-      await apiClient.delete(`/api/users/${id}`);
+      await apiClient.delete(`/users/${id}`);
       showToast('User deactivated.', 'success');
       fetchData();
     } catch (err) {

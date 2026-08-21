@@ -24,24 +24,20 @@ router.post('/login', async (req, res) => {
     const result = await pool.query(
       `SELECT
          u.id,
-         u.full_name,
-         u.username,
+         u.first_name,
+         u.last_name,
          u.email,
          u.password_hash,
-         u.employee_id,
-         u.avatar_initials,
-         u.contact_number,
-         u.address,
          u.status,
-         u.last_login,
          u.created_at,
-         r.id   AS role_id,
-         r.name AS role_name,
+         r.role_id,
+         r.role_name,
          r.slug AS role_slug,
-         b.id   AS branch_id,
-         b.name AS branch_name
+         b.id AS branch_id,
+         b.name AS branch_name,
+         CONCAT(u.first_name, ' ', u.last_name) AS full_name
        FROM users u
-       JOIN roles r ON r.id = u.role_id
+       JOIN roles r ON r.role_id = u.role_id
        LEFT JOIN branches b ON b.id = u.branch_id
        WHERE u.email = $1`,
       [email.toLowerCase().trim()]
@@ -50,8 +46,8 @@ router.post('/login', async (req, res) => {
     if (result.rows.length === 0) {
       // Log failed attempt
       await pool.query(
-        `INSERT INTO audit_logs (user_name, action, module, ip_address, status, details)
-         VALUES ($1, 'Login Failed', 'Auth', $2, 'Failed', 'User not found')`,
+        `INSERT INTO audit_logs (user_id, user_name, action, ip_address, status_details)
+         VALUES (NULL, $1, 'Login Failed', $2, 'User not found')`,
         [email, req.ip]
       );
       return res.status(401).json({ success: false, message: 'Invalid email or password.' });
@@ -62,44 +58,33 @@ router.post('/login', async (req, res) => {
     if (user.status === 'Inactive') {
       return res.status(403).json({ success: false, message: 'Your account has been deactivated. Please contact an administrator.' });
     }
-    if (user.status === 'Suspended') {
-      return res.status(403).json({ success: false, message: 'Your account is suspended. Please contact support.' });
-    }
 
     // Verify password
     const isValid = await bcrypt.compare(password, user.password_hash);
     if (!isValid) {
       await pool.query(
-        `INSERT INTO audit_logs (user_id, user_name, action, module, ip_address, status, details)
-         VALUES ($1, $2, 'Login Failed', 'Auth', $3, 'Failed', 'Invalid password')`,
+        `INSERT INTO audit_logs (user_id, user_name, action, ip_address, status_details)
+         VALUES ($1, $2, 'Login Failed', $3, 'Invalid password')`,
         [user.id, user.full_name, req.ip]
       );
       return res.status(401).json({ success: false, message: 'Invalid email or password.' });
     }
 
-    // Update last_login
-    await pool.query(`UPDATE users SET last_login = NOW() WHERE id = $1`, [user.id]);
-
     // Log successful login
     await pool.query(
-      `INSERT INTO audit_logs (user_id, user_name, action, module, ip_address, status, details)
-       VALUES ($1, $2, 'Login', 'Auth', $3, 'Success', 'Successful login')`,
+      `INSERT INTO audit_logs (user_id, user_name, action, ip_address, status_details)
+       VALUES ($1, $2, 'Login', $3, 'Successful login')`,
       [user.id, user.full_name, req.ip]
     );
 
-    // Return user info (never return password_hash)
+    // Return user info (never return password)
     return res.status(200).json({
       success: true,
       message: 'Login successful.',
       user: {
         id:             user.id,
         fullName:       user.full_name,
-        username:       user.username,
         email:          user.email,
-        employeeId:     user.employee_id,
-        avatarInitials: user.avatar_initials,
-        contactNumber:  user.contact_number,
-        address:        user.address,
         status:         user.status,
         role: {
           id:   user.role_id,
@@ -110,7 +95,6 @@ router.post('/login', async (req, res) => {
           id:   user.branch_id,
           name: user.branch_name,
         } : null,
-        lastLogin: user.last_login,
       },
     });
   } catch (err) {

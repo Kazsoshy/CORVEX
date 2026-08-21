@@ -1,5 +1,4 @@
 import { getBranchById as getOperatingBranchById } from '../data/operatingManagerMockData';
-import { getCustomerRecordById } from '../data/operatingManagerMockData';
 import { resolveAdminPage } from './adminRoutes';
 import { resolveBranchManagerPage } from './branchManagerRoutes';
 
@@ -43,7 +42,7 @@ export function matchOperatingManagerRoute(pathname) {
 }
 
 export function buildOperatingManagerBreadcrumbs(pageType, params = {}) {
-  const crumbs = [{ label: 'Executive Dashboard', to: '/operating-manager/dashboard' }];
+  const crumbs = [{ label: 'Operating Dashboard', to: '/operating-manager/dashboard' }];
   const branch = params.branchId ? getOperatingBranchById(params.branchId) : null;
   const branchPerf = [{ label: 'Branch Performance', to: '/operating-manager/branch-performance' }];
   const gis = [{ label: 'Leaflet | OpenStreetMap', to: '/operating-manager/leaflet' }];
@@ -51,7 +50,7 @@ export function buildOperatingManagerBreadcrumbs(pageType, params = {}) {
 
   switch (pageType) {
     case 'dashboard':
-      return [{ label: 'Executive Dashboard', to: '/operating-manager/dashboard' }];
+      return [{ label: 'Operating Dashboard', to: '/operating-manager/dashboard' }];
     case 'branchPerformance':
       return [...crumbs, ...branchPerf];
     case 'branchComparison':
@@ -89,7 +88,7 @@ export function buildOperatingManagerBreadcrumbs(pageType, params = {}) {
     case 'customers':
       return [...crumbs, { label: 'Customer Records', to: '/operating-manager/customers' }];
     case 'customerDetail':
-      return [...crumbs, { label: 'Customer Records', to: '/operating-manager/customers' }, { label: getCustomerRecordById(params.customerId)?.clientName ?? 'Customer Detail', to: `/operating-manager/customers/${params.customerId}` }];
+      return [...crumbs, { label: 'Customer Records', to: '/operating-manager/customers' }, { label: 'Customer Detail', to: `/operating-manager/customers/${params.customerId}` }];
     default:
       return crumbs;
   }
@@ -128,7 +127,7 @@ export function resolveOperatingManagerPage(pathname) {
   if (!match) return null;
 
   const titles = {
-    dashboard: 'Executive Dashboard',
+    dashboard: 'Operating Dashboard',
     branchPerformance: 'Branch Performance',
     branchComparison: 'Branch Comparison',
     branchDetail: 'Branch Detail',
@@ -199,6 +198,8 @@ const OPERATION_TITLES = {
   settings: 'Settings',
   approvalCenter: 'Approval Center',
   auditLog: 'Audit Log',
+  customers: 'Customers',
+  customerDetail: 'Customer Detail',
   fieldOperations: 'Field Operations',
   routePerformance: 'Route Performance',
   collectorRoutes: 'Collector Route Overview',

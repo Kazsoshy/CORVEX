@@ -11,7 +11,7 @@ export function AccountCard({ account, onViewDetails, onCall, onNavigate }) {
     <article className="account-card">
       <div className="account-card-header">
         <div>
-          <h4>{account.clientName}</h4>
+          <h4>{account.customerName}</h4>
           <p className="muted account-meta">{account.accountNumber}</p>
         </div>
         <span className={`status-badge ${STATUS_CLASS[account.status] ?? ''}`}>{account.status}</span>
@@ -36,7 +36,7 @@ export function AccountCard({ account, onViewDetails, onCall, onNavigate }) {
           View Details
         </button>
         <button className="button secondary" type="button" onClick={() => onCall(account)}>
-          Call Client
+          Call Customer
         </button>
         <button className="button ghost" type="button" onClick={() => onNavigate(account)}>
           Open Map

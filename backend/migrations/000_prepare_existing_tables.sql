@@ -13,9 +13,6 @@ BEGIN
     ALTER TABLE products RENAME COLUMN product_id TO id;
   END IF;
 
-  IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='clients' AND column_name='client_id') THEN
-    ALTER TABLE clients RENAME COLUMN client_id TO id;
-  END IF;
 
   IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='stock_movements' AND column_name='stock_movements_id') THEN
     ALTER TABLE stock_movements RENAME COLUMN stock_movements_id TO id;
@@ -122,50 +119,6 @@ EXCEPTION WHEN OTHERS THEN NULL; END $$;
 UPDATE products SET sku = 'OLD-SKU-' || id WHERE sku IS NULL OR sku = '';
 UPDATE products SET sku = sku || '_' || id WHERE id IN (SELECT id FROM (SELECT id, ROW_NUMBER() OVER (PARTITION BY sku ORDER BY id) as rnum FROM products) t WHERE t.rnum > 1);
 
--- 4. CLIENTS Table
-ALTER TABLE clients ADD COLUMN IF NOT EXISTS user_id INT;
-ALTER TABLE clients ADD COLUMN IF NOT EXISTS account_number VARCHAR(100);
-ALTER TABLE clients ADD COLUMN IF NOT EXISTS client_name VARCHAR(150);
-ALTER TABLE clients ADD COLUMN IF NOT EXISTS business_type VARCHAR(100);
-ALTER TABLE clients ADD COLUMN IF NOT EXISTS contact_person VARCHAR(120);
-ALTER TABLE clients ADD COLUMN IF NOT EXISTS phone VARCHAR(100);
-ALTER TABLE clients ADD COLUMN IF NOT EXISTS email VARCHAR(120);
-ALTER TABLE clients ADD COLUMN IF NOT EXISTS credit_limit NUMERIC(12,2) DEFAULT 0;
-ALTER TABLE clients ADD COLUMN IF NOT EXISTS status VARCHAR(20) DEFAULT 'Active';
-ALTER TABLE clients ADD COLUMN IF NOT EXISTS days_overdue INT DEFAULT 0;
-ALTER TABLE clients ADD COLUMN IF NOT EXISTS risk_level VARCHAR(20);
-ALTER TABLE clients ADD COLUMN IF NOT EXISTS blacklisted BOOLEAN DEFAULT FALSE;
-ALTER TABLE clients ADD COLUMN IF NOT EXISTS total_purchases NUMERIC(14,2) DEFAULT 0;
-ALTER TABLE clients ADD COLUMN IF NOT EXISTS assigned_collector INT;
-ALTER TABLE clients ADD COLUMN IF NOT EXISTS account_open_date DATE;
-ALTER TABLE clients ADD COLUMN IF NOT EXISTS last_visit_date DATE;
-ALTER TABLE clients ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT NOW();
-ALTER TABLE clients ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT NOW();
-
-ALTER TABLE clients ALTER COLUMN account_number TYPE VARCHAR(100);
-ALTER TABLE clients ALTER COLUMN phone TYPE VARCHAR(100);
-
-DO $$ BEGIN
-  ALTER TABLE clients ALTER COLUMN business_name DROP NOT NULL;
-  ALTER TABLE clients ALTER COLUMN first_name DROP NOT NULL;
-  ALTER TABLE clients ALTER COLUMN last_name DROP NOT NULL;
-  ALTER TABLE clients ALTER COLUMN address DROP NOT NULL;
-  ALTER TABLE clients ALTER COLUMN latitude DROP NOT NULL;
-  ALTER TABLE clients ALTER COLUMN longitude DROP NOT NULL;
-  ALTER TABLE clients ALTER COLUMN outstanding_balance DROP NOT NULL;
-  ALTER TABLE clients ALTER COLUMN purchase_volume DROP NOT NULL;
-  ALTER TABLE clients ALTER COLUMN last_collection_date DROP NOT NULL;
-  ALTER TABLE clients ALTER COLUMN last_sales_visit DROP NOT NULL;
-EXCEPTION WHEN OTHERS THEN NULL; END $$;
-
-DO $$ BEGIN
-  IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='clients' AND column_name='first_name') THEN
-    EXECUTE 'UPDATE clients SET client_name = COALESCE(business_name, COALESCE(first_name, '''') || '' '' || COALESCE(last_name, '''')) WHERE client_name IS NULL';
-  END IF;
-END $$;
-
-UPDATE clients SET account_number = 'OLD-ACC-' || id WHERE account_number IS NULL OR account_number = '';
-UPDATE clients SET account_number = account_number || '_' || id WHERE id IN (SELECT id FROM (SELECT id, ROW_NUMBER() OVER (PARTITION BY account_number ORDER BY id) as rnum FROM clients) t WHERE t.rnum > 1);
 
 -- 5. STOCK_MOVEMENTS Table
 ALTER TABLE stock_movements ADD COLUMN IF NOT EXISTS movement_ref VARCHAR(100);
@@ -200,10 +153,7 @@ DO $$ BEGIN
     ALTER TABLE products ADD CONSTRAINT products_sku_key UNIQUE (sku);
   END IF;
 
-  IF NOT EXISTS (SELECT 1 FROM information_schema.table_constraints WHERE constraint_name='clients_account_number_key') THEN
-    ALTER TABLE clients ADD CONSTRAINT clients_account_number_key UNIQUE (account_number);
-  END IF;
-  
+
   IF NOT EXISTS (SELECT 1 FROM information_schema.table_constraints WHERE constraint_name='stock_movements_movement_ref_key') THEN
     ALTER TABLE stock_movements ADD CONSTRAINT stock_movements_movement_ref_key UNIQUE (movement_ref);
   END IF;

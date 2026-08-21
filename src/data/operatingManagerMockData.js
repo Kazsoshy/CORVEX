@@ -1,4 +1,4 @@
-// Furniture retail — Operating Manager (3 branches)
+// Furniture retail — Operating Manager (Davao City)
 
 export const OPERATING_MANAGER_PROFILE = {
   name: 'Elena Mercado',
@@ -146,7 +146,7 @@ export const LEAFLET_LAYERS = [
   { id: 'profitability',label: 'Profitability Zones',      active: true  },
   { id: 'coverage',     label: 'Branch Coverage Areas',    active: true  },
   { id: 'efficiency',   label: 'Route Efficiency',         active: false },
-  { id: 'opportunity',  label: 'High-Value Client Zones',  active: false },
+  { id: 'opportunity',  label: 'High-Value Customer Zones',  active: false },
 ];
 
 export const REPORT_CATEGORIES = [
@@ -182,7 +182,7 @@ export function getLowestPerformingBranch()  { return [...BRANCHES].sort((a, b) 
 export const CUSTOMER_RECORDS = [
   {
     id: 'CR-001',
-    clientName: 'Luntiang Tahanan Interiors',
+    customerName: 'Luntiang Tahanan Interiors',
     accountNumber: 'ACC-1001',
     branch: 'Davao City',
     contactPerson: 'Juan Santos',
@@ -208,7 +208,7 @@ export const CUSTOMER_RECORDS = [
   },
   {
     id: 'CR-002',
-    clientName: 'Furniture Plus GenSan',
+    customerName: 'Furniture Plus GenSan',
     accountNumber: 'ACC-2001',
     branch: 'General Santos',
     contactPerson: 'Rosario Bautista',
@@ -234,7 +234,7 @@ export const CUSTOMER_RECORDS = [
   },
   {
     id: 'CR-003',
-    clientName: 'Abode Furniture Warehouse',
+    customerName: 'Abode Furniture Warehouse',
     accountNumber: 'ACC-2004',
     branch: 'General Santos',
     contactPerson: 'Marco Reyes',
@@ -260,7 +260,7 @@ export const CUSTOMER_RECORDS = [
   },
   {
     id: 'CR-004',
-    clientName: 'Mabuhay Sala Sets',
+    customerName: 'Mabuhay Sala Sets',
     accountNumber: 'ACC-1006',
     branch: 'Davao City',
     contactPerson: 'Ernesto Cruz',
@@ -286,7 +286,7 @@ export const CUSTOMER_RECORDS = [
   },
   {
     id: 'CR-005',
-    clientName: 'Hardin ng Bahay Home Store',
+    customerName: 'Hardin ng Bahay Home Store',
     accountNumber: 'ACC-1003',
     branch: 'Davao City',
     contactPerson: 'Maribel Santos',

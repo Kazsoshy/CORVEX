@@ -41,7 +41,7 @@ router.get('/', async (req, res) => {
     const offset = (Number(page) - 1) * Number(limit);
 
     const countResult = await pool.query(
-      `SELECT COUNT(*) FROM users u JOIN roles r ON r.id = u.role_id ${where}`,
+      `SELECT COUNT(*) FROM users u JOIN roles r ON r.role_id = u.role_id ${where}`,
       params
     );
     const total = Number(countResult.rows[0].count);
@@ -51,10 +51,10 @@ router.get('/', async (req, res) => {
          u.id, u.full_name, u.username, u.email,
          u.employee_id, u.avatar_initials, u.contact_number,
          u.address, u.status, u.last_login, u.created_at, u.updated_at,
-         r.id AS role_id, r.name AS role_name, r.slug AS role_slug,
+         r.role_id, r.role_name, r.slug AS role_slug,
          b.id AS branch_id, b.name AS branch_name
        FROM users u
-       JOIN roles r ON r.id = u.role_id
+       JOIN roles r ON r.role_id = u.role_id
        LEFT JOIN branches b ON b.id = u.branch_id
        ${where}
        ORDER BY u.created_at DESC
@@ -89,10 +89,10 @@ router.get('/:id', async (req, res) => {
          u.id, u.full_name, u.username, u.email,
          u.employee_id, u.avatar_initials, u.contact_number,
          u.address, u.status, u.last_login, u.created_at, u.updated_at,
-         r.id AS role_id, r.name AS role_name, r.slug AS role_slug,
+         r.role_id, r.role_name, r.slug AS role_slug,
          b.id AS branch_id, b.name AS branch_name
        FROM users u
-       JOIN roles r ON r.id = u.role_id
+       JOIN roles r ON r.role_id = u.role_id
        LEFT JOIN branches b ON b.id = u.branch_id
        WHERE u.id = $1`,
       [req.params.id]
@@ -167,9 +167,9 @@ router.post('/', async (req, res) => {
     );
 
     const newUser = await pool.query(
-      `SELECT u.*, r.name AS role_name, r.slug AS role_slug, b.name AS branch_name
+      `SELECT u.*, r.role_id, r.role_name, r.slug AS role_slug, b.name AS branch_name
        FROM users u
-       JOIN roles r ON r.id = u.role_id
+       JOIN roles r ON r.role_id = u.role_id
        LEFT JOIN branches b ON b.id = u.branch_id
        WHERE u.id = $1`,
       [result.rows[0].id]
@@ -241,9 +241,9 @@ router.put('/:id', async (req, res) => {
     );
 
     const updated = await pool.query(
-      `SELECT u.*, r.name AS role_name, r.slug AS role_slug, b.name AS branch_name
+      `SELECT u.*, r.role_id, r.role_name, r.slug AS role_slug, b.name AS branch_name
        FROM users u
-       JOIN roles r ON r.id = u.role_id
+       JOIN roles r ON r.role_id = u.role_id
        LEFT JOIN branches b ON b.id = u.branch_id
        WHERE u.id = $1`,
       [userId]

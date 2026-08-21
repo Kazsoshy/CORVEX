@@ -1,4 +1,5 @@
 import express from 'express';
+import { requireAuth } from '../middleware/auth.js';
 
 const router = express.Router();
 
@@ -6,16 +7,15 @@ const router = express.Router();
 // GET /api/dashboard/system-health
 // Returns live system metrics for the Super Admin dashboard
 // ──────────────────────────────────────────────────────────────────────────────
-router.get('/system-health', async (req, res) => {
+router.get('/system-health', requireAuth, async (req, res) => {
   try {
     const pool = req.app.locals.pool;
 
     // Run all queries in parallel
-    const [usersResult, branchesResult, activeSessionsResult, auditResult] = await Promise.all([
+    const [usersResult, branchesResult, auditResult] = await Promise.all([
       pool.query(`SELECT COUNT(*) AS total, COUNT(*) FILTER (WHERE status='Active') AS active FROM users`),
       pool.query(`SELECT COUNT(*) AS total FROM branches WHERE status='Active'`),
-      pool.query(`SELECT COUNT(*) AS active FROM users WHERE last_login > NOW() - INTERVAL '1 hour'`),
-      pool.query(`SELECT COUNT(*) AS errors FROM audit_logs WHERE status='Failed' AND created_at > NOW() - INTERVAL '24 hours'`),
+      pool.query(`SELECT COUNT(*) AS errors FROM audit_logs WHERE status_details LIKE '%Failed%' AND created_at > NOW() - INTERVAL '24 hours'`),
     ]);
 
     // Test DB connectivity
@@ -26,7 +26,6 @@ router.get('/system-health', async (req, res) => {
     const totalUsers  = Number(usersResult.rows[0].total);
     const activeUsers = Number(usersResult.rows[0].active);
     const totalBranches = Number(branchesResult.rows[0].total);
-    const activeSessions = Number(activeSessionsResult.rows[0].active);
     const errorCount = Number(auditResult.rows[0].errors);
 
     return res.status(200).json({
@@ -37,7 +36,6 @@ router.get('/system-health', async (req, res) => {
         activeUsers,
         inactiveUsers:  totalUsers - activeUsers,
         totalBranches,
-        activeSessions,
         apiResponseMs,
         errorCount,
         serverCpu:      Math.floor(Math.random() * 30) + 25,   // simulated — replace with real metrics in production
@@ -61,22 +59,22 @@ router.get('/system-health', async (req, res) => {
 // ──────────────────────────────────────────────────────────────────────────────
 // GET /api/dashboard/user-stats  — User count breakdown by role
 // ──────────────────────────────────────────────────────────────────────────────
-router.get('/user-stats', async (req, res) => {
+router.get('/user-stats', requireAuth, async (req, res) => {
   try {
     const pool = req.app.locals.pool;
 
     const result = await pool.query(
-      `SELECT r.name AS role, r.slug, COUNT(u.id) AS total,
+      `SELECT r.role_name AS role, r.slug, COUNT(u.id) AS total,
               COUNT(u.id) FILTER (WHERE u.status = 'Active')   AS active,
               COUNT(u.id) FILTER (WHERE u.status = 'Inactive') AS inactive
        FROM roles r
-       LEFT JOIN users u ON u.role_id = r.id
-       GROUP BY r.id, r.name, r.slug
-       ORDER BY r.id`
+       LEFT JOIN users u ON u.role_id = r.role_id
+       GROUP BY r.role_id, r.role_name, r.slug
+       ORDER BY r.role_id`
     );
 
     const newThisMonth = await pool.query(
-      `SELECT COUNT(*) FROM users WHERE created_at >= date_trunc('month', NOW())`
+      `SELECT COUNT(*) FROM users WHERE created_at >= date_trunc('month', CURRENT_TIMESTAMP)`
     );
 
     return res.status(200).json({
@@ -95,25 +93,36 @@ router.get('/user-stats', async (req, res) => {
 // ──────────────────────────────────────────────────────────────────────────────
 // GET /api/dashboard/inventory-health  — Inventory health across branches
 // ──────────────────────────────────────────────────────────────────────────────
-router.get('/inventory-health', async (req, res) => {
+router.get('/inventory-health', requireAuth, async (req, res) => {
   try {
     const pool = req.app.locals.pool;
 
     const result = await pool.query(
       `SELECT
-         stock_status,
+         CASE 
+           WHEN available_stock <= 0 THEN 'Out of Stock'
+           WHEN available_stock <= reorder_level THEN 'Low Stock'
+           ELSE 'Sufficient'
+         END AS stock_status,
          COUNT(*) AS count
-       FROM inventory
+       FROM branch_inventory
        GROUP BY stock_status`
     );
 
+    const user = req.currentUser;
+    let branchFilter = '';
+    if (user && user.branchId) {
+      branchFilter = `WHERE b.id = ${user.branchId}`;
+    }
+
     const alerts = await pool.query(
-      `SELECT p.name, p.sku, b.name AS branch_name, i.quantity, i.stock_status
-       FROM inventory i
-       JOIN products p ON p.id = i.product_id
-       JOIN branches b ON b.id = i.branch_id
-       WHERE i.stock_status IN ('Out of Stock','Critical Stock')
-       ORDER BY i.stock_status, p.name`
+      `SELECT p.name AS product_name, b.name AS branch_name, bi.available_stock, bi.reorder_level
+       FROM branch_inventory bi
+       JOIN products p ON p.id = bi.product_id
+       JOIN branches b ON b.id = bi.branch_id
+       ${branchFilter}
+       WHERE bi.available_stock <= bi.reorder_level
+       ORDER BY bi.available_stock ASC`
     );
 
     return res.status(200).json({
@@ -132,13 +141,20 @@ router.get('/inventory-health', async (req, res) => {
 // ──────────────────────────────────────────────────────────────────────────────
 // GET /api/dashboard/recent-audit  — Recent audit log entries (last 10)
 // ──────────────────────────────────────────────────────────────────────────────
-router.get('/recent-audit', async (req, res) => {
+router.get('/recent-audit', requireAuth, async (req, res) => {
   try {
     const pool = req.app.locals.pool;
 
+    const user = req.currentUser;
+    let userFilter = '';
+    if (user && user.branchId) {
+      userFilter = `WHERE user_id = ${user.id}`;
+    }
+
     const result = await pool.query(
-      `SELECT id, user_name, action, module, ip_address, status, details, created_at
+      `SELECT log_id, user_name, action, ip_address, status_details, created_at
        FROM audit_logs
+       ${userFilter}
        ORDER BY created_at DESC
        LIMIT 10`
     );
@@ -153,20 +169,26 @@ router.get('/recent-audit', async (req, res) => {
 // ──────────────────────────────────────────────────────────────────────────────
 // GET /api/dashboard/branches  — Branch summary stats
 // ──────────────────────────────────────────────────────────────────────────────
-router.get('/branches', async (req, res) => {
+router.get('/branches', requireAuth, async (req, res) => {
   try {
     const pool = req.app.locals.pool;
 
+    const user = req.currentUser;
+    let branchFilter = '';
+    if (user && user.branchId) {
+      branchFilter = `WHERE b.id = ${user.branchId}`;
+    }
+
     const result = await pool.query(
       `SELECT
-         b.id, b.name, b.city, b.region, b.status, b.manager,
+         b.id, b.name AS branch_name, b.address, b.status,
          COUNT(DISTINCT u.id) FILTER (WHERE u.status='Active') AS employee_count,
-         COUNT(DISTINCT c.id) AS client_count,
-         COUNT(DISTINCT c.id) FILTER (WHERE c.status IN ('Overdue','Blacklisted')) AS overdue_clients
+         COUNT(DISTINCT c.customer_id) AS customer_count
        FROM branches b
        LEFT JOIN users u ON u.branch_id = b.id
-       LEFT JOIN clients c ON c.branch_id = b.id
-       GROUP BY b.id
+       LEFT JOIN customers c ON c.branch_id = b.id
+       ${branchFilter}
+       GROUP BY b.id, b.name, b.address, b.status
        ORDER BY b.name`
     );
 
@@ -183,16 +205,52 @@ router.get('/branches', async (req, res) => {
 // Query param: branch_id (required for Operating Manager; auto-injected by
 // requireBranchScope for Branch Manager).
 //
-// Returns: staff counts, client counts, overdue stats, inventory health,
+// Returns: staff counts, customer counts, overdue stats, inventory health,
 // recent collection/sales totals, and pending CI requests for the branch.
 // ──────────────────────────────────────────────────────────────────────────────
-router.get('/branch-summary', async (req, res) => {
+router.get('/branch-summary', requireAuth, async (req, res) => {
   try {
     const pool = req.app.locals.pool;
-    const { branch_id } = req.query;
+    const user = req.currentUser;
 
-    // branch_id is required — for Branch Manager it is auto-injected by middleware
+    const isBranchScoped = user.branchId !== null;
+    let branch_id = req.query.branch_id;
+    if (!branch_id && isBranchScoped) {
+      branch_id = String(user.branchId);
+    }
+
     if (!branch_id || isNaN(Number(branch_id))) {
+      if (!isBranchScoped) {
+        const [
+          staffResult,
+          customerResult,
+          activityResult,
+          inventoryResult,
+          collectionResult,
+          salesResult,
+        ] = await Promise.all([
+          pool.query(`SELECT COUNT(*) FILTER (WHERE status = 'Active') AS active_staff, COUNT(*) FILTER (WHERE status = 'Inactive') AS inactive_staff, COUNT(*) AS total FROM users`),
+          pool.query(`SELECT COUNT(*) AS total_customers, COUNT(*) FILTER (WHERE status = 'Active') AS active_customers, COALESCE(SUM(outstanding_balance), 0) AS total_outstanding FROM customers`),
+          pool.query(`SELECT COALESCE(SUM(outstanding_balance), 0) AS total_outstanding, COALESCE(SUM(purchase_volume), 0) AS total_purchase_volume FROM customer_activity`),
+          pool.query(`SELECT CASE WHEN available_stock <= 0 THEN 'Out of Stock' WHEN available_stock <= reorder_level THEN 'Low Stock' ELSE 'Sufficient' END AS stock_status, COUNT(*) AS count, COALESCE(SUM(available_stock), 0) AS total_qty FROM branch_inventory GROUP BY stock_status`),
+          pool.query(`SELECT COUNT(*) AS total_collections, COALESCE(SUM(amount), 0) AS total_amount_collected, COUNT(*) FILTER (WHERE status = 'Pending') AS pending_collections FROM collection_payment WHERE payment_date >= date_trunc('month', CURRENT_TIMESTAMP)`),
+          pool.query(`SELECT COUNT(*) AS total_invoices, COALESCE(SUM(total_amount), 0) AS total_sales_amount, COUNT(*) FILTER (WHERE status = 'Pending') AS pending_invoices FROM sales_invoices WHERE invoices_date >= date_trunc('month', CURRENT_TIMESTAMP)`),
+        ]);
+
+        return res.status(200).json({
+          success: true,
+          data: {
+            branch: { id: null, name: 'All Branches', address: '', status: 'Active' },
+            staff: { activeStaff: Number(staffResult.rows[0].active_staff), inactiveStaff: Number(staffResult.rows[0].inactive_staff) },
+            customers: { totalCustomers: Number(customerResult.rows[0].total_customers), activeCustomers: Number(customerResult.rows[0].active_customers), totalOutstanding: Number(activityResult.rows[0].total_outstanding), totalPurchaseVolume: Number(activityResult.rows[0].total_purchase_volume) },
+            inventory: inventoryResult.rows.map((r) => ({ stockStatus: r.stock_status, count: Number(r.count), totalQty: Number(r.total_qty) })),
+            collections: { totalCollections: Number(collectionResult.rows[0].total_collections), totalAmountCollected: Number(collectionResult.rows[0].total_amount_collected), pendingCollections: Number(collectionResult.rows[0].pending_collections) },
+            sales: { totalInvoices: Number(salesResult.rows[0].total_invoices), totalSalesAmount: Number(salesResult.rows[0].total_sales_amount), pendingInvoices: Number(salesResult.rows[0].pending_invoices) },
+            generatedAt: new Date().toISOString(),
+          },
+        });
+      }
+
       return res.status(400).json({
         success: false,
         message: 'branch_id query parameter is required.',
@@ -201,17 +259,25 @@ router.get('/branch-summary', async (req, res) => {
 
     const bid = Number(branch_id);
 
+    if (user.branchId && bid !== user.branchId) {
+      return res.status(403).json({
+        success: false,
+        message: 'Access denied: you can only access data for your assigned branch.',
+      });
+    }
+
     const [
       branchResult,
       staffResult,
       clientResult,
+      activityResult,
       inventoryResult,
       collectionResult,
       salesResult,
     ] = await Promise.all([
       // Branch info
       pool.query(
-        `SELECT id, name, city, region, manager, status FROM branches WHERE id = $1`,
+        `SELECT id, name AS branch_name, address, status FROM branches WHERE id = $1`,
         [bid]
       ),
       // Staff counts for this branch
@@ -223,26 +289,35 @@ router.get('/branch-summary', async (req, res) => {
          WHERE branch_id = $1`,
         [bid]
       ),
-      // Client counts and overdue breakdown
+      // Customer counts and breakdown
       pool.query(
         `SELECT
-           COUNT(*)                                              AS total_clients,
-           COUNT(*) FILTER (WHERE status = 'Active')            AS active_clients,
-           COUNT(*) FILTER (WHERE status = 'Overdue')           AS overdue_clients,
-           COUNT(*) FILTER (WHERE status = 'Blacklisted')       AS blacklisted_clients,
-           COALESCE(SUM(outstanding_balance), 0)                AS total_outstanding,
-           COALESCE(SUM(credit_limit), 0)                       AS total_credit_limit
-         FROM clients
+           COUNT(*)                                              AS total_customers,
+           COUNT(*) FILTER (WHERE status = 'Active')            AS active_customers
+         FROM customers
          WHERE branch_id = $1`,
+        [bid]
+      ),
+      // Customer activity data
+      pool.query(
+        `SELECT
+           COALESCE(SUM(outstanding_balance), 0)                AS total_outstanding,
+           COALESCE(SUM(purchase_volume), 0)                    AS total_purchase_volume
+         FROM customer_activity
+         WHERE customer_id IN (SELECT customer_id FROM customers WHERE branch_id = $1)`,
         [bid]
       ),
       // Inventory health for this branch
       pool.query(
         `SELECT
-           stock_status,
+           CASE 
+             WHEN available_stock <= 0 THEN 'Out of Stock'
+             WHEN available_stock <= reorder_level THEN 'Low Stock'
+             ELSE 'Sufficient'
+           END AS stock_status,
            COUNT(*) AS count,
-           COALESCE(SUM(quantity), 0) AS total_qty
-         FROM inventory
+           COALESCE(SUM(available_stock), 0) AS total_qty
+         FROM branch_inventory
          WHERE branch_id = $1
          GROUP BY stock_status`,
         [bid]
@@ -251,11 +326,11 @@ router.get('/branch-summary', async (req, res) => {
       pool.query(
         `SELECT
            COUNT(*)                                               AS total_collections,
-           COALESCE(SUM(amount_paid), 0)                         AS total_amount_collected,
+           COALESCE(SUM(amount), 0)                             AS total_amount_collected,
            COUNT(*) FILTER (WHERE status = 'Pending')            AS pending_collections
-         FROM collection_payments
+         FROM collection_payment
          WHERE branch_id = $1
-           AND payment_date >= date_trunc('month', NOW())`,
+           AND payment_date >= date_trunc('month', CURRENT_TIMESTAMP)`,
         [bid]
       ),
       // Sales total for current month
@@ -266,7 +341,7 @@ router.get('/branch-summary', async (req, res) => {
            COUNT(*) FILTER (WHERE status = 'Pending')           AS pending_invoices
          FROM sales_invoices
          WHERE branch_id = $1
-           AND invoice_date >= date_trunc('month', NOW())`,
+           AND invoices_date >= date_trunc('month', CURRENT_TIMESTAMP)`,
         [bid]
       ),
     ]);
@@ -279,18 +354,21 @@ router.get('/branch-summary', async (req, res) => {
     return res.status(200).json({
       success: true,
       data: {
-        branch,
+        branch: {
+          id: branch.id,
+          name: branch.name,
+          address: branch.address,
+          status: branch.status,
+        },
         staff: {
           activeStaff:   Number(staffResult.rows[0].active_staff),
           inactiveStaff: Number(staffResult.rows[0].inactive_staff),
         },
-        clients: {
-          totalClients:      Number(clientResult.rows[0].total_clients),
-          activeClients:     Number(clientResult.rows[0].active_clients),
-          overdueClients:    Number(clientResult.rows[0].overdue_clients),
-          blacklistedClients:Number(clientResult.rows[0].blacklisted_clients),
-          totalOutstanding:  Number(clientResult.rows[0].total_outstanding),
-          totalCreditLimit:  Number(clientResult.rows[0].total_credit_limit),
+        customers: {
+          totalCustomers:     Number(clientResult.rows[0].total_customers),
+          activeCustomers:    Number(clientResult.rows[0].active_customers),
+          totalOutstanding:   Number(activityResult.rows[0].total_outstanding),
+          totalPurchaseVolume: Number(activityResult.rows[0].total_purchase_volume),
         },
         inventory: inventoryResult.rows.map((r) => ({
           stockStatus: r.stock_status,

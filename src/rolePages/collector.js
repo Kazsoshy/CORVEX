@@ -8,7 +8,7 @@ export const collectorRole = {
   navPages: [
     { label: 'Dashboard', to: '/collector/dashboard' },
     { label: "Today's Route", to: '/collector/route' },
-    { label: 'Accounts', to: '/collector/accounts' },
+    { label: 'Customers', to: '/collector/accounts' },
     { label: 'Collection History', to: '/collector/history' },
     { label: 'Notifications', to: '/collector/notifications' },
     { label: 'Profile', to: '/collector/profile' },

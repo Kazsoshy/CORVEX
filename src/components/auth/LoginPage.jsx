@@ -9,18 +9,18 @@ import './LoginPage.css';
 // ── Offline demo accounts ─────────────────────────────────────────────────────
 // Used when the backend is unreachable. Mirrors reset_passwords.js credentials.
 const OFFLINE_CREDENTIALS = {
-  'marcus.santos@corvex.ph':      'SuperAdmin@2026',
-  'corazon.v@corvex.ph':          'SuperAdmin@2026',
-  'elena.mercado@corvex.ph':      'OpManager@2026',
-  'roberto.villanueva@corvex.ph': 'BranchMgr@2026',
-  'miguel.f@corvex.ph':           'BranchMgr@2026',
-  'grace.t@corvex.ph':            'BranchMgr@2026',
-  'ana.r@corvex.ph':              'InvStaff@2026',
-  'florencia.r@corvex.ph':        'InvStaff@2026',
-  'carlos.m@corvex.ph':           'Sales@2026',
-  'jane.s@corvex.ph':             'Sales@2026',
-  'maria.dc@corvex.ph':           'Collector@2026',
-  'luntiang.tahanan@email.com':   'Client@2026',
+  'marcus.santos@corvex.ph':      'Corvex@2026',
+  'corazon.v@corvex.ph':          'Corvex@2026',
+  'elena.mercado@corvex.ph':      'Corvex@2026',
+  'roberto.villanueva@corvex.ph': 'Corvex@2026',
+  'miguel.f@corvex.ph':           'Corvex@2026',
+  'grace.t@corvex.ph':            'Corvex@2026',
+  'ana.r@corvex.ph':              'Corvex@2026',
+  'florencia.r@corvex.ph':        'Corvex@2026',
+  'carlos.m@corvex.ph':           'Corvex@2026',
+  'jane.s@corvex.ph':             'Corvex@2026',
+  'maria.dc@corvex.ph':           'Corvex@2026',
+  'luntiang.tahanan@email.com':   'Corvex@2026',
 };
 
 const OFFLINE_USERS = [
@@ -97,7 +97,7 @@ const OFFLINE_USERS = [
   {
     id: 25, fullName: 'Luntiang Tahanan Interiors', username: 'luntiang.tahanan',
     email: 'luntiang.tahanan@email.com', employeeId: null, avatarInitials: 'LT', status: 'Active',
-    role: { id: 6, name: 'Client', slug: 'client' },
+    role: { id: 6, name: 'Customer', slug: 'customer' },
     branch: { id: 1, name: 'Davao City Branch' },
   },
 ];
@@ -154,7 +154,7 @@ export function LoginPage() {
           localStorage.setItem('corvex_user', JSON.stringify(offlineUser));
           navigate(getEntryPathForRole(offlineUser.role.slug));
         } else {
-          setApiError('Cannot connect to server. Use a demo account (e.g. roberto.villanueva@corvex.ph / BranchMgr@2026).');
+          setApiError('Cannot connect to server. Use a demo account (e.g. roberto.villanueva@corvex.ph / Corvex@2026).');
         }
       } else {
         setApiError(msg || 'An error occurred. Please try again.');

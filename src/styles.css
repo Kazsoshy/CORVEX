@@ -2664,7 +2664,7 @@ select {
   grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
   gap: 12px;
   list-style: none;
-  margin: 0;
+  margin: 0 0 18px;
   padding: 0;
 }
 

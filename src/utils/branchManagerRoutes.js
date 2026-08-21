@@ -5,6 +5,8 @@ const ROUTE_DEFINITIONS = [
   { pattern: /^\/branch-manager\/settings$/, pageType: 'settings' },
   { pattern: /^\/branch-manager\/approval-center$/, pageType: 'approvalCenter' },
   { pattern: /^\/branch-manager\/audit-log$/, pageType: 'auditLog' },
+  { pattern: /^\/branch-manager\/customers$/, pageType: 'customers' },
+  { pattern: /^\/branch-manager\/customers\/([^/]+)$/, pageType: 'customerDetail', params: ['customerId'] },
   { pattern: /^\/branch-manager\/field-operations$/, pageType: 'fieldOperations' },
   { pattern: /^\/branch-manager\/field-operations\/performance$/, pageType: 'routePerformance' },
   { pattern: /^\/branch-manager\/field-operations\/collectors$/, pageType: 'collectorRoutes' },
@@ -27,6 +29,8 @@ const ROUTE_DEFINITIONS = [
   { pattern: /^\/branch-manager\/staff-performance\/collectors$/, pageType: 'staffCollectors' },
   { pattern: /^\/branch-manager\/staff-performance\/sales$/, pageType: 'staffSales' },
   { pattern: /^\/branch-manager\/staff-performance\/scorecards$/, pageType: 'staffScorecards' },
+  { pattern: /^\/branch-manager\/credit-history$/, pageType: 'creditHistory' },
+  { pattern: /^\/branch-manager\/credit-history\/([^/]+)$/, pageType: 'creditDetail', params: ['creditId'] },
   { pattern: /^\/branch-manager\/alerts$/, pageType: 'alerts' },
   { pattern: /^\/branch-manager\/notifications$/, pageType: 'notifications' },
   { pattern: /^\/branch-manager\/profile$/, pageType: 'profile' },
@@ -57,12 +61,17 @@ export function buildBranchManagerBreadcrumbs(pageType, params = {}) {
   const leafletCrumbs = [{ label: 'Leaflet | OpenStreetMap', to: '/branch-manager/leaflet' }];
   const reportsCrumbs = [{ label: 'Reports & Analytics', to: '/branch-manager/reports' }];
   const staffCrumbs = [{ label: 'Staff Performance', to: '/branch-manager/staff-performance' }];
+  const creditCrumbs = [{ label: 'Customer Credit History', to: '/branch-manager/credit-history' }];
 
   switch (pageType) {
     case 'dashboard': return [{ label: 'Dashboard', to: '/branch-manager/dashboard' }];
     case 'settings': return [...crumbs, { label: 'Settings', to: '/branch-manager/settings' }];
     case 'approvalCenter': return [...crumbs, { label: 'Approval Center', to: '/branch-manager/approval-center' }];
     case 'auditLog': return [...crumbs, { label: 'Audit Log', to: '/branch-manager/audit-log' }];
+    case 'customers': return [...crumbs, { label: 'Customers', to: '/branch-manager/customers' }];
+    case 'customerDetail': return [...crumbs, { label: 'Customers', to: '/branch-manager/customers' }, { label: 'Customer Detail', to: `/branch-manager/customers/${params.customerId}` }];
+    case 'creditHistory': return [...crumbs, ...creditCrumbs];
+    case 'creditDetail': return [...crumbs, ...creditCrumbs, { label: 'Credit Record', to: `/branch-manager/credit-history/${params.creditId}` }];
     case 'fieldOperations': return [...crumbs, ...fieldOps];
     case 'routePerformance': return [...crumbs, ...fieldOps, { label: 'Route Performance', to: '/branch-manager/field-operations/performance' }];
     case 'collectorRoutes': return [...crumbs, ...fieldOps, { label: 'Collector Route Overview', to: '/branch-manager/field-operations/collectors' }];
@@ -70,12 +79,12 @@ export function buildBranchManagerBreadcrumbs(pageType, params = {}) {
     case 'salesSchedules': return [...crumbs, ...fieldOps, { label: 'Sales Schedule Overview', to: '/branch-manager/field-operations/sales' }];
     case 'salesAgentDetail': return [...crumbs, ...fieldOps, { label: 'Sales Schedule Overview', to: '/branch-manager/field-operations/sales' }, { label: agent?.name ?? 'Sales Agent Detail', to: `/branch-manager/field-operations/sales/${params.agentId}` }];
     case 'ciQueue': return [...crumbs, ...ciCrumbs];
-    case 'ciDetail': return [...crumbs, ...ciCrumbs, { label: ci?.clientName ?? 'CI Detail', to: `/branch-manager/ci-approvals/${params.ciId}` }];
+    case 'ciDetail': return [...crumbs, ...ciCrumbs, { label: ci?.customerName ?? 'CI Detail', to: `/branch-manager/ci-approvals/${params.ciId}` }];
     case 'leafletMap': return [...crumbs, ...leafletCrumbs];
     case 'leafletTerritory': return [...crumbs, ...leafletCrumbs, { label: 'Territory Map', to: '/branch-manager/leaflet/territory' }];
     case 'leafletDelinquency': return [...crumbs, ...leafletCrumbs, { label: 'Delinquency Heatmap', to: '/branch-manager/leaflet/delinquency' }];
     case 'leafletProfitability': return [...crumbs, ...leafletCrumbs, { label: 'Profitability Zones', to: '/branch-manager/leaflet/profitability' }];
-    case 'accountLocationDetail': return [...crumbs, ...leafletCrumbs, { label: account?.clientName ?? 'Account Location', to: `/branch-manager/leaflet/account/${params.accountId}` }];
+    case 'accountLocationDetail': return [...crumbs, ...leafletCrumbs, { label: account?.customerName ?? 'Account Location', to: `/branch-manager/leaflet/account/${params.accountId}` }];
     case 'reports': return [...crumbs, ...reportsCrumbs];
     case 'reportCollection': return [...crumbs, ...reportsCrumbs, { label: 'Collection Reports', to: '/branch-manager/reports/collection' }];
     case 'reportSales': return [...crumbs, ...reportsCrumbs, { label: 'Sales Reports', to: '/branch-manager/reports/sales' }];
@@ -101,6 +110,8 @@ export function resolveBranchManagerPage(pathname) {
     settings: 'Settings',
     approvalCenter: 'Approval Center',
     auditLog: 'Audit Log',
+    customers: 'Customers',
+    customerDetail: 'Customer Detail',
     fieldOperations: 'Field Operations',
     routePerformance: 'Route Performance',
     collectorRoutes: 'Collector Route Overview',
@@ -123,6 +134,8 @@ export function resolveBranchManagerPage(pathname) {
     staffCollectors: 'Collector Performance',
     staffSales: 'Sales Agent Performance',
     staffScorecards: 'Performance Scorecards',
+    creditHistory: 'Customer Credit History',
+    creditDetail: 'Credit Record',
     alerts: 'Alerts & Exceptions',
     notifications: 'Notifications',
     profile: 'Profile',
@@ -142,11 +155,13 @@ export function isBranchManagerNavActive(fullPath, navTo) {
   if (navTo === '/branch-manager/dashboard') {
     return pathname === '/branch-manager/dashboard' || pathname === '/branch-manager/settings' || pathname === '/branch-manager/audit-log' || pathname === '/branch-manager/approval-center';
   }
+  if (navTo === '/branch-manager/customers') return pathname.startsWith('/branch-manager/customers');
   if (navTo === '/branch-manager/field-operations') return pathname.startsWith('/branch-manager/field-operations');
   if (navTo === '/branch-manager/ci-approvals') return pathname.startsWith('/branch-manager/ci-approvals');
   if (navTo === '/branch-manager/leaflet') return pathname.startsWith('/branch-manager/leaflet');
   if (navTo === '/branch-manager/reports') return pathname.startsWith('/branch-manager/reports');
   if (navTo === '/branch-manager/staff-performance') return pathname.startsWith('/branch-manager/staff-performance');
+  if (navTo === '/branch-manager/credit-history') return pathname.startsWith('/branch-manager/credit-history');
   if (navTo === '/branch-manager/alerts') return pathname === '/branch-manager/alerts';
   if (navTo === '/branch-manager/notifications') return pathname === '/branch-manager/notifications';
   if (navTo === '/branch-manager/profile') return pathname === '/branch-manager/profile';

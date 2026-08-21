@@ -43,7 +43,7 @@ export async function requireAuth(req, res, next) {
       `SELECT u.id, u.status, u.branch_id,
               r.slug AS role_slug
        FROM users u
-       JOIN roles r ON r.id = u.role_id
+       JOIN roles r ON r.role_id = u.role_id
        WHERE u.id = $1`,
       [Number(userId)]
     );
@@ -98,16 +98,14 @@ export function requireBranchScope(req, res, next) {
     return res.status(401).json({ success: false, message: 'Not authenticated.' });
   }
 
-  // Roles that see all branches — let through unmodified
   const UNSCOPED_ROLES = ['super_admin', 'operating_manager'];
   if (UNSCOPED_ROLES.includes(user.roleSlug) || user.branchId === null) {
     return next();
   }
 
-  // Branch-scoped role: determine requested branch
   const requestedBranchId =
     req.query.branch_id   ? Number(req.query.branch_id) :
-    req.body?.branch_id   ? Number(req.body.branch_id)  :
+    req.body?.branch_id   ? Number(req.body.branch_id) :
     req.params.branch_id  ? Number(req.params.branch_id) :
     null;
 
@@ -118,9 +116,9 @@ export function requireBranchScope(req, res, next) {
     });
   }
 
-  // Auto-inject branch_id so downstream handlers don't need to check
   if (requestedBranchId === null) {
-    req.query.branch_id = String(user.branchId);
+    next();
+    return;
   }
 
   next();

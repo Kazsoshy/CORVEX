@@ -1,29 +1,33 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
+import { fetchCustomerById, fetchCustomers } from '../../api/salesService';
+import { getCurrentUser } from '../../api/authService.js';
 import {
   AUDIT_LOGS,
-  CLIENTS,
+  CUSTOMERS,
   DASHBOARD_SUMMARY,
   LOW_STOCK_ITEMS,
   NOTIFICATIONS,
   OFFLINE_STATUS,
   PRODUCTS,
   ROUTE_TRACKING,
-  SALES_AGENT_PROFILE,
   SALES_ANALYTICS,
   SALES_HISTORY,
   SCHEDULE_STOPS,
+
   formatCurrency,
-  getClientById,
+
+  getCustomerById,
   getProductById,
   getProductStock,
   getSaleById,
 } from '../../data/salesMockData';
-import { ClientCard } from './ClientCard';
+import { CustomerCard } from './CustomerCard';
 import { EmptyState } from '../collector/EmptyState';
 import { LoadingState } from '../collector/LoadingState';
 import { NavIcon } from '../../navIcons';
 import LeafletMap from '../common/LeafletMap';
+import { CreditHistoryListPage, CreditHistoryDetailPage } from '../shared/CreditHistoryPages';
 
 function actionButtonClass(variant) {
   if (variant === 'secondary') return 'button secondary';
@@ -85,9 +89,11 @@ function OfflineBanner() {
 }
 
 function DashboardPage({ navigate, showToast }) {
+  const currentUser = getCurrentUser();
   const today = new Date().toLocaleDateString('en-PH', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
   const unreadCount = NOTIFICATIONS.filter((n) => !n.read).length;
   const firstPending = SCHEDULE_STOPS.find((c) => c.status !== 'Completed');
+  const agentName = currentUser?.fullName || 'Sales Agent';
 
   return (
     <div className="page">
@@ -96,7 +102,7 @@ function DashboardPage({ navigate, showToast }) {
       <section className="panel dashboard-greeting">
         <div className="dashboard-greeting-main">
           <p className="dashboard-eyebrow">Good morning</p>
-          <h2>{SALES_AGENT_PROFILE.name}</h2>
+          <h2>{agentName}</h2>
           <p className="muted">{today}</p>
         </div>
         <Link to="/sales/notifications" className="notification-bell" aria-label={`${unreadCount} unread notifications`}>
@@ -136,7 +142,7 @@ function DashboardPage({ navigate, showToast }) {
       <PageToolbar
         actions={[
           { label: "View Today's Schedule", to: '/sales/schedule' },
-          { label: 'Log a Sale', to: firstPending ? `/sales/visit-log/${firstPending.id}?from=schedule` : '/sales/clients', variant: 'secondary' },
+          { label: 'Log a Sale', to: firstPending ? `/sales/visit-log/${firstPending.id}?from=schedule` : '/sales/customers', variant: 'secondary' },
           { label: 'Check Inventory', to: '/sales/inventory', variant: 'secondary' },
         ]}
         onAction={(a) => navigate(a.to)}
@@ -163,7 +169,7 @@ function DashboardPage({ navigate, showToast }) {
           <ul className="widget-list">
             {SALES_HISTORY.slice(0, 3).map((sale) => (
               <li key={sale.id}>
-                <div><strong>{sale.clientName}</strong><span className="muted">{sale.date}</span></div>
+                 <div><strong>{sale.customerName || sale.first_name + ' ' + sale.last_name}</strong><span className="muted">{sale.date}</span></div>
                 <span>{formatCurrency(sale.totalAmount)}</span>
               </li>
             ))}
@@ -192,10 +198,10 @@ function DashboardPage({ navigate, showToast }) {
           <div className="analytics-card"><span className="metric-label">Weekly Total</span><strong>{formatCurrency(SALES_ANALYTICS.weeklyRevenue)}</strong></div>
           <div className="analytics-card"><span className="metric-label">Monthly Total</span><strong>{formatCurrency(SALES_ANALYTICS.monthlyRevenue)}</strong></div>
         </div>
-        <h4 className="subsection-title">Top Clients</h4>
+        <h4 className="subsection-title">Top Customers</h4>
         <ul className="widget-list">
-          {SALES_ANALYTICS.topClients.map((client) => (
-            <li key={client.name}><div><strong>{client.name}</strong></div><span>{formatCurrency(client.revenue)}</span></li>
+          {SALES_ANALYTICS.topCustomers.map((customer) => (
+            <li key={customer.name}><div><strong>{customer.name}</strong></div><span>{formatCurrency(customer.revenue)}</span></li>
           ))}
         </ul>
       </section>
@@ -204,15 +210,57 @@ function DashboardPage({ navigate, showToast }) {
 }
 
 function SchedulePage({ pageType, navigate, showToast }) {
+  const [customers, setCustomers] = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    async function loadCustomers() {
+      setLoading(true);
+      const result = await fetchCustomers();
+      if (result.success) {
+        const scheduleData = result.data.map((customer, index) => ({
+          id: String(customer.customer_id),
+          first_name: customer.first_name,
+          last_name: customer.last_name,
+          contact_person_fname: customer.contact_person_fname,
+          contact_person_lname: customer.contact_person_lname,
+          address: customer.address,
+          phone: customer.contact_phone,
+          lastVisitDate: customer.updated_at ? new Date(customer.updated_at).toISOString().split('T')[0] : 'N/A',
+          purchaseVolume: 0,
+          totalPurchaseVolume: 0,
+          distanceKm: 0,
+          status: customer.status === 'Active' ? 'Pending' : 'Inactive',
+          assignedToday: true,
+          rank: index + 1,
+          active: customer.status === 'Active',
+          highValue: false,
+          delinquent: false,
+          lastPurchaseDate: 'N/A',
+          paymentHistory: [],
+          account_number: `ACC-${customer.customer_id}`,
+          business_type: 'Retail',
+          credit_limit: 0,
+          outstanding_balance: 0,
+          days_overdue: 0,
+        }));
+        setCustomers(scheduleData);
+      }
+      setLoading(false);
+    }
+    loadCustomers();
+  }, []);
   const [filter, setFilter] = useState('All');
   const [showMap, setShowMap] = useState(pageType === 'scheduleMap');
 
   const filtered = useMemo(() => {
-    if (filter === 'All') return SCHEDULE_STOPS;
-    if (filter === 'Pending') return SCHEDULE_STOPS.filter((c) => c.status === 'Pending');
-    if (filter === 'Completed') return SCHEDULE_STOPS.filter((c) => c.status === 'Completed');
-    return SCHEDULE_STOPS.filter((c) => c.status === 'Rescheduled');
-  }, [filter]);
+    if (filter === 'All') return customers;
+    if (filter === 'Pending') return customers.filter((c) => c.status === 'Pending');
+    if (filter === 'Completed') return customers.filter((c) => c.status === 'Completed');
+    return customers.filter((c) => c.status === 'Rescheduled');
+  }, [filter, customers]);
+
+  if (loading) return <LoadingState />;
 
   const actions = [
     { label: 'Schedule List', to: '/sales/schedule', variant: pageType === 'scheduleList' && !showMap ? undefined : 'secondary' },
@@ -238,12 +286,12 @@ function SchedulePage({ pageType, navigate, showToast }) {
               center={[7.1907, 125.4553]} 
               zoom={13} 
               height={500}
-              markers={SCHEDULE_STOPS.map((stop, i) => ({
+              markers={customers.map((stop, i) => ({
                 id: stop.id,
                 position: [7.1907 + (i * 0.006), 125.4553 + (i * 0.006)],
-                label: stop.id.replace('client-', ''),
+                label: stop.id.replace('customer-', ''),
                 color: stop.status === 'Completed' ? '#10b981' : '#2563eb',
-                popup: `${stop.clientName} - ${stop.status}`
+                popup: `${stop.first_name} ${stop.last_name} - ${stop.status}`
               }))}
             />
           </div>
@@ -281,183 +329,215 @@ function SchedulePage({ pageType, navigate, showToast }) {
         </div>
         {filtered.length ? (
           <div className="account-card-grid">
-            {filtered.map((client) => (
-              <ClientCard
-                key={client.id}
-                client={client}
+            {filtered.map((customer) => (
+              <CustomerCard
+                key={customer.id}
+                customer={customer}
                 showRank
-                onViewDetails={(c) => navigate(`/sales/client-detail/${c.id}?from=schedule`)}
+                onViewDetails={(c) => navigate(`/sales/customer-detail/${c.id}?from=schedule`)}
                 onLogVisit={(c) => navigate(`/sales/visit-log/${c.id}?from=schedule`)}
-                onCall={() => showToast(`Calling ${client.clientName}...`, 'success')}
-                onNavigate={() => showToast(`Opening navigation to ${client.address}`, 'success')}
+              onNavigate={() => showToast(`Opening navigation to ${customer.address}`, 'success')}
               />
             ))}
           </div>
         ) : (
-          <EmptyState title="No clients match this filter" description="Try a different status filter." />
+          <EmptyState title="No customers match this filter" description="Try a different status filter." />
         )}
       </section>
     </div>
   );
 }
 
-function ClientsPage({ navigate, showToast }) {
+function CustomersPage({ navigate, showToast }) {
   const [search, setSearch] = useState('');
-  const [filter, setFilter] = useState('Active Clients');
+  const [filter, setFilter] = useState('Active Customers');
   const [sortBy, setSortBy] = useState('Name');
   const [loading, setLoading] = useState(true);
+  const [customersData, setCustomersData] = useState([]);
 
   useEffect(() => {
-    const timer = window.setTimeout(() => setLoading(false), 400);
-    return () => window.clearTimeout(timer);
+    async function load() {
+      setLoading(true);
+      const res = await fetchCustomers();
+      if (res.success) {
+        setCustomersData(res.data);
+      }
+      setLoading(false);
+    }
+    load();
   }, []);
 
-  const filteredClients = useMemo(() => {
-    let results = [...CLIENTS];
+  const filteredCustomers = useMemo(() => {
+    let results = [...customersData];
     const query = search.trim().toLowerCase();
     if (query) {
       results = results.filter(
-        (c) => c.clientName.toLowerCase().includes(query) || c.businessName.toLowerCase().includes(query) || c.phone.includes(query),
+        (c) => (c.first_name + ' ' + c.last_name).toLowerCase().includes(query) || 
+               (c.contact_person_fname + ' ' + c.contact_person_lname).toLowerCase().includes(query) || 
+               (c.contact_phone || '').includes(query)
       );
     }
     switch (filter) {
-      case 'Active Clients': results = results.filter((c) => c.active); break;
-      case 'Inactive Clients': results = results.filter((c) => !c.active); break;
-      case 'High Value Clients': results = results.filter((c) => c.highValue); break;
-      case 'Delinquent Clients': results = results.filter((c) => c.delinquent); break;
+      case 'Active Customers': results = results.filter((c) => c.status === 'Active'); break;
+      case 'Inactive Customers': results = results.filter((c) => c.status !== 'Active'); break;
       default: break;
     }
     switch (sortBy) {
-      case 'Sales Volume': results.sort((a, b) => b.totalPurchaseVolume - a.totalPurchaseVolume); break;
-      case 'Last Purchase Date': results.sort((a, b) => b.lastPurchaseDate.localeCompare(a.lastPurchaseDate)); break;
-      case 'Distance': results.sort((a, b) => a.distanceKm - b.distanceKm); break;
-      default: results.sort((a, b) => a.clientName.localeCompare(b.clientName)); break;
+      case 'Name': 
+      default: 
+        results.sort((a, b) => (a.first_name + ' ' + a.last_name).localeCompare(b.first_name + ' ' + b.last_name)); 
+        break;
     }
     return results;
-  }, [search, filter, sortBy]);
+  }, [customersData, search, filter, sortBy]);
 
-  if (loading) return <LoadingState message="Loading clients..." />;
+  if (loading) return <LoadingState message="Loading customers..." />;
 
   return (
     <div className="page">
       <section className="panel content-panel">
-        <div className="panel-section-header"><h3>Client List</h3></div>
+        <div className="panel-section-header"><h3>Customer List</h3></div>
         <div className="accounts-toolbar">
-          <input className="search-input" type="search" placeholder="Search by client name, business name, or contact number" value={search} onChange={(e) => setSearch(e.target.value)} />
+          <input className="search-input" type="search" placeholder="Search by customer name, or contact number" value={search} onChange={(e) => setSearch(e.target.value)} />
           <div className="accounts-filters">
             <select value={filter} onChange={(e) => setFilter(e.target.value)}>
-              {['Active Clients', 'Inactive Clients', 'High Value Clients', 'Delinquent Clients'].map((o) => <option key={o} value={o}>{o}</option>)}
+              {['Active Customers', 'Inactive Customers', 'All Customers'].map((o) => <option key={o} value={o}>{o}</option>)}
             </select>
             <select value={sortBy} onChange={(e) => setSortBy(e.target.value)}>
-              {['Name', 'Sales Volume', 'Last Purchase Date', 'Distance'].map((o) => <option key={o} value={o}>Sort: {o}</option>)}
+              {['Name'].map((o) => <option key={o} value={o}>Sort: {o}</option>)}
             </select>
           </div>
         </div>
       </section>
-      {filteredClients.length ? (
+      {filteredCustomers.length ? (
         <div className="account-card-grid">
-          {filteredClients.map((client) => (
-            <ClientCard
-              key={client.id}
-              client={client}
-              onViewDetails={(c) => navigate(`/sales/client-detail/${c.id}?from=clients`)}
-              onCall={() => showToast(`Calling ${client.clientName}...`, 'success')}
-              onNavigate={() => showToast(`Opening navigation to ${client.address}`, 'success')}
+          {filteredCustomers.map((customer) => (
+            <CustomerCard
+              key={customer.customer_id}
+              customer={{...customer, id: String(customer.customer_id)}}
+              onViewDetails={(c) => navigate(`/sales/customer-detail/${c.id}?from=customers`)}
+              onNavigate={() => showToast(`Opening navigation to ${customer.address}`, 'success')}
             />
           ))}
         </div>
       ) : (
-        <EmptyState title="No clients found" description="Adjust your search or filters." actionLabel="Clear filters" onAction={() => { setSearch(''); setFilter('Active Clients'); }} />
+        <EmptyState title="No customers found" description="Adjust your search or filters." actionLabel="Clear filters" onAction={() => { setSearch(''); setFilter('Active Customers'); }} />
       )}
     </div>
   );
 }
 
-function ClientDetailPage({ clientId, parentContext, navigate, showToast }) {
-  const client = getClientById(clientId);
-  if (!client) return <EmptyState title="Client not found" actionLabel="Back to Clients" onAction={() => navigate('/sales/clients')} />;
+function CustomerDetailPage({ customerId, parentContext, navigate, showToast }) {
+  const [customer, setCustomer] = useState(null);
+  const [loading, setLoading] = useState(true);
 
-  const backTo = parentContext === 'schedule' ? '/sales/schedule' : '/sales/clients';
-  const contextQuery = `?from=${parentContext}`;
+  useEffect(() => {
+    async function load() {
+      setLoading(true);
+      const res = await fetchCustomerById(customerId);
+      if (res.success && res.data) {
+        setCustomer(res.data);
+      }
+      setLoading(false);
+    }
+    load();
+  }, [customerId]);
+
+  if (loading) return <LoadingState message="Loading customer details..." />;
+  if (!customer) return <EmptyState title="Customer not found" actionLabel="Back to Customers" onAction={() => navigate('/sales/customers')} />;
+
+  const purchaseVolume = customer.activity?.purchase_volume || 0;
+  const outstandingBalance = customer.activity?.outstanding_balance || 0;
+  const lastVisit = customer.activity?.last_sales_visit ? new Date(customer.activity.last_sales_visit).toLocaleDateString() : 'N/A';
+  const creditLimit = customer.creditInfo?.credit_limit || 10000;
+  const avgOrder = customer.paymentHistory && customer.paymentHistory.length 
+    ? Math.round(purchaseVolume / customer.paymentHistory.length) 
+    : purchaseVolume;
 
   return (
-    <div className="page">
+    <div className="page account-detail-page">
       <StatsGrid stats={[
-        { label: 'Total Purchases', value: formatCurrency(client.totalPurchaseVolume) },
-        { label: 'Last Visit', value: client.lastVisitDate },
-        { label: 'Avg Order', value: formatCurrency(Math.round(client.totalPurchaseVolume / Math.max(client.purchaseHistory.length, 1))) },
+        { label: 'Total Purchases', value: formatCurrency(purchaseVolume) },
+        { label: 'Last Visit', value: lastVisit },
+        { label: 'Avg Order', value: formatCurrency(avgOrder) },
       ]} />
+      
       <section className="panel content-panel account-detail-panel">
         <div className="panel-section-header">
-          <h3>{client.clientName}</h3>
-          <p className="muted">{client.businessName}</p>
+          <h3>{customer.first_name} {customer.last_name}</h3>
+          <p className="muted">Contact: {customer.contact_person_fname} {customer.contact_person_lname}</p>
         </div>
         <div className="account-detail-grid two-up">
           <div>
-            <p><strong>Address:</strong> {client.address}</p>
-            <p><strong>Contact:</strong> {client.phone}</p>
-            <p><strong>Last Purchase:</strong> {client.lastPurchaseDate}</p>
+            <p><strong>Address:</strong> {customer.address}</p>
+            <p><strong>Contact:</strong> {customer.contact_phone}</p>
+            <p><strong>Last Collection:</strong> {customer.activity?.last_collection_date ? new Date(customer.activity.last_collection_date).toLocaleDateString() : 'N/A'}</p>
           </div>
           <div>
-            <h4 className="subsection-title">Sales Performance</h4>
-            <p>Monthly target: {formatCurrency(client.salesPerformance.monthlyTarget)}</p>
-            <p>Achieved: {formatCurrency(client.salesPerformance.achieved)}</p>
-            <p>Visits: {client.salesPerformance.visitsCompleted}/{client.salesPerformance.visitsPlanned}</p>
+            <h4 className="subsection-title">Credit Performance</h4>
+            <p>Credit Limit: {formatCurrency(creditLimit)}</p>
+            <p>Outstanding Balance: {formatCurrency(outstandingBalance)}</p>
+            <div className="progress-bar-container" style={{ marginTop: 8 }}>
+              <div className="progress-bar" style={{ width: `${Math.min((outstandingBalance / creditLimit) * 100, 100)}%`, backgroundColor: outstandingBalance > creditLimit * 0.8 ? '#ef4444' : '#3b82f6' }}></div>
+            </div>
           </div>
         </div>
       </section>
+      
       <section className="panel content-panel">
-        <div className="panel-section-header"><h3>Purchase History</h3></div>
-        {client.purchaseHistory.length ? (
-          <div className="table-shell">
-            <table className="data-table">
-              <thead><tr><th>Date</th><th>Amount</th><th>Products</th><th>Agent</th></tr></thead>
-              <tbody>
-                {client.purchaseHistory.map((row) => (
-                  <tr key={row.date + row.amount}><td>{row.date}</td><td>{formatCurrency(row.amount)}</td><td>{row.products}</td><td>{row.agent}</td></tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        ) : <EmptyState title="No purchase history" description="Sales to this client will appear here." />}
+        <div className="panel-section-header">
+          <h3>Recent Payments</h3>
+        </div>
+        <div className="table-responsive">
+          <table className="data-table">
+            <thead>
+              <tr>
+                <th>Date</th>
+                <th>Amount</th>
+                <th>Method</th>
+              </tr>
+            </thead>
+            <tbody>
+              {customer.paymentHistory && customer.paymentHistory.length ? customer.paymentHistory.map((p) => (
+                <tr key={p.payment_id}>
+                  <td>{new Date(p.payment_date).toLocaleDateString()}</td>
+                  <td>{formatCurrency(p.amount)}</td>
+                  <td>{p.payment_method || 'Cash'}</td>
+                </tr>
+              )) : (
+                <tr>
+                  <td colSpan="3" className="text-center muted">No recent payments</td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
       </section>
-      <section className="panel content-panel">
-        <div className="panel-section-header"><h3>Current Stock Availability</h3></div>
-        {client.stockAvailability.length ? (
-          <ul className="widget-list">
-            {client.stockAvailability.map((item) => (
-              <li key={item.product}><div><strong>{item.product}</strong></div><span>{item.stock} units on hand</span></li>
-            ))}
-          </ul>
-        ) : <EmptyState title="No stock data" description="Stock levels at this client location are not recorded." />}
-      </section>
-      <PageToolbar
-        actions={[
-          { label: 'Log Sales Visit', to: `/sales/visit-log/${client.id}${contextQuery}` },
-          { label: 'Submit Credit Investigation', to: `/sales/ci-form/${client.id}${contextQuery}`, variant: 'secondary' },
-          { label: 'Call Client', action: 'call', variant: 'secondary' },
-          { label: 'Open Navigation', action: 'navigate', variant: 'secondary' },
-          { label: 'Back', to: backTo, variant: 'ghost' },
-        ]}
-        onAction={(action) => {
-          if (action.action === 'call') showToast(`Calling ${client.clientName}...`, 'success');
-          else if (action.action === 'navigate') showToast(`Opening navigation to ${client.address}`, 'success');
-          else if (action.to) navigate(action.to);
-        }}
-      />
     </div>
   );
 }
 
-function VisitLogPage({ clientId, parentContext, navigate, showToast }) {
-  const client = getClientById(clientId);
+function VisitLogPage({ customerId, parentContext, navigate, showToast }) {
+  const [customer, setCustomer] = useState(null);
+  const [loading, setLoading] = useState(true);
   const [rows, setRows] = useState([{ id: 1, productId: 'p1', quantity: '', unitPrice: 250 }]);
   const [formData, setFormData] = useState({ paymentMethod: '', deliveryDate: '', notes: '', commitmentNotes: '' });
   const [errors, setErrors] = useState({});
   const [submitted, setSubmitted] = useState(false);
   const contextQuery = `?from=${parentContext}`;
 
-  if (!client) return <EmptyState title="Client not found" actionLabel="Back to Clients" onAction={() => navigate('/sales/clients')} />;
+  useEffect(() => {
+    async function load() {
+      setLoading(true);
+      const res = await fetchCustomerById(customerId);
+      if (res.success && res.data) setCustomer(res.data);
+      setLoading(false);
+    }
+    load();
+  }, [customerId]);
+
+  if (loading) return <LoadingState message="Loading customer..." />;
+  if (!customer) return <EmptyState title="Customer not found" actionLabel="Back to Customers" onAction={() => navigate('/sales/customers')} />;
 
   const lineTotal = (row) => (Number(row.quantity) || 0) * (Number(row.unitPrice) || 0);
   const grandTotal = rows.reduce((sum, row) => sum + lineTotal(row), 0);
@@ -486,7 +566,7 @@ function VisitLogPage({ clientId, parentContext, navigate, showToast }) {
   return (
     <div className="page">
       <section className="panel content-panel">
-        <p className="muted">Logging sale for <strong>{client.clientName}</strong></p>
+        <p className="muted">Logging sale for <strong>{customer.first_name} {customer.last_name}</strong></p>
       </section>
       <section className="panel content-panel">
         <div className="panel-section-header">
@@ -545,7 +625,7 @@ function VisitLogPage({ clientId, parentContext, navigate, showToast }) {
       <PageToolbar
         actions={[
           { label: 'Log Sale', action: 'submit' },
-          { label: 'Cancel', to: `/sales/client-detail/${client.id}${contextQuery}`, variant: 'secondary' },
+          { label: 'Cancel', to: `/sales/customer-detail/${customer.id}${contextQuery}`, variant: 'secondary' },
         ]}
         onAction={(a) => (a.action === 'submit' ? handleSubmit() : navigate(a.to))}
       />
@@ -553,16 +633,29 @@ function VisitLogPage({ clientId, parentContext, navigate, showToast }) {
   );
 }
 
-function CIFormPage({ clientId, parentContext, navigate, showToast }) {
-  const client = getClientById(clientId);
+function CIFormPage({ customerId, parentContext, navigate, showToast }) {
+  const [customer, setCustomer] = useState(null);
+  const [loading, setLoading] = useState(true);
   const [formData, setFormData] = useState({});
   const contextQuery = `?from=${parentContext}`;
-  if (!client) return <EmptyState title="Client not found" actionLabel="Back" onAction={() => navigate('/sales/clients')} />;
+
+  useEffect(() => {
+    async function load() {
+      setLoading(true);
+      const res = await fetchCustomerById(customerId);
+      if (res.success && res.data) setCustomer(res.data);
+      setLoading(false);
+    }
+    load();
+  }, [customerId]);
+
+  if (loading) return <LoadingState message="Loading customer..." />;
+  if (!customer) return <EmptyState title="Customer not found" actionLabel="Back" onAction={() => navigate('/sales/customers')} />;
 
   return (
     <div className="page">
       <section className="panel form-panel content-panel">
-        <div className="panel-section-header"><h3>Credit Investigation Form</h3><p className="muted">Client: {client.clientName}</p></div>
+        <div className="panel-section-header"><h3>Credit Investigation Form</h3><p className="muted">Customer: {customer.first_name} {customer.last_name}</p></div>
         <div className="form-group"><label>Purpose of CI</label><select value={formData.purpose ?? ''} onChange={(e) => setFormData((p) => ({ ...p, purpose: e.target.value }))}><option value="">Select purpose</option>{['Credit Limit Increase', 'New Account', 'Delinquency Review'].map((o) => <option key={o}>{o}</option>)}</select></div>
         <div className="form-group"><label>Monthly Income</label><input type="number" placeholder="PHP amount" value={formData.income ?? ''} onChange={(e) => setFormData((p) => ({ ...p, income: e.target.value }))} /></div>
         <div className="form-group"><label>Business Type</label><select value={formData.businessType ?? ''} onChange={(e) => setFormData((p) => ({ ...p, businessType: e.target.value }))}><option value="">Select type</option>{['Retail', 'Wholesale', 'Convenience Store', 'Service'].map((o) => <option key={o}>{o}</option>)}</select></div>
@@ -572,10 +665,10 @@ function CIFormPage({ clientId, parentContext, navigate, showToast }) {
       <PageToolbar
         actions={[
           { label: 'Submit to Operating Manager', action: 'submit' },
-          { label: 'Cancel', to: `/sales/client-detail/${client.id}${contextQuery}`, variant: 'secondary' },
+          { label: 'Cancel', to: `/sales/customer-detail/${customer.id}${contextQuery}`, variant: 'secondary' },
         ]}
         onAction={(a) => {
-          if (a.action === 'submit') { showToast('CI Form sent to Operating Manager.', 'success'); navigate(`/sales/client-detail/${client.id}${contextQuery}`); }
+          if (a.action === 'submit') { showToast('CI Form sent to Operating Manager.', 'success'); navigate(`/sales/customer-detail/${customer.id}${contextQuery}`); }
           else navigate(a.to);
         }}
       />
@@ -634,7 +727,6 @@ function InventoryPage({ navigate, showToast }) {
                     <td>{product.branch}</td>
                     <td><span className={`stock-status stock-${product.status.toLowerCase()}`}>{product.status}</span></td>
                     <td>
-                      <button className="icon-action-button" type="button" title="Details" onClick={() => setSelectedProduct(product)}><NavIcon name="view" /></button>
                       <button className="icon-action-button" type="button" title="View" onClick={() => navigate(`/sales/inventory/${product.id}`)}><NavIcon name="view" /></button>
                     </td>
                   </tr>
@@ -705,7 +797,7 @@ function SalesHistoryPage({ navigate }) {
   const filtered = useMemo(() => {
     const query = search.trim().toLowerCase();
     return SALES_HISTORY.filter((item) => {
-      const matchesSearch = !query || item.clientName.toLowerCase().includes(query) || item.invoiceNumber.toLowerCase().includes(query);
+      const matchesSearch = !query || (item.customerName || item.first_name + ' ' + item.last_name).toLowerCase().includes(query) || item.invoiceNumber.toLowerCase().includes(query);
       const matchesStatus = statusFilter === 'All' || item.status === statusFilter;
       const matchesFrom = !dateFrom || item.date >= dateFrom;
       const matchesTo = !dateTo || item.date <= dateTo;
@@ -721,7 +813,7 @@ function SalesHistoryPage({ navigate }) {
       <section className="panel content-panel">
         <div className="panel-section-header"><h3>Sales Transactions</h3></div>
         <div className="accounts-toolbar">
-          <input className="search-input" type="search" placeholder="Search by client or invoice number" value={search} onChange={(e) => setSearch(e.target.value)} />
+          <input className="search-input" type="search" placeholder="Search by customer or invoice number" value={search} onChange={(e) => setSearch(e.target.value)} />
           <div className="accounts-filters">
             <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}>{['All', 'Confirmed', 'Pending Review'].map((o) => <option key={o}>{o}</option>)}</select>
             <select value={productFilter} onChange={(e) => setProductFilter(e.target.value)}><option value="All">All Products</option>{PRODUCTS.map((p) => <option key={p.id} value={p.name}>{p.name}</option>)}</select>
@@ -734,12 +826,12 @@ function SalesHistoryPage({ navigate }) {
         <section className="panel content-panel">
           <div className="table-shell">
             <table className="data-table">
-              <thead><tr><th>Invoice Number</th><th>Client Name</th><th>Total Amount</th><th>Date</th><th>Status</th><th>Actions</th></tr></thead>
+              <thead><tr><th>Invoice Number</th><th>Customer Name</th><th>Total Amount</th><th>Date</th><th>Status</th><th>Actions</th></tr></thead>
               <tbody>
                 {filtered.map((item) => (
                   <tr key={item.id}>
                     <td>{item.invoiceNumber}</td>
-                    <td>{item.clientName}</td>
+                    <td>{item.customerName || item.first_name + ' ' + item.last_name}</td>
                     <td>{formatCurrency(item.totalAmount)}</td>
                     <td>{item.date}</td>
                     <td>{item.status}</td>
@@ -767,7 +859,7 @@ function SaleDetailsPage({ invoiceId, navigate, showToast }) {
       ]} />
       <section className="panel content-panel">
         <ul className="info-grid">
-          <li><span className="info-item-label">Client</span><span className="info-item-value">{sale.clientName}</span></li>
+          <li><span className="info-item-label">Customer</span><span className="info-item-value">{sale.customerName || sale.first_name + ' ' + sale.last_name}</span></li>
           <li><span className="info-item-label">Branch</span><span className="info-item-value">{sale.branch}</span></li>
           <li><span className="info-item-label">Payment Method</span><span className="info-item-value">{sale.paymentMethod}</span></li>
           <li><span className="info-item-label">Date</span><span className="info-item-value">{sale.date}</span></li>
@@ -831,18 +923,21 @@ function NotificationsPage({ navigate, showToast }) {
 }
 
 function ProfilePage({ navigate, showToast }) {
+  const currentUser = getCurrentUser();
+  const profile = currentUser || {};
+
   return (
     <div className="page">
       <OfflineBanner />
       <section className="panel content-panel profile-panel">
         <div className="profile-header">
-          <div className="profile-avatar">{SALES_AGENT_PROFILE.avatarInitials}</div>
-          <div><h3>{SALES_AGENT_PROFILE.name}</h3><p className="muted">{SALES_AGENT_PROFILE.employeeId}</p></div>
+          <div className="profile-avatar">{(profile.fullName || 'SA').split(' ').map((n) => n[0]).join('').slice(0, 2).toUpperCase()}</div>
+          <div><h3>{profile.fullName || 'Sales Agent'}</h3><p className="muted">{profile.email || ''}</p></div>
         </div>
         <ul className="info-grid">
-          <li><span className="info-item-label">Assigned Branch</span><span className="info-item-value">{SALES_AGENT_PROFILE.branch}</span></li>
-          <li><span className="info-item-label">Email</span><span className="info-item-value">{SALES_AGENT_PROFILE.email}</span></li>
-          <li><span className="info-item-label">Phone</span><span className="info-item-value">{SALES_AGENT_PROFILE.phone}</span></li>
+          <li><span className="info-item-label">Assigned Branch</span><span className="info-item-value">{profile.branch?.name || '—'}</span></li>
+          <li><span className="info-item-label">Role</span><span className="info-item-value">{profile.role?.name || '—'}</span></li>
+          <li><span className="info-item-label">Status</span><span className="info-item-value">{profile.status || '—'}</span></li>
         </ul>
       </section>
       <PageToolbar
@@ -879,16 +974,16 @@ function RouteTrackingPage({ navigate }) {
             height={500}
             polylines={[{ 
               id: 'route', 
-              positions: SCHEDULE_STOPS.map((stop, i) => [7.1907 + (i * 0.006), 125.4553 + (i * 0.006)]), 
+              positions: customers.map((stop, i) => [7.1907 + (i * 0.006), 125.4553 + (i * 0.006)]), 
               color: '#10b981' 
             }]}
-            markers={SCHEDULE_STOPS.map((stop, i) => ({
-              id: stop.id,
-              position: [7.1907 + (i * 0.006), 125.4553 + (i * 0.006)],
-              label: stop.id.replace('client-', ''),
-              color: stop.status === 'Completed' ? '#10b981' : '#f59e0b',
-              popup: `${stop.clientName} - ${stop.status}`
-            }))}
+              markers={customers.map((stop, i) => ({
+                id: stop.id,
+                position: [7.1907 + (i * 0.006), 125.4553 + (i * 0.006)],
+                label: stop.id.replace('customer-', ''),
+                color: stop.status === 'Completed' ? '#10b981' : '#f59e0b',
+                popup: `${stop.first_name} ${stop.last_name} - ${stop.status}`
+              }))}
           />
         </div>
         <p className="muted">Current location: {ROUTE_TRACKING.currentLocation}</p>
@@ -896,8 +991,8 @@ function RouteTrackingPage({ navigate }) {
       <section className="panel content-panel">
         <div className="panel-section-header"><h3>Visit Verification</h3></div>
         <ul className="widget-list">
-          {SCHEDULE_STOPS.filter((c) => c.status === 'Completed').map((c) => (
-            <li key={c.id}><div><strong>{c.clientName}</strong><span className="muted">GPS verified · {c.lastVisitDate}</span></div><span className="status-badge status-completed">Verified</span></li>
+          {customers.filter((c) => c.status === 'Completed').map((c) => (
+            <li key={c.id}><div><strong>{c.first_name} {c.last_name}</strong><span className="muted">GPS verified · {c.lastVisitDate}</span></div><span className="status-badge status-completed">Verified</span></li>
           ))}
         </ul>
       </section>
@@ -943,14 +1038,16 @@ function SettingsPage({ navigate }) {
 
 export function SalesPageBody({ page, navigate, showToast }) {
   if (!page) return <EmptyState title="Page not found" description="Use the sidebar to open a supported screen." />;
-  const props = { clientId: page.params?.clientId, productId: page.params?.productId, invoiceId: page.params?.invoiceId, parentContext: page.parentContext, navigate, showToast };
+  const props = { customerId: page.params?.customerId, productId: page.params?.productId, invoiceId: page.params?.invoiceId, parentContext: page.parentContext, navigate, showToast };
   switch (page.pageType) {
     case 'dashboard': return <DashboardPage {...props} />;
     case 'settings': return <SettingsPage {...props} />;
     case 'scheduleList':
     case 'scheduleMap': return <SchedulePage pageType={page.pageType} {...props} />;
-    case 'clients': return <ClientsPage {...props} />;
-    case 'clientDetail': return <ClientDetailPage {...props} />;
+    case 'customers': return <CustomersPage {...props} />;
+    case 'clients': return <CustomersPage {...props} />;
+    case 'customerDetail': return <CustomerDetailPage {...props} />;
+    case 'clientDetail': return <CustomerDetailPage {...props} />;
     case 'visitLog': return <VisitLogPage {...props} />;
     case 'ciForm': return <CIFormPage {...props} />;
     case 'inventory': return <InventoryPage {...props} />;
@@ -961,6 +1058,15 @@ export function SalesPageBody({ page, navigate, showToast }) {
     case 'profile': return <ProfilePage {...props} />;
     case 'routeTracking': return <RouteTrackingPage {...props} />;
     case 'auditLog': return <AuditLogPage {...props} />;
+    case 'creditHistory': return <CreditHistoryListPage navigate={navigate} showToast={showToast} basePath="/sales/credit-history" userBranch={getCurrentUser()?.branch?.name} />;
+    case 'creditDetail': return <CreditHistoryDetailPage creditId={page.params?.creditId} navigate={navigate} basePath="/sales/credit-history" />;
     default: return <EmptyState title="Page not found" description="This screen is not configured yet." />;
   }
 }
+
+
+
+
+
+
+
