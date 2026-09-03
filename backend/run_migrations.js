@@ -9,7 +9,7 @@ const { Pool } = pkg;
 const pool = new Pool({
   user:     process.env.DB_USER     || 'postgres',
   host:     process.env.DB_HOST     || 'localhost',
-  database: process.env.DB_NAME     || 'corvex',
+  database: process.env.DB_NAME     || 'corvex_db',
   password: process.env.DB_PASSWORD || '100802',
   port:     Number(process.env.DB_PORT) || 5432,
 });
@@ -17,15 +17,9 @@ const pool = new Pool({
 const MIGRATIONS_DIR = path.join(process.cwd(), 'backend', 'migrations');
 
 const MIGRATIONS = [
-  { file: '001_initial_schema.sql',          label: '001_initial_schema.sql' },
-  { file: '000_prepare_existing_tables.sql', label: '000_prepare_existing_tables.sql' },
-  { file: '002_seed_data.sql',               label: '002_seed_data.sql' },
-  { file: '004_fix_password_hash.sql',       label: '004_fix_password_hash.sql' },
-  { file: '008_seed_customers.sql',          label: '008_seed_customers.sql' },
-  { file: '009_seed_customer_activity.sql',  label: '009_seed_customer_activity.sql' },
-  { file: '010_seed_field_operations.sql',    label: '010_seed_field_operations.sql' },
-  { file: '011_seed_reports.sql',             label: '011_seed_reports.sql' },
-  { file: '012_seed_customer_activity.sql',  label: '012_seed_customer_activity.sql' },
+  { file: '001_master_schema.sql', label: '001_master_schema.sql' },
+  { file: '002_master_seed.sql',   label: '002_master_seed.sql' },
+  { file: '003_customers_user_id_nullable.sql', label: '003_customers_user_id_nullable.sql' }
 ];
 
 async function ensureMigrationsTable() {

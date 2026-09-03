@@ -1,6 +1,7 @@
 import React from 'react';
 import { MapContainer, TileLayer, Marker, Popup, Polyline } from 'react-leaflet';
 import L from 'leaflet';
+import RoutingComponent from './RoutingComponent';
 
 // Fix for default marker icon in leaflet
 delete L.Icon.Default.prototype._getIconUrl;
@@ -38,6 +39,7 @@ export const createCustomIcon = (color = '#2563eb', label = '') => {
  * Reusable LeafletMap Component
  * @param {Array} markers - Array of { id, position: [lat, lng], popup, icon, color, label }
  * @param {Array} polylines - Array of { id, positions: [[lat, lng], ...], color }
+ * @param {Array} routingWaypoints - Array of [lat, lng] for route calculation along roads
  * @param {Array} center - [lat, lng]
  * @param {Number} zoom - Zoom level
  * @param {String|Number} height - Map height
@@ -45,6 +47,7 @@ export const createCustomIcon = (color = '#2563eb', label = '') => {
 export default function LeafletMap({ 
   markers = [], 
   polylines = [], 
+  routingWaypoints = null,
   center = [12.8797, 121.7740], // Default center: Philippines
   zoom = 5,
   height = 560
@@ -82,6 +85,10 @@ export default function LeafletMap({
             opacity={0.7}
           />
         ))}
+
+        {routingWaypoints && routingWaypoints.length > 1 && (
+          <RoutingComponent waypoints={routingWaypoints} />
+        )}
       </MapContainer>
     </div>
   );

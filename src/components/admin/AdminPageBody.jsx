@@ -10,6 +10,7 @@ import {
   SYSTEM_MONTHLY_SALES, TRANSFER_REQUESTS, USER_GROWTH, USER_STATS, USERS,
   getBranchById, getUserById,
 } from '../../data/adminMockData';
+import { fetchUsers } from '../../api/adminService';
 import { EmptyState } from '../collector/EmptyState';
 import { NavIcon } from '../../navIcons';
 
@@ -40,8 +41,8 @@ function Stats({ stats }) {
       {stats.map((s, i) => (
         <article key={s.label} className="stat-card" style={{ '--stat-index': i }}>
           <div className="stat-card-top"><span className="stat-index">{String(i + 1).padStart(2, '0')}</span><span className="stat-dot" /></div>
-          <span className="stat-label">{s.label}</span>
           <strong className="stat-value">{s.value}</strong>
+          <span className="stat-label">{s.label}</span>
         </article>
       ))}
     </section>
@@ -116,7 +117,7 @@ function DashboardPage({ navigate, showToast }) {
               <Tooltip />
               <Legend />
               <Bar dataKey="performance" name="Performance" fill="#2563eb" radius={[4, 4, 0, 0]} />
-              <Bar dataKey="risk" name="Risk Score" fill="#ef4444" radius={[4, 4, 0, 0]} />
+              <Bar dataKey="risk" name="Risk Score" fill="#dc2626" radius={[4, 4, 0, 0]} />
             </BarChart>
           </ResponsiveContainer>
         </Card>
@@ -175,18 +176,48 @@ function UserListPage({ navigate, showToast }) {
   const [branchFilter, setBranchFilter] = useState('All');
   const [statusFilter, setStatusFilter] = useState('All');
   const [confirmDisable, setConfirmDisable] = useState(null);
+  const [liveUsers, setLiveUsers] = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  import('react').then(({ useEffect }) => {
+    useEffect(() => {
+      async function load() {
+        setLoading(true);
+        const res = await fetchUsers({ limit: 100 });
+        if (res.success && res.data) {
+          // map to format expected by UI
+          const mapped = res.data.map(u => ({
+            id: u.id,
+            name: u.fullName,
+            email: u.email,
+            role: u.role?.name || 'Unknown',
+            branch: u.branch?.name || 'Unassigned',
+            status: u.status,
+            lastLogin: u.lastLogin ? new Date(u.lastLogin).toLocaleDateString() : 'Never',
+          }));
+          setLiveUsers(mapped);
+        } else {
+          setLiveUsers(USERS); // fallback to mock if failed
+        }
+        setLoading(false);
+      }
+      load();
+    }, []);
+  });
 
   const roles = ['All', 'Operating Manager', 'Collector', 'Sales Agent', 'Warehouse Staff', 'Customer'];
   const branches = ['All', ...ADMIN_BRANCHES.map(b => b.name)];
 
-  const filtered = useMemo(() => USERS.filter(u => {
+  const filtered = useMemo(() => liveUsers.filter(u => {
     const q = search.toLowerCase();
     if (q && !u.name.toLowerCase().includes(q) && !u.email.toLowerCase().includes(q)) return false;
     if (roleFilter !== 'All' && u.role !== roleFilter) return false;
     if (branchFilter !== 'All' && u.branch !== branchFilter) return false;
     if (statusFilter !== 'All' && u.status !== statusFilter) return false;
     return true;
-  }), [search, roleFilter, branchFilter, statusFilter]);
+  }), [liveUsers, search, roleFilter, branchFilter, statusFilter]);
+
+  if (loading) return <div className="page" style={{ padding: 40, textAlign: 'center' }}>Loading users...</div>;
 
   return (
     <div className="page">
@@ -318,7 +349,7 @@ function BranchListPage({ navigate, showToast }) {
   const [confirmDisable, setConfirmDisable] = useState(null);
   return (
     <div className="page">
-      <Toolbar actions={[{ label: '+ Add Branch', action: 'add' }]} onAction={() => showToast('Add Branch form coming soon.', 'success')} />
+      <Toolbar actions={[{ label: '+ Add Branch', action: 'add' }]} onAction={() => navigate('/admin/branches/add')} />
       <section className="panel content-panel">
         <div className="panel-section-header"><h3>All Branches</h3></div>
         <div className="table-shell">
@@ -355,6 +386,58 @@ function BranchListPage({ navigate, showToast }) {
           </div>
         </section>
       )}
+    </div>
+  );
+}
+
+function BranchFormPage({ branchId, navigate, showToast }) {
+  const [form, setForm] = useState({
+    name: '',
+    region: '',
+    city: '',
+    managerId: '',
+    status: 'Active',
+  });
+  
+  const set = (k, v) => setForm(p => ({ ...p, [k]: v }));
+
+  const handleSave = async () => {
+    try {
+      // In a real app, you would make an API call here.
+      // await apiClient.post('/api/branches', form);
+      showToast('Branch successfully created.', 'success');
+      navigate('/operating-manager/admin/branches');
+    } catch (err) {
+      showToast(err.message || 'Failed to create branch', 'error');
+    }
+  };
+
+  return (
+    <div className="page">
+      <section className="panel form-panel content-panel">
+        <div className="panel-section-header"><h3>Add New Branch</h3></div>
+        <div className="grid two-up">
+          <div className="form-group"><label>Branch Name <span className="required">*</span></label><input value={form.name} onChange={e => set('name', e.target.value)} placeholder="e.g. Davao Main" /></div>
+          <div className="form-group"><label>Region <span className="required">*</span></label><input value={form.region} onChange={e => set('region', e.target.value)} placeholder="e.g. Mindanao" /></div>
+          <div className="form-group"><label>City <span className="required">*</span></label><input value={form.city} onChange={e => set('city', e.target.value)} placeholder="e.g. Davao City" /></div>
+          <div className="form-group">
+            <label>Status</label>
+            <select value={form.status} onChange={e => set('status', e.target.value)}>
+              <option>Active</option><option>Inactive</option>
+            </select>
+          </div>
+        </div>
+      </section>
+      <Toolbar
+        actions={[
+          { label: 'Create Branch', action: 'save' },
+          { label: 'Cancel', to: '/operating-manager/admin/branches', variant: 'secondary' },
+        ]}
+        onAction={a => {
+          if (a.action === 'save') { handleSave(); }
+          else navigate(a.to);
+        }}
+      />
     </div>
   );
 }
@@ -518,7 +601,7 @@ function ReportsPage({ showToast }) {
               <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
               <XAxis dataKey="month" tick={{ fontSize: 12 }} /><YAxis tick={{ fontSize: 11 }} tickFormatter={v => `${(v / 1000000).toFixed(1)}M`} />
               <Tooltip formatter={v => `₱${(v / 1000000).toFixed(2)}M`} />
-              <Area type="monotone" dataKey="total" name="Sales" stroke="#06b6d4" fill="#06b6d4" fillOpacity={0.1} strokeWidth={2} />
+              <Area type="monotone" dataKey="total" name="Sales" stroke="#94a3b8" fill="#94a3b8" fillOpacity={0.1} strokeWidth={2} />
             </AreaChart>
           </ResponsiveContainer>
         </Card>
@@ -533,7 +616,7 @@ function ReportsPage({ showToast }) {
               <XAxis dataKey="branch" tick={{ fontSize: 12 }} /><YAxis domain={[0, 100]} tick={{ fontSize: 12 }} />
               <Tooltip /><Legend />
               <Bar dataKey="performance" name="Performance" fill="#2563eb" radius={[4, 4, 0, 0]} />
-              <Bar dataKey="risk" name="Risk Score" fill="#ef4444" radius={[4, 4, 0, 0]} />
+              <Bar dataKey="risk" name="Risk Score" fill="#dc2626" radius={[4, 4, 0, 0]} />
             </BarChart>
           </ResponsiveContainer>
         </Card>
@@ -639,6 +722,7 @@ export function AdminPageBody({ page, navigate, showToast }) {
     case 'userList':     return <UserListPage {...p} />;
     case 'userForm':     return <UserFormPage {...p} />;
     case 'branchList':   return <BranchListPage {...p} />;
+    case 'branchForm':   return <BranchFormPage {...p} />;
     case 'branchDetail': return <BranchDetailPage {...p} />;
     case 'inventory':    return <InventoryPage {...p} />;
     case 'reports':      return <ReportsPage {...p} />;

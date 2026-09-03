@@ -4,7 +4,6 @@ export const customerRole = {
   homePath: '/customer',
   entryPath: '/customer/home',
   loginPath: '/customer/login',
-  accent: 'Self-service payments and receipts',
   navPages: [
     { label: 'Home', to: '/customer/home' },
     { label: 'Account Details', to: '/customer/account-details' },

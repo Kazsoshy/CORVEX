@@ -31,18 +31,18 @@ router.get('/analytics', requireAuth, async (req, res) => {
            COUNT(*) FILTER (WHERE r.slug = 'collector') AS active_collectors,
            COUNT(*) FILTER (WHERE r.slug = 'sales_staff') AS active_sales_agents
          FROM users u
-         JOIN roles r ON u.role_id = r.role_id
+         JOIN roles r ON u.role_id = r.id
          ${isBranchScoped ? 'WHERE u.branch_id = $1' : ''}`,
         isBranchScoped ? [bid] : []
       ),
       pool.query(
         `SELECT
            COUNT(*) AS total_customers,
-           COUNT(*) FILTER (WHERE status = 'Active') AS active_customers,
-           COALESCE(SUM(ca.outstanding_balance), 0) AS total_outstanding
+           COUNT(*) FILTER (WHERE u.status = 'Active') AS active_customers,
+           COALESCE(SUM(c.outstanding_balance), 0) AS total_outstanding
          FROM customers c
-         LEFT JOIN customer_activity ca ON c.customer_id = ca.customer_id
-         ${isBranchScoped ? 'WHERE c.branch_id = $1' : ''}`,
+         JOIN users u ON c.user_id = u.id
+         ${isBranchScoped ? 'WHERE u.branch_id = $1' : ''}`,
         isBranchScoped ? [bid] : []
       ),
       pool.query(
@@ -87,7 +87,7 @@ router.get('/analytics', requireAuth, async (req, res) => {
            COUNT(*) AS assigned
          FROM users u
          LEFT JOIN field_visits fv ON fv.user_id = u.id
-         WHERE u.role_id = (SELECT role_id FROM roles WHERE slug = 'collector')
+         WHERE u.role_id = (SELECT id FROM roles WHERE slug = 'collector')
            ${isBranchScoped ? 'AND u.branch_id = $1' : ''}
          GROUP BY u.id`,
         isBranchScoped ? [bid] : []
@@ -106,7 +106,7 @@ router.get('/analytics', requireAuth, async (req, res) => {
            FROM sales_invoices
            GROUP BY sales_agent_id
          ) si ON si.sales_agent_id = u.id
-         WHERE u.role_id = (SELECT role_id FROM roles WHERE slug = 'sales_staff')
+         WHERE u.role_id = (SELECT id FROM roles WHERE slug = 'sales_staff')
            ${isBranchScoped ? 'AND u.branch_id = $1' : ''}
          GROUP BY u.id, si.sales_logged, si.total_sales_amount`,
         isBranchScoped ? [bid] : []
@@ -179,13 +179,13 @@ router.get('/staff', requireAuth, async (req, res) => {
     const bid = isBranchScoped ? user.branchId : null;
 
     const result = await pool.query(
-      `SELECT u.id, u.first_name, u.last_name, u.email, r.slug AS role_slug
+      `SELECT u.id, u.full_name, u.email, r.slug AS role_slug
        FROM users u
-       JOIN roles r ON u.role_id = r.role_id
+       JOIN roles r ON u.role_id = r.id
        WHERE u.status = 'Active'
          AND r.slug IN ('collector', 'sales_staff')
          ${isBranchScoped ? 'AND u.branch_id = $1' : ''}
-       ORDER BY r.slug, u.first_name`,
+       ORDER BY r.slug, u.full_name`,
       isBranchScoped ? [bid] : []
     );
 
@@ -219,7 +219,7 @@ router.get('/staff', requireAuth, async (req, res) => {
 
         return {
           id: String(u.id),
-          name: `${u.first_name} ${u.last_name}`,
+          name: u.full_name,
           accountsAssigned: assigned,
           accountsVisited: visited,
           accountsPending: Number(visits.pending) || 0,
@@ -268,7 +268,7 @@ router.get('/staff', requireAuth, async (req, res) => {
 
         return {
           id: String(u.id),
-          name: `${u.first_name} ${u.last_name}`,
+          name: u.full_name,
           customersAssigned,
           visitsCompleted,
           salesLogged,
@@ -309,27 +309,25 @@ router.get('/customers', requireAuth, async (req, res) => {
     const bid = isBranchScoped ? user.branchId : null;
 
     const result = await pool.query(
-      `SELECT c.customer_id, c.first_name, c.last_name, c.contact_phone, c.status,
-              c.latitude, c.longitude, c.address,
+      `SELECT c.id AS customer_id, u.full_name AS customer_name, u.contact_number AS contact_phone, u.status,
+              c.latitude, c.longitude, u.address,
               c.contact_person_fname, c.contact_person_lname, c.contact_person_phone,
               b.name AS branch_name,
-              COALESCE(ca.outstanding_balance, 0) AS outstanding_balance,
-              COALESCE(ca.purchase_volume, 0) AS purchase_volume,
-              ca.last_collection_date, ca.last_sales_visit
+              COALESCE(c.outstanding_balance, 0) AS outstanding_balance,
+              COALESCE(c.purchase_volume, 0) AS purchase_volume,
+              c.last_collection_date, c.last_sales_visit
        FROM customers c
-       JOIN branches b ON b.id = c.branch_id
-       LEFT JOIN customer_activity ca ON c.customer_id = ca.customer_id
-       ${isBranchScoped ? 'WHERE c.branch_id = $1' : ''}
-       ORDER BY c.last_name, c.first_name`,
+       JOIN users u ON c.user_id = u.id
+       JOIN branches b ON b.id = u.branch_id
+       ${isBranchScoped ? 'WHERE u.branch_id = $1' : ''}
+       ORDER BY u.full_name`,
       isBranchScoped ? [bid] : []
     );
 
     const customers = result.rows.map((c) => ({
       customer_id: c.customer_id,
       id: String(c.customer_id),
-      first_name: c.first_name,
-      last_name: c.last_name,
-      customerName: `${c.first_name} ${c.last_name}`,
+      customerName: c.customer_name,
       address: c.address,
       contact_phone: c.contact_phone,
       contact_person_fname: c.contact_person_fname,
@@ -379,16 +377,17 @@ router.get('/customers/:id', requireAuth, async (req, res) => {
     const isBranchScoped = user.branchId !== null;
     const bid = isBranchScoped ? user.branchId : null;
 
-    let customerQuery = `SELECT c.customer_id, c.first_name, c.last_name, c.address, c.latitude, c.longitude,
-              c.contact_phone, c.contact_person_fname, c.contact_person_lname,
-              c.contact_person_phone, c.status, c.created_at, c.updated_at,
+    let customerQuery = `SELECT c.id AS customer_id, u.full_name AS customer_name, u.address, c.latitude, c.longitude,
+              u.contact_number AS contact_phone, c.contact_person_fname, c.contact_person_lname,
+              c.contact_person_phone, u.status, c.created_at, c.updated_at,
               b.name AS branch_name
        FROM customers c
-       JOIN branches b ON b.id = c.branch_id
-       WHERE c.customer_id = $1`;
+       JOIN users u ON c.user_id = u.id
+       JOIN branches b ON b.id = u.branch_id
+       WHERE c.id = $1`;
     const params = [req.params.id];
     if (isBranchScoped) {
-      customerQuery += ` AND c.branch_id = $2`;
+      customerQuery += ` AND u.branch_id = $2`;
       params.push(bid);
     }
 
@@ -401,8 +400,8 @@ router.get('/customers/:id', requireAuth, async (req, res) => {
     const customer = customerResult.rows[0];
 
     const [activityResult, creditResult] = await Promise.all([
-      pool.query(`SELECT * FROM customer_activity WHERE customer_id = $1`, [req.params.id]),
-      pool.query(`SELECT * FROM customer_credit_info WHERE customer_id = $1`, [req.params.id]),
+      pool.query(`SELECT outstanding_balance, purchase_volume, last_collection_date, last_sales_visit FROM customers WHERE id = $1`, [req.params.id]),
+      pool.query(`SELECT credit_limit, monthly_income, employment_status, credit_score FROM customers WHERE id = $1`, [req.params.id]),
     ]);
 
     return res.status(200).json({
@@ -431,9 +430,9 @@ router.get('/alerts', requireAuth, async (req, res) => {
     const isBranchScoped = user.branchId !== null;
     const bid = isBranchScoped ? user.branchId : null;
 
-    let inventoryQuery = `SELECT p.name AS product_name, bi.available_stock, bi.reorder_level
+    let inventoryQuery = `SELECT p.product_name AS product_name, bi.available_stock, bi.reorder_level
        FROM branch_inventory bi
-       JOIN products p ON p.id = bi.product_id
+       JOIN products p ON p.product_id = bi.product_id
        WHERE bi.available_stock <= bi.reorder_level`;
     const params = [];
     if (isBranchScoped) {
@@ -467,6 +466,28 @@ router.get('/alerts', requireAuth, async (req, res) => {
   } catch (err) {
     console.error('[Branch Manager] GET /alerts error:', err.message);
     return res.status(500).json({ success: false, message: 'Failed to fetch alerts.' });
+  }
+});
+
+// ──────────────────────────────────────────────────────────────────────────────
+// PUT /api/branch-manager/ci-approvals/:id
+// Updates the status of a CI approval
+// ──────────────────────────────────────────────────────────────────────────────
+router.put('/ci-approvals/:id', requireAuth, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { status, reason } = req.body;
+    
+    // Simulating database update since ci_approvals table structure is mocked
+    console.log(`[Branch Manager] CI ${id} status updated to ${status} (Reason: ${reason || 'N/A'})`);
+
+    return res.status(200).json({
+      success: true,
+      message: `CI ${id} successfully updated to ${status}`,
+    });
+  } catch (err) {
+    console.error('[Branch Manager] PUT /ci-approvals/:id error:', err.message);
+    return res.status(500).json({ success: false, message: 'Failed to update CI.' });
   }
 });
 

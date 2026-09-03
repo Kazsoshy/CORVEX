@@ -4,9 +4,7 @@ export const branchManagerRole = {
   homePath: '/branch-manager',
   entryPath: '/branch-manager/dashboard',
   loginPath: '/branch-manager',
-  // accent is shown in the sidebar header — branch name is injected at runtime
   // by App.jsx once the user object is available
-  accent: 'Branch operations, field teams, and approvals',
   navSections: [
     {
       title: 'Dashboard',

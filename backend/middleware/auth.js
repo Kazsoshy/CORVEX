@@ -19,31 +19,36 @@
  */
 
 import pkg from 'pg';
+import jwt from 'jsonwebtoken';
 const { Pool } = pkg;
 
 // ─── requireAuth ─────────────────────────────────────────────────────────────
 /**
- * Reads X-User-Id header, looks up the user in the DB, and attaches
+ * Reads Authorization header (Bearer token), verifies JWT, looks up the user in the DB, and attaches
  * req.currentUser = { id, role_slug, branch_id }.
- * Returns 401 if the header is missing or the user is not found/active.
+ * Returns 401 if the token is missing/invalid or the user is not found/active.
  */
 export async function requireAuth(req, res, next) {
-  const userId = req.headers['x-user-id'];
-
-  if (!userId || isNaN(Number(userId))) {
+  const authHeader = req.headers.authorization;
+  if (!authHeader || !authHeader.startsWith('Bearer ')) {
     return res.status(401).json({
       success: false,
-      message: 'Authentication required. No valid user session found.',
+      message: 'Authentication required. No valid token found.',
     });
   }
 
+  const token = authHeader.split(' ')[1];
+
   try {
+    const decoded = jwt.verify(token, process.env.JWT_SECRET || 'fallback_secret_key');
+    const userId = decoded.id;
+
     const pool = req.app.locals.pool;
     const result = await pool.query(
       `SELECT u.id, u.status, u.branch_id,
               r.slug AS role_slug
        FROM users u
-       JOIN roles r ON r.role_id = u.role_id
+       JOIN roles r ON r.id = u.role_id
        WHERE u.id = $1`,
       [Number(userId)]
     );
@@ -69,6 +74,9 @@ export async function requireAuth(req, res, next) {
 
     next();
   } catch (err) {
+    if (err.name === 'JsonWebTokenError' || err.name === 'TokenExpiredError') {
+      return res.status(401).json({ success: false, message: 'Invalid or expired token.' });
+    }
     console.error('[Auth Middleware] requireAuth error:', err.message);
     return res.status(500).json({ success: false, message: 'Internal server error during auth.' });
   }
@@ -127,6 +135,7 @@ export function requireBranchScope(req, res, next) {
 // ─── requireRole ─────────────────────────────────────────────────────────────
 /**
  * Factory — returns middleware that allows only the listed role slugs.
+ * Super Admin implicitly bypasses this check.
  * @param {string[]} allowedRoles
  */
 export function requireRole(allowedRoles) {
@@ -135,7 +144,8 @@ export function requireRole(allowedRoles) {
     if (!user) {
       return res.status(401).json({ success: false, message: 'Not authenticated.' });
     }
-    if (!allowedRoles.includes(user.roleSlug)) {
+    // Allow super_admin implicitly if we are providing full access.
+    if (user.roleSlug !== 'super_admin' && !allowedRoles.includes(user.roleSlug)) {
       return res.status(403).json({
         success: false,
         message: `Access denied: this action requires one of [${allowedRoles.join(', ')}].`,

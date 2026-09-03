@@ -62,8 +62,8 @@ function StatsGrid({ stats }) {
             <span className="stat-index">{String(index + 1).padStart(2, '0')}</span>
             <span className="stat-dot" aria-hidden="true" />
           </div>
-          <span className="stat-label">{stat.label}</span>
           <strong className="stat-value">{stat.value}</strong>
+          <span className="stat-label">{stat.label}</span>
         </article>
       ))}
     </section>
@@ -520,9 +520,11 @@ function CustomerDetailPage({ customerId, parentContext, navigate, showToast }) 
 function VisitLogPage({ customerId, parentContext, navigate, showToast }) {
   const [customer, setCustomer] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [rows, setRows] = useState([{ id: 1, productId: 'p1', quantity: '', unitPrice: 250 }]);
-  const [formData, setFormData] = useState({ paymentMethod: '', deliveryDate: '', notes: '', commitmentNotes: '' });
-  const [errors, setErrors] = useState({});
+  const [cart, setCart] = useState([]);
+  const [category, setCategory] = useState('All');
+  const [search, setSearch] = useState('');
+  
+  const [formData, setFormData] = useState({ paymentMethod: 'Cash', notes: '' });
   const [submitted, setSubmitted] = useState(false);
   const contextQuery = `?from=${parentContext}`;
 
@@ -539,96 +541,201 @@ function VisitLogPage({ customerId, parentContext, navigate, showToast }) {
   if (loading) return <LoadingState message="Loading customer..." />;
   if (!customer) return <EmptyState title="Customer not found" actionLabel="Back to Customers" onAction={() => navigate('/sales/customers')} />;
 
-  const lineTotal = (row) => (Number(row.quantity) || 0) * (Number(row.unitPrice) || 0);
-  const grandTotal = rows.reduce((sum, row) => sum + lineTotal(row), 0);
-
-  const addRow = () => setRows((prev) => [...prev, { id: Date.now(), productId: 'p1', quantity: '', unitPrice: PRODUCTS[0].unitPrice }]);
-  const removeRow = (id) => setRows((prev) => (prev.length > 1 ? prev.filter((r) => r.id !== id) : prev));
-  const updateRow = (id, field, value) => setRows((prev) => prev.map((r) => (r.id === id ? { ...r, [field]: value, ...(field === 'productId' ? { unitPrice: getProductById(value)?.unitPrice ?? r.unitPrice } : {}) } : r)));
-
-  const handleSubmit = () => {
-    const nextErrors = {};
-    rows.forEach((row, i) => {
-      const qty = Number(row.quantity);
-      if (!qty || qty <= 0) nextErrors[`qty-${row.id}`] = `Row ${i + 1}: quantity must be greater than zero.`;
-      const stock = getProductStock(row.productId);
-      if (qty > stock) nextErrors[`qty-${row.id}`] = `Row ${i + 1}: exceeds available inventory (${stock} units).`;
+  const addToCart = (product) => {
+    setCart((prev) => {
+      const existing = prev.find((item) => item.id === product.id);
+      if (existing) {
+        if (existing.quantity >= product.stock) {
+          showToast(`Cannot add more. Only ${product.stock} in stock.`, 'error');
+          return prev;
+        }
+        return prev.map((item) => item.id === product.id ? { ...item, quantity: item.quantity + 1 } : item);
+      }
+      if (product.stock <= 0) {
+        showToast('Out of stock.', 'error');
+        return prev;
+      }
+      return [...prev, { ...product, quantity: 1 }];
     });
-    if (!formData.paymentMethod) nextErrors.paymentMethod = 'Select a payment method.';
-    if (submitted) nextErrors.submit = 'This sale has already been submitted.';
-    setErrors(nextErrors);
-    if (Object.keys(nextErrors).length) { showToast('Please fix the errors before submitting.', 'error'); return; }
-    setSubmitted(true);
-    showToast('Sale logged. Inventory deducted and visit marked completed.', 'success');
-    navigate(`/sales/history/INV-2024-0089`);
   };
 
+  const updateQuantity = (id, delta) => {
+    setCart((prev) => prev.map((item) => {
+      if (item.id === id) {
+        const newQty = item.quantity + delta;
+        if (newQty > item.stock) { showToast(`Only ${item.stock} in stock.`, 'error'); return item; }
+        if (newQty < 1) return null;
+        return { ...item, quantity: newQty };
+      }
+      return item;
+    }).filter(Boolean));
+  };
+
+  const grandTotal = cart.reduce((sum, item) => sum + (item.quantity * item.unitPrice), 0);
+
+  const handleSubmit = async () => {
+    if (cart.length === 0) { showToast('Cart is empty.', 'error'); return; }
+    if (!formData.paymentMethod) { showToast('Select a payment method.', 'error'); return; }
+    if (submitted) return;
+    
+    setSubmitted(true);
+    try {
+      const res = await fetch('http://localhost:5000/api/sales', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${localStorage.getItem('corvex_token')}`,
+        },
+        body: JSON.stringify({
+          customer_id: customer.customer_id,
+          cart: cart.map(c => ({ id: c.product_id || c.id, quantity: c.quantity, unitPrice: c.unit_price || c.unitPrice })),
+          payment_method_id: 1, // Assume 1 is Cash for now, since formData.paymentMethod is string
+          notes: formData.notes
+        })
+      });
+      const data = await res.json();
+      if (data.success) {
+        showToast('Sale logged. Inventory deducted and visit marked completed.', 'success');
+        navigate(`/sales/history`);
+      } else {
+        showToast(`Failed to log sale: ${data.message}`, 'error');
+        setSubmitted(false);
+      }
+    } catch (err) {
+      showToast('An error occurred during sale processing.', 'error');
+      setSubmitted(false);
+    }
+  };
+
+  const [products, setProducts] = useState([]);
+  useEffect(() => {
+    async function loadProducts() {
+      try {
+        const res = await fetch('http://localhost:5000/api/products', {
+          headers: { 'Authorization': `Bearer ${localStorage.getItem('corvex_token')}` }
+        });
+        const data = await res.json();
+        if (data.success) {
+          // Map backend product data to expected frontend format
+          setProducts(data.data.map(p => ({
+            id: p.product_id,
+            product_id: p.product_id,
+            name: p.product_name,
+            sku: p.sku,
+            category: p.category,
+            stock: Number(p.total_quantity || p.quantity || 0),
+            unitPrice: Number(p.unit_price)
+          })));
+        }
+      } catch (err) {
+        console.error('Failed to fetch products', err);
+      }
+    }
+    loadProducts();
+  }, []);
+
+  const categories = ['All', ...new Set(products.map((p) => p.category))];
+  const filteredProducts = products.filter(p => {
+    if (category !== 'All' && p.category !== category) return false;
+    if (search && !p.name.toLowerCase().includes(search.toLowerCase()) && !p.sku.toLowerCase().includes(search.toLowerCase())) return false;
+    return true;
+  });
+
   return (
-    <div className="page">
-      <section className="panel content-panel">
-        <p className="muted">Logging sale for <strong>{customer.first_name} {customer.last_name}</strong></p>
-      </section>
-      <section className="panel content-panel">
-        <div className="panel-section-header">
-          <h3>Product Selection</h3>
-          <button className="button secondary" type="button" onClick={addRow}>Add Product Row</button>
+    <div className="page" style={{ height: 'calc(100vh - var(--header-height) - 48px)', display: 'flex', flexDirection: 'column' }}>
+      <header className="panel-section-header" style={{ marginBottom: 16 }}>
+        <div>
+          <h2 style={{ margin: 0 }}>Log Sale: {customer.first_name} {customer.last_name}</h2>
+          <p className="muted" style={{ margin: 0 }}>{customer.address}</p>
         </div>
-        <div className="table-shell">
-          <table className="data-table product-table">
-            <thead><tr><th>Product Name</th><th>Quantity</th><th>Unit Price</th><th>Line Total</th><th></th></tr></thead>
-            <tbody>
-              {rows.map((row, index) => {
-                const product = getProductById(row.productId);
-                return (
-                  <tr key={row.id}>
-                    <td>
-                      <select value={row.productId} onChange={(e) => updateRow(row.id, 'productId', e.target.value)}>
-                        {PRODUCTS.map((p) => <option key={p.id} value={p.id}>{p.name} (stock: {p.stock})</option>)}
-                      </select>
-                      {errors[`qty-${row.id}`] ? <p className="form-error">{errors[`qty-${row.id}`]}</p> : null}
-                    </td>
-                    <td><input type="number" min="1" value={row.quantity} onChange={(e) => updateRow(row.id, 'quantity', e.target.value)} /></td>
-                    <td><input type="number" min="0" value={row.unitPrice} onChange={(e) => updateRow(row.id, 'unitPrice', e.target.value)} /></td>
-                    <td>{formatCurrency(lineTotal(row))}</td>
-                    <td><button className="icon-action-button danger" type="button" title="Remove" onClick={() => removeRow(row.id)} disabled={rows.length === 1}><NavIcon name="trash" /></button></td>
-                  </tr>
-                );
-              })}
-            </tbody>
-            <tfoot><tr><td colSpan="3"><strong>Grand Total</strong></td><td colSpan="2"><strong>{formatCurrency(grandTotal)}</strong></td></tr></tfoot>
-          </table>
+        <button className="button ghost" onClick={() => navigate('/sales/customers')}>Cancel</button>
+      </header>
+
+      <div style={{ display: 'flex', gap: 24, flex: 1, overflow: 'hidden' }}>
+        {/* Left Side: Product Grid */}
+        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 16, overflow: 'hidden' }}>
+          <div className="accounts-toolbar" style={{ marginBottom: 0 }}>
+            <input type="search" className="search-input" placeholder="Search products..." value={search} onChange={(e) => setSearch(e.target.value)} />
+            <select value={category} onChange={(e) => setCategory(e.target.value)}>
+              {categories.map(c => <option key={c} value={c}>{c}</option>)}
+            </select>
+          </div>
+          
+          <div style={{ flex: 1, overflowY: 'auto', paddingRight: 8 }}>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: 16 }}>
+              {filteredProducts.map(product => (
+                <div 
+                  key={product.id} 
+                  className="quick-link-card" 
+                  style={{ display: 'flex', flexDirection: 'column', gap: 8, padding: 16, cursor: product.stock > 0 ? 'pointer' : 'not-allowed', opacity: product.stock > 0 ? 1 : 0.6 }}
+                  onClick={() => product.stock > 0 && addToCart(product)}
+                >
+                  <div style={{ fontSize: '24px', textAlign: 'center', marginBottom: 8 }}>{product.image || '📦'}</div>
+                  <strong style={{ fontSize: '1rem', lineHeight: '1.2' }}>{product.name}</strong>
+                  <span className="muted" style={{ fontSize: '0.8rem' }}>{product.sku}</span>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 'auto', paddingTop: 8 }}>
+                    <span style={{ fontWeight: 600, color: 'var(--primary)' }}>{formatCurrency(product.unitPrice)}</span>
+                    <span style={{ fontSize: '0.8rem', color: product.stock > 0 ? 'var(--text-main)' : 'var(--danger)' }}>{product.stock > 0 ? `${product.stock} in stock` : 'Out of Stock'}</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+            {filteredProducts.length === 0 && <EmptyState title="No products found" />}
+          </div>
         </div>
-      </section>
-      <section className="panel form-panel content-panel">
-        <div className="form-group">
-          <label>Payment Method<span className="required">*</span></label>
-          <select value={formData.paymentMethod} onChange={(e) => setFormData((p) => ({ ...p, paymentMethod: e.target.value }))}>
-            <option value="">Select payment method</option>
-            {['Cash', 'Check', 'Bank Transfer', 'Credit Terms'].map((o) => <option key={o} value={o}>{o}</option>)}
-          </select>
-          {errors.paymentMethod ? <p className="form-error">{errors.paymentMethod}</p> : null}
+
+        {/* Right Side: Cart / POS Panel */}
+        <div className="panel content-panel" style={{ width: 380, display: 'flex', flexDirection: 'column', padding: 0, overflow: 'hidden' }}>
+          <div style={{ padding: 16, borderBottom: '1px solid var(--surface-3)', background: 'var(--surface-2)' }}>
+            <h3 style={{ margin: 0 }}>Current Order</h3>
+          </div>
+          
+          <div style={{ flex: 1, overflowY: 'auto', padding: 16 }}>
+            {cart.length === 0 ? (
+              <EmptyState title="Cart is empty" description="Select products to add to the order." />
+            ) : (
+              <ul style={{ listStyle: 'none', padding: 0, margin: 0, display: 'flex', flexDirection: 'column', gap: 16 }}>
+                {cart.map(item => (
+                  <li key={item.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                    <div style={{ flex: 1 }}>
+                      <strong style={{ display: 'block', marginBottom: 4 }}>{item.name}</strong>
+                      <span className="muted">{formatCurrency(item.unitPrice)}</span>
+                    </div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <div style={{ display: 'flex', border: '1px solid var(--surface-3)', borderRadius: 4, overflow: 'hidden' }}>
+                        <button type="button" style={{ padding: '4px 8px', background: 'var(--surface-2)', border: 'none', cursor: 'pointer' }} onClick={() => updateQuantity(item.id, -1)}>-</button>
+                        <span style={{ padding: '4px 12px', fontSize: '0.9rem', minWidth: 32, textAlign: 'center', borderLeft: '1px solid var(--surface-3)', borderRight: '1px solid var(--surface-3)' }}>{item.quantity}</span>
+                        <button type="button" style={{ padding: '4px 8px', background: 'var(--surface-2)', border: 'none', cursor: 'pointer' }} onClick={() => updateQuantity(item.id, 1)}>+</button>
+                      </div>
+                      <strong style={{ minWidth: 80, textAlign: 'right' }}>{formatCurrency(item.quantity * item.unitPrice)}</strong>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+          
+          <div style={{ padding: 16, borderTop: '1px solid var(--surface-3)', background: 'var(--surface-1)' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 16, fontSize: '1.25rem', fontWeight: 600 }}>
+              <span>Total</span>
+              <span>{formatCurrency(grandTotal)}</span>
+            </div>
+            
+            <div className="form-group" style={{ marginBottom: 16 }}>
+              <label>Payment Method</label>
+              <select value={formData.paymentMethod} onChange={(e) => setFormData(p => ({ ...p, paymentMethod: e.target.value }))}>
+                <option value="Cash">Cash</option>
+                <option value="Check">Check</option>
+                <option value="Bank Transfer">Bank Transfer</option>
+              </select>
+            </div>
+            
+            <button className="button" style={{ width: '100%', padding: '12px', fontSize: '1rem' }} onClick={handleSubmit} disabled={cart.length === 0 || submitted}>
+              Complete Sale
+            </button>
+          </div>
         </div>
-        <div className="form-group">
-          <label>Expected Delivery Date</label>
-          <input type="date" value={formData.deliveryDate} onChange={(e) => setFormData((p) => ({ ...p, deliveryDate: e.target.value }))} />
-        </div>
-        <div className="form-group">
-          <label>Notes</label>
-          <textarea placeholder="Visit notes..." value={formData.notes} onChange={(e) => setFormData((p) => ({ ...p, notes: e.target.value }))} />
-        </div>
-        <div className="form-group">
-          <label>Commitment Notes</label>
-          <textarea placeholder="Sales commitments or follow-up actions..." value={formData.commitmentNotes} onChange={(e) => setFormData((p) => ({ ...p, commitmentNotes: e.target.value }))} />
-        </div>
-        {errors.submit ? <p className="form-error">{errors.submit}</p> : null}
-      </section>
-      <PageToolbar
-        actions={[
-          { label: 'Log Sale', action: 'submit' },
-          { label: 'Cancel', to: `/sales/customer-detail/${customer.id}${contextQuery}`, variant: 'secondary' },
-        ]}
-        onAction={(a) => (a.action === 'submit' ? handleSubmit() : navigate(a.to))}
-      />
+      </div>
     </div>
   );
 }
@@ -680,24 +787,46 @@ function InventoryPage({ navigate, showToast }) {
   const [search, setSearch] = useState('');
   const [category, setCategory] = useState('All');
   const [sortBy, setSortBy] = useState('Name');
-  const [selectedProduct, setSelectedProduct] = useState(null);
+  const [products, setProducts] = useState([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    const timer = window.setTimeout(() => setLoading(false), 400);
-    return () => window.clearTimeout(timer);
+    async function loadProducts() {
+      setLoading(true);
+      try {
+        const res = await fetch('http://localhost:5000/api/products', {
+          headers: { 'Authorization': `Bearer ${localStorage.getItem('corvex_token')}` }
+        });
+        const data = await res.json();
+        if (data.success) {
+          setProducts(data.data.map(p => ({
+            id: p.product_id,
+            name: p.product_name,
+            sku: p.sku,
+            category: p.category,
+            stock: Number(p.total_quantity || p.quantity || 0),
+            status: p.stock_status || p.status,
+            branch: p.branch_name || 'All Branches'
+          })));
+        }
+      } catch (err) {
+        console.error('Failed to fetch products', err);
+      }
+      setLoading(false);
+    }
+    loadProducts();
   }, []);
 
-  const categories = ['All', ...new Set(PRODUCTS.map((p) => p.category))];
+  const categories = ['All', ...new Set(products.map((p) => p.category))];
   const filtered = useMemo(() => {
-    let results = [...PRODUCTS];
+    let results = [...products];
     const query = search.trim().toLowerCase();
     if (query) results = results.filter((p) => p.name.toLowerCase().includes(query) || p.sku.toLowerCase().includes(query));
     if (category !== 'All') results = results.filter((p) => p.category === category);
     if (sortBy === 'Stock Level') results.sort((a, b) => a.stock - b.stock);
     else results.sort((a, b) => a.name.localeCompare(b.name));
     return results;
-  }, [search, category, sortBy]);
+  }, [search, category, sortBy, products]);
 
   if (loading) return <LoadingState message="Loading inventory..." />;
 

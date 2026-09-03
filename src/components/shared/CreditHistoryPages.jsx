@@ -145,8 +145,8 @@ export function CreditHistoryDetailPage({ creditId, navigate, basePath = '/wareh
         ].map((s, i) => (
           <article key={s.label} className="stat-card" style={{ '--stat-index': i }}>
             <div className="stat-card-top"><span className="stat-index">{String(i + 1).padStart(2, '0')}</span><span className="stat-dot" /></div>
-            <span className="stat-label">{s.label}</span>
             <strong className="stat-value" style={{ fontSize: '1.1rem' }}>{s.value}</strong>
+            <span className="stat-label">{s.label}</span>
           </article>
         ))}
       </section>

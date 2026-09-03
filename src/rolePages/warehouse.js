@@ -4,7 +4,6 @@ export const warehouseRole = {
   homePath: '/warehouse',
   entryPath: '/warehouse/dashboard',
   loginPath: '/warehouse',
-  accent: 'Stock counts, restocks, transfers, and credit history',
   navPages: [
     { label: 'Dashboard',               to: '/warehouse/dashboard' },
     { label: 'Inventory',               to: '/warehouse/inventory' },

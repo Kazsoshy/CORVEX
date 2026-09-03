@@ -10,7 +10,10 @@ import productsRouter  from './routes/products.js';
 import customersRouter from './routes/customers.js';
 import dashboardRouter from './routes/dashboard.js';
 import branchManagerRouter from './routes/branchManager.js';
+import branchesRouter  from './routes/branches.js';
 import reportsRouter  from './routes/reports.js';
+import salesRouter from './routes/sales.js';
+import collectionsRouter from './routes/collections.js';
 import { requireAuth, requireBranchScope } from './middleware/auth.js';
 
 dotenv.config();
@@ -34,10 +37,10 @@ app.use(express.urlencoded({ extended: true }));
 // DATABASE CONNECTION
 // ──────────────────────────────────────────────────────────────────────────────
 const pool = new Pool({
-  user:     process.env.DB_USER     || 'postgres',
-  host:     process.env.DB_HOST     || 'localhost',
-  database: process.env.DB_NAME     || 'corvex',
-  password: process.env.DB_PASSWORD || '100802',
+  user:     process.env.DB_USER,
+  host:     process.env.DB_HOST,
+  database: process.env.DB_NAME,
+  password: process.env.DB_PASSWORD,
   port:     Number(process.env.DB_PORT) || 5432,
   max:      10,          // max connections in pool
   idleTimeoutMillis:    30000,
@@ -76,12 +79,15 @@ app.use('/api/auth',      authRouter);
 app.use('/api/users',     requireAuth, usersRouter);
 app.use('/api/roles',     requireAuth, rolesRouter);
 app.use('/api/products',  requireAuth, productsRouter);
+app.use('/api/branches',  requireAuth, branchesRouter);
 
 // Branch-scoped routes — identify + branch enforcement
 app.use('/api/customers', requireAuth, requireBranchScope, customersRouter);
-app.use('/api/dashboard', requireAuth, dashboardRouter);
-app.use('/api/branch-manager', requireAuth, branchManagerRouter);
-app.use('/api/reports', requireAuth, reportsRouter);
+app.use('/api/dashboard', requireAuth, requireBranchScope, dashboardRouter);
+app.use('/api/branch-manager', requireAuth, requireBranchScope, branchManagerRouter);
+app.use('/api/reports', requireAuth, requireBranchScope, reportsRouter);
+app.use('/api/sales', requireAuth, requireBranchScope, salesRouter);
+app.use('/api/collections', requireAuth, requireBranchScope, collectionsRouter);
 
 // Health Check
 app.get('/', (req, res) => {

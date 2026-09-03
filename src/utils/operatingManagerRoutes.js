@@ -95,7 +95,7 @@ export function buildOperatingManagerBreadcrumbs(pageType, params = {}) {
 }
 
 export function resolveOperatingManagerPage(pathname) {
-  if (pathname.startsWith('/operating-manager/admin') || pathname.startsWith('/admin')) {
+  if (pathname.startsWith('/operating-manager/admin')) {
     const legacyPath = pathname.replace('/operating-manager/admin', '/admin');
     const resolved = resolveAdminPage(legacyPath);
     if (!resolved) return null;
@@ -228,7 +228,6 @@ const OPERATION_TITLES = {
 };
 
 function normalizeOperatingManagerPath(pathname) {
-  if (pathname.startsWith('/admin')) return pathname.replace('/admin', '/operating-manager/admin');
   if (pathname.startsWith('/branch-manager')) return pathname.replace('/branch-manager', '/operating-manager/operations');
   return pathname;
 }

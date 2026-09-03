@@ -1,4 +1,4 @@
-import apiClient from './apiClient.js';
+import { api } from './apiClient.js';
 
 /**
  * Login with email and password.
@@ -8,11 +8,13 @@ import apiClient from './apiClient.js';
  * @returns {Promise<{success: boolean, user?: object, message?: string}>}
  */
 export async function login(email, password) {
-  const response = await apiClient.post('/auth/login', { email, password });
-  const data = response.data;
+  const data = await api.post('/auth/login', { email, password });
 
   if (data.success && data.user) {
     localStorage.setItem('corvex_user', JSON.stringify(data.user));
+    if (data.token) {
+      localStorage.setItem('corvex_token', data.token);
+    }
   }
 
   return data;
@@ -46,8 +48,8 @@ const ROLE_SLUG_TO_PATH = {
   super_admin:       '/super-admin/dashboard',
   operating_manager: '/operating-manager/dashboard',
   branch_manager:    '/branch-manager/dashboard',
-  inventory_staff:   '/warehouse/dashboard',
-  sales_staff:       '/sales/dashboard',
+  warehouse_staff:   '/warehouse/dashboard',
+  sales_agent:       '/sales/dashboard',
   collector:         '/collector/dashboard',
   customer:            '/customer/home',
 };

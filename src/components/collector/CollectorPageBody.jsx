@@ -6,13 +6,14 @@ import {
   formatCurrency,
   getReceiptById,
 } from '../../data/collectorMockData';
-import { fetchAccounts, fetchAccountById } from '../../api/collectorService';
+import { fetchAccounts, fetchAccountById, submitCollectionPayment } from '../../api/collectorService';
 import { getCurrentUser } from '../../api/authService.js';
 import { AccountCard } from './AccountCard';
 import { EmptyState } from './EmptyState';
 import { LoadingState } from './LoadingState';
 import { NavIcon } from '../../navIcons';
 import LeafletMap from '../common/LeafletMap';
+import { getOptimizedSequence, getRouteMetrics, calculateSavings, formatDuration } from '../../utils/routeOptimization';
 
 function actionButtonClass(variant) {
   if (variant === 'secondary') return 'button secondary';
@@ -52,8 +53,8 @@ function StatsGrid({ stats }) {
             <span className="stat-index">{String(index + 1).padStart(2, '0')}</span>
             <span className="stat-dot" aria-hidden="true" />
           </div>
-          <span className="stat-label">{stat.label}</span>
           <strong className="stat-value">{stat.value}</strong>
+          <span className="stat-label">{stat.label}</span>
         </article>
       ))}
     </section>
@@ -237,6 +238,12 @@ function RoutePage({ pageType, navigate, showToast }) {
   const [filter, setFilter] = useState('All');
   const [showMap, setShowMap] = useState(pageType === 'routeMap');
 
+  // Route Optimization States
+  const [isLive, setIsLive] = useState(false);
+  const [currentLocation, setCurrentLocation] = useState([7.1907, 125.4553]); // Default branch location
+  const [savings, setSavings] = useState(null);
+  const [isOptimizing, setIsOptimizing] = useState(false);
+
   useEffect(() => {
     async function load() {
       setLoading(true);
@@ -252,6 +259,35 @@ function RoutePage({ pageType, navigate, showToast }) {
     }
     load();
   }, []);
+
+  const handleStartLiveNavigation = async () => {
+    setIsLive(true);
+    setIsOptimizing(true);
+    showToast('Calculating optimized route...', 'success');
+    
+    const pendingCustomers = customers.filter(c => c.status !== 'Completed');
+    if (pendingCustomers.length === 0) {
+      setIsOptimizing(false);
+      return;
+    }
+    
+    // Use fallback location since browser geolocation may prompt and block
+    await performOptimization(currentLocation, pendingCustomers);
+  };
+  
+  const performOptimization = async (start, pendingCustomers) => {
+    const originalMetrics = await getRouteMetrics(start, pendingCustomers);
+    const optimizedSequence = await getOptimizedSequence(start, pendingCustomers);
+    const optMetrics = await getRouteMetrics(start, optimizedSequence);
+    
+    setSavings(calculateSavings(originalMetrics, optMetrics));
+    
+    // Reorder the main list: Optimized first, then completed ones at the end
+    const completed = customers.filter(c => c.status === 'Completed');
+    setCustomers([...optimizedSequence, ...completed].map((c, i) => ({ ...c, rank: i + 1 })));
+    setIsOptimizing(false);
+    showToast('Route optimized for maximum fuel efficiency!', 'success');
+  };
 
   const filteredStops = useMemo(() => {
     if (filter === 'All') return customers;
@@ -319,6 +355,11 @@ function RoutePage({ pageType, navigate, showToast }) {
                 </button>
               ))}
             </div>
+            {!isLive && (
+              <button className="button" type="button" onClick={handleStartLiveNavigation} disabled={isOptimizing}>
+                {isOptimizing ? 'Optimizing...' : 'Start Live Route'}
+              </button>
+            )}
             {pageType !== 'routeMap' ? (
               <button className="button secondary" type="button" onClick={() => setShowMap(!showMap)}>
                 {showMap ? 'Show List View' : 'Show Map View'}
@@ -326,24 +367,64 @@ function RoutePage({ pageType, navigate, showToast }) {
             ) : null}
           </div>
         </div>
+        
+        {savings && (
+          <div style={{ background: '#ecfdf5', border: '1px solid #10b981', padding: 16, borderRadius: 8, margin: '16px 0', display: 'flex', gap: 24, flexWrap: 'wrap' }}>
+            <div>
+              <span style={{ fontSize: '0.8rem', color: '#047857', fontWeight: 600, display: 'block' }}>TIME SAVED</span>
+              <strong style={{ fontSize: '1.25rem', color: '#064e3b' }}>{formatDuration(savings.timeSavedSeconds)}</strong>
+            </div>
+            <div>
+              <span style={{ fontSize: '0.8rem', color: '#047857', fontWeight: 600, display: 'block' }}>DISTANCE SAVED</span>
+              <strong style={{ fontSize: '1.25rem', color: '#064e3b' }}>{savings.distanceSavedKm.toFixed(1)} km</strong>
+            </div>
+            <div>
+              <span style={{ fontSize: '0.8rem', color: '#047857', fontWeight: 600, display: 'block' }}>FUEL SAVINGS</span>
+              <strong style={{ fontSize: '1.25rem', color: '#064e3b' }}>{savings.fuelSavedLiters.toFixed(2)} L (₱{savings.fuelSavedPHP.toFixed(2)})</strong>
+            </div>
+            <div>
+              <span style={{ fontSize: '0.8rem', color: '#047857', fontWeight: 600, display: 'block' }}>OPTIMIZED ROUTE TIME</span>
+              <strong style={{ fontSize: '1.25rem', color: '#064e3b' }}>{formatDuration(savings.optimizedDurationSec)}</strong>
+            </div>
+          </div>
+        )}
+
         {showMap || pageType === 'routeMap' ? (
           <div style={{ marginTop: 16 }}>
             <LeafletMap 
-              center={[7.1907, 125.4553]} 
+              center={currentLocation} 
               zoom={13} 
               height={500}
-              markers={customers.map((stop, i) => ({
-                id: stop.id,
-                position: [7.1907 + (i * 0.005), 125.4553 + (i * 0.005)],
-                label: stop.customerName.substring(0, 2).toUpperCase(),
-                color: stop.status === 'Completed' ? '#10b981' : '#2563eb',
-                popup: `${stop.customerName} - ${stop.status}`
-              }))}
-              polylines={[{ 
-                id: 'route', 
-                positions: customers.map((stop, i) => [7.1907 + (i * 0.005), 125.4553 + (i * 0.005)]), 
-                color: '#2563eb' 
-              }]}
+              routingWaypoints={
+                isLive 
+                ? [currentLocation, ...filteredStops.filter(s => s.status !== 'Completed').map(s => [s.latitude, s.longitude])]
+                : null
+              }
+              markers={
+                isLive
+                ? [
+                    { id: 'collector_live', position: currentLocation, label: 'YOU', color: '#8b5cf6', popup: 'Your Current Location' },
+                    ...filteredStops.map((stop, i) => ({
+                      id: stop.id,
+                      position: [stop.latitude, stop.longitude],
+                      label: stop.status === 'Completed' ? '✓' : String(i + 1),
+                      color: stop.status === 'Completed' ? '#10b981' : '#2563eb',
+                      popup: `${stop.customerName} - ${stop.status}`
+                    }))
+                  ]
+                : customers.map((stop, i) => ({
+                    id: stop.id,
+                    position: [stop.latitude, stop.longitude],
+                    label: String(i + 1),
+                    color: stop.status === 'Completed' ? '#10b981' : '#2563eb',
+                    popup: `${stop.customerName} - ${stop.status}`
+                  }))
+              }
+              polylines={!isLive ? [{ 
+                id: 'route_preview', 
+                positions: customers.map((stop) => [stop.latitude, stop.longitude]), 
+                color: '#94a3b8' 
+              }] : []}
             />
           </div>
         ) : filteredStops.length ? (
@@ -665,7 +746,7 @@ function CollectionLogPage({ accountId, parentContext, navigate, showToast }) {
     setErrors((prev) => ({ ...prev, [name]: undefined }));
   };
 
-  const handleSubmit = () => {
+  const handleSubmit = async () => {
     const amount = Number(formData.amountCollected);
     const nextErrors = {};
 
@@ -680,9 +761,21 @@ function CollectionLogPage({ accountId, parentContext, navigate, showToast }) {
       return;
     }
 
-    setSubmitted(true);
-    showToast('Collection logged successfully.', 'success');
-    navigate(`/collector/receipt/${account.id}${contextQuery}`);
+    const res = await submitCollectionPayment({
+      customer_id: account.id,
+      amount,
+      payment_method_id: formData.paymentMethod === 'Cash' ? 1 : 2, // Mock mapping
+      notes: formData.notes,
+      visit_id: account.id // Using id as visit_id for simplicity since we queried field_visits.id AS id
+    });
+
+    if (res.success) {
+      setSubmitted(true);
+      showToast('Collection logged successfully.', 'success');
+      navigate(`/collector/receipt/${account.id}${contextQuery}`);
+    } else {
+      showToast(`Failed to log collection: ${res.message}`, 'error');
+    }
   };
 
   return (

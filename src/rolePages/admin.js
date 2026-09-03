@@ -4,7 +4,6 @@ export const adminRole = {
   homePath: '/admin',
   entryPath: '/admin/dashboard',
   loginPath: '/admin',
-  accent: 'User management, branches, inventory, and system reports',
   navPages: [
     { label: 'Dashboard',           to: '/admin/dashboard' },
     { label: 'User Management',     to: '/admin/users' },

@@ -141,14 +141,14 @@ router.get('/inventory', requireAuth, async (req, res) => {
     );
 
     const lowStockResult = await pool.query(
-      `SELECT p.name AS product_name, p.sku, bi.available_stock, bi.reorder_level,
+      `SELECT p.product_name AS product_name, p.sku, bi.available_stock, bi.reorder_level,
          CASE 
            WHEN bi.available_stock <= 0 THEN 'Out of Stock'
            WHEN bi.available_stock <= bi.reorder_level THEN 'Low Stock'
            ELSE 'Sufficient'
          END AS status
        FROM branch_inventory bi
-       JOIN products p ON p.id = bi.product_id
+       JOIN products p ON p.product_id = bi.product_id
        WHERE bi.available_stock <= bi.reorder_level
          ${isBranchScoped ? 'AND bi.branch_id = $1' : ''}
        ORDER BY bi.available_stock ASC`,

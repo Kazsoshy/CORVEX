@@ -14,13 +14,12 @@ import { LoadingState } from '../collector/LoadingState';
 import { NavIcon } from '../../navIcons';
 import LeafletMap from '../common/LeafletMap';
 import { StatusBadge } from '../StatusBadge';
-import { requestLogout, getCurrentUser } from '../../api/authService.js';
-import { getBranchAnalytics, getBranchStaff, getBranchCustomers, getBranchCustomerById, getBranchAlerts } from '../../api/branchManagerService.js';
+import { getBranchAnalytics, getBranchStaff, getBranchCustomers, getBranchCustomerById, getBranchAlerts, updateCIStatus } from '../../api/branchManagerService.js';
 import { getReportCollection, getReportSales, getReportInventory, getReportDelinquency, getReportCompliance, getReportKPI } from '../../api/reportsService.js';
 import { CreditHistoryListPage, CreditHistoryDetailPage } from '../shared/CreditHistoryPages';
-
+import { getCurrentUser } from '../../api/authService.js';
 // Re-export for use in other components
-export { getBranchAnalytics, getBranchStaff, getBranchCustomers, getBranchAlerts };
+export { getBranchAnalytics, getBranchStaff, getBranchCustomers, getBranchAlerts, updateCIStatus };
 
 const C = ['#2563eb','#06b6d4','#10b981','#f59e0b','#ef4444'];
 
@@ -52,8 +51,8 @@ function Stats({ stats }) {
       {stats.map((s, i) => (
         <article key={s.label} className="stat-card" style={{ '--stat-index': i }}>
           <div className="stat-card-top"><span className="stat-index">{String(i+1).padStart(2,'0')}</span><span className="stat-dot" /></div>
-          <span className="stat-label">{s.label}</span>
           <strong className="stat-value">{s.value}</strong>
+          <span className="stat-label">{s.label}</span>
         </article>
       ))}
     </section>
@@ -181,7 +180,7 @@ function DashboardPage({ navigate, branchName }) {
               <YAxis tick={{fontSize:11}} tickFormatter={(v)=>`${(v/1000).toFixed(0)}k`}/>
               <Tooltip formatter={(v)=>formatCurrency(v)}/><Legend/>
               <Bar dataKey="target" name="Target" fill="#e2e8f0" radius={[4,4,0,0]}/>
-              <Bar dataKey="actual" name="Actual" fill="#06b6d4" radius={[4,4,0,0]}/>
+              <Bar dataKey="actual" name="Actual" fill="#94a3b8" radius={[4,4,0,0]}/>
             </BarChart>
           </ResponsiveContainer>
         </Card>
@@ -192,8 +191,8 @@ function DashboardPage({ navigate, branchName }) {
           <ResponsiveContainer width="100%" height={200}>
             <AreaChart data={delinquencyData?.delinquency || []}>
               <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9"/><XAxis dataKey="week" tick={{fontSize:12}}/><YAxis tick={{fontSize:12}}/><Tooltip/><Legend/>
-              <Area type="monotone" dataKey="accounts" name="Overdue" stroke="#ef4444" fill="#ef4444" fillOpacity={0.1} strokeWidth={2}/>
-              <Area type="monotone" dataKey="rate" name="Rate %" stroke="#f59e0b" fill="#f59e0b" fillOpacity={0.08} strokeWidth={2}/>
+              <Area type="monotone" dataKey="accounts" name="Overdue" stroke="#dc2626" fill="#dc2626" fillOpacity={0.1} strokeWidth={2}/>
+              <Area type="monotone" dataKey="rate" name="Rate %" stroke="#d97706" fill="#d97706" fillOpacity={0.08} strokeWidth={2}/>
             </AreaChart>
           </ResponsiveContainer>
         </Card>
@@ -269,7 +268,7 @@ function FieldOperationsHub({ navigate, showToast }) {
                 <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9"/>
                 <XAxis dataKey="name" tick={{fontSize:12}}/><YAxis domain={[0,100]} unit="%" tick={{fontSize:12}}/><Tooltip formatter={(v)=>`${v}%`}/><Legend/>
                 <Bar dataKey="compliance" name="Compliance" fill="#2563eb" radius={[4,4,0,0]}/>
-                <Bar dataKey="recovery" name="Recovery" fill="#06b6d4" radius={[4,4,0,0]}/>
+                <Bar dataKey="recovery" name="Recovery" fill="#94a3b8" radius={[4,4,0,0]}/>
               </BarChart>
             </ResponsiveContainer>
           </Card>
@@ -278,7 +277,7 @@ function FieldOperationsHub({ navigate, showToast }) {
               <BarChart data={salesChart}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9"/>
                 <XAxis dataKey="name" tick={{fontSize:12}}/><YAxis domain={[0,100]} unit="%" tick={{fontSize:12}}/><Tooltip formatter={(v)=>`${v}%`}/><Legend/>
-                <Bar dataKey="visits" name="Visit Completion" fill="#8b5cf6" radius={[4,4,0,0]}/>
+                <Bar dataKey="visits" name="Visit Completion" fill="#64748b" radius={[4,4,0,0]}/>
                 <Bar dataKey="conversion" name="Conversion" fill="#10b981" radius={[4,4,0,0]}/>
               </BarChart>
             </ResponsiveContainer>
@@ -372,9 +371,14 @@ function CollectorDetailPage({ collectorId, navigate }) {
             center={[7.1907, 125.4553]} 
             zoom={13} 
             height={400} 
-            polylines={[{ id: 'route', positions: [[7.1907, 125.4553], [7.1950, 125.4600], [7.2000, 125.4500]], color: '#2563eb' }]}
+            routingWaypoints={[
+              [7.1907, 125.4553],
+              [7.1950, 125.4600],
+              [7.2000, 125.4500]
+            ]}
             markers={[
               { id: 'start', position: [7.1907, 125.4553], label: 'S', color: '#10b981', popup: 'Start Location' },
+              { id: 'wp1', position: [7.1950, 125.4600], label: '1', color: '#f59e0b', popup: 'Visit 1' },
               { id: 'end', position: [7.2000, 125.4500], label: 'E', color: '#ef4444', popup: 'End Location' }
             ]}
           />
@@ -488,7 +492,7 @@ function ReportsHubPage({ navigate, showToast }) {
               <BarChart data={collectorAmt}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9"/><XAxis dataKey="name" tick={{fontSize:12}}/><YAxis tick={{fontSize:11}} tickFormatter={(v)=>`${(v/1000).toFixed(0)}k`}/><Tooltip/><Legend/>
                 <Bar dataKey="amount" name="Collected (PHP)" fill="#2563eb" radius={[4,4,0,0]}/>
-                <Bar dataKey="compliance" name="Compliance %" fill="#06b6d4" radius={[4,4,0,0]}/>
+                <Bar dataKey="compliance" name="Compliance %" fill="#94a3b8" radius={[4,4,0,0]}/>
               </BarChart>
             </ResponsiveContainer>
           </Card>
@@ -508,7 +512,7 @@ function ReportsHubPage({ navigate, showToast }) {
               <BarChart data={salesData?.weekly || []}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9"/><XAxis dataKey="day" tick={{fontSize:12}}/><YAxis tick={{fontSize:11}} tickFormatter={(v)=>`${(v/1000).toFixed(0)}k`}/><Tooltip formatter={(v)=>formatCurrency(v)}/><Legend/>
                 <Bar dataKey="target" name="Target" fill="#e2e8f0" radius={[4,4,0,0]}/>
-                <Bar dataKey="actual" name="Actual" fill="#06b6d4" radius={[4,4,0,0]}/>
+                <Bar dataKey="actual" name="Actual" fill="#94a3b8" radius={[4,4,0,0]}/>
               </BarChart>
             </ResponsiveContainer>
           </Card>
@@ -516,7 +520,7 @@ function ReportsHubPage({ navigate, showToast }) {
             <ResponsiveContainer width="100%" height={220}>
               <BarChart data={agentRev}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9"/><XAxis dataKey="name" tick={{fontSize:12}}/><YAxis yAxisId="l" tick={{fontSize:11}} tickFormatter={(v)=>`${(v/1000).toFixed(0)}k`}/><YAxis yAxisId="r" orientation="right" domain={[0,100]} unit="%" tick={{fontSize:12}}/><Tooltip/><Legend/>
-                <Bar yAxisId="l" dataKey="revenue" name="Revenue" fill="#8b5cf6" radius={[4,4,0,0]}/>
+                <Bar yAxisId="l" dataKey="revenue" name="Revenue" fill="#64748b" radius={[4,4,0,0]}/>
                 <Bar yAxisId="r" dataKey="visits" name="Visit %" fill="#10b981" radius={[4,4,0,0]}/>
               </BarChart>
             </ResponsiveContainer>
@@ -587,8 +591,8 @@ function ReportsHubPage({ navigate, showToast }) {
             <ResponsiveContainer width="100%" height={220}>
               <AreaChart data={delinquencyData?.delinquency || []}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9"/><XAxis dataKey="week" tick={{fontSize:12}}/><YAxis tick={{fontSize:12}}/><Tooltip/><Legend/>
-                <Area type="monotone" dataKey="accounts" name="Overdue" stroke="#ef4444" fill="#ef4444" fillOpacity={0.1} strokeWidth={2}/>
-                <Area type="monotone" dataKey="rate" name="Rate %" stroke="#f59e0b" fill="#f59e0b" fillOpacity={0.08} strokeWidth={2}/>
+                <Area type="monotone" dataKey="accounts" name="Overdue" stroke="#dc2626" fill="#dc2626" fillOpacity={0.1} strokeWidth={2}/>
+                <Area type="monotone" dataKey="rate" name="Rate %" stroke="#d97706" fill="#d97706" fillOpacity={0.08} strokeWidth={2}/>
               </AreaChart>
             </ResponsiveContainer>
           </Card>
@@ -680,7 +684,7 @@ function StaffPerformancePage({ navigate }) {
               <BarChart data={collectorBar}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9"/><XAxis dataKey="name" tick={{fontSize:12}}/><YAxis domain={[0,100]} unit="%" tick={{fontSize:12}}/><Tooltip formatter={(v)=>`${v}%`}/><Legend/>
                 <Bar dataKey="score" name="Compliance" fill="#2563eb" radius={[4,4,0,0]}/>
-                <Bar dataKey="recovery" name="Recovery" fill="#06b6d4" radius={[4,4,0,0]}/>
+                <Bar dataKey="recovery" name="Recovery" fill="#94a3b8" radius={[4,4,0,0]}/>
               </BarChart>
             </ResponsiveContainer>
           </Card>
@@ -688,7 +692,7 @@ function StaffPerformancePage({ navigate }) {
             <ResponsiveContainer width="100%" height={220}>
               <BarChart data={salesBar}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9"/><XAxis dataKey="name" tick={{fontSize:12}}/><YAxis domain={[0,100]} unit="%" tick={{fontSize:12}}/><Tooltip formatter={(v)=>`${v}%`}/><Legend/>
-                <Bar dataKey="visits" name="Visit Completion" fill="#8b5cf6" radius={[4,4,0,0]}/>
+                <Bar dataKey="visits" name="Visit Completion" fill="#64748b" radius={[4,4,0,0]}/>
                 <Bar dataKey="conversion" name="Conversion" fill="#10b981" radius={[4,4,0,0]}/>
               </BarChart>
             </ResponsiveContainer>
@@ -786,7 +790,15 @@ function CIQueuePage({ navigate, showToast }) {
             <thead><tr><th>Customer</th><th>Submitted By</th><th>Date</th><th>Delinquency</th><th>Status</th><th>Actions</th></tr></thead>
             <tbody>{filtered.map((ci)=>(<tr key={ci.id}><td>{ci.customerName}</td><td>{ci.submittedBy}</td><td>{ci.submissionDate}</td><td>{ci.delinquencyStatus}</td><td>{ci.status}</td><td className="table-actions">
               <button className="icon-action-button" type="button" title="Open" onClick={()=>navigate(`/branch-manager/ci-approvals/${ci.id}`)}><NavIcon name="view" /></button>
-              {ci.status==='Pending'&&<><button className="icon-action-button" type="button" title="Approve" onClick={()=>showToast(`Approved CI for ${ci.customerName}.`,'success')}><NavIcon name="check" /></button><button className="icon-action-button danger" type="button" title="Reject" onClick={()=>showToast(`Rejected CI for ${ci.customerName}.`,'error')}><NavIcon name="close" /></button></>}
+              {ci.status==='Pending'&&<><button className="icon-action-button" type="button" title="Approve" onClick={async () => {
+                const res = await updateCIStatus(ci.id, 'Approved');
+                if (res.success) { showToast(`Approved CI for ${ci.customerName}.`,'success'); navigate(0); }
+                else showToast(res.message, 'error');
+              }}><NavIcon name="check" /></button><button className="icon-action-button danger" type="button" title="Reject" onClick={async () => {
+                const res = await updateCIStatus(ci.id, 'Rejected', 'Rejected from queue');
+                if (res.success) { showToast(`Rejected CI for ${ci.customerName}.`,'error'); navigate(0); }
+                else showToast(res.message, 'error');
+              }}><NavIcon name="close" /></button></>}
             </td></tr>))}</tbody>
           </table></div>
         </section>
@@ -811,10 +823,25 @@ function CIDetailPage({ ciId, navigate, showToast }) {
       {showReject&&<section className="panel form-panel content-panel"><div className="form-group"><label>Rejection Reason<span className="required">*</span></label><textarea value={rejectReason} onChange={(e)=>setRejectReason(e.target.value)} placeholder="Mandatory reason..."/></div></section>}
       {ci.status==='Pending'?(
         <Toolbar actions={[{label:'Approve',action:'approve'},{label:showReject?'Confirm Reject':'Reject',action:'reject',variant:'secondary'},{label:'Request Revision',action:'revision',variant:'secondary'},{label:'Back',to:'/branch-manager/ci-approvals',variant:'ghost'}]}
-          onAction={(a)=>{
-            if(a.action==='approve'){showToast('CI approved.','success');navigate('/branch-manager/ci-approvals');}
-            else if(a.action==='reject'){if(showReject){if(!rejectReason.trim()){showToast('Reason required.','error');return;}showToast(`CI rejected.`,'error');navigate('/branch-manager/ci-approvals');}else setShowReject(true);}
-            else if(a.action==='revision'){showToast('Revision requested.','success');navigate('/branch-manager/ci-approvals');}
+          onAction={async (a)=>{
+            if(a.action==='approve'){
+              const res = await updateCIStatus(ci.id, 'Approved');
+              if (res.success) { showToast('CI approved.','success'); navigate('/branch-manager/ci-approvals'); }
+              else showToast(res.message, 'error');
+            }
+            else if(a.action==='reject'){
+              if(showReject){
+                if(!rejectReason.trim()){showToast('Reason required.','error');return;}
+                const res = await updateCIStatus(ci.id, 'Rejected', rejectReason);
+                if (res.success) { showToast(`CI rejected.`,'error'); navigate('/branch-manager/ci-approvals'); }
+                else showToast(res.message, 'error');
+              } else setShowReject(true);
+            }
+            else if(a.action==='revision'){
+              const res = await updateCIStatus(ci.id, 'Revision Requested');
+              if (res.success) { showToast('Revision requested.','success'); navigate('/branch-manager/ci-approvals'); }
+              else showToast(res.message, 'error');
+            }
             else navigate(a.to);
           }}/>
       ):<Toolbar actions={[{label:'Back',to:'/branch-manager/ci-approvals',variant:'ghost'}]} onAction={(a)=>navigate(a.to)}/>}
@@ -1090,13 +1117,46 @@ function LeafletPage({ pageType, navigate, showToast }) {
             center={mapCenter}
             zoom={12} 
             height={560}
-            markers={mapAccounts.filter((a) => a.lat && a.lng).map((a) => ({
-              id: a.id,
-              position: [a.lat, a.lng],
-              label: a.customerName.substring(0, 2).toUpperCase(),
-              color: a.paymentStatus === 'Overdue' ? '#ef4444' : '#10b981',
-              popup: `${a.customerName} - ${a.paymentStatus}`,
-            }))}
+            markers={mapAccounts.filter((a) => {
+              if (!a.lat || !a.lng) return false;
+              if (layers.includes('Delinquency Clusters') && layers.length === 1 && a.paymentStatus !== 'Overdue') return false;
+              return true;
+            }).map((a) => {
+              let color = '#2563eb'; // default blue
+              if (layers.includes('Delinquency Clusters') && a.paymentStatus === 'Overdue') color = '#ef4444'; // red
+              else if (layers.includes('High Collection Areas') && a.balance > 50000) color = '#f59e0b'; // orange
+              else if (a.paymentStatus === 'Overdue') color = '#ef4444'; 
+              else color = '#10b981';
+              
+              return {
+                id: a.id,
+                position: [a.lat, a.lng],
+                label: a.customerName.substring(0, 2).toUpperCase(),
+                color,
+                popup: `${a.customerName} - ${a.paymentStatus} (Bal: ${formatCurrency(a.balance)})`,
+              };
+            })}
+            routingWaypoints={
+              layers.includes('Collector Routes') && mapAccounts.filter(a => a.lat && a.lng).length > 1
+                ? (() => {
+                    // TSP Greedy Route Optimization (Nearest Neighbor)
+                    const points = mapAccounts.filter(a => a.lat && a.lng).map(a => [a.lat, a.lng]);
+                    if (points.length === 0) return null;
+                    const route = [points.shift()]; // start with first point
+                    while (points.length > 0) {
+                      const last = route[route.length - 1];
+                      let nearestIdx = 0;
+                      let minVal = Infinity;
+                      for (let i = 0; i < points.length; i++) {
+                        const dist = Math.pow(points[i][0] - last[0], 2) + Math.pow(points[i][1] - last[1], 2);
+                        if (dist < minVal) { minVal = dist; nearestIdx = i; }
+                      }
+                      route.push(points.splice(nearestIdx, 1)[0]);
+                    }
+                    return route;
+                  })()
+                : null
+            }
           />
         </div>
       </section>
@@ -1251,8 +1311,8 @@ function ApprovalCenterPage({ navigate, showToast }) {
         ].map((s, i) => (
           <article key={s.label} className="stat-card" style={{ '--stat-index': i }}>
             <div className="stat-card-top"><span className="stat-index">{String(i + 1).padStart(2, '0')}</span><span className="stat-dot" /></div>
-            <span className="stat-label">{s.label}</span>
             <strong className="stat-value">{s.value}</strong>
+            <span className="stat-label">{s.label}</span>
           </article>
         ))}
       </section>

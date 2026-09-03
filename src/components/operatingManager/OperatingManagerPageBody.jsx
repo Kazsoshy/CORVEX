@@ -22,12 +22,13 @@ import { EmptyState } from '../collector/EmptyState';
 import { LoadingState } from '../collector/LoadingState';
 import { NavIcon } from '../../navIcons';
 import { getCurrentUser } from '../../api/authService';
+import { fetchEnterpriseKPIs } from '../../api/operatingManagerService';
 
-const COLORS = ['#2563eb', '#06b6d4', '#ef4444', '#f59e0b'];
+const COLORS = ['#2563eb', '#94a3b8', '#64748b', '#cbd5e1'];
 const BRANCH_COLORS = {
   'Davao City': '#2563eb',
-  'General Santos': '#10b981',
-  'Davao Oriental': '#ef4444',
+  'General Santos': '#94a3b8',
+  'Davao Oriental': '#64748b',
 };
 
 function actionButtonClass(v) {
@@ -63,8 +64,8 @@ function StatsGrid({ stats }) {
             <span className="stat-index">{String(index + 1).padStart(2, '0')}</span>
             <span className="stat-dot" aria-hidden="true" />
           </div>
-          <span className="stat-label">{stat.label}</span>
           <strong className="stat-value">{stat.value}</strong>
+          <span className="stat-label">{stat.label}</span>
         </article>
       ))}
     </section>
@@ -92,6 +93,19 @@ function ChartCard({ title, subtitle, children, action, onAction }) {
 }
 
 function DashboardPage({ navigate }) {
+  const [kpiData, setKpiData] = useState(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    async function load() {
+      setLoading(true);
+      const res = await fetchEnterpriseKPIs();
+      if (res.success) setKpiData(res.data);
+      setLoading(false);
+    }
+    load();
+  }, []);
+
   const unread = NOTIFICATIONS.filter((n) => !n.read).length;
   const topBranch = getHighestPerformingBranch();
   const lowBranch = getLowestPerformingBranch();
@@ -105,6 +119,8 @@ function DashboardPage({ navigate }) {
   }));
 
   const revenueDonut = BRANCHES.map((b) => ({ name: b.name, value: b.revenue }));
+
+  if (loading) return <LoadingState message="Loading dashboard..." />;
 
   return (
     <div className="page">
@@ -121,12 +137,12 @@ function DashboardPage({ navigate }) {
       </section>
 
       <StatsGrid stats={[
-        { label: 'Sales Today', value: formatCurrency(SALES_ANALYTICS.salesToday) },
-        { label: 'Total Revenue', value: formatCurrency(ENTERPRISE_KPIS.totalRevenue) },
-        { label: 'Total Collections', value: formatCurrency(ENTERPRISE_KPIS.totalCollections) },
-        { label: 'Total Sales', value: formatCurrency(ENTERPRISE_KPIS.totalSales) },
-        { label: 'Total Delinquencies', value: formatCurrency(ENTERPRISE_KPIS.totalDelinquencies) },
-        { label: 'Total Inventory Value', value: formatCurrency(ENTERPRISE_KPIS.totalInventoryValue) },
+        { label: 'System Health', value: `${kpiData?.healthScore || 0}/100` },
+        { label: 'Total Revenue', value: formatCurrency(kpiData?.totalSalesAmount || 0) },
+        { label: 'Total Collections', value: formatCurrency(kpiData?.totalCollectionsAmount || 0) },
+        { label: 'Total Sales Invoices', value: String(kpiData?.totalSalesWeek || 0) },
+        { label: 'Total Customers', value: String(kpiData?.totalCustomers || 0) },
+        { label: 'Total Outstanding', value: formatCurrency(kpiData?.totalOutstanding || 0) },
       ]} />
 
       <div className="grid two-up">
@@ -139,8 +155,8 @@ function DashboardPage({ navigate }) {
               <Tooltip formatter={(v) => `${v}%`} />
               <Legend />
               <Bar dataKey="Collection" fill="#2563eb" radius={[4, 4, 0, 0]} />
-              <Bar dataKey="Sales" fill="#06b6d4" radius={[4, 4, 0, 0]} />
-              <Bar dataKey="Inventory" fill="#8b5cf6" radius={[4, 4, 0, 0]} />
+              <Bar dataKey="Sales" fill="#94a3b8" radius={[4, 4, 0, 0]} />
+              <Bar dataKey="Inventory" fill="#64748b" radius={[4, 4, 0, 0]} />
             </BarChart>
           </ResponsiveContainer>
         </ChartCard>
@@ -264,7 +280,7 @@ function BranchPerformanceHub({ navigate }) {
                   <Tooltip />
                   <Legend />
                   <Bar dataKey="score" name="Performance" fill="#2563eb" radius={[0, 4, 4, 0]} />
-                  <Bar dataKey="growth" name="Growth" fill="#06b6d4" radius={[0, 4, 4, 0]} />
+                  <Bar dataKey="growth" name="Growth" fill="#94a3b8" radius={[0, 4, 4, 0]} />
                 </BarChart>
               </ResponsiveContainer>
             </ChartCard>
@@ -650,7 +666,7 @@ function ReportsHubPage({ navigate, showToast }) {
                   <Tooltip />
                   <Legend />
                   <Bar yAxisId="left" dataKey="health" name="Health %" fill="#2563eb" radius={[4, 4, 0, 0]} />
-                  <Bar yAxisId="right" dataKey="value" name="Value (M PHP)" fill="#06b6d4" radius={[4, 4, 0, 0]} />
+                  <Bar yAxisId="right" dataKey="value" name="Value (M PHP)" fill="#94a3b8" radius={[4, 4, 0, 0]} />
                 </BarChart>
               </ResponsiveContainer>
             </ChartCard>
@@ -716,8 +732,8 @@ function ReportsHubPage({ navigate, showToast }) {
                   <YAxis tick={{ fontSize: 12 }} />
                   <Tooltip />
                   <Legend />
-                  <Bar dataKey="overdue" name="Overdue Accounts" fill="#ef4444" radius={[4, 4, 0, 0]} />
-                  <Bar dataKey="risk" name="Risk Score" fill="#f59e0b" radius={[4, 4, 0, 0]} />
+                  <Bar dataKey="overdue" name="Overdue Accounts" fill="#dc2626" radius={[4, 4, 0, 0]} />
+                  <Bar dataKey="risk" name="Risk Score" fill="#d97706" radius={[4, 4, 0, 0]} />
                 </BarChart>
               </ResponsiveContainer>
             </ChartCard>
@@ -783,7 +799,25 @@ function LeafletPage({ navigate, subPage }) {
         <div className="panel-section-header">
           <h3>{subPage ? { delinquency: 'Delinquency Heatmap', profitability: 'Profitability Analysis', territory: 'Territory Analysis' }[subPage] : 'Leaflet | OpenStreetMap'}</h3>
         </div>
-        <LeafletMap markers={mockBranchMarkers} center={[6.7534, 125.6558]} zoom={8} height={560} />
+        <LeafletMap 
+          center={[6.7534, 125.6558]} 
+          zoom={8} 
+          height={560}
+          markers={mockBranchMarkers.filter((m) => {
+             if (layers.find(l => l.id === 'delinquency')?.active && m.id === 'davao-oriental') return true;
+             if (layers.find(l => l.id === 'delinquency')?.active && m.id !== 'davao-oriental') return false; // example filtering
+             return true;
+          }).map(m => {
+            let color = m.color;
+            if (layers.find(l => l.id === 'delinquency')?.active && m.id === 'davao-oriental') color = '#ef4444';
+            return { ...m, color };
+          })}
+          routingWaypoints={
+            layers.find(l => l.id === 'routes')?.active 
+              ? mockBranchMarkers.map(m => m.position) 
+              : null
+          }
+        />
         <div className="layer-toggles" style={{ marginTop: 16 }}>
           {layers.map((layer) => (
             <label key={layer.id} className="toggle-label">

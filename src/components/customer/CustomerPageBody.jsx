@@ -44,8 +44,8 @@ function StatsGrid({ stats }) {
     <section className="stats-grid customer-stats">
       {stats.map((stat, index) => (
         <article key={stat.label} className="stat-card" style={{ '--stat-index': index }}>
-          <span className="stat-label">{stat.label}</span>
           <strong className="stat-value">{stat.value}</strong>
+          <span className="stat-label">{stat.label}</span>
         </article>
       ))}
     </section>

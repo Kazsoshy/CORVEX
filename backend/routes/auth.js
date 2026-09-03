@@ -1,6 +1,7 @@
 import express from 'express';
 import bcrypt from 'bcryptjs';
 import pkg from 'pg';
+import jwt from 'jsonwebtoken';
 
 const { Pool } = pkg;
 const router = express.Router();
@@ -24,20 +25,19 @@ router.post('/login', async (req, res) => {
     const result = await pool.query(
       `SELECT
          u.id,
-         u.first_name,
-         u.last_name,
+         u.full_name,
          u.email,
-         u.password_hash,
+         rc.password_hash,
          u.status,
          u.created_at,
-         r.role_id,
-         r.role_name,
+         r.id AS role_id,
+         r.name AS role_name,
          r.slug AS role_slug,
          b.id AS branch_id,
-         b.name AS branch_name,
-         CONCAT(u.first_name, ' ', u.last_name) AS full_name
+         b.name AS branch_name
        FROM users u
-       JOIN roles r ON r.role_id = u.role_id
+       JOIN roles r ON r.id = u.role_id
+       JOIN role_credentials rc ON rc.role_id = r.id
        LEFT JOIN branches b ON b.id = u.branch_id
        WHERE u.email = $1`,
       [email.toLowerCase().trim()]
@@ -77,10 +77,22 @@ router.post('/login', async (req, res) => {
       [user.id, user.full_name, req.ip]
     );
 
+    // Generate JWT
+    const token = jwt.sign(
+      {
+        id: user.id,
+        roleSlug: user.role_slug,
+        branchId: user.branch_id
+      },
+      process.env.JWT_SECRET || 'fallback_secret_key',
+      { expiresIn: '24h' }
+    );
+
     // Return user info (never return password)
     return res.status(200).json({
       success: true,
       message: 'Login successful.',
+      token, // Return token for frontend usage
       user: {
         id:             user.id,
         fullName:       user.full_name,

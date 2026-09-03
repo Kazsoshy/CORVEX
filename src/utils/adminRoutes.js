@@ -4,6 +4,7 @@ const ROUTES = [
   { pattern: /^\/admin\/users\/add$/,       pageType: 'userForm', params: [] },
   { pattern: /^\/admin\/users\/([^/]+)$/,   pageType: 'userForm', params: ['userId'] },
   { pattern: /^\/admin\/branches$/,         pageType: 'branchList' },
+  { pattern: /^\/admin\/branches\/add$/,    pageType: 'branchForm', params: [] },
   { pattern: /^\/admin\/branches\/([^/]+)$/, pageType: 'branchDetail', params: ['branchId'] },
   { pattern: /^\/admin\/inventory$/,        pageType: 'inventory' },
   { pattern: /^\/admin\/reports$/,          pageType: 'reports' },
@@ -17,6 +18,7 @@ const TITLES = {
   userList:    'User Management',
   userForm:    'Add / Edit User',
   branchList:  'Branch Management',
+  branchForm:  'Add Branch',
   branchDetail:'Branch Details',
   inventory:   'Inventory Management',
   reports:     'System Reports',
@@ -49,6 +51,7 @@ function buildCrumbs(pageType, params) {
     case 'userList':     return [...base, { label: 'User Management', to: '/admin/users' }];
     case 'userForm':     return [...base, { label: 'User Management', to: '/admin/users' }, { label: 'Add / Edit User', to: '/admin/users/add' }];
     case 'branchList':   return [...base, { label: 'Branch Management', to: '/admin/branches' }];
+    case 'branchForm':   return [...base, { label: 'Branch Management', to: '/admin/branches' }, { label: 'Add Branch', to: '/admin/branches/add' }];
     case 'branchDetail': return [...base, { label: 'Branch Management', to: '/admin/branches' }, { label: 'Branch Details', to: `/admin/branches/${params.branchId}` }];
     case 'inventory':    return [...base, { label: 'Inventory Management', to: '/admin/inventory' }];
     case 'reports':      return [...base, { label: 'System Reports', to: '/admin/reports' }];

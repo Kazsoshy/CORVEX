@@ -11,6 +11,7 @@ import {
 import { EmptyState } from '../collector/EmptyState';
 import { NavIcon } from '../../navIcons';
 import { StatusBadge } from '../StatusBadge';
+import { useFailures } from '../../context/FailureContext';
 
 function btn(v) {
   if (v === 'secondary') return 'button secondary';
@@ -39,8 +40,8 @@ function Stats({ stats }) {
       {stats.map((s, i) => (
         <article key={s.label} className="stat-card" style={{ '--stat-index': i }}>
           <div className="stat-card-top"><span className="stat-index">{String(i + 1).padStart(2, '0')}</span><span className="stat-dot" /></div>
-          <span className="stat-label">{s.label}</span>
           <strong className="stat-value">{s.value}</strong>
+          <span className="stat-label">{s.label}</span>
         </article>
       ))}
     </section>
@@ -99,9 +100,6 @@ function DashboardPage({ navigate }) {
         { label: 'Total Users',     value: String(SYSTEM_HEALTH.totalUsers) },
         { label: 'Total Branches',  value: String(SYSTEM_HEALTH.totalBranches) },
         { label: 'Active Sessions', value: String(SYSTEM_HEALTH.activeSessions) },
-        { label: 'API Response',    value: `${SYSTEM_HEALTH.apiResponseMs} ms` },
-        { label: 'System Uptime',   value: SYSTEM_HEALTH.uptime },
-        { label: 'Last Backup',     value: SYSTEM_HEALTH.lastBackup },
       ]} />
 
       <div className="grid two-up">
@@ -114,7 +112,7 @@ function DashboardPage({ navigate }) {
               <Tooltip formatter={v => `${v}%`} />
               <Legend />
               <Line type="monotone" dataKey="cpu" name="CPU" stroke="#2563eb" strokeWidth={2} dot={false} />
-              <Line type="monotone" dataKey="mem" name="Memory" stroke="#8b5cf6" strokeWidth={2} dot={false} />
+              <Line type="monotone" dataKey="mem" name="Memory" stroke="#64748b" strokeWidth={2} dot={false} />
             </LineChart>
           </ResponsiveContainer>
         </Card>
@@ -315,23 +313,50 @@ function BackupPage({ showToast }) {
 // ── Database & Server Monitoring ──────────────────────────────────────────────
 function MonitoringPage({ showToast }) {
   const [loading, setLoading] = useState(false);
+  const { systemFailures, clearFailures } = useFailures();
+  
   const refresh = () => { setLoading(true); setTimeout(() => setLoading(false), 800); };
 
   return (
     <div className="page">
       <Toolbar
-        actions={[{ label: loading ? 'Refreshing…' : 'Refresh', action: 'refresh' }, { label: 'Download Logs', action: 'download', variant: 'secondary' }]}
-        onAction={a => { if (a.action === 'refresh') refresh(); else showToast('Error logs downloaded.', 'success'); }}
+        actions={[
+          { label: loading ? 'Refreshing…' : 'Refresh', action: 'refresh' }, 
+          { label: 'Clear Failures', action: 'clear', variant: 'secondary' }
+        ]}
+        onAction={a => { if (a.action === 'refresh') refresh(); else { clearFailures(); showToast('Failures cleared.', 'success'); } }}
       />
 
       <Stats stats={[
         { label: 'Database Status',  value: SYSTEM_HEALTH.dbStatus },
-        { label: 'CPU Usage',        value: `${SYSTEM_HEALTH.serverCpu}%` },
+        { label: 'Active Failures',  value: String(systemFailures.length) },
         { label: 'Memory Usage',     value: `${SYSTEM_HEALTH.memoryUsage}%` },
         { label: 'Storage Usage',    value: `${SYSTEM_HEALTH.storageUsage}%` },
         { label: 'API Response',     value: `${SYSTEM_HEALTH.apiResponseMs} ms` },
         { label: 'Active Users',     value: String(SYSTEM_HEALTH.activeSessions) },
       ]} />
+
+      {systemFailures.length > 0 && (
+        <section className="panel content-panel" style={{ borderColor: '#fca5a5' }}>
+          <div className="panel-section-header"><h3>Active System Failures</h3></div>
+          <div className="table-shell">
+            <table className="data-table">
+              <thead><tr><th>Time</th><th>Module</th><th>Service / API</th><th>Error Type</th><th>Cause</th></tr></thead>
+              <tbody>
+                {systemFailures.map(f => (
+                  <tr key={f.id}>
+                    <td>{f.time}</td>
+                    <td><strong>{f.module}</strong></td>
+                    <td>{f.service}</td>
+                    <td><span className="severity-badge severity-critical">{f.type}</span></td>
+                    <td style={{ color: '#b91c1c' }}>{f.cause}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      )}
 
       <Card title="Server Performance Timeline" sub="CPU & Memory over the last 24h">
         <ResponsiveContainer width="100%" height={240}>
@@ -342,13 +367,13 @@ function MonitoringPage({ showToast }) {
             <Tooltip formatter={v => `${v}%`} />
             <Legend />
             <Line type="monotone" dataKey="cpu" name="CPU" stroke="#2563eb" strokeWidth={2} dot={false} />
-            <Line type="monotone" dataKey="mem" name="Memory" stroke="#8b5cf6" strokeWidth={2} dot={false} />
+            <Line type="monotone" dataKey="mem" name="Memory" stroke="#64748b" strokeWidth={2} dot={false} />
           </LineChart>
         </ResponsiveContainer>
       </Card>
 
       <section className="panel content-panel">
-        <div className="panel-section-header"><h3>Error Logs</h3></div>
+        <div className="panel-section-header"><h3>Audit Logs (Failed Attempts)</h3></div>
         {AUDIT_LOGS.filter(l => l.status === 'Failed').length ? (
           <div className="table-shell">
             <table className="data-table">

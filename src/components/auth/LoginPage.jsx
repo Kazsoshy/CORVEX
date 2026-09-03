@@ -9,18 +9,18 @@ import './LoginPage.css';
 // ── Offline demo accounts ─────────────────────────────────────────────────────
 // Used when the backend is unreachable. Mirrors reset_passwords.js credentials.
 const OFFLINE_CREDENTIALS = {
-  'marcus.santos@corvex.ph':      'Corvex@2026',
-  'corazon.v@corvex.ph':          'Corvex@2026',
-  'elena.mercado@corvex.ph':      'Corvex@2026',
+  'marcus.santos@corvex.ph': 'Corvex@2026',
+  'corazon.v@corvex.ph': 'Corvex@2026',
+  'elena.mercado@corvex.ph': 'Corvex@2026',
   'roberto.villanueva@corvex.ph': 'Corvex@2026',
-  'miguel.f@corvex.ph':           'Corvex@2026',
-  'grace.t@corvex.ph':            'Corvex@2026',
-  'ana.r@corvex.ph':              'Corvex@2026',
-  'florencia.r@corvex.ph':        'Corvex@2026',
-  'carlos.m@corvex.ph':           'Corvex@2026',
-  'jane.s@corvex.ph':             'Corvex@2026',
-  'maria.dc@corvex.ph':           'Corvex@2026',
-  'luntiang.tahanan@email.com':   'Corvex@2026',
+  'miguel.f@corvex.ph': 'Corvex@2026',
+  'grace.t@corvex.ph': 'Corvex@2026',
+  'ana.r@corvex.ph': 'Corvex@2026',
+  'florencia.r@corvex.ph': 'Corvex@2026',
+  'carlos.m@corvex.ph': 'Corvex@2026',
+  'jane.s@corvex.ph': 'Corvex@2026',
+  'maria.dc@corvex.ph': 'Corvex@2026',
+  'luntiang.tahanan@email.com': 'Corvex@2026',
 };
 
 const OFFLINE_USERS = [
@@ -115,7 +115,7 @@ export function LoginPage() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
-  
+
   const [errors, setErrors] = useState({});
   const [apiError, setApiError] = useState('');
   const [loading, setLoading] = useState(false);
@@ -125,12 +125,12 @@ export function LoginPage() {
     const newErrors = {};
     if (!email.trim()) newErrors.email = 'Email is required';
     if (!password.trim()) newErrors.password = 'Password is required';
-    
+
     if (Object.keys(newErrors).length > 0) {
       setErrors(newErrors);
       return;
     }
-    
+
     setErrors({});
     setApiError('');
     setLoading(true);
@@ -173,8 +173,8 @@ export function LoginPage() {
         className="login-glass-card"
       >
         {/* Logo Section */}
-          <img src={logo} alt="Corvex Logo" className="login-logo-img"/>
-       
+        <img src={logo} alt="Corvex Logo" className="login-logo-img" />
+
 
         <h1 className="login-heading">CORVEX</h1>
         <p className="login-subtitle">
@@ -186,7 +186,7 @@ export function LoginPage() {
 
         <AnimatePresence>
           {apiError && (
-            <motion.div 
+            <motion.div
               initial={{ opacity: 0, height: 0, marginBottom: 0 }}
               animate={{ opacity: 1, height: 'auto', marginBottom: 24 }}
               exit={{ opacity: 0, height: 0, marginBottom: 0 }}
@@ -235,9 +235,9 @@ export function LoginPage() {
             {errors.password && <span className="login-error-message">{errors.password}</span>}
           </div>
 
-          <button 
-            type="submit" 
-            className="login-submit-button" 
+          <button
+            type="submit"
+            className="login-submit-button"
             disabled={loading}
           >
             {loading ? (
@@ -252,9 +252,9 @@ export function LoginPage() {
           <button className="login-link" onClick={() => navigate('/password-reset')}>
             Forgot Password
           </button>
-          
+
           <div className="login-divider" />
-          
+
           <button className="login-link" style={{ color: '#ffffff' }}>
             Create Account
           </button>

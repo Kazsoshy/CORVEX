@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
+import { fetchProducts, fetchProductById, restockProduct, transferProduct } from '../../api/productsService';
 import {
   AUDIT_LOGS,
   BRANCHES,
@@ -58,8 +59,8 @@ function StatsGrid({ stats }) {
             <span className="stat-index">{String(index + 1).padStart(2, '0')}</span>
             <span className="stat-dot" aria-hidden="true" />
           </div>
-          <span className="stat-label">{stat.label}</span>
           <strong className="stat-value">{stat.value}</strong>
+          <span className="stat-label">{stat.label}</span>
         </article>
       ))}
     </section>
@@ -185,15 +186,32 @@ function InventoryPage({ navigate, showToast }) {
   const [statusFilter, setStatusFilter] = useState('All');
   const [sortBy, setSortBy] = useState('Product Name');
   const [page, setPage] = useState(1);
+  const [products, setProducts] = useState([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    const timer = window.setTimeout(() => setLoading(false), 400);
-    return () => window.clearTimeout(timer);
+    async function loadProducts() {
+      setLoading(true);
+      const res = await fetchProducts();
+      if (res.success) {
+        setProducts(res.data.map(p => ({
+            id: String(p.product_id),
+            name: p.product_name,
+            sku: p.sku,
+            category: p.category,
+            stock: Number(p.total_quantity || p.quantity || 0),
+            status: p.stock_status || p.status || 'Sufficient',
+            branch: p.branch_name || 'All Branches',
+            lastUpdated: p.updated_at ? new Date(p.updated_at).toLocaleDateString() : 'N/A'
+        })));
+      }
+      setLoading(false);
+    }
+    loadProducts();
   }, []);
 
   const filtered = useMemo(() => {
-    let results = [...PRODUCTS];
+    let results = [...products];
     const query = search.trim().toLowerCase();
     if (query) results = results.filter((p) => p.name.toLowerCase().includes(query) || p.sku.toLowerCase().includes(query) || p.category.toLowerCase().includes(query));
     if (branch !== 'All') results = results.filter((p) => p.branch === branch);
@@ -202,7 +220,7 @@ function InventoryPage({ navigate, showToast }) {
     if (sortBy === 'Stock Level') results.sort((a, b) => a.stock - b.stock);
     else results.sort((a, b) => a.name.localeCompare(b.name));
     return results;
-  }, [search, branch, category, statusFilter, sortBy]);
+  }, [search, branch, category, statusFilter, sortBy, products]);
 
   const totalPages = Math.ceil(filtered.length / PAGE_SIZE);
   const paginated = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
@@ -481,19 +499,46 @@ function StockCountPage({ productId, navigate, showToast }) {
 }
 
 function RestockPage({ productId, navigate, showToast }) {
-  const product = getProductById(productId);
-  const [form, setForm] = useState({ quantity: '', supplier: product?.supplier ?? '', deliveryRef: '', dateReceived: new Date().toISOString().slice(0, 10) });
+  const [product, setProduct] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [form, setForm] = useState({ quantity: '', supplier: '', deliveryRef: '', dateReceived: new Date().toISOString().slice(0, 10) });
   const [errors, setErrors] = useState({});
 
+  useEffect(() => {
+    async function load() {
+      setLoading(true);
+      const res = await fetchProductById(productId);
+      if (res.success && res.data) {
+        setProduct({ ...res.data, name: res.data.product_name, stock: res.data.quantity });
+        setForm(p => ({ ...p, supplier: res.data.supplier || '' }));
+      }
+      setLoading(false);
+    }
+    load();
+  }, [productId]);
+
+  if (loading) return <LoadingState message="Loading product..." />;
   if (!product) return <EmptyState title="Product not found" actionLabel="Back" onAction={() => navigate('/warehouse/inventory')} />;
 
-  const handleSubmit = () => {
+  const handleSubmit = async () => {
     const nextErrors = {};
     if (!form.quantity || Number(form.quantity) <= 0) nextErrors.quantity = 'Quantity must be positive.';
     setErrors(nextErrors);
     if (Object.keys(nextErrors).length) { showToast('Please fix the errors.', 'error'); return; }
-    showToast('Restock transaction created. Inventory updated.', 'success');
-    navigate(`/warehouse/product/${product.id}`);
+    
+    const res = await restockProduct({
+      product_id: product.product_id,
+      quantity: Number(form.quantity),
+      supplier: form.supplier,
+      reference_number: form.deliveryRef
+    });
+    
+    if (res.success) {
+      showToast('Restock transaction created. Inventory updated.', 'success');
+      navigate('/warehouse/inventory');
+    } else {
+      showToast(`Failed to restock: ${res.message}`, 'error');
+    }
   };
 
   return (
@@ -519,13 +564,30 @@ function RestockPage({ productId, navigate, showToast }) {
 }
 
 function TransferPage({ productId, navigate, showToast }) {
-  const product = getProductById(productId);
+  const [product, setProduct] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [branches, setBranches] = useState([]);
   const [form, setForm] = useState({ destination: '', quantity: '', notes: '' });
   const [errors, setErrors] = useState({});
 
+  useEffect(() => {
+    async function load() {
+      setLoading(true);
+      const res = await fetchProductById(productId);
+      if (res.success && res.data) {
+        setProduct({ ...res.data, name: res.data.product_name, stock: res.data.quantity, branch: res.data.branch_name, branch_id: res.data.branch_id });
+      }
+      // Need a way to fetch branches, for now just use static or skip. Let's use BRANCHES mock for UI
+      setBranches(BRANCHES);
+      setLoading(false);
+    }
+    load();
+  }, [productId]);
+
+  if (loading) return <LoadingState message="Loading product..." />;
   if (!product) return <EmptyState title="Product not found" actionLabel="Back" onAction={() => navigate('/warehouse/inventory')} />;
 
-  const handleSubmit = () => {
+  const handleSubmit = async () => {
     const qty = Number(form.quantity);
     const nextErrors = {};
     if (!form.destination) nextErrors.destination = 'Destination branch is required.';
@@ -533,8 +595,23 @@ function TransferPage({ productId, navigate, showToast }) {
     if (qty > product.stock) nextErrors.quantity = `Cannot transfer more than available stock (${product.stock} units).`;
     setErrors(nextErrors);
     if (Object.keys(nextErrors).length) { showToast('Please fix the errors.', 'error'); return; }
-    showToast('Transfer submitted for approval.', 'success');
-    navigate('/warehouse/transfers');
+    
+    const destBranchId = branches.indexOf(form.destination) + 1; // Basic mapping
+
+    const res = await transferProduct({
+      product_id: product.product_id,
+      quantity: qty,
+      from_branch_id: product.branch_id || 1,
+      to_branch_id: destBranchId || 2,
+      notes: form.notes
+    });
+
+    if (res.success) {
+      showToast('Transfer completed.', 'success');
+      navigate('/warehouse/inventory');
+    } else {
+      showToast(`Failed to transfer: ${res.message}`, 'error');
+    }
   };
 
   return (

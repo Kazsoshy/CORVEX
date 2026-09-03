@@ -1,6 +1,5 @@
 import { useMemo, useState, useCallback, useEffect } from 'react';
 import { Link, Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
-import { Breadcrumbs } from './components/collector/Breadcrumbs';
 import { CollectorPageBody } from './components/collector/CollectorPageBody';
 import { SalesPageBody } from './components/sales/SalesPageBody';
 import { WarehousePageBody } from './components/warehouse/WarehousePageBody';
@@ -15,6 +14,8 @@ import { LoginPage } from './components/auth/LoginPage';
 import { NavIcon } from './navIcons';
 import LeafletMap from './components/common/LeafletMap';
 import { LogoutConfirmDialog } from './components/LogoutConfirmDialog';
+import { FailureProvider } from './context/FailureContext';
+import { ErrorBoundary } from './components/common/ErrorBoundary';
 import { collectorRole } from './rolePages/collector';
 import { isCollectorNavActive, resolveCollectorPage } from './utils/collectorRoutes';
 import { isSalesNavActive, resolveSalesPage } from './utils/salesRoutes';
@@ -34,53 +35,104 @@ const ROLES = [collectorRole, salesRole, warehouseRole, operatingManagerRole, br
 const ROLE_BY_KEY = Object.fromEntries(ROLES.map((role) => [role.key, role]));
 const ROUTE_REGISTRY = Object.assign({}, ...ROLES.map((role) => role.routes));
 
+function AdminRouteInterceptor() {
+  const loggedInUser = getCurrentUser();
+  if (loggedInUser?.role?.slug === 'super_admin') {
+    return <Navigate to="/super-admin/dashboard" replace />;
+  }
+  return <Navigate to="/operating-manager/admin/dashboard" replace />;
+}
+
 function App() {
   return (
-    <Routes>
-      <Route path="/" element={<Navigate to="/login" replace />} />
-      <Route path="/login" element={<LoginPage />} />
-      <Route path="/collector" element={<Navigate to={collectorRole.entryPath} replace />} />
-      <Route path="/sales" element={<Navigate to={salesRole.entryPath} replace />} />
-      <Route path="/warehouse" element={<Navigate to={warehouseRole.entryPath} replace />} />
-      <Route path="/branch-manager" element={<Navigate to={branchManagerRole.entryPath} replace />} />
-      <Route path="/admin" element={<Navigate to="/operating-manager/admin/dashboard" replace />} />
-      <Route path="/operating-manager" element={<Navigate to={operatingManagerRole.entryPath} replace />} />
-      <Route path="/customer" element={<Navigate to={customerRole.entryPath} replace />} />
-      <Route path="/super-admin" element={<Navigate to={superAdminRole.entryPath} replace />} />
-      <Route path="*" element={<PrototypeShell />} />
-    </Routes>
+    <FailureProvider>
+      <ErrorBoundary>
+        <Routes>
+          <Route path="/" element={<Navigate to="/login" replace />} />
+          <Route path="/login" element={<LoginPage />} />
+          <Route path="/collector" element={<Navigate to={collectorRole.entryPath} replace />} />
+          <Route path="/sales" element={<Navigate to={salesRole.entryPath} replace />} />
+          <Route path="/warehouse" element={<Navigate to={warehouseRole.entryPath} replace />} />
+          <Route path="/branch-manager" element={<Navigate to={branchManagerRole.entryPath} replace />} />
+          <Route path="/admin" element={<AdminRouteInterceptor />} />
+          <Route path="/operating-manager" element={<Navigate to={operatingManagerRole.entryPath} replace />} />
+          <Route path="/customer" element={<Navigate to={customerRole.entryPath} replace />} />
+          <Route path="/super-admin" element={<Navigate to={superAdminRole.entryPath} replace />} />
+          <Route path="*" element={<PrototypeShell />} />
+        </Routes>
+      </ErrorBoundary>
+    </FailureProvider>
   );
+}
+
+function getActualPath(pathname) {
+  if (pathname.startsWith('/super-admin/')) {
+    const sub = pathname.substring('/super-admin'.length);
+    if (
+      sub.startsWith('/collector') ||
+      sub.startsWith('/sales') ||
+      sub.startsWith('/warehouse') ||
+      sub.startsWith('/branch-manager') ||
+      sub.startsWith('/operating-manager') ||
+      sub.startsWith('/customer')
+    ) {
+      return sub;
+    }
+  }
+  return pathname;
 }
 
 function PrototypeShell() {
   const location = useLocation();
   const navigate = useNavigate();
-  const currentRole = roleFromPath(location.pathname);
-  const isCollector = currentRole?.key === 'collector';
-  const isSales = currentRole?.key === 'sales';
-  const isWarehouse = currentRole?.key === 'warehouse';
-  const isOperatingManager = currentRole?.key === 'operatingManager';
-  const isBranchManager = currentRole?.key === 'branchManager';
-  const isCustomer = currentRole?.key === 'customer';
-  const isSuperAdmin = currentRole?.key === 'superAdmin';
+  const loggedInUser = getCurrentUser();
+
+  useEffect(() => {
+    if (loggedInUser?.role?.slug === 'super_admin') {
+      const path = location.pathname;
+      if (
+        path.startsWith('/collector/') ||
+        path.startsWith('/sales/') ||
+        path.startsWith('/warehouse/') ||
+        path.startsWith('/branch-manager/') ||
+        path.startsWith('/operating-manager/') ||
+        path.startsWith('/customer/') ||
+        ['/collector', '/sales', '/warehouse', '/branch-manager', '/operating-manager', '/customer'].includes(path)
+      ) {
+        navigate(`/super-admin${path}${location.search}`, { replace: true });
+      }
+    }
+  }, [location.pathname, location.search, loggedInUser, navigate]);
+
+  const actualPathname = getActualPath(location.pathname);
+  const pageRole = roleFromPath(actualPathname);
+  const currentRole = loggedInUser?.role?.slug === 'super_admin' ? superAdminRole : pageRole;
+
+  const isCollector = pageRole?.key === 'collector';
+  const isSales = pageRole?.key === 'sales';
+  const isWarehouse = pageRole?.key === 'warehouse';
+  const isOperatingManager = pageRole?.key === 'operatingManager';
+  const isBranchManager = pageRole?.key === 'branchManager';
+  const isCustomer = pageRole?.key === 'customer';
+  const isSuperAdmin = pageRole?.key === 'superAdmin';
   const isRoleModule = isCollector || isSales || isWarehouse || isOperatingManager || isBranchManager || isCustomer || isSuperAdmin;
-  const isCustomerLogin = isCustomerAuthPath(location.pathname);
-  const fullPath = location.pathname + location.search;
+  const isCustomerLogin = isCustomerAuthPath(actualPathname);
+  const fullPath = actualPathname + location.search;
   const page = isCollector
-    ? resolveCollectorPage(location.pathname, location.search)
+    ? resolveCollectorPage(actualPathname, location.search)
     : isSales
-      ? resolveSalesPage(location.pathname, location.search)
+      ? resolveSalesPage(actualPathname, location.search)
       : isWarehouse
-        ? resolveWarehousePage(location.pathname)
+        ? resolveWarehousePage(actualPathname)
         : isOperatingManager
-          ? resolveOperatingManagerPage(location.pathname)
+          ? resolveOperatingManagerPage(actualPathname)
           : isBranchManager
-            ? resolveBranchManagerPage(location.pathname)
+            ? resolveBranchManagerPage(actualPathname)
             : isCustomer
-              ? resolveCustomerPage(location.pathname)
+              ? resolveCustomerPage(actualPathname)
               : isSuperAdmin
-                ? resolveSuperAdminPage(location.pathname)
-                : ROUTE_REGISTRY[location.pathname] ?? null;
+                ? resolveSuperAdminPage(actualPathname)
+                : ROUTE_REGISTRY[actualPathname] ?? null;
   const [showMap, setShowMap] = useState(false);
   const [filter, setFilter] = useState('All');
   const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
@@ -88,6 +140,37 @@ function PrototypeShell() {
 
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(() => localStorage.getItem('corvex_sidebar_collapsed') === 'true');
   const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
+  const [searchTerm, setSearchTerm] = useState('');
+
+  const filteredNavSections = useMemo(() => {
+    if (!currentRole?.navSections) return [];
+    if (!searchTerm.trim()) return currentRole.navSections;
+    const term = searchTerm.toLowerCase();
+    return currentRole.navSections
+      .map((section) => ({
+        ...section,
+        items: section.items.filter((item) => item.label.toLowerCase().includes(term)),
+      }))
+      .filter((section) => section.items.length > 0);
+  }, [currentRole, searchTerm]);
+
+  const topLinks = useMemo(() => {
+    if (isAuthPath(location.pathname) || !currentRole) {
+      return [
+        { label: 'Login', to: '/login' },
+        { label: 'Reset password', to: '/password-reset' },
+      ];
+    }
+
+    return currentRole.navPages;
+  }, [currentRole, location.pathname]);
+
+  const filteredTopLinks = useMemo(() => {
+    if (!topLinks) return [];
+    if (!searchTerm.trim()) return topLinks;
+    const term = searchTerm.toLowerCase();
+    return topLinks.filter((item) => item.label.toLowerCase().includes(term));
+  }, [topLinks, searchTerm]);
 
   useEffect(() => {
     localStorage.setItem('corvex_sidebar_collapsed', isSidebarCollapsed);
@@ -113,31 +196,22 @@ function PrototypeShell() {
     navigate('/login');
   };
 
-  const topLinks = useMemo(() => {
-    if (isAuthPath(location.pathname) || !currentRole) {
-      return [
-        { label: 'Login', to: '/login' },
-        { label: 'Reset password', to: '/password-reset' },
-      ];
-    }
 
-    return currentRole.navPages;
-  }, [currentRole, location.pathname]);
 
-  const pageTitle = page?.title ?? (currentRole ? currentRole.label : 'CORVEX');
+
 
   return (
     <div className={`app-shell ${isSidebarCollapsed ? 'collapsed' : ''} ${isMobileSidebarOpen ? 'mobile-open' : ''}`}>
-      <LogoutConfirmDialog 
-        isOpen={showLogoutConfirm} 
-        onConfirm={handleLogoutConfirm} 
-        onCancel={() => setShowLogoutConfirm(false)} 
+      <LogoutConfirmDialog
+        isOpen={showLogoutConfirm}
+        onConfirm={handleLogoutConfirm}
+        onCancel={() => setShowLogoutConfirm(false)}
       />
       {isMobileSidebarOpen && (
         <div className="sidebar-overlay" onClick={() => setIsMobileSidebarOpen(false)} aria-hidden="true" />
       )}
       <aside className="sidebar">
-        <button 
+        <button
           className="sidebar-toggle-btn"
           onClick={() => setIsSidebarCollapsed(!isSidebarCollapsed)}
           aria-label={isSidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
@@ -145,165 +219,167 @@ function PrototypeShell() {
           <NavIcon name={isSidebarCollapsed ? 'chevronRight' : 'chevronLeft'} />
         </button>
         <div className="sidebar-inner">
-          <div className="sidebar-header">
+        <div className="sidebar-header" style={{ padding: '16px 12px 0' }}>
           <div className="brand-card">
             <img src="/src/assets/corvex-logo.png" alt="CORVEX logo" className="brand-logo" />
             <div className="brand-copy">
               <div className="brand-title">CORVEX</div>
-              {currentRole ? <div className="brand-subtitle">{currentRole.label}</div> : null}
             </div>
           </div>
         </div>
 
-        {currentRole && !isAuthPath(location.pathname) && !isCustomerLogin ? (
-          <>
-            <nav className="nav-links">
-              {currentRole?.navSections?.length ? (
-                currentRole.navSections.map((section) => (
-                  <details key={section.title} className="nav-group" open>
-                    <summary className="nav-group-summary">
-                      <span>{section.title}</span>
-                      <span className="nav-group-chevron" aria-hidden="true">
-                        <NavIcon name="chevronRight" />
-                      </span>
-                    </summary>
-                    <div className="nav-group-items">
-                      {section.items.map((link) => (
-                        <Link
-                          key={link.to}
-                          to={link.to}
-                          className={
-                            isRoleModule
-                              ? (isCollector
-                                  ? isCollectorNavActive(fullPath, link.to)
-                                  : isSales
-                                    ? isSalesNavActive(fullPath, link.to)
-                                    : isWarehouse
-                                      ? isWarehouseNavActive(fullPath, link.to)
-                                      : isOperatingManager
-                                        ? isOperatingManagerNavActive(fullPath, link.to)
-                                        : isBranchManager
-                                          ? isBranchManagerNavActive(fullPath, link.to)
-                                          : isSuperAdmin
-                                              ? isSuperAdminNavActive(fullPath, link.to)
-                                              : isCustomerNavActive(fullPath, link.to))
-                                ? 'nav-link active'
-                                : 'nav-link'
-                              : location.pathname === link.to
-                                ? 'nav-link active'
-                                : 'nav-link'
-                          }
-                          data-tooltip={link.label}
-                        >
-                          <span className="nav-link-icon">
-                            <NavIcon label={link.label} />
-                          </span>
-                          <span className="nav-link-text">{link.label}</span>
-                        </Link>
-                      ))}
-                    </div>
-                  </details>
-                ))
-              ) : (
-                topLinks.map((link) => (
-                  <Link
-                    key={link.to}
-                    to={link.to}
-                    className={
-                      isRoleModule
-                        ? (isCollector
-                            ? isCollectorNavActive(fullPath, link.to)
-                            : isSales
-                              ? isSalesNavActive(fullPath, link.to)
-                              : isWarehouse
-                                ? isWarehouseNavActive(fullPath, link.to)
-                                : isOperatingManager
-                                  ? isOperatingManagerNavActive(fullPath, link.to)
-                                  : isBranchManager
-                                    ? isBranchManagerNavActive(fullPath, link.to)
-                                    : isSuperAdmin
-                                        ? isSuperAdminNavActive(fullPath, link.to)
-                                        : isCustomerNavActive(fullPath, link.to))
-                          ? 'nav-link active'
-                          : 'nav-link'
-                        : location.pathname === link.to
-                          ? 'nav-link active'
-                          : 'nav-link'
-                    }
-                    data-tooltip={link.label}
-                  >
-                    <span className="nav-link-icon">
-                      <NavIcon label={link.label} />
-                    </span>
-                    <span className="nav-link-text">{link.label}</span>
-                  </Link>
-                ))
-              )}
+          {currentRole && !isAuthPath(location.pathname) && !isCustomerLogin ? (
+            <>
+
+              <nav className="nav-links">
+                {filteredNavSections.length ? (
+                  filteredNavSections.map((section) => (
+                    <details key={section.title} className="nav-group" open>
+                      <summary className="nav-group-summary">
+                        <span>{section.title}</span>
+                        <span className="nav-group-chevron" aria-hidden="true">
+                          <NavIcon name="chevronRight" />
+                        </span>
+                      </summary>
+                      <div className="nav-group-items">
+                        {section.items.map((link) => {
+                          const actualLinkTo = getActualPath(link.to);
+                          return (
+                            <Link
+                              key={link.to}
+                              to={link.to}
+                              className={
+                                isRoleModule
+                                  ? (isCollector
+                                    ? isCollectorNavActive(fullPath, actualLinkTo)
+                                    : isSales
+                                      ? isSalesNavActive(fullPath, actualLinkTo)
+                                      : isWarehouse
+                                        ? isWarehouseNavActive(fullPath, actualLinkTo)
+                                        : isOperatingManager
+                                          ? isOperatingManagerNavActive(fullPath, actualLinkTo)
+                                          : isBranchManager
+                                            ? isBranchManagerNavActive(fullPath, actualLinkTo)
+                                            : isSuperAdmin
+                                              ? isSuperAdminNavActive(fullPath, actualLinkTo)
+                                              : isCustomerNavActive(fullPath, actualLinkTo))
+                                    ? 'nav-link active'
+                                    : 'nav-link'
+                                  : actualPathname === actualLinkTo
+                                    ? 'nav-link active'
+                                    : 'nav-link'
+                              }
+                              data-tooltip={link.label}
+                            >
+                              <span className="nav-link-icon">
+                                <NavIcon label={link.label} />
+                              </span>
+                              <span className="nav-link-text">{link.label}</span>
+                            </Link>
+                          );
+                        })}
+                      </div>
+                    </details>
+                  ))
+                ) : (
+                  filteredTopLinks.map((link) => {
+                    const actualLinkTo = getActualPath(link.to);
+                    return (
+                      <Link
+                        key={link.to}
+                        to={link.to}
+                        className={
+                          isRoleModule
+                            ? (isCollector
+                              ? isCollectorNavActive(fullPath, actualLinkTo)
+                              : isSales
+                                ? isSalesNavActive(fullPath, actualLinkTo)
+                                : isWarehouse
+                                  ? isWarehouseNavActive(fullPath, actualLinkTo)
+                                  : isOperatingManager
+                                    ? isOperatingManagerNavActive(fullPath, actualLinkTo)
+                                    : isBranchManager
+                                      ? isBranchManagerNavActive(fullPath, actualLinkTo)
+                                      : isSuperAdmin
+                                        ? isSuperAdminNavActive(fullPath, actualLinkTo)
+                                        : isCustomerNavActive(fullPath, actualLinkTo))
+                              ? 'nav-link active'
+                              : 'nav-link'
+                            : actualPathname === actualLinkTo
+                              ? 'nav-link active'
+                              : 'nav-link'
+                        }
+                        data-tooltip={link.label}
+                      >
+                        <span className="nav-link-icon">
+                          <NavIcon label={link.label} />
+                        </span>
+                        <span className="nav-link-text">{link.label}</span>
+                      </Link>
+                    );
+                  })
+                )}
+              </nav>
+            </>
+          ) : (
+            <nav className="nav-links nav-links-auth">
+              {topLinks.map((link) => (
+                <Link
+                  key={link.to}
+                  to={link.to}
+                  className={location.pathname === link.to ? 'nav-link active' : 'nav-link'}
+                  data-tooltip={link.label}
+                >
+                  <span className="nav-link-icon">
+                    <NavIcon label={link.label} />
+                  </span>
+                  <span className="nav-link-text">{link.label}</span>
+                </Link>
+              ))}
             </nav>
-            <div className="sidebar-footer">
-              <button
-                className="button ghost sidebar-switch"
-                type="button"
-                onClick={() => setShowLogoutConfirm(true)}
-              >
-                <span className="sidebar-switch-icon">
-                  <NavIcon name="login" />
-                </span>
-                <span className="sidebar-switch-text">Logout</span>
-              </button>
-            </div>
-          </>
-        ) : (
-          <nav className="nav-links nav-links-auth">
-            {topLinks.map((link) => (
-              <Link
-                key={link.to}
-                to={link.to}
-                className={location.pathname === link.to ? 'nav-link active' : 'nav-link'}
-                data-tooltip={link.label}
-              >
-                <span className="nav-link-icon">
-                  <NavIcon label={link.label} />
-                </span>
-                <span className="nav-link-text">{link.label}</span>
-              </Link>
-            ))}
-          </nav>
-        )}
+          )}
         </div>
+        
+        {currentRole && !isAuthPath(location.pathname) && !isCustomerLogin && (
+          <div className="sidebar-footer">
+            <div className="sidebar-user-section">
+              <div className="sidebar-user-avatar" aria-hidden="true">
+                {loggedInUser?.name ? loggedInUser.name.charAt(0).toUpperCase() : 'U'}
+              </div>
+              <div className="sidebar-user-info">
+                <div className="sidebar-user-name" title={loggedInUser?.name || 'User'}>
+                  {loggedInUser?.name || 'User'}
+                </div>
+                <div className="sidebar-user-role" title={currentRole.label || 'Staff'}>
+                  {currentRole.label || 'Staff'}
+                </div>
+              </div>
+            </div>
+            <button
+              className="button ghost sidebar-switch"
+              type="button"
+              onClick={() => setShowLogoutConfirm(true)}
+            >
+              <span className="sidebar-switch-icon">
+                <NavIcon name="login" />
+              </span>
+              <span className="sidebar-switch-text">Logout</span>
+            </button>
+          </div>
+        )}
       </aside>
 
       <main className="content">
         <div className="content-ambient" aria-hidden="true" />
         <header className="topbar">
-          <div className="topbar-main">
-            <div className="mobile-header-actions">
-              <button className="mobile-menu-btn" type="button" onClick={() => setIsMobileSidebarOpen(true)} aria-label="Open menu">
-                <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <line x1="3" y1="12" x2="21" y2="12"></line>
-                  <line x1="3" y1="6" x2="21" y2="6"></line>
-                  <line x1="3" y1="18" x2="21" y2="18"></line>
-                </svg>
-              </button>
-            </div>
-            {currentRole && page ? (
-              isRoleModule && page.breadcrumbs?.length ? (
-                <Breadcrumbs items={page.breadcrumbs} />
-              ) : (
-                <p className="breadcrumb">
-                  {currentRole.label}
-                  <span aria-hidden="true">/</span>
-                  {page.title}
-                </p>
-              )
-            ) : null}
-            <div className="topbar-title-row">
-              <h1>{pageTitle}</h1>
-            </div>
-            {page?.description ? <p className="topbar-subtitle">{page.description}</p> : null}
-            {!page?.description && currentRole && isDashboardPath(location.pathname, currentRole) ? (
-              <p className="topbar-subtitle">{currentRole.accent}</p>
-            ) : null}
+          <div className="mobile-header-actions">
+            <button className="mobile-menu-btn" type="button" onClick={() => setIsMobileSidebarOpen(true)} aria-label="Open menu">
+              <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <line x1="3" y1="12" x2="21" y2="12"></line>
+                <line x1="3" y1="6" x2="21" y2="6"></line>
+                <line x1="3" y1="18" x2="21" y2="18"></line>
+              </svg>
+            </button>
           </div>
         </header>
 
@@ -469,8 +545,8 @@ function PageBody({ showMap, setShowMap, filter, setFilter, page, currentRole, n
                 <span className="stat-index">{String(index + 1).padStart(2, '0')}</span>
                 <span className="stat-dot" aria-hidden="true" />
               </div>
-              <span className="stat-label">{stat.label}</span>
               <strong className="stat-value">{stat.value}</strong>
+              <span className="stat-label">{stat.label}</span>
             </article>
           ))}
         </section>
@@ -526,9 +602,9 @@ function PageBody({ showMap, setShowMap, filter, setFilter, page, currentRole, n
           </div>
           {showMap ? (
             <div style={{ marginTop: 16 }}>
-              <LeafletMap 
-                center={[7.1907, 125.4553]} 
-                zoom={12} 
+              <LeafletMap
+                center={[7.1907, 125.4553]}
+                zoom={12}
                 height={500}
                 markers={[
                   { id: '1', position: [7.1907, 125.4553], label: 'A', color: '#2563eb', popup: 'Marker A' },
@@ -567,9 +643,9 @@ function PageBody({ showMap, setShowMap, filter, setFilter, page, currentRole, n
 
           {showMap && page.table.hasMap ? (
             <div style={{ marginTop: 16 }}>
-              <LeafletMap 
-                center={[7.1907, 125.4553]} 
-                zoom={12} 
+              <LeafletMap
+                center={[7.1907, 125.4553]}
+                zoom={12}
                 height={500}
                 markers={[
                   { id: '1', position: [7.1907, 125.4553], label: 'P1', color: '#2563eb', popup: 'Location 1' },

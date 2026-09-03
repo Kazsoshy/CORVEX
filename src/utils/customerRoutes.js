@@ -74,23 +74,11 @@ export function resolveCustomerPage(pathname) {
     profile: 'Profile',
   };
 
-  const descriptions = {
-    login: 'Sign in with your account number and password or OTP.',
-    home: 'Your account overview and quick actions.',
-    accountDetails: 'View and update your account information.',
-    paymentHistory: 'Complete record of payments received.',
-    receipts: 'Digital receipts for all confirmed payments.',
-    statements: 'Monthly account statements and summaries.',
-    notifications: 'Payment reminders and account updates.',
-    profile: 'Personal information and security settings.',
-  };
-
   return {
     pageType: match.pageType,
     params: match.params,
     breadcrumbs: buildCustomerBreadcrumbs(match.pageType, match.params),
     title: titles[match.pageType] ?? 'Customer Portal',
-    description: descriptions[match.pageType],
     badge: 'Customer portal',
   };
 }

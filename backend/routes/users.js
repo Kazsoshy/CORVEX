@@ -1,5 +1,6 @@
 import express from 'express';
 import bcrypt from 'bcryptjs';
+import { requireRole } from '../middleware/auth.js';
 
 const router = express.Router();
 
@@ -7,7 +8,7 @@ const router = express.Router();
 // GET /api/users
 // Query params: role (slug), status, branch_id, search, page, limit
 // ──────────────────────────────────────────────────────────────────────────────
-router.get('/', async (req, res) => {
+router.get('/', requireRole(['super_admin', 'operating_manager', 'branch_manager']), async (req, res) => {
   try {
     const pool = req.app.locals.pool;
     const {
@@ -81,7 +82,7 @@ router.get('/', async (req, res) => {
 // ──────────────────────────────────────────────────────────────────────────────
 // GET /api/users/:id
 // ──────────────────────────────────────────────────────────────────────────────
-router.get('/:id', async (req, res) => {
+router.get('/:id', requireRole(['super_admin', 'operating_manager', 'branch_manager']), async (req, res) => {
   try {
     const pool = req.app.locals.pool;
     const result = await pool.query(
@@ -110,7 +111,7 @@ router.get('/:id', async (req, res) => {
 // ──────────────────────────────────────────────────────────────────────────────
 // POST /api/users  — Create user
 // ──────────────────────────────────────────────────────────────────────────────
-router.post('/', async (req, res) => {
+router.post('/', requireRole(['super_admin', 'operating_manager']), async (req, res) => {
   try {
     const pool = req.app.locals.pool;
     const {
@@ -189,7 +190,7 @@ router.post('/', async (req, res) => {
 // ──────────────────────────────────────────────────────────────────────────────
 // PUT /api/users/:id  — Update user
 // ──────────────────────────────────────────────────────────────────────────────
-router.put('/:id', async (req, res) => {
+router.put('/:id', requireRole(['super_admin', 'operating_manager']), async (req, res) => {
   try {
     const pool = req.app.locals.pool;
     const userId = Number(req.params.id);
@@ -263,7 +264,7 @@ router.put('/:id', async (req, res) => {
 // ──────────────────────────────────────────────────────────────────────────────
 // DELETE /api/users/:id  — Soft delete (set status = Inactive)
 // ──────────────────────────────────────────────────────────────────────────────
-router.delete('/:id', async (req, res) => {
+router.delete('/:id', requireRole(['super_admin', 'operating_manager']), async (req, res) => {
   try {
     const pool = req.app.locals.pool;
     const userId = Number(req.params.id);

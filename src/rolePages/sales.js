@@ -4,7 +4,6 @@ export const salesRole = {
   homePath: '/sales',
   entryPath: '/sales/dashboard',
   loginPath: '/sales',
-  accent: 'Visits, sales, and inventory awareness',
   navPages: [
     { label: 'Dashboard', to: '/sales/dashboard' },
     { label: "Today's Schedule", to: '/sales/schedule' },

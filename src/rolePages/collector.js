@@ -4,7 +4,6 @@ export const collectorRole = {
   homePath: '/collector',
   entryPath: '/collector/dashboard',
   loginPath: '/collector',
-  accent: 'Field collection and route tracking',
   navPages: [
     { label: 'Dashboard', to: '/collector/dashboard' },
     { label: "Today's Route", to: '/collector/route' },

@@ -1,4 +1,5 @@
 import express from 'express';
+import { requireRole } from '../middleware/auth.js';
 
 const router = express.Router();
 
@@ -6,7 +7,7 @@ const router = express.Router();
 // GET /api/products
 // Query params: branch_id, category, status, search, page, limit
 // ──────────────────────────────────────────────────────────────────────────────
-router.get('/', async (req, res) => {
+router.get('/', requireRole(['super_admin', 'operating_manager', 'branch_manager', 'sales_agent', 'warehouse_staff']), async (req, res) => {
   try {
     const pool = req.app.locals.pool;
     const { branch_id, category, status, search, page = 1, limit = 50 } = req.query;
@@ -28,7 +29,7 @@ router.get('/', async (req, res) => {
       params.push(status);
     }
     if (search) {
-      conditions.push(`(p.name ILIKE $${pIdx} OR p.sku ILIKE $${pIdx})`);
+      conditions.push(`(p.product_name ILIKE $${pIdx} OR p.sku ILIKE $${pIdx})`);
       params.push(`%${search}%`);
       pIdx++;
     }
@@ -101,7 +102,7 @@ router.get('/', async (req, res) => {
 // ──────────────────────────────────────────────────────────────────────────────
 // GET /api/products/:id  — Single product with inventory across all branches
 // ──────────────────────────────────────────────────────────────────────────────
-router.get('/:id', async (req, res) => {
+router.get('/:id', requireRole(['super_admin', 'operating_manager', 'branch_manager', 'sales_agent', 'warehouse_staff']), async (req, res) => {
   try {
     const pool = req.app.locals.pool;
 
@@ -156,7 +157,7 @@ router.get('/:id', async (req, res) => {
 // ──────────────────────────────────────────────────────────────────────────────
 // POST /api/products  — Create product
 // ──────────────────────────────────────────────────────────────────────────────
-router.post('/', async (req, res) => {
+router.post('/', requireRole(['super_admin', 'operating_manager']), async (req, res) => {
   try {
     const pool = req.app.locals.pool;
     const { name, sku, category, description, unit_price, unit_type, barcode, supplier_id, reorder_point } = req.body;
@@ -192,7 +193,7 @@ router.post('/', async (req, res) => {
 // ──────────────────────────────────────────────────────────────────────────────
 // PUT /api/products/:id  — Update product
 // ──────────────────────────────────────────────────────────────────────────────
-router.put('/:id', async (req, res) => {
+router.put('/:id', requireRole(['super_admin', 'operating_manager']), async (req, res) => {
   try {
     const pool = req.app.locals.pool;
     const { name, category, description, unit_price, unit_type, barcode, supplier_id, reorder_point, status } = req.body;
@@ -231,6 +232,133 @@ router.put('/:id', async (req, res) => {
   } catch (err) {
     console.error('[Products] PUT /:id error:', err.message);
     return res.status(500).json({ success: false, message: 'Failed to update product.' });
+  }
+});
+
+// ──────────────────────────────────────────────────────────────────────────────
+// POST /api/products/restock  — Restock inventory
+// ──────────────────────────────────────────────────────────────────────────────
+router.post('/restock', requireRole(['super_admin', 'operating_manager', 'branch_manager', 'warehouse_staff']), async (req, res) => {
+  const pool = req.app.locals.pool;
+  const { product_id, supplier_id, quantity, branch_id, delivery_ref } = req.body;
+  const user_id = req.currentUser?.id || null;
+  const b_id = req.currentUser?.branchId || branch_id;
+
+  if (!product_id || !supplier_id || !quantity || !b_id || !delivery_ref) {
+    return res.status(400).json({ success: false, message: 'Missing required fields for restock.' });
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    // Insert restock record
+    await client.query(
+      `INSERT INTO restock_records (product_id, branch_id, delivery_ref, supplier_id, quantity, received_date)
+       VALUES ($1, $2, $3, $4, $5, CURRENT_DATE)`,
+      [product_id, b_id, delivery_ref, supplier_id, quantity]
+    );
+
+    // Upsert into branch_inventory
+    await client.query(
+      `INSERT INTO branch_inventory (branch_id, product_id, available_stock, reorder_level)
+       VALUES ($1, $2, $3, 10)
+       ON CONFLICT (branch_id, product_id)
+       DO UPDATE SET available_stock = branch_inventory.available_stock + EXCLUDED.available_stock, updated_at = NOW()`,
+      [b_id, product_id, quantity]
+    );
+
+    // Insert stock movement
+    await client.query(
+      `INSERT INTO stock_movements (performed_by, product_id, quantity, type, movement_ref, reference_type, movement_date, notes)
+       VALUES ($1, $2, $3, 'Restock', $4, 'restock', NOW(), $5)`,
+      [user_id, product_id, quantity, `MOV-RESTOCK-${Date.now()}`, `Delivery ${delivery_ref}`]
+    );
+
+    await client.query('COMMIT');
+    return res.status(201).json({ success: true, message: 'Inventory restocked successfully.' });
+  } catch (err) {
+    await client.query('ROLLBACK');
+    console.error('[Products] Restock failed:', err.message);
+    return res.status(500).json({ success: false, message: 'Restock failed.', error: err.message });
+  } finally {
+    client.release();
+  }
+});
+
+// ──────────────────────────────────────────────────────────────────────────────
+// POST /api/products/transfer  — Transfer inventory between branches
+// ──────────────────────────────────────────────────────────────────────────────
+router.post('/transfer', requireRole(['super_admin', 'operating_manager', 'branch_manager', 'warehouse_staff']), async (req, res) => {
+  const pool = req.app.locals.pool;
+  const { product_id, quantity, destination_branch_id } = req.body;
+  const user_id = req.currentUser?.id || null;
+  const source_branch_id = req.currentUser?.branchId || req.body.source_branch_id;
+
+  if (!product_id || !quantity || !source_branch_id || !destination_branch_id) {
+    return res.status(400).json({ success: false, message: 'Missing required fields for transfer.' });
+  }
+
+  if (source_branch_id === destination_branch_id) {
+    return res.status(400).json({ success: false, message: 'Source and destination branches cannot be the same.' });
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    // 1. Check source inventory
+    const stockRes = await client.query(
+      'SELECT available_stock FROM branch_inventory WHERE product_id = $1 AND branch_id = $2 FOR UPDATE',
+      [product_id, source_branch_id]
+    );
+    if (stockRes.rows.length === 0 || stockRes.rows[0].available_stock < quantity) {
+      throw new Error('Insufficient stock for transfer.');
+    }
+
+    // 2. Deduct from source branch
+    await client.query(
+      'UPDATE branch_inventory SET available_stock = available_stock - $1, updated_at = NOW() WHERE product_id = $2 AND branch_id = $3',
+      [quantity, product_id, source_branch_id]
+    );
+
+    // 3. Insert into transfers table as Completed
+    const transfer_ref = `TRF-${Date.now()}`;
+    await client.query(
+      `INSERT INTO transfers (transfer_ref, product_id, quantity, source_branch_id, destination_branch_id, status, submitted_by, submitted_date, completed_date)
+       VALUES ($1, $2, $3, $4, $5, 'Completed', $6, CURRENT_DATE, CURRENT_DATE)`,
+      [transfer_ref, product_id, quantity, source_branch_id, destination_branch_id, user_id]
+    );
+
+    // 4. Add to destination branch
+    await client.query(
+      `INSERT INTO branch_inventory (branch_id, product_id, available_stock, reorder_level)
+       VALUES ($1, $2, $3, 10)
+       ON CONFLICT (branch_id, product_id)
+       DO UPDATE SET available_stock = branch_inventory.available_stock + EXCLUDED.available_stock, updated_at = NOW()`,
+      [destination_branch_id, product_id, quantity]
+    );
+
+    // 5. Stock movements
+    await client.query(
+      `INSERT INTO stock_movements (performed_by, product_id, quantity, type, movement_ref, reference_type, movement_date, notes)
+       VALUES ($1, $2, $3, 'Transfer Out', $4, 'transfer', NOW(), $5)`,
+      [user_id, product_id, -quantity, `MOV-TRFOUT-${Date.now()}`, `To branch ${destination_branch_id}`]
+    );
+    await client.query(
+      `INSERT INTO stock_movements (performed_by, product_id, quantity, type, movement_ref, reference_type, movement_date, notes)
+       VALUES ($1, $2, $3, 'Transfer In', $4, 'transfer', NOW(), $5)`,
+      [user_id, product_id, quantity, `MOV-TRFIN-${Date.now()}`, `From branch ${source_branch_id}`]
+    );
+
+    await client.query('COMMIT');
+    return res.status(201).json({ success: true, message: 'Transfer completed successfully.' });
+  } catch (err) {
+    await client.query('ROLLBACK');
+    console.error('[Products] Transfer failed:', err.message);
+    return res.status(500).json({ success: false, message: 'Transfer failed.', error: err.message });
+  } finally {
+    client.release();
   }
 });
 

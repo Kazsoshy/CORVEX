@@ -11,12 +11,12 @@ router.get('/', async (req, res) => {
 
     // All roles
     const rolesResult = await pool.query(
-      `SELECT role_id, role_name, slug, description FROM roles ORDER BY role_id`
+      `SELECT id AS role_id, name AS role_name, slug FROM roles ORDER BY id`
     );
 
     // All permissions
     const permsResult = await pool.query(
-      `SELECT permission_id, label, description FROM permissions ORDER BY permission_id`
+      `SELECT id AS permission_id, label, description FROM permissions ORDER BY id`
     );
 
     // Role-permission mapping
@@ -35,7 +35,6 @@ router.get('/', async (req, res) => {
       id:          role.role_id,
       name:        role.role_name,
       slug:        role.slug,
-      description: role.description,
       permissions: Object.fromEntries(
         permissions.map((p) => [p.permission_id, !!(rpMap[role.role_id]?.[p.permission_id])])
       ),
@@ -65,7 +64,7 @@ router.put('/:id/permissions', async (req, res) => {
   }
 
   // Prevent editing Super Admin
-  const roleCheck = await pool.query(`SELECT slug FROM roles WHERE role_id = $1`, [roleId]);
+  const roleCheck = await pool.query(`SELECT slug FROM roles WHERE id = $1`, [roleId]);
   if (roleCheck.rows.length === 0) {
     return res.status(404).json({ success: false, message: 'Role not found.' });
   }
@@ -77,7 +76,7 @@ router.put('/:id/permissions', async (req, res) => {
   try {
     await client.query('BEGIN');
 
-    const permsResult = await client.query(`SELECT id, key FROM permissions`);
+    const permsResult = await client.query(`SELECT id, label AS key FROM permissions`);
     const permMap = Object.fromEntries(permsResult.rows.map((p) => [p.key, p.id]));
 
     for (const [key, granted] of Object.entries(permissions)) {

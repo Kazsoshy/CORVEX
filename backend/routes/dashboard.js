@@ -116,9 +116,9 @@ router.get('/inventory-health', requireAuth, async (req, res) => {
     }
 
     const alerts = await pool.query(
-      `SELECT p.name AS product_name, b.name AS branch_name, bi.available_stock, bi.reorder_level
+      `SELECT p.product_name AS product_name, b.name AS branch_name, bi.available_stock, bi.reorder_level
        FROM branch_inventory bi
-       JOIN products p ON p.id = bi.product_id
+       JOIN products p ON p.product_id = bi.product_id
        JOIN branches b ON b.id = bi.branch_id
        ${branchFilter}
        WHERE bi.available_stock <= bi.reorder_level
@@ -182,11 +182,12 @@ router.get('/branches', requireAuth, async (req, res) => {
     const result = await pool.query(
       `SELECT
          b.id, b.name AS branch_name, b.address, b.status,
-         COUNT(DISTINCT u.id) FILTER (WHERE u.status='Active') AS employee_count,
-         COUNT(DISTINCT c.customer_id) AS customer_count
+         COUNT(DISTINCT u.id) FILTER (WHERE u.status='Active' AND u.role_id != 7) AS employee_count,
+         COUNT(DISTINCT c.id) AS customer_count
        FROM branches b
        LEFT JOIN users u ON u.branch_id = b.id
-       LEFT JOIN customers c ON c.branch_id = b.id
+       LEFT JOIN users cu ON cu.branch_id = b.id AND cu.role_id = 7
+       LEFT JOIN customers c ON c.user_id = cu.id
        ${branchFilter}
        GROUP BY b.id, b.name, b.address, b.status
        ORDER BY b.name`
@@ -230,8 +231,8 @@ router.get('/branch-summary', requireAuth, async (req, res) => {
           salesResult,
         ] = await Promise.all([
           pool.query(`SELECT COUNT(*) FILTER (WHERE status = 'Active') AS active_staff, COUNT(*) FILTER (WHERE status = 'Inactive') AS inactive_staff, COUNT(*) AS total FROM users`),
-          pool.query(`SELECT COUNT(*) AS total_customers, COUNT(*) FILTER (WHERE status = 'Active') AS active_customers, COALESCE(SUM(outstanding_balance), 0) AS total_outstanding FROM customers`),
-          pool.query(`SELECT COALESCE(SUM(outstanding_balance), 0) AS total_outstanding, COALESCE(SUM(purchase_volume), 0) AS total_purchase_volume FROM customer_activity`),
+          pool.query(`SELECT COUNT(*) AS total_customers, COUNT(*) FILTER (WHERE c.status IS NOT NULL) AS active_customers, COALESCE(SUM(outstanding_balance), 0) AS total_outstanding FROM customers c JOIN users u ON u.id = c.user_id`),
+          pool.query(`SELECT COALESCE(SUM(outstanding_balance), 0) AS total_outstanding, COALESCE(SUM(purchase_volume), 0) AS total_purchase_volume FROM customers`),
           pool.query(`SELECT CASE WHEN available_stock <= 0 THEN 'Out of Stock' WHEN available_stock <= reorder_level THEN 'Low Stock' ELSE 'Sufficient' END AS stock_status, COUNT(*) AS count, COALESCE(SUM(available_stock), 0) AS total_qty FROM branch_inventory GROUP BY stock_status`),
           pool.query(`SELECT COUNT(*) AS total_collections, COALESCE(SUM(amount), 0) AS total_amount_collected, COUNT(*) FILTER (WHERE status = 'Pending') AS pending_collections FROM collection_payment WHERE payment_date >= date_trunc('month', CURRENT_TIMESTAMP)`),
           pool.query(`SELECT COUNT(*) AS total_invoices, COALESCE(SUM(total_amount), 0) AS total_sales_amount, COUNT(*) FILTER (WHERE status = 'Pending') AS pending_invoices FROM sales_invoices WHERE invoices_date >= date_trunc('month', CURRENT_TIMESTAMP)`),
@@ -292,19 +293,21 @@ router.get('/branch-summary', requireAuth, async (req, res) => {
       // Customer counts and breakdown
       pool.query(
         `SELECT
-           COUNT(*)                                              AS total_customers,
-           COUNT(*) FILTER (WHERE status = 'Active')            AS active_customers
-         FROM customers
-         WHERE branch_id = $1`,
+           COUNT(c.id)                                           AS total_customers,
+           COUNT(c.id) FILTER (WHERE u.status = 'Active')        AS active_customers
+         FROM customers c
+         JOIN users u ON u.id = c.user_id
+         WHERE u.branch_id = $1`,
         [bid]
       ),
       // Customer activity data
       pool.query(
         `SELECT
-           COALESCE(SUM(outstanding_balance), 0)                AS total_outstanding,
-           COALESCE(SUM(purchase_volume), 0)                    AS total_purchase_volume
-         FROM customer_activity
-         WHERE customer_id IN (SELECT customer_id FROM customers WHERE branch_id = $1)`,
+           COALESCE(SUM(c.outstanding_balance), 0)                AS total_outstanding,
+           COALESCE(SUM(c.purchase_volume), 0)                    AS total_purchase_volume
+         FROM customers c
+         JOIN users u ON u.id = c.user_id
+         WHERE u.branch_id = $1`,
         [bid]
       ),
       // Inventory health for this branch

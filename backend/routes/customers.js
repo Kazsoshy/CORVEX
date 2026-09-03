@@ -1,11 +1,12 @@
 import express from 'express';
+import axios from 'axios';
 
 const router = express.Router();
 
 router.get('/', async (req, res) => {
   try {
     const pool = req.app.locals.pool;
-    let { branch_id, status, search, page = 1, limit = 20 } = req.query;
+    let { branch_id, status, search, page = 1, limit = 20, user_id } = req.query;
 
     if (!branch_id && req.currentUser && req.currentUser.branchId) {
       branch_id = String(req.currentUser.branchId);
@@ -16,9 +17,10 @@ router.get('/', async (req, res) => {
     let pIdx = 1;
 
     if (branch_id) { conditions.push(`c.branch_id = $${pIdx++}`); params.push(Number(branch_id)); }
+    if (user_id)   { conditions.push(`c.user_id = $${pIdx++}`);   params.push(Number(user_id)); }
     if (status)    { conditions.push(`c.status = $${pIdx++}`);    params.push(status); }
     if (search) {
-      conditions.push(`(c.first_name ILIKE $${pIdx} OR c.last_name ILIKE $${pIdx} OR c.address ILIKE $${pIdx} OR c.contact_phone ILIKE $${pIdx})`);
+      conditions.push(`(u.full_name ILIKE $${pIdx} OR u.address ILIKE $${pIdx} OR u.contact_number ILIKE $${pIdx} OR c.contact_person_fname ILIKE $${pIdx})`);
       params.push(`%${search}%`, `%${search}%`, `%${search}%`, `%${search}%`);
       pIdx += 4;
     }
@@ -27,7 +29,7 @@ router.get('/', async (req, res) => {
     const offset = (Number(page) - 1) * Number(limit);
 
     const countResult = await pool.query(
-      `SELECT COUNT(*) FROM customers c ${where}`,
+      `SELECT COUNT(*) FROM customers c JOIN users u ON u.id = c.user_id ${where}`,
       params
     );
     const total = Number(countResult.rows[0].count);
@@ -48,26 +50,27 @@ router.get('/', async (req, res) => {
 
     const result = await pool.query(
       `SELECT
-         c.customer_id,
+         c.id AS customer_id,
          c.user_id,
-         c.branch_id,
-         c.first_name,
-         c.last_name,
-         c.address,
+         u.branch_id,
+         u.full_name AS first_name,
+         '' AS last_name,
+         u.address,
          c.latitude,
          c.longitude,
-         c.contact_phone,
+         u.contact_number AS contact_phone,
          c.contact_person_fname,
          c.contact_person_lname,
          c.contact_person_phone,
-         c.status,
+         u.status,
          c.created_at,
          c.updated_at,
          ${activityColumns}
-         COALESCE(c.contact_phone, '') AS phone
+         COALESCE(u.contact_number, '') AS phone
        FROM customers c
+       JOIN users u ON u.id = c.user_id
        ${where}
-       ORDER BY c.customer_id DESC
+       ORDER BY c.id DESC
        LIMIT $${pIdx++} OFFSET $${pIdx++}`,
       [...params, Number(limit), offset]
     );
@@ -94,23 +97,24 @@ router.get('/:id', async (req, res) => {
 
     const customerResult = await pool.query(
       `SELECT
-         c.customer_id,
+         c.id AS customer_id,
          c.user_id,
-         c.branch_id,
-         c.first_name,
-         c.last_name,
-         c.address,
+         u.branch_id,
+         u.full_name AS first_name,
+         '' AS last_name,
+         u.address,
          c.latitude,
          c.longitude,
-         c.contact_phone,
+         u.contact_number AS contact_phone,
          c.contact_person_fname,
          c.contact_person_lname,
          c.contact_person_phone,
-         c.status,
+         u.status,
          c.created_at,
          c.updated_at
        FROM customers c
-       WHERE c.customer_id = $1`,
+       JOIN users u ON u.id = c.user_id
+       WHERE c.id = $1`,
       [req.params.id]
     );
     if (customerResult.rows.length === 0) {
@@ -176,7 +180,7 @@ router.get('/:id', async (req, res) => {
 router.post('/', async (req, res) => {
   try {
     const pool = req.app.locals.pool;
-    const {
+    let {
       first_name, last_name, address, latitude, longitude,
       contact_phone, contact_person_fname, contact_person_lname,
       contact_person_phone, branch_id, user_id, status,
@@ -186,25 +190,54 @@ router.post('/', async (req, res) => {
       return res.status(400).json({ success: false, message: 'All required customer fields must be provided.' });
     }
 
+    // Automatic Geocoding if coordinates are missing
+    if (!latitude || !longitude) {
+      try {
+        const geoRes = await axios.get(`https://nominatim.openstreetmap.org/search`, {
+          params: { q: address, format: 'json', limit: 1 }
+        });
+        if (geoRes.data && geoRes.data.length > 0) {
+          latitude = geoRes.data[0].lat;
+          longitude = geoRes.data[0].lon;
+        }
+      } catch (geoErr) {
+        console.error('[Customers] Geocoding failed:', geoErr.message);
+      }
+      
+      // Fallback if geocoding fails or returns empty, since DB requires NOT NULL
+      if (!latitude || !longitude) {
+        latitude = 12.8797; // Default Philippines lat
+        longitude = 121.7740; // Default Philippines lng
+      }
+    }
+
+    const userResult = await pool.query(
+      `INSERT INTO users (branch_id, role_id, full_name, username, email, contact_number, address, status)
+       VALUES ($1, 7, $2, $3, $4, $5, $6, $7) RETURNING id`,
+      [
+        branch_id ? Number(branch_id) : 1,
+        (first_name + ' ' + last_name).trim(),
+        'cust_' + Date.now(),
+        contact_person_phone ? contact_person_phone + '@corvex.ph' : 'noemail@corvex.ph', // Defaulting since email is required
+        contact_phone.trim(),
+        address.trim(),
+        status || 'Active'
+      ]
+    );
+    const newUserId = userResult.rows[0].id;
+
     const result = await pool.query(
       `INSERT INTO customers
-        (user_id, branch_id, first_name, last_name, address, latitude, longitude,
-         contact_phone, contact_person_fname, contact_person_lname, contact_person_phone, status)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
-       RETURNING *`,
+        (user_id, latitude, longitude, contact_person_fname, contact_person_lname, contact_person_phone)
+       VALUES ($1,$2,$3,$4,$5,$6)
+       RETURNING id AS customer_id, user_id, latitude, longitude, contact_person_fname, contact_person_lname, contact_person_phone`,
       [
-        user_id ? Number(user_id) : null,
-        branch_id ? Number(branch_id) : null,
-        first_name.trim(),
-        last_name.trim(),
-        address.trim(),
+        newUserId,
         latitude ? Number(latitude) : null,
         longitude ? Number(longitude) : null,
-        contact_phone.trim(),
         contact_person_fname.trim(),
         contact_person_lname.trim(),
-        contact_person_phone.trim(),
-        status || 'Active',
+        contact_person_phone.trim()
       ]
     );
 
@@ -224,32 +257,51 @@ router.put('/:id', async (req, res) => {
       contact_person_phone, branch_id, user_id, status,
     } = req.body;
 
+    if (first_name !== undefined || last_name !== undefined || address !== undefined || contact_phone !== undefined || status !== undefined) {
+      const userUpdates = [];
+      const userParams = [];
+      let uIdx = 1;
+      const uAddField = (col, val) => { userUpdates.push(`${col} = $${uIdx++}`); userParams.push(val); };
+      if (first_name !== undefined || last_name !== undefined) {
+         const fn = first_name || ''; const ln = last_name || '';
+         uAddField('full_name', (fn + ' ' + ln).trim());
+      }
+      if (address !== undefined) uAddField('address', address);
+      if (contact_phone !== undefined) uAddField('contact_number', contact_phone);
+      if (status !== undefined) uAddField('status', status);
+      
+      if (userUpdates.length > 0) {
+        userParams.push(Number(req.params.id)); // Using customer.id to find user
+        await pool.query(
+          `UPDATE users SET ${userUpdates.join(', ')}, updated_at = NOW() WHERE id = (SELECT user_id FROM customers WHERE id = $${uIdx})`,
+          userParams
+        );
+      }
+    }
+
     const updates = [];
     const params = [];
     let pIdx = 1;
 
     const addField = (col, val) => { updates.push(`${col} = $${pIdx++}`); params.push(val); };
 
-    if (first_name !== undefined)            addField('first_name', first_name);
-    if (last_name !== undefined)             addField('last_name', last_name);
-    if (address !== undefined)               addField('address', address);
     if (latitude !== undefined)              addField('latitude', latitude ? Number(latitude) : null);
     if (longitude !== undefined)             addField('longitude', longitude ? Number(longitude) : null);
-    if (contact_phone !== undefined)         addField('contact_phone', contact_phone);
     if (contact_person_fname !== undefined)  addField('contact_person_fname', contact_person_fname);
     if (contact_person_lname !== undefined)  addField('contact_person_lname', contact_person_lname);
     if (contact_person_phone !== undefined)  addField('contact_person_phone', contact_person_phone);
-    if (branch_id !== undefined)             addField('branch_id', branch_id ? Number(branch_id) : null);
     if (user_id !== undefined)               addField('user_id', user_id ? Number(user_id) : null);
-    if (status !== undefined)                addField('status', status);
 
-    if (!updates.length) return res.status(400).json({ success: false, message: 'No fields to update.' });
-
-    params.push(Number(req.params.id));
-    const result = await pool.query(
-      `UPDATE customers SET ${updates.join(', ')}, updated_at = NOW() WHERE customer_id = $${pIdx} RETURNING *`,
-      params
-    );
+    let result = null;
+    if (updates.length > 0) {
+      params.push(Number(req.params.id));
+      result = await pool.query(
+        `UPDATE customers SET ${updates.join(', ')}, updated_at = NOW() WHERE id = $${pIdx} RETURNING id AS customer_id, *`,
+        params
+      );
+    } else {
+      result = await pool.query(`SELECT id AS customer_id, * FROM customers WHERE id = $1`, [Number(req.params.id)]);
+    }
 
     if (result.rows.length === 0) return res.status(404).json({ success: false, message: 'Customer not found.' });
     return res.status(200).json({ success: true, message: 'Customer updated.', data: result.rows[0] });

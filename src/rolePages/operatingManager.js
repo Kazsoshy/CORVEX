@@ -4,7 +4,6 @@ export const operatingManagerRole = {
   homePath: '/operating-manager',
   entryPath: '/operating-manager/dashboard',
   loginPath: '/operating-manager',
-  accent: 'Cross-branch performance, administration, and field operations',
   navSections: [
     {
       title: 'Dashboard',
