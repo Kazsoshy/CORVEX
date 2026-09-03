@@ -1,0 +1,10 @@
+Operating Manager merge notes
+
+- Admin and Branch Manager responsibilities now live under the Operating Manager role.
+- Keep the executive dashboard, branch performance, field operations, GIS, reports, alerts, notifications, and profile flows under the Operating Manager shell.
+- Use nested Operating Manager paths for compatibility and cleaner navigation:
+  - `/operating-manager/admin/*` for administration screens.
+  - `/operating-manager/operations/*` for branch operations screens.
+- Legacy `/admin/*` and `/branch-manager/*` URLs should continue to resolve, but they are compatibility routes only.
+- Inventory and approval workflows should treat Operating Manager as the approval authority that used to be split between Admin and Branch Manager.
+- Keep charts and mock data in the admin/operations pages so the prototype still feels complete without a backend.

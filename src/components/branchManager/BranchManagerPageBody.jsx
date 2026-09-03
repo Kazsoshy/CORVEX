@@ -1,0 +1,1507 @@
+import { useEffect, useMemo, useState } from 'react';
+import { Link } from 'react-router-dom';
+import {
+  AreaChart, Area, BarChart, Bar, LineChart, Line,
+  XAxis, YAxis, CartesianGrid, Tooltip, Legend,
+  ResponsiveContainer, PieChart, Pie, Cell,
+} from 'recharts';
+import {
+  AUDIT_LOGS, ALERTS, BRANCH_ANALYTICS, CI_QUEUE, formatCurrency, getCIById,
+  getMapAccountById, MAP_ACCOUNTS, NOTIFICATIONS,
+} from '../../data/branchManagerMockData';
+import { EmptyState } from '../collector/EmptyState';
+import { LoadingState } from '../collector/LoadingState';
+import { NavIcon } from '../../navIcons';
+import LeafletMap from '../common/LeafletMap';
+import { StatusBadge } from '../StatusBadge';
+import { getBranchAnalytics, getBranchStaff, getBranchCustomers, getBranchCustomerById, getBranchAlerts, updateCIStatus } from '../../api/branchManagerService.js';
+import { getReportCollection, getReportSales, getReportInventory, getReportDelinquency, getReportCompliance, getReportKPI } from '../../api/reportsService.js';
+import { CreditHistoryListPage, CreditHistoryDetailPage } from '../shared/CreditHistoryPages';
+import { getCurrentUser } from '../../api/authService.js';
+// Re-export for use in other components
+export { getBranchAnalytics, getBranchStaff, getBranchCustomers, getBranchAlerts, updateCIStatus };
+
+const C = ['#2563eb','#06b6d4','#10b981','#f59e0b','#ef4444'];
+
+function cls(v) {
+  if (v === 'secondary') return 'button secondary';
+  if (v === 'ghost') return 'button ghost';
+  return 'button';
+}
+
+function Toolbar({ actions, onAction }) {
+  if (!actions?.length) return null;
+  return (
+    <header className="page-toolbar">
+      <div className="page-toolbar-main">
+        <div className="page-toolbar-actions">
+          {actions.map((a) => (
+            <button key={a.label} className={cls(a.variant)} type="button" onClick={() => onAction(a)}>{a.label}</button>
+          ))}
+        </div>
+      </div>
+    </header>
+  );
+}
+
+function Stats({ stats }) {
+  if (!stats?.length) return null;
+  return (
+    <section className="stats-grid">
+      {stats.map((s, i) => (
+        <article key={s.label} className="stat-card" style={{ '--stat-index': i }}>
+          <div className="stat-card-top"><span className="stat-index">{String(i+1).padStart(2,'0')}</span><span className="stat-dot" /></div>
+          <strong className="stat-value">{s.value}</strong>
+          <span className="stat-label">{s.label}</span>
+        </article>
+      ))}
+    </section>
+  );
+}
+
+function Severity({ severity }) {
+  const map = { Critical:'severity-critical', Warning:'severity-warning', Informational:'severity-info' };
+  return <span className={`severity-badge ${map[severity]??''}`}>{severity}</span>;
+}
+
+function Card({ title, sub, children }) {
+  return (
+    <section className="panel content-panel">
+      <div className="panel-section-header">
+        <div><h3>{title}</h3>{sub&&<p className="muted" style={{margin:'2px 0 0',fontSize:'0.85rem'}}>{sub}</p>}</div>
+      </div>
+      {children}
+    </section>
+  );
+}
+
+function StaffCard({ title, metrics, actions, onAction }) {
+  return (
+    <article className="account-card">
+      <div className="account-card-header"><h4>{title}</h4></div>
+      <div className="account-metrics">
+        {metrics.map((m) => <div key={m.label}><span className="metric-label">{m.label}</span><strong>{m.value}</strong></div>)}
+      </div>
+      <div className="account-card-actions">
+        {actions.map((a) => <button key={a.label} className={cls(a.variant)} type="button" onClick={() => onAction(a)}>{a.label}</button>)}
+      </div>
+    </article>
+  );
+}
+
+// ── Dashboard ─────────────────────────────────────────────────────────────────
+function DashboardPage({ navigate, branchName }) {
+  const currentUser = getCurrentUser();
+  const userName = currentUser?.fullName || 'User';
+  const userBranch = currentUser?.branch?.name || branchName || 'Branch';
+  
+  const [analytics, setAnalytics] = useState(null);
+  const [alerts, setAlerts] = useState([]);
+  const [staff, setStaff] = useState({ collectors: [], salesAgents: [] });
+  const [customers, setCustomers] = useState({ mapAccounts: [] });
+  const [collectionData, setCollectionData] = useState(null);
+  const [salesData, setSalesData] = useState(null);
+  const [delinquencyData, setDelinquencyData] = useState(null);
+  const [kpi, setKpi] = useState(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    async function fetchData() {
+      setLoading(true);
+      const [analyticsData, alertsData, staffData, customersData, reportCollection, reportSales, reportDelinquency, reportKpi] = await Promise.all([
+        getBranchAnalytics(),
+        getBranchAlerts(),
+        getBranchStaff(),
+        getBranchCustomers(),
+        getReportCollection(),
+        getReportSales(),
+        getReportDelinquency(),
+        getReportKPI(),
+      ]);
+      if (analyticsData.success) setAnalytics(analyticsData.data);
+      if (alertsData.success) setAlerts(alertsData.data.alerts);
+      if (staffData.success) setStaff(staffData.data);
+      if (customersData.success) setCustomers(customersData.data);
+      if (reportCollection.success) setCollectionData(reportCollection.data);
+      if (reportSales.success) setSalesData(reportSales.data);
+      if (reportDelinquency.success) setDelinquencyData(reportDelinquency.data);
+      if (reportKpi.success) setKpi(reportKpi.data);
+      setLoading(false);
+    }
+    fetchData();
+  }, []);
+
+  const unread = 0; // Would come from notifications API
+  const critical = alerts.filter((a) => a.severity === 'Critical');
+
+  if (loading) return <LoadingState />;
+
+  return (
+    <div className="page">
+      <section className="panel dashboard-greeting">
+        <div className="dashboard-greeting-main">
+          <p className="dashboard-eyebrow">{userBranch}</p>
+          <h2>{userName}</h2>
+          <p className="muted">Branch Health: <strong>{analytics?.healthScore || 0}/100</strong></p>
+        </div>
+        <Link to="/branch-manager/notifications" className="notification-bell" aria-label={`${unread} unread`}>
+          <NavIcon name="bell" />{unread>0&&<span className="notification-badge">{unread}</span>}
+        </Link>
+      </section>
+
+      <Stats stats={[
+        {label:'Collection Rate',value:`${analytics?.collectionRateToday || kpi?.collectionRate || 0}%`},
+        {label:'Route Compliance',value:`${analytics?.routeCompliance || 0}%`},
+        {label:'Sales Visit Completion',value:`${analytics?.salesVisitCompletion || 0}%`},
+        {label:'Pending CI Approvals',value:String(analytics?.pendingCI || 0)},
+        {label:'Overdue Accounts',value:String(kpi?.totalOutstanding > 0 ? Math.round(kpi.totalOutstanding / 1000) : 0)},
+        {label:'Stock Alerts',value:String(kpi?.stockAlertsCount || analytics?.stockAlertsCount || 0)},
+      ]} />
+
+      <div className="grid two-up">
+        <Card title="Daily Collection vs Target" sub="This week">
+          <ResponsiveContainer width="100%" height={220}>
+            <AreaChart data={collectionData?.daily || []}>
+              <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9"/>
+              <XAxis dataKey="day" tick={{fontSize:12}}/>
+              <YAxis tick={{fontSize:11}} tickFormatter={(v)=>`${(v/1000).toFixed(0)}k`}/>
+              <Tooltip formatter={(v)=>formatCurrency(v)}/>
+              <Legend/>
+              <Area type="monotone" dataKey="target" name="Target" stroke="#e2e8f0" fill="#f1f5f9" strokeWidth={2} strokeDasharray="5 5"/>
+              <Area type="monotone" dataKey="amount" name="Collected" stroke="#2563eb" fill="#2563eb" fillOpacity={0.12} strokeWidth={2}/>
+            </AreaChart>
+          </ResponsiveContainer>
+        </Card>
+        <Card title="Sales vs Target" sub="This week">
+          <ResponsiveContainer width="100%" height={220}>
+            <BarChart data={salesData?.weekly || []}>
+              <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9"/>
+              <XAxis dataKey="day" tick={{fontSize:12}}/>
+              <YAxis tick={{fontSize:11}} tickFormatter={(v)=>`${(v/1000).toFixed(0)}k`}/>
+              <Tooltip formatter={(v)=>formatCurrency(v)}/><Legend/>
+              <Bar dataKey="target" name="Target" fill="#e2e8f0" radius={[4,4,0,0]}/>
+              <Bar dataKey="actual" name="Actual" fill="#94a3b8" radius={[4,4,0,0]}/>
+            </BarChart>
+          </ResponsiveContainer>
+        </Card>
+      </div>
+
+      <div className="grid two-up">
+        <Card title="Delinquency Trend" sub="Weekly overdue accounts">
+          <ResponsiveContainer width="100%" height={200}>
+            <AreaChart data={delinquencyData?.delinquency || []}>
+              <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9"/><XAxis dataKey="week" tick={{fontSize:12}}/><YAxis tick={{fontSize:12}}/><Tooltip/><Legend/>
+              <Area type="monotone" dataKey="accounts" name="Overdue" stroke="#dc2626" fill="#dc2626" fillOpacity={0.1} strokeWidth={2}/>
+              <Area type="monotone" dataKey="rate" name="Rate %" stroke="#d97706" fill="#d97706" fillOpacity={0.08} strokeWidth={2}/>
+            </AreaChart>
+          </ResponsiveContainer>
+        </Card>
+        <section className="panel content-panel">
+          <div className="panel-section-header">
+            <h3>Critical Alerts</h3>
+            <button className="button ghost" type="button" onClick={()=>navigate('/branch-manager/alerts')}>View All</button>
+          </div>
+          <ul className="widget-list">
+            {critical.slice(0,4).map((a)=>(
+              <li key={a.id}><div><strong>{a.title}</strong><span className="muted">{a.category}</span></div><Severity severity={a.severity}/></li>
+            ))}
+          </ul>
+        </section>
+      </div>
+
+      <Toolbar actions={[
+        {label:'Field Operations',to:'/branch-manager/field-operations'},
+        {label:'Customers',to:'/branch-manager/customers',variant:'secondary'},
+        {label:'Approve CIs',to:'/branch-manager/ci-approvals',variant:'secondary'},
+        {label:'Leaflet | OpenStreetMap',to:'/branch-manager/leaflet',variant:'secondary'},
+        {label:'Reports',to:'/branch-manager/reports',variant:'secondary'},
+      ]} onAction={(a)=>navigate(a.to)}/>
+    </div>
+  );
+}
+
+// ── Field Operations (combined hub + tab navigation) ─────────────────────────
+function FieldOperationsHub({ navigate, showToast }) {
+  const [tab, setTab] = useState('overview');
+  const [staff, setStaff] = useState({ collectors: [], salesAgents: [] });
+  const [analytics, setAnalytics] = useState(null);
+  const [loading, setLoading] = useState(true);
+
+  const tabs = [{key:'overview',label:'Overview'},{key:'collectors',label:'Collector Routes'},{key:'sales',label:'Sales Schedules'},{key:'performance',label:'Route Performance'}];
+
+  useEffect(() => {
+    async function fetchData() {
+      setLoading(true);
+      const [staffData, analyticsData] = await Promise.all([
+        getBranchStaff(),
+        getBranchAnalytics(),
+      ]);
+      if (staffData.success) setStaff(staffData.data);
+      if (analyticsData.success) setAnalytics(analyticsData.data);
+      setLoading(false);
+    }
+    fetchData();
+  }, []);
+
+  const collectorChart = staff.collectors.map((c)=>({name:c.name.split(' ')[0],compliance:c.complianceScore,recovery:c.recoveryRate}));
+  const salesChart = staff.salesAgents.map((a)=>({name:a.name.split(' ')[0],visits:a.visitCompletionRate,conversion:a.conversionRate}));
+
+  if (loading) return <LoadingState />;
+
+  return (
+    <div className="page">
+      <div className="segmented-control" style={{marginBottom:24,flexWrap:'wrap'}}>
+        {tabs.map((t)=><button key={t.key} className={tab===t.key?'segment active':'segment'} type="button" onClick={()=>setTab(t.key)}>{t.label}</button>)}
+      </div>
+
+      {tab==='overview'&&(<>
+        <Stats stats={[
+          {label:'Active Collectors',value:String(staff.collectors.length)},
+          {label:'Active Sales Agents',value:String(staff.salesAgents.length)},
+          {label:'Route Compliance',value:`${analytics?.routeCompliance || 0}%`},
+          {label:'Sales Completion',value:`${analytics?.salesVisitCompletion || 0}%`},
+        ]}/>
+        <div className="grid two-up">
+          <Card title="Collector Performance" sub="Compliance & recovery">
+            <ResponsiveContainer width="100%" height={220}>
+              <BarChart data={collectorChart}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9"/>
+                <XAxis dataKey="name" tick={{fontSize:12}}/><YAxis domain={[0,100]} unit="%" tick={{fontSize:12}}/><Tooltip formatter={(v)=>`${v}%`}/><Legend/>
+                <Bar dataKey="compliance" name="Compliance" fill="#2563eb" radius={[4,4,0,0]}/>
+                <Bar dataKey="recovery" name="Recovery" fill="#94a3b8" radius={[4,4,0,0]}/>
+              </BarChart>
+            </ResponsiveContainer>
+          </Card>
+          <Card title="Sales Agent Performance" sub="Visit completion & conversion">
+            <ResponsiveContainer width="100%" height={220}>
+              <BarChart data={salesChart}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9"/>
+                <XAxis dataKey="name" tick={{fontSize:12}}/><YAxis domain={[0,100]} unit="%" tick={{fontSize:12}}/><Tooltip formatter={(v)=>`${v}%`}/><Legend/>
+                <Bar dataKey="visits" name="Visit Completion" fill="#64748b" radius={[4,4,0,0]}/>
+                <Bar dataKey="conversion" name="Conversion" fill="#10b981" radius={[4,4,0,0]}/>
+              </BarChart>
+            </ResponsiveContainer>
+          </Card>
+        </div>
+        <Card title="Collector Performance Summary" sub="Current branch metrics">
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 16, padding: '12px 0' }}>
+            {staff.collectors.slice(0, 4).map((c) => (
+              <div key={c.id} style={{ background: '#f8fafc', padding: 12, borderRadius: 8, border: '1px solid #e2e8f0' }}>
+                <strong style={{ fontSize: '0.9rem' }}>{c.name}</strong>
+                <div style={{ marginTop: 8, display: 'flex', flexDirection: 'column', gap: 4, fontSize: '0.85rem', color: '#475569' }}>
+                  <span>Assigned: {c.accountsAssigned}</span>
+                  <span>Visited: {c.accountsVisited}</span>
+                  <span>Pending: {c.accountsPending}</span>
+                  <span>Compliance: {c.complianceScore}%</span>
+                  <span>Collected: {formatCurrency(c.collectionAmount)}</span>
+                </div>
+              </div>
+            ))}
+          </div>
+        </Card>
+      </>)}
+
+      {tab==='collectors'&&(
+        <div className="account-card-grid">
+          {staff.collectors.map((c)=>(
+            <StaffCard key={c.id} title={c.name}
+              metrics={[{label:'Assigned',value:c.accountsAssigned},{label:'Visited',value:c.accountsVisited},{label:'Pending',value:c.accountsPending},{label:'Compliance',value:`${c.complianceScore}%`},{label:'Collected',value:formatCurrency(c.collectionAmount)}]}
+              actions={[{label:'Expand Route',action:'detail'},{label:'View on Map',action:'map',variant:'ghost'}]}
+              onAction={(a)=>{ if(a.action==='detail') navigate(`/branch-manager/field-operations/collectors/${c.id}`); else navigate('/branch-manager/leaflet'); }}
+            />
+          ))}
+        </div>
+      )}
+
+      {tab==='sales'&&(
+        <div className="account-card-grid">
+          {staff.salesAgents.map((a)=>(
+            <StaffCard key={a.id} title={a.name}
+              metrics={[{label:'Customers',value:a.customersAssigned},{label:'Visits',value:a.visitsCompleted},{label:'Sales',value:a.salesLogged},{label:'Revenue',value:formatCurrency(a.totalSalesAmount)}]}
+              actions={[{label:'Expand Schedule',action:'detail'},{label:'View on Map',action:'map',variant:'ghost'}]}
+              onAction={(act)=>{ if(act.action==='detail') navigate(`/branch-manager/field-operations/sales/${a.id}`); else navigate('/branch-manager/leaflet'); }}
+            />
+          ))}
+        </div>
+      )}
+
+      {tab==='performance'&&(
+        <section className="panel content-panel">
+          <div className="panel-section-header"><h3>Route Performance Summary</h3></div>
+          <div className="table-shell">
+            <table className="data-table">
+              <thead><tr><th>Staff</th><th>Type</th><th>Compliance</th><th>Recovery / Revenue</th><th>Missed</th></tr></thead>
+              <tbody>
+                {staff.collectors.map((c)=><tr key={c.id}><td>{c.name}</td><td>Collector</td><td>{c.complianceScore}%</td><td>{c.recoveryRate}%</td><td>{c.missedVisits}</td></tr>)}
+                {staff.salesAgents.map((a)=><tr key={a.id}><td>{a.name}</td><td>Sales</td><td>{a.visitCompletionRate}%</td><td>{formatCurrency(a.totalSalesAmount)}</td><td>—</td></tr>)}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      )}
+    </div>
+  );
+}
+
+function CollectorDetailPage({ collectorId, navigate }) {
+  const [staff, setStaff] = useState({ collectors: [], salesAgents: [] });
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    async function load() {
+      setLoading(true);
+      const result = await getBranchStaff();
+      if (result.success) setStaff(result.data);
+      setLoading(false);
+    }
+    load();
+  }, []);
+
+  const c = staff.collectors.find((x) => x.id === String(collectorId));
+  if (loading) return <LoadingState />;
+  if (!c) return <EmptyState title="Collector not found" actionLabel="Back" onAction={()=>navigate('/branch-manager/field-operations')}/>;
+  return (
+    <div className="page">
+      <Stats stats={[{label:'Compliance',value:`${c.complianceScore}%`},{label:'Success Rate',value:`${c.collectionSuccessRate}%`},{label:'Avg Visit',value:c.avgVisitDuration},{label:'Recovery',value:`${c.recoveryRate}%`}]}/>
+      <section className="panel content-panel">
+        <div className="panel-section-header"><h3>Route Timeline</h3><span className="muted">GPS: {c.gpsAttendance?'Active':'Off'}</span></div>
+        {c.route.length?(<div className="table-shell"><table className="data-table"><thead><tr><th>Account</th><th>Status</th><th>Time</th><th>Amount</th></tr></thead><tbody>{c.route.map((r)=><tr key={r.account}><td>{r.account}</td><td>{r.status}</td><td>{r.time}</td><td>{r.amount?formatCurrency(r.amount):'—'}</td></tr>)}</tbody></table></div>):<EmptyState title="No route data"/>}
+        <div style={{ marginTop: 16 }}>
+          <LeafletMap 
+            center={[7.1907, 125.4553]} 
+            zoom={13} 
+            height={400} 
+            routingWaypoints={[
+              [7.1907, 125.4553],
+              [7.1950, 125.4600],
+              [7.2000, 125.4500]
+            ]}
+            markers={[
+              { id: 'start', position: [7.1907, 125.4553], label: 'S', color: '#10b981', popup: 'Start Location' },
+              { id: 'wp1', position: [7.1950, 125.4600], label: '1', color: '#f59e0b', popup: 'Visit 1' },
+              { id: 'end', position: [7.2000, 125.4500], label: 'E', color: '#ef4444', popup: 'End Location' }
+            ]}
+          />
+        </div>
+      </section>
+      <Toolbar actions={[{label:'View on Map',to:'/branch-manager/leaflet',variant:'secondary'},{label:'Back',to:'/branch-manager/field-operations',variant:'ghost'}]} onAction={(a)=>navigate(a.to)}/>
+    </div>
+  );
+}
+
+function SalesAgentDetailPage({ agentId, navigate }) {
+  const [staff, setStaff] = useState({ collectors: [], salesAgents: [] });
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    async function load() {
+      setLoading(true);
+      const result = await getBranchStaff();
+      if (result.success) setStaff(result.data);
+      setLoading(false);
+    }
+    load();
+  }, []);
+
+  const a = staff.salesAgents.find((x) => x.id === String(agentId));
+  if (loading) return <LoadingState />;
+  if (!a) return <EmptyState title="Agent not found" actionLabel="Back" onAction={()=>navigate('/branch-manager/field-operations')}/>;
+  return (
+    <div className="page">
+      <Stats stats={[{label:'Visit Completion',value:`${a.visitCompletionRate}%`},{label:'Conversion',value:`${a.conversionRate}%`},{label:'Avg Sale',value:formatCurrency(a.avgSaleValue)},{label:'New Customers',value:String(a.newCustomersAcquired)}]}/>
+      <section className="panel content-panel">
+        {a.customers.length?(<><h4 className="subsection-title">Customers</h4><div style={{display:'flex',flexWrap:'wrap',gap:8,marginTop:8}}>{a.customers.map((c)=><span key={c} style={{padding:'5px 12px',borderRadius:999,background:'var(--surface)',border:'1px solid var(--surface-3)',fontSize:'0.88rem',fontWeight:500}}>{c}</span>)}</div></>):null}
+        {a.productPerformance.length?(<><h4 className="subsection-title" style={{marginTop:16}}>Product Performance</h4><ul className="widget-list">{a.productPerformance.map((p)=><li key={p.product}><div><strong>{p.product}</strong></div><span>{p.units} units</span></li>)}</ul></>):null}
+      </section>
+      <Toolbar actions={[{label:'Back',to:'/branch-manager/field-operations',variant:'ghost'}]} onAction={(a)=>navigate(a.to)}/>
+    </div>
+  );
+}
+
+// ── Reports & Analytics (combined with tab nav) ───────────────────────────────
+function ReportsHubPage({ navigate, showToast }) {
+  const [tab, setTab] = useState('collection');
+  const [staff, setStaff] = useState({ collectors: [], salesAgents: [] });
+  const [collectionData, setCollectionData] = useState(null);
+  const [salesData, setSalesData] = useState(null);
+  const [inventoryData, setInventoryData] = useState(null);
+  const [delinquencyData, setDelinquencyData] = useState(null);
+  const [complianceData, setComplianceData] = useState(null);
+  const [kpi, setKpi] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const tabs = [{key:'collection',label:'Collections'},{key:'sales',label:'Sales'},{key:'inventory',label:'Inventory'},{key:'delinquency',label:'Delinquency'}];
+
+  useEffect(() => {
+    async function load() {
+      setLoading(true);
+      const [staffResult, collectionResult, salesResult, inventoryResult, delinquencyResult, complianceResult, kpiResult] = await Promise.all([
+        getBranchStaff(),
+        getReportCollection(),
+        getReportSales(),
+        getReportInventory(),
+        getReportDelinquency(),
+        getReportCompliance(),
+        getReportKPI(),
+      ]);
+      if (staffResult.success) setStaff(staffResult.data);
+      if (collectionResult.success) setCollectionData(collectionResult.data);
+      if (salesResult.success) setSalesData(salesResult.data);
+      if (inventoryResult.success) setInventoryData(inventoryResult.data);
+      if (delinquencyResult.success) setDelinquencyData(delinquencyResult.data);
+      if (complianceResult.success) setComplianceData(complianceResult.data);
+      if (kpiResult.success) setKpi(kpiResult.data);
+      setLoading(false);
+    }
+    load();
+  }, []);
+
+  const collectorAmt = staff.collectors.map((c)=>({name:c.name.split(' ')[0],amount:c.collectionAmount,compliance:c.complianceScore}));
+  const agentRev = staff.salesAgents.map((a)=>({name:a.name.split(' ')[0],revenue:a.totalSalesAmount,visits:a.visitCompletionRate}));
+
+  if (loading) return <LoadingState message="Loading reports..." />;
+
+  return (
+    <div className="page">
+      <div className="segmented-control" style={{marginBottom:24,flexWrap:'wrap'}}>
+        {tabs.map((t)=><button key={t.key} className={tab===t.key?'segment active':'segment'} type="button" onClick={()=>setTab(t.key)}>{t.label}</button>)}
+      </div>
+      <div style={{display:'flex',justifyContent:'flex-end',gap:8,marginBottom:16}}>
+        <button className="button secondary" type="button" onClick={()=>showToast('Export PDF initiated.','success')}>Export PDF</button>
+        <button className="button secondary" type="button" onClick={()=>showToast('Export Excel initiated.','success')}>Export Excel</button>
+      </div>
+
+      {tab==='collection'&&(<>
+        <Stats stats={[
+          {label:'Collections (7 days)',value:formatCurrency(collectionData?.summary?.totalCollected || 0)},
+          {label:'Collection Rate',value:`${collectionData?.summary?.collectionRate || 0}%`},
+          {label:'Target',value:formatCurrency(collectionData?.summary?.totalTarget || 0)},
+          {label:'Active Days',value:String(collectionData?.summary?.daysWithCollections || 0)},
+        ]}/>
+        <div className="grid two-up">
+          <Card title="Daily Collection vs Target" sub="Last 7 days">
+            <ResponsiveContainer width="100%" height={220}>
+              <AreaChart data={collectionData?.daily || []}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9"/><XAxis dataKey="day" tick={{fontSize:12}}/><YAxis tick={{fontSize:11}} tickFormatter={(v)=>`${(v/1000).toFixed(0)}k`}/><Tooltip formatter={(v)=>formatCurrency(v)}/><Legend/>
+                <Area type="monotone" dataKey="target" name="Target" stroke="#e2e8f0" fill="#f1f5f9" strokeWidth={2} strokeDasharray="5 5"/>
+                <Area type="monotone" dataKey="amount" name="Collected" stroke="#2563eb" fill="#2563eb" fillOpacity={0.12} strokeWidth={2}/>
+              </AreaChart>
+            </ResponsiveContainer>
+          </Card>
+          <Card title="Collector Amounts">
+            <ResponsiveContainer width="100%" height={220}>
+              <BarChart data={collectorAmt}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9"/><XAxis dataKey="name" tick={{fontSize:12}}/><YAxis tick={{fontSize:11}} tickFormatter={(v)=>`${(v/1000).toFixed(0)}k`}/><Tooltip/><Legend/>
+                <Bar dataKey="amount" name="Collected (PHP)" fill="#2563eb" radius={[4,4,0,0]}/>
+                <Bar dataKey="compliance" name="Compliance %" fill="#94a3b8" radius={[4,4,0,0]}/>
+              </BarChart>
+            </ResponsiveContainer>
+          </Card>
+        </div>
+      </>)}
+
+      {tab==='sales'&&(<>
+        <Stats stats={[
+          {label:'Sales (7 days)',value:formatCurrency(salesData?.summary?.totalActual || 0)},
+          {label:'Sales Efficiency',value:`${salesData?.summary?.salesEfficiency || 0}%`},
+          {label:'Invoices',value:String(salesData?.summary?.totalInvoices || 0)},
+          {label:'Target',value:formatCurrency(salesData?.summary?.totalTarget || 0)},
+        ]}/>
+        <div className="grid two-up">
+          <Card title="Sales vs Target" sub="Last 7 days">
+            <ResponsiveContainer width="100%" height={220}>
+              <BarChart data={salesData?.weekly || []}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9"/><XAxis dataKey="day" tick={{fontSize:12}}/><YAxis tick={{fontSize:11}} tickFormatter={(v)=>`${(v/1000).toFixed(0)}k`}/><Tooltip formatter={(v)=>formatCurrency(v)}/><Legend/>
+                <Bar dataKey="target" name="Target" fill="#e2e8f0" radius={[4,4,0,0]}/>
+                <Bar dataKey="actual" name="Actual" fill="#94a3b8" radius={[4,4,0,0]}/>
+              </BarChart>
+            </ResponsiveContainer>
+          </Card>
+          <Card title="Agent Revenue & Visits">
+            <ResponsiveContainer width="100%" height={220}>
+              <BarChart data={agentRev}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9"/><XAxis dataKey="name" tick={{fontSize:12}}/><YAxis yAxisId="l" tick={{fontSize:11}} tickFormatter={(v)=>`${(v/1000).toFixed(0)}k`}/><YAxis yAxisId="r" orientation="right" domain={[0,100]} unit="%" tick={{fontSize:12}}/><Tooltip/><Legend/>
+                <Bar yAxisId="l" dataKey="revenue" name="Revenue" fill="#64748b" radius={[4,4,0,0]}/>
+                <Bar yAxisId="r" dataKey="visits" name="Visit %" fill="#10b981" radius={[4,4,0,0]}/>
+              </BarChart>
+            </ResponsiveContainer>
+          </Card>
+        </div>
+      </>)}
+
+      {tab==='inventory'&&(<>
+        <Stats stats={[
+          {label:'Inventory Health',value:`${inventoryData?.healthPct || 0}%`},
+          {label:'Stock Alerts',value:String(inventoryData?.alertsCount || 0)},
+          {label:'Total Products',value:String(inventoryData?.totalProducts || 0)},
+          {label:'Out of Stock',value:String(inventoryData?.summary?.outOfStock || 0)},
+        ]}/>
+        <div className="grid two-up">
+          <Card title="Inventory Status">
+            <ResponsiveContainer width="100%" height={220}>
+              <PieChart>
+                <Pie data={[
+                  { name: 'Sufficient', value: inventoryData?.summary?.sufficient || 0, color: '#10b981' },
+                  { name: 'Low Stock', value: inventoryData?.summary?.low || 0, color: '#f59e0b' },
+                  { name: 'Critical', value: inventoryData?.summary?.critical || 0, color: '#ef4444' },
+                  { name: 'Out of Stock', value: inventoryData?.summary?.outOfStock || 0, color: '#64748b' },
+                ]} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={80} label={({ name, value }) => `${name}: ${value}`}>
+                  {[
+                    { name: 'Sufficient', color: '#10b981' },
+                    { name: 'Low Stock', color: '#f59e0b' },
+                    { name: 'Critical', color: '#ef4444' },
+                    { name: 'Out of Stock', color: '#64748b' },
+                  ].map((entry) => <Cell key={entry.name} fill={entry.color} />)}
+                </Pie>
+                <Tooltip />
+                <Legend />
+              </PieChart>
+            </ResponsiveContainer>
+          </Card>
+          <Card title="Items Requiring Attention">
+            <div className="table-shell">
+              <table className="data-table">
+                <thead><tr><th>Product</th><th>SKU</th><th>Stock</th><th>Status</th></tr></thead>
+                <tbody>
+                  {(inventoryData?.lowStockItems || []).length ? inventoryData.lowStockItems.map((item) => (
+                    <tr key={item.sku}>
+                      <td>{item.product_name}</td>
+                      <td>{item.sku}</td>
+                      <td>{item.available_stock}</td>
+                      <td><StatusBadge status={item.status} /></td>
+                    </tr>
+                  )) : (
+                    <tr><td colSpan={4}>All products are at sufficient stock levels.</td></tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </Card>
+        </div>
+      </>)}
+
+      {tab==='delinquency'&&(<>
+        <Stats stats={[
+          {label:'Overdue Accounts',value:String(delinquencyData?.summary?.totalOverdue || 0)},
+          {label:'Avg Rate',value:`${delinquencyData?.summary?.avgRate || 0}%`},
+          {label:'Trend',value:delinquencyData?.summary?.trend || 'stable'},
+          {label:'Branch Health',value:`${kpi?.healthScore || 0}/100`},
+        ]}/>
+        <div className="grid two-up">
+          <Card title="Delinquency Trend" sub="Weekly overdue accounts">
+            <ResponsiveContainer width="100%" height={220}>
+              <AreaChart data={delinquencyData?.delinquency || []}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9"/><XAxis dataKey="week" tick={{fontSize:12}}/><YAxis tick={{fontSize:12}}/><Tooltip/><Legend/>
+                <Area type="monotone" dataKey="accounts" name="Overdue" stroke="#dc2626" fill="#dc2626" fillOpacity={0.1} strokeWidth={2}/>
+                <Area type="monotone" dataKey="rate" name="Rate %" stroke="#d97706" fill="#d97706" fillOpacity={0.08} strokeWidth={2}/>
+              </AreaChart>
+            </ResponsiveContainer>
+          </Card>
+          <Card title="Route Compliance Trend" sub="Weekly per collector">
+            <ResponsiveContainer width="100%" height={220}>
+              <LineChart data={complianceData?.compliance?.[0]?.data?.map((d, i) => {
+                const point = { week: d.week };
+                complianceData.compliance.forEach((c) => { point[c.name] = c.data[i]?.rate || 0; });
+                return point;
+              }) || []}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9"/><XAxis dataKey="week" tick={{fontSize:12}}/><YAxis domain={[80,100]} unit="%" tick={{fontSize:12}}/><Tooltip formatter={(v)=>`${v}%`}/><Legend/>
+                {complianceData?.compliance?.map((c, i) => <Line key={c.name} type="monotone" dataKey={c.name} stroke={['#2563eb','#06b6d4','#10b981','#f59e0b','#ef4444'][i % 5]} strokeWidth={2} dot={false}/>)}
+              </LineChart>
+            </ResponsiveContainer>
+          </Card>
+        </div>
+      </>)}
+
+      <div style={{ marginTop: 24 }}>
+        <Card title="Overall KPI Summary">
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 16, padding: '12px 0' }}>
+            <div><strong>Health Score</strong><div style={{ fontSize: '1.5rem', color: '#2563eb' }}>{kpi?.healthScore || 0}/100</div></div>
+            <div><strong>Active Collectors</strong><div style={{ fontSize: '1.5rem', color: '#10b981' }}>{kpi?.activeCollectors || 0}</div></div>
+            <div><strong>Active Sales Agents</strong><div style={{ fontSize: '1.5rem', color: '#8b5cf6' }}>{kpi?.activeSalesAgents || 0}</div></div>
+            <div><strong>Total Customers</strong><div style={{ fontSize: '1.5rem' }}>{kpi?.totalCustomers || 0}</div></div>
+            <div><strong>Outstanding Balance</strong><div style={{ fontSize: '1.5rem', color: '#ef4444' }}>{formatCurrency(kpi?.totalOutstanding || 0)}</div></div>
+            <div><strong>Collections (7d)</strong><div style={{ fontSize: '1.5rem', color: '#059669' }}>{formatCurrency(kpi?.totalCollectionsAmount || 0)}</div></div>
+            <div><strong>Sales (7d)</strong><div style={{ fontSize: '1.5rem', color: '#2563eb' }}>{formatCurrency(kpi?.totalSalesAmount || 0)}</div></div>
+            <div><strong>Inventory Health</strong><div style={{ fontSize: '1.5rem' }}>{kpi?.inventoryHealth || 0}%</div></div>
+          </div>
+        </Card>
+      </div>
+    </div>
+  );
+}
+
+// ── Staff Performance (improved) ──────────────────────────────────────────────
+function StaffPerformancePage({ navigate }) {
+  const [tab, setTab] = useState('overview');
+  const [period, setPeriod] = useState('Daily');
+  const [staff, setStaff] = useState({ collectors: [], salesAgents: [] });
+  const [complianceData, setComplianceData] = useState(null);
+  const tabs = [{key:'overview',label:'Overview'},{key:'collectors',label:'Collectors'},{key:'sales',label:'Sales Agents'},{key:'scorecards',label:'Scorecards'}];
+
+  useEffect(() => {
+    async function load() {
+      const [staffResult, complianceResult] = await Promise.all([
+        getBranchStaff(),
+        getReportCompliance(),
+      ]);
+      if (staffResult.success) setStaff(staffResult.data);
+      if (complianceResult.success) setComplianceData(complianceResult.data);
+    }
+    load();
+  }, []);
+
+  const topCollector = [...staff.collectors].sort((a,b)=>b.complianceScore-a.complianceScore)[0];
+  const topAgent = [...staff.salesAgents].sort((a,b)=>b.totalSalesAmount-a.totalSalesAmount)[0];
+  const combined = [
+    ...staff.collectors.map((c)=>({name:c.name,role:'Collector',score:c.complianceScore,metric:`${c.recoveryRate}% recovery`})),
+    ...staff.salesAgents.map((a)=>({name:a.name,role:'Sales',score:a.visitCompletionRate,metric:formatCurrency(a.totalSalesAmount)})),
+  ].sort((a,b)=>b.score-a.score);
+
+  const collectorBar = staff.collectors.map((c)=>({name:c.name.split(' ')[0],score:c.complianceScore,recovery:c.recoveryRate,missed:c.missedVisits}));
+  const salesBar = staff.salesAgents.map((a)=>({name:a.name.split(' ')[0],visits:a.visitCompletionRate,conversion:a.conversionRate,newCustomers:a.newCustomersAcquired}));
+
+  const complianceChartData = complianceData?.compliance?.[0]?.data?.map((d, i) => {
+    const point = { week: d.week };
+    complianceData.compliance.forEach((c) => { point[c.name] = c.data[i]?.rate || 0; });
+    return point;
+  }) || [];
+
+  return (
+    <div className="page">
+      <div className="segmented-control" style={{marginBottom:24,flexWrap:'wrap'}}>
+        {tabs.map((t)=><button key={t.key} className={tab===t.key?'segment active':'segment'} type="button" onClick={()=>setTab(t.key)}>{t.label}</button>)}
+      </div>
+
+      {tab==='overview'&&(<>
+        <Stats stats={[
+          {label:'Active Collectors',value:String(staff.collectors.length)},
+          {label:'Active Sales Agents',value:String(staff.salesAgents.length)},
+          {label:'Top Collector',value:topCollector?topCollector.name.split(' ')[0]:'—'},
+          {label:'Top Sales Agent',value:topAgent?topAgent.name.split(' ')[0]:'—'},
+        ]}/>
+        <div className="grid two-up">
+          <Card title="Collector Scorecard" sub="Compliance & recovery rates">
+            <ResponsiveContainer width="100%" height={220}>
+              <BarChart data={collectorBar}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9"/><XAxis dataKey="name" tick={{fontSize:12}}/><YAxis domain={[0,100]} unit="%" tick={{fontSize:12}}/><Tooltip formatter={(v)=>`${v}%`}/><Legend/>
+                <Bar dataKey="score" name="Compliance" fill="#2563eb" radius={[4,4,0,0]}/>
+                <Bar dataKey="recovery" name="Recovery" fill="#94a3b8" radius={[4,4,0,0]}/>
+              </BarChart>
+            </ResponsiveContainer>
+          </Card>
+          <Card title="Sales Agent Scorecard" sub="Visit completion & conversion">
+            <ResponsiveContainer width="100%" height={220}>
+              <BarChart data={salesBar}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9"/><XAxis dataKey="name" tick={{fontSize:12}}/><YAxis domain={[0,100]} unit="%" tick={{fontSize:12}}/><Tooltip formatter={(v)=>`${v}%`}/><Legend/>
+                <Bar dataKey="visits" name="Visit Completion" fill="#64748b" radius={[4,4,0,0]}/>
+                <Bar dataKey="conversion" name="Conversion" fill="#10b981" radius={[4,4,0,0]}/>
+              </BarChart>
+            </ResponsiveContainer>
+          </Card>
+        </div>
+        <Card title="Route Compliance Trend" sub="Weekly per collector">
+          <ResponsiveContainer width="100%" height={200}>
+            <LineChart data={complianceChartData}>
+              <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9"/><XAxis dataKey="week" tick={{fontSize:12}}/><YAxis domain={[80,100]} unit="%" tick={{fontSize:12}}/><Tooltip formatter={(v)=>`${v}%`}/><Legend/>
+              {complianceData?.compliance?.map((c, i) => <Line key={c.name} type="monotone" dataKey={c.name} stroke={['#2563eb','#06b6d4','#10b981','#f59e0b','#ef4444'][i % 5]} strokeWidth={2} dot={false}/>)}
+            </LineChart>
+          </ResponsiveContainer>
+        </Card>
+      </>)}
+
+      {tab==='collectors'&&(
+        <section className="panel content-panel">
+          <div className="panel-section-header">
+            <h3>Collector Rankings</h3>
+            <div className="segmented-control">
+              {['Daily','Weekly','Monthly'].map((p)=><button key={p} className={period===p?'segment active':'segment'} type="button" onClick={()=>setPeriod(p)}>{p}</button>)}
+            </div>
+          </div>
+          <div className="table-shell">
+            <table className="data-table">
+              <thead><tr><th>#</th><th>Collector</th><th>Compliance</th><th>Collections</th><th>Recovery</th><th>Missed</th></tr></thead>
+              <tbody>
+                {[...staff.collectors].sort((a,b)=>b.complianceScore-a.complianceScore).map((c,i)=>(
+                  <tr key={c.id}><td>{i+1}</td><td>{c.name}</td><td>{c.complianceScore}%</td><td>{formatCurrency(c.collectionAmount)}</td><td>{c.recoveryRate}%</td><td>{c.missedVisits}</td></tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      )}
+
+      {tab==='sales'&&(
+        <section className="panel content-panel">
+          <div className="panel-section-header">
+            <h3>Sales Agent Rankings</h3>
+            <div className="segmented-control">
+              {['Daily','Weekly','Monthly'].map((p)=><button key={p} className={period===p?'segment active':'segment'} type="button" onClick={()=>setPeriod(p)}>{p}</button>)}
+            </div>
+          </div>
+          <div className="table-shell">
+            <table className="data-table">
+              <thead><tr><th>#</th><th>Agent</th><th>Visit Completion</th><th>Revenue</th><th>New Customers</th><th>Sales</th></tr></thead>
+              <tbody>
+                {[...staff.salesAgents].sort((a,b)=>b.totalSalesAmount-a.totalSalesAmount).map((a,i)=>(
+                  <tr key={a.id}><td>{i+1}</td><td>{a.name}</td><td>{a.visitCompletionRate}%</td><td>{formatCurrency(a.totalSalesAmount)}</td><td>{a.newCustomersAcquired}</td><td>{a.salesLogged}</td></tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      )}
+
+      {tab==='scorecards'&&(
+        <section className="panel content-panel">
+          <div className="panel-section-header"><h3>Overall Rankings</h3></div>
+          <ul className="widget-list">
+            {combined.map((s,i)=>(
+              <li key={s.name}>
+                <div style={{display:'flex',alignItems:'center',gap:12}}>
+                  <span style={{width:28,height:28,borderRadius:'50%',background:'#2563eb',color:'#fff',display:'grid',placeItems:'center',fontSize:'0.75rem',fontWeight:700,flexShrink:0}}>#{i+1}</span>
+                  <div><strong>{s.name}</strong><span className="muted" style={{display:'block',fontSize:'0.82rem'}}>{s.role}</span></div>
+                </div>
+                <div style={{textAlign:'right'}}>
+                  <strong>{s.score}%</strong>
+                  <span className="muted" style={{display:'block',fontSize:'0.82rem'}}>{s.metric}</span>
+                </div>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+    </div>
+  );
+}
+
+// ── CI Queue ──────────────────────────────────────────────────────────────────
+function CIQueuePage({ navigate, showToast }) {
+  const [filter, setFilter] = useState('Pending');
+  const filtered = useMemo(()=>CI_QUEUE.filter((c)=>filter==='All'||c.status===filter),[filter]);
+  return (
+    <div className="page">
+      <section className="panel content-panel">
+        <div className="segmented-control">
+          {['Pending','Approved','Rejected','All'].map((f)=><button key={f} className={filter===f?'segment active':'segment'} type="button" onClick={()=>setFilter(f)}>{f}</button>)}
+        </div>
+      </section>
+      {filtered.length?(
+        <section className="panel content-panel">
+          <div className="table-shell"><table className="data-table">
+            <thead><tr><th>Customer</th><th>Submitted By</th><th>Date</th><th>Delinquency</th><th>Status</th><th>Actions</th></tr></thead>
+            <tbody>{filtered.map((ci)=>(<tr key={ci.id}><td>{ci.customerName}</td><td>{ci.submittedBy}</td><td>{ci.submissionDate}</td><td>{ci.delinquencyStatus}</td><td>{ci.status}</td><td className="table-actions">
+              <button className="icon-action-button" type="button" title="Open" onClick={()=>navigate(`/branch-manager/ci-approvals/${ci.id}`)}><NavIcon name="view" /></button>
+              {ci.status==='Pending'&&<><button className="icon-action-button" type="button" title="Approve" onClick={async () => {
+                const res = await updateCIStatus(ci.id, 'Approved');
+                if (res.success) { showToast(`Approved CI for ${ci.customerName}.`,'success'); navigate(0); }
+                else showToast(res.message, 'error');
+              }}><NavIcon name="check" /></button><button className="icon-action-button danger" type="button" title="Reject" onClick={async () => {
+                const res = await updateCIStatus(ci.id, 'Rejected', 'Rejected from queue');
+                if (res.success) { showToast(`Rejected CI for ${ci.customerName}.`,'error'); navigate(0); }
+                else showToast(res.message, 'error');
+              }}><NavIcon name="close" /></button></>}
+            </td></tr>))}</tbody>
+          </table></div>
+        </section>
+      ):<EmptyState title="No CI records" description="No items match this filter."/>}
+    </div>
+  );
+}
+
+function CIDetailPage({ ciId, navigate, showToast }) {
+  const ci = getCIById(ciId);
+  const [rejectReason, setRejectReason] = useState('');
+  const [showReject, setShowReject] = useState(false);
+  if (!ci) return <EmptyState title="CI not found" actionLabel="Back" onAction={()=>navigate('/branch-manager/ci-approvals')}/>;
+  return (
+    <div className="page">
+      <Stats stats={[{label:'Customer',value:ci.customerName},{label:'Risk Score',value:String(ci.riskScore)},{label:'Delinquency',value:ci.delinquencyStatus},{label:'Map Zone',value:ci.leafletClassification}]}/>
+      <section className="panel content-panel">
+        <ul className="info-grid"><li><span className="info-item-label">Purpose</span><span className="info-item-value">{ci.purpose}</span></li><li><span className="info-item-label">Monthly Income</span><span className="info-item-value">{formatCurrency(ci.monthlyIncome)}</span></li><li><span className="info-item-label">Business Type</span><span className="info-item-value">{ci.businessType}</span></li><li><span className="info-item-label">References</span><span className="info-item-value">{ci.references}</span></li><li><span className="info-item-label">Remarks</span><span className="info-item-value">{ci.formRemarks}</span></li></ul>
+        {ci.delinquencyFlags.length?(<div style={{marginTop:16,padding:12,background:'rgba(220,38,38,0.06)',borderRadius:12}}><strong>Delinquency Flags:</strong><ul className="flag-list" style={{marginTop:8}}>{ci.delinquencyFlags.map((f)=><li key={f}>{f}</li>)}</ul></div>):null}
+        {ci.paymentHistory.length?(<><h4 className="subsection-title">Payment History</h4><div className="table-shell"><table className="data-table"><thead><tr><th>Date</th><th>Amount</th><th>Status</th></tr></thead><tbody>{ci.paymentHistory.map((p)=><tr key={p.date}><td>{p.date}</td><td>{formatCurrency(p.amount)}</td><td>{p.status}</td></tr>)}</tbody></table></div></>):null}
+      </section>
+      {showReject&&<section className="panel form-panel content-panel"><div className="form-group"><label>Rejection Reason<span className="required">*</span></label><textarea value={rejectReason} onChange={(e)=>setRejectReason(e.target.value)} placeholder="Mandatory reason..."/></div></section>}
+      {ci.status==='Pending'?(
+        <Toolbar actions={[{label:'Approve',action:'approve'},{label:showReject?'Confirm Reject':'Reject',action:'reject',variant:'secondary'},{label:'Request Revision',action:'revision',variant:'secondary'},{label:'Back',to:'/branch-manager/ci-approvals',variant:'ghost'}]}
+          onAction={async (a)=>{
+            if(a.action==='approve'){
+              const res = await updateCIStatus(ci.id, 'Approved');
+              if (res.success) { showToast('CI approved.','success'); navigate('/branch-manager/ci-approvals'); }
+              else showToast(res.message, 'error');
+            }
+            else if(a.action==='reject'){
+              if(showReject){
+                if(!rejectReason.trim()){showToast('Reason required.','error');return;}
+                const res = await updateCIStatus(ci.id, 'Rejected', rejectReason);
+                if (res.success) { showToast(`CI rejected.`,'error'); navigate('/branch-manager/ci-approvals'); }
+                else showToast(res.message, 'error');
+              } else setShowReject(true);
+            }
+            else if(a.action==='revision'){
+              const res = await updateCIStatus(ci.id, 'Revision Requested');
+              if (res.success) { showToast('Revision requested.','success'); navigate('/branch-manager/ci-approvals'); }
+              else showToast(res.message, 'error');
+            }
+            else navigate(a.to);
+          }}/>
+      ):<Toolbar actions={[{label:'Back',to:'/branch-manager/ci-approvals',variant:'ghost'}]} onAction={(a)=>navigate(a.to)}/>}
+    </div>
+  );
+}
+
+// ── Customers ─────────────────────────────────────────────────────────────────
+function CustomersPage({ navigate, branchName }) {
+  const [search, setSearch] = useState('');
+  const [statusFilter, setStatusFilter] = useState('All');
+  const [paymentFilter, setPaymentFilter] = useState('All');
+  const [customers, setCustomers] = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    async function load() {
+      setLoading(true);
+      const result = await getBranchCustomers();
+      if (result.success) setCustomers(result.data.customers || []);
+      setLoading(false);
+    }
+    load();
+  }, []);
+
+  const filtered = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    return customers.filter((c) => {
+      const matchSearch = !q
+        || c.customerName.toLowerCase().includes(q)
+        || (c.address || '').toLowerCase().includes(q)
+        || (c.contact_phone || '').includes(q);
+      const matchStatus = statusFilter === 'All' || c.status === statusFilter;
+      const matchPayment = paymentFilter === 'All' || c.paymentStatus === paymentFilter;
+      return matchSearch && matchStatus && matchPayment;
+    });
+  }, [search, statusFilter, paymentFilter, customers]);
+
+  const totalOutstanding = customers.reduce((sum, c) => sum + (c.outstanding_balance || 0), 0);
+
+  if (loading) return <LoadingState message="Loading customers..." />;
+
+  return (
+    <div className="page">
+      <Stats stats={[
+        { label: 'Total Customers', value: String(customers.length) },
+        { label: 'Active', value: String(customers.filter((c) => c.status === 'Active').length) },
+        { label: 'With Balance', value: String(customers.filter((c) => c.outstanding_balance > 0).length) },
+        { label: 'Total Outstanding', value: formatCurrency(totalOutstanding) },
+      ]} />
+
+      <section className="panel content-panel">
+        <div className="panel-section-header">
+          <h3>Branch Customers</h3>
+          <span className="muted">{branchName}</span>
+        </div>
+        <div className="accounts-toolbar">
+          <input
+            className="search-input"
+            type="search"
+            placeholder="Search by customer name, address, or phone"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+          />
+          <div className="accounts-filters">
+            <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}>
+              {['All', 'Active', 'Inactive'].map((s) => (
+                <option key={s} value={s}>{s === 'All' ? 'All Statuses' : s}</option>
+              ))}
+            </select>
+            <select value={paymentFilter} onChange={(e) => setPaymentFilter(e.target.value)}>
+              {['All', 'Current', 'Overdue'].map((s) => (
+                <option key={s} value={s}>{s === 'All' ? 'All Payment Status' : s}</option>
+              ))}
+            </select>
+          </div>
+        </div>
+      </section>
+
+      {filtered.length ? (
+        <section className="panel content-panel">
+          <div className="table-shell">
+            <table className="data-table">
+              <thead>
+                <tr>
+                  <th>Customer</th>
+                  <th>Address</th>
+                  <th>Contact</th>
+                  <th>Outstanding</th>
+                  <th>Payment</th>
+                  <th>Status</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filtered.map((c) => (
+                  <tr key={c.id}>
+                    <td><strong>{c.customerName}</strong></td>
+                    <td>{c.address || '—'}</td>
+                    <td>{c.contact_phone || '—'}</td>
+                    <td>{formatCurrency(c.outstanding_balance || 0)}</td>
+                    <td><StatusBadge status={c.paymentStatus} /></td>
+                    <td><StatusBadge status={c.status} /></td>
+                    <td className="table-actions">
+                      <button className="icon-action-button" type="button" title="View" onClick={() => navigate(`/branch-manager/customers/${c.id}`)}>
+                        <NavIcon name="view" />
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      ) : (
+        <EmptyState title="No customers found" description="Adjust your search or filters, or add customers through the system." />
+      )}
+    </div>
+  );
+}
+
+function CustomerDetailPage({ customerId, navigate, branchName }) {
+  const [customer, setCustomer] = useState(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    async function load() {
+      setLoading(true);
+      const result = await getBranchCustomerById(customerId);
+      if (result.success) setCustomer(result.data);
+      setLoading(false);
+    }
+    load();
+  }, [customerId]);
+
+  if (loading) return <LoadingState message="Loading customer..." />;
+  if (!customer) {
+    return (
+      <EmptyState
+        title="Customer not found"
+        description="This customer may not belong to your branch or no longer exists."
+        actionLabel="Back to Customers"
+        onAction={() => navigate('/branch-manager/customers')}
+      />
+    );
+  }
+
+  const name = `${customer.first_name} ${customer.last_name}`;
+  const paymentStatus = Number(customer.activity?.outstanding_balance || 0) > 0 ? 'Overdue' : 'Current';
+
+  return (
+    <div className="page">
+      <section className="panel dashboard-greeting">
+        <div className="dashboard-greeting-main">
+          <p className="dashboard-eyebrow">{customer.branch_name || branchName}</p>
+          <h2>{name}</h2>
+          <p className="muted">{customer.address || 'No address on file'}</p>
+        </div>
+      </section>
+
+      <Stats stats={[
+        { label: 'Status', value: customer.status || '—' },
+        { label: 'Payment Status', value: paymentStatus },
+        { label: 'Outstanding', value: formatCurrency(Number(customer.activity?.outstanding_balance || 0)) },
+        { label: 'Purchase Volume', value: formatCurrency(Number(customer.activity?.purchase_volume || 0)) },
+      ]} />
+
+      <div className="grid two-up">
+        <section className="panel content-panel">
+          <div className="panel-section-header"><h3>Contact Information</h3></div>
+          <ul className="info-grid">
+            <li><span className="info-item-label">Customer Name</span><span className="info-item-value">{name}</span></li>
+            <li><span className="info-item-label">Branch</span><span className="info-item-value">{customer.branch_name || branchName}</span></li>
+            <li><span className="info-item-label">Address</span><span className="info-item-value">{customer.address || '—'}</span></li>
+            <li><span className="info-item-label">Contact Phone</span><span className="info-item-value">{customer.contact_phone || '—'}</span></li>
+            <li><span className="info-item-label">Contact Person</span><span className="info-item-value">{customer.contact_person_fname} {customer.contact_person_lname}</span></li>
+            <li><span className="info-item-label">Contact Person Phone</span><span className="info-item-value">{customer.contact_person_phone || '—'}</span></li>
+          </ul>
+        </section>
+
+        <section className="panel content-panel">
+          <div className="panel-section-header"><h3>Account Activity</h3></div>
+          <ul className="info-grid">
+            <li><span className="info-item-label">Outstanding Balance</span><span className="info-item-value">{formatCurrency(Number(customer.activity?.outstanding_balance || 0))}</span></li>
+            <li><span className="info-item-label">Purchase Volume</span><span className="info-item-value">{formatCurrency(Number(customer.activity?.purchase_volume || 0))}</span></li>
+            <li><span className="info-item-label">Last Collection</span><span className="info-item-value">{customer.activity?.last_collection_date || '—'}</span></li>
+            <li><span className="info-item-label">Last Sales Visit</span><span className="info-item-value">{customer.activity?.last_sales_visit || '—'}</span></li>
+          </ul>
+        </section>
+      </div>
+
+      {customer.creditInfo ? (
+        <section className="panel content-panel">
+          <div className="panel-section-header"><h3>Credit Information</h3></div>
+          <ul className="info-grid">
+            <li><span className="info-item-label">Credit Limit</span><span className="info-item-value">{formatCurrency(Number(customer.creditInfo.credit_limit || 0))}</span></li>
+            <li><span className="info-item-label">Monthly Income</span><span className="info-item-value">{formatCurrency(Number(customer.creditInfo.monthly_income || 0))}</span></li>
+            <li><span className="info-item-label">Credit Score</span><span className="info-item-value">{customer.creditInfo.credit_score || '—'}</span></li>
+            <li><span className="info-item-label">Employment Status</span><span className="info-item-value">{customer.creditInfo.employment_status || '—'}</span></li>
+            <li><span className="info-item-label">Approved Date</span><span className="info-item-value">{customer.creditInfo.approved_date || '—'}</span></li>
+          </ul>
+        </section>
+      ) : null}
+
+      {(customer.latitude && customer.longitude) ? (
+        <section className="panel content-panel">
+          <div className="panel-section-header"><h3>Location</h3></div>
+          <div style={{ minHeight: 220, borderRadius: 8, overflow: 'hidden' }}>
+            <LeafletMap
+              center={[Number(customer.latitude), Number(customer.longitude)]}
+              zoom={15}
+              height={220}
+              markers={[{
+                id: customer.customer_id,
+                position: [Number(customer.latitude), Number(customer.longitude)],
+                label: name.substring(0, 2).toUpperCase(),
+                color: paymentStatus === 'Overdue' ? '#ef4444' : '#2563eb',
+                popup: name,
+              }]}
+            />
+          </div>
+        </section>
+      ) : null}
+
+      <Toolbar actions={[
+        { label: 'View on Map', to: '/branch-manager/leaflet', variant: 'secondary' },
+        { label: 'Back to Customers', to: '/branch-manager/customers', variant: 'ghost' },
+      ]} onAction={(a) => navigate(a.to)} />
+    </div>
+  );
+}
+
+// ── GIS, Alerts, Notifications, Profile, Audit ───────────────────────────────
+function LeafletPage({ pageType, navigate, showToast }) {
+  const [layers, setLayers] = useState(['Collector Routes','Delinquency Clusters']);
+  const [mapAccounts, setMapAccounts] = useState([]);
+  const [staff, setStaff] = useState({ collectors: [], salesAgents: [] });
+  const [loading, setLoading] = useState(true);
+  const layerOptions = ['Collector Routes','Sales Territories','Payment Behavior Zones','Delinquency Clusters','Profitability Zones','High Collection Areas','Route Efficiency Layer'];
+  const toggle = (l) => setLayers((p)=>p.includes(l)?p.filter((x)=>x!==l):[...p,l]);
+
+  useEffect(() => {
+    async function load() {
+      setLoading(true);
+      const [customersResult, staffResult] = await Promise.all([
+        getBranchCustomers(),
+        getBranchStaff(),
+      ]);
+      if (customersResult.success) setMapAccounts(customersResult.data.mapAccounts || []);
+      if (staffResult.success) setStaff(staffResult.data);
+      setLoading(false);
+    }
+    load();
+  }, []);
+
+  const mapCenter = mapAccounts.find((a) => a.lat && a.lng)
+    ? [mapAccounts.find((a) => a.lat && a.lng).lat, mapAccounts.find((a) => a.lat && a.lng).lng]
+    : [7.1907, 125.4553];
+
+  if (loading) return <LoadingState message="Loading map data..." />;
+
+  return (
+    <div className="page">
+      <section className="panel content-panel">
+        <div className="panel-section-header"><h3>Leaflet | OpenStreetMap</h3></div>
+        <div className="accounts-filters">
+          <select><option>Today</option><option>This Week</option><option>This Month</option></select>
+          <select><option>All Staff</option>{staff.collectors.map((c)=><option key={c.id}>{c.name}</option>)}{staff.salesAgents.map((a)=><option key={a.id}>{a.name}</option>)}</select>
+        </div>
+        <div className="layer-toggles">{layerOptions.map((l)=><label key={l} className="toggle-label"><input type="checkbox" checked={layers.includes(l)} onChange={()=>toggle(l)}/>{l}</label>)}</div>
+        <div style={{ marginTop: 16 }}>
+          <LeafletMap 
+            center={mapCenter}
+            zoom={12} 
+            height={560}
+            markers={mapAccounts.filter((a) => {
+              if (!a.lat || !a.lng) return false;
+              if (layers.includes('Delinquency Clusters') && layers.length === 1 && a.paymentStatus !== 'Overdue') return false;
+              return true;
+            }).map((a) => {
+              let color = '#2563eb'; // default blue
+              if (layers.includes('Delinquency Clusters') && a.paymentStatus === 'Overdue') color = '#ef4444'; // red
+              else if (layers.includes('High Collection Areas') && a.balance > 50000) color = '#f59e0b'; // orange
+              else if (a.paymentStatus === 'Overdue') color = '#ef4444'; 
+              else color = '#10b981';
+              
+              return {
+                id: a.id,
+                position: [a.lat, a.lng],
+                label: a.customerName.substring(0, 2).toUpperCase(),
+                color,
+                popup: `${a.customerName} - ${a.paymentStatus} (Bal: ${formatCurrency(a.balance)})`,
+              };
+            })}
+            routingWaypoints={
+              layers.includes('Collector Routes') && mapAccounts.filter(a => a.lat && a.lng).length > 1
+                ? (() => {
+                    // TSP Greedy Route Optimization (Nearest Neighbor)
+                    const points = mapAccounts.filter(a => a.lat && a.lng).map(a => [a.lat, a.lng]);
+                    if (points.length === 0) return null;
+                    const route = [points.shift()]; // start with first point
+                    while (points.length > 0) {
+                      const last = route[route.length - 1];
+                      let nearestIdx = 0;
+                      let minVal = Infinity;
+                      for (let i = 0; i < points.length; i++) {
+                        const dist = Math.pow(points[i][0] - last[0], 2) + Math.pow(points[i][1] - last[1], 2);
+                        if (dist < minVal) { minVal = dist; nearestIdx = i; }
+                      }
+                      route.push(points.splice(nearestIdx, 1)[0]);
+                    }
+                    return route;
+                  })()
+                : null
+            }
+          />
+        </div>
+      </section>
+      <section className="panel content-panel">
+        <div className="panel-section-header"><h3>Customer Pins</h3></div>
+        {mapAccounts.length ? (
+          <div className="table-shell"><table className="data-table">
+            <thead><tr><th>Customer</th><th>Balance</th><th>Status</th><th>Last Visit</th><th>Staff</th><th>Actions</th></tr></thead>
+            <tbody>{mapAccounts.map((a)=><tr key={a.id}><td>{a.customerName}</td><td>{formatCurrency(a.balance)}</td><td>{a.paymentStatus}</td><td>{a.lastVisit}</td><td>{a.assignedStaff}</td><td className="table-actions"><button className="icon-action-button" type="button" title="View" onClick={()=>navigate(`/branch-manager/customers/${a.id}`)}><NavIcon name="view" /></button></td></tr>)}</tbody>
+          </table></div>
+        ) : (
+          <EmptyState title="No customers on map" description="Customers for your branch will appear here once they have location data." />
+        )}
+      </section>
+      <Toolbar actions={[{label:'Delinquency Heatmap',to:'/branch-manager/leaflet/delinquency',variant:'secondary'},{label:'Profitability Zones',to:'/branch-manager/leaflet/profitability',variant:'secondary'}]} onAction={(a)=>navigate(a.to)}/>
+    </div>
+  );
+}
+
+function AlertsPage({ navigate, showToast }) {
+  const [filter, setFilter] = useState('All');
+  const filtered = useMemo(()=>filter==='All'?ALERTS:ALERTS.filter((a)=>a.category.includes(filter)),[filter]);
+  return (
+    <div className="page">
+      <section className="panel content-panel">
+        <div className="segmented-control">
+          {['All','Collection','Sales','Inventory','Route'].map((f)=><button key={f} className={filter===f?'segment active':'segment'} type="button" onClick={()=>setFilter(f)}>{f}</button>)}
+        </div>
+      </section>
+      <div className="notification-list">
+        {filtered.map((a)=>(
+          <article key={a.id} className="notification-item">
+            <div><h4>{a.title}</h4><p className="muted">{a.message}</p><span className="notification-time">{a.category} · {a.time}</span></div>
+            <div className="notification-actions"><Severity severity={a.severity}/><button className="button ghost" type="button" onClick={()=>showToast('Follow-up assigned.','success')}>Assign</button><button className="button" type="button" onClick={()=>showToast('Resolved.','success')}>Resolve</button></div>
+          </article>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function NotificationsPage({ navigate, showToast }) {
+  const [items, setItems] = useState(NOTIFICATIONS);
+  const [filter, setFilter] = useState('All');
+  const filtered = useMemo(()=>{
+    if(filter==='Unread') return items.filter((n)=>!n.read);
+    if(filter==='All') return items;
+    return items.filter((n)=>n.type===filter.toLowerCase());
+  },[items,filter]);
+  return (
+    <div className="page">
+      <Toolbar actions={[{label:'Mark All as Read',action:'markAll'}]} onAction={()=>{setItems((n)=>n.map((i)=>({...i,read:true})));showToast('All marked read.','success');}}/>
+      <section className="panel content-panel">
+        <div className="segmented-control">{['All','Unread','CI','Route','Delinquency','Inventory','Staff'].map((f)=><button key={f} className={filter===f?'segment active':'segment'} type="button" onClick={()=>setFilter(f)}>{f}</button>)}</div>
+      </section>
+      {filtered.length?(
+        <div className="notification-list">
+          {filtered.map((item)=>(
+            <article key={item.id} className={`notification-item${item.read?'':' unread'}`}>
+              <div><h4>{item.title}</h4><p className="muted">{item.message}</p><span className="notification-time">{item.time}</span></div>
+              <div className="notification-actions">
+                {!item.read&&<button className="button ghost" type="button" onClick={()=>setItems((ns)=>ns.map((n)=>n.id===item.id?{...n,read:true}:n))}>Mark Read</button>}
+                <button className="button secondary" type="button" onClick={()=>navigate(item.relatedTo)}>Open</button>
+              </div>
+            </article>
+          ))}
+        </div>
+      ):<EmptyState title="No notifications" description="You're all caught up."/>}
+    </div>
+  );
+}
+
+function ProfilePage({ navigate, showToast, branchName }) {
+  const currentUser = getCurrentUser();
+  const userName = currentUser?.fullName || 'User';
+  const userBranch = currentUser?.branch?.name || branchName || 'Branch';
+  const userEmail = currentUser?.email || 'N/A';
+  const userInitials = userName.split(' ').map(n => n[0]).join('').toUpperCase();
+  
+  return (
+    <div className="page">
+      <section className="panel content-panel">
+        <div className="profile-header">
+          <div className="profile-avatar">{userInitials}</div>
+          <div><h3>{userName}</h3><p className="muted">Branch Manager</p></div>
+        </div>
+        <ul className="info-grid"><li><span className="info-item-label">Branch</span><span className="info-item-value">{userBranch}</span></li><li><span className="info-item-label">Email</span><span className="info-item-value">{userEmail}</span></li><li><span className="info-item-label">Phone</span><span className="info-item-value">N/A</span></li></ul>
+      </section>
+      <Toolbar actions={[{label:'Update Profile',action:'update'},{label:'Change Password',action:'password',variant:'secondary'},{label:'Approval Center',to:'/branch-manager/approval-center',variant:'ghost'},{label:'Audit Log',to:'/branch-manager/audit-log',variant:'ghost'},{label:'Logout',action:'logout',variant:'ghost'}]}
+        onAction={(a)=>{if(a.to)navigate(a.to);else if (a.action === 'logout') { requestLogout(); }else showToast(`${a.label} opened.`,'success');}}/>
+    </div>
+  );
+}
+
+function ApprovalCenterPage({ navigate, showToast }) {
+  const [tab, setTab] = useState('ci');
+  const [ciList, setCiList] = useState(CI_QUEUE);
+  const [transferList, setTransferList] = useState([
+    { id: 'TRF-301', product: '3-Seater Fabric Sofa (Beige)',         qty: 4, from: 'Davao Oriental Branch', to: 'Davao City Branch',    requestedBy: 'Ana Reyes',    date: '2026-06-25', status: 'Pending Approval', value: 114000 },
+    { id: 'TRF-300', product: '6-Seater Dining Table Set (Narra)',    qty: 2, from: 'Davao Oriental Branch', to: 'General Santos Branch', requestedBy: 'Ana Reyes',    date: '2026-06-24', status: 'Pending Approval', value: 84000  },
+    { id: 'TRF-297', product: 'Coffee Table (Tempered Glass & Steel)', qty: 5, from: 'Davao Oriental Branch', to: 'General Santos Branch', requestedBy: 'Ana Reyes',    date: '2026-06-25', status: 'Pending Approval', value: 37500  },
+  ]);
+  const [specialList, setSpecialList] = useState([
+    { id: 'SC-001', customerName: 'Mabuhay Sala Sets',       accountNumber: 'ACC-1006', requestType: 'Extended Payment Term', requestedBy: 'John Dela Cruz', date: '2026-06-24', amount: 38000, status: 'Pending', notes: 'Customer requested 90-day extension due to business slowdown.' },
+    { id: 'SC-002', customerName: 'Hardin ng Bahay Home Store', accountNumber: 'ACC-1003', requestType: 'Partial Collection',    requestedBy: 'Maria Dela Cruz', date: '2026-06-23', amount: 10000, status: 'Pending', notes: 'Customer can only settle ₱10,000 of ₱15,800 balance this week.' },
+  ]);
+
+  const tabs = [
+    { key: 'ci',        label: `Credit Investigations (${ciList.filter(c => c.status === 'Pending').length})` },
+    { key: 'transfers', label: `Inventory Transfers (${transferList.filter(t => t.status === 'Pending Approval').length})` },
+    { key: 'special',   label: `Special Collections (${specialList.filter(s => s.status === 'Pending').length})` },
+  ];
+
+  const totalPending = ciList.filter(c => c.status === 'Pending').length
+    + transferList.filter(t => t.status === 'Pending Approval').length
+    + specialList.filter(s => s.status === 'Pending').length;
+
+  const approveCI = (id) => { setCiList(p => p.map(c => c.id === id ? { ...c, status: 'Approved' } : c)); showToast('CI approved successfully.', 'success'); };
+  const rejectCI  = (id) => { setCiList(p => p.map(c => c.id === id ? { ...c, status: 'Rejected' } : c)); showToast('CI rejected.', 'success'); };
+  const approveTransfer = (id) => { setTransferList(p => p.map(t => t.id === id ? { ...t, status: 'Approved' } : t)); showToast('Transfer approved.', 'success'); };
+  const rejectTransfer  = (id) => { setTransferList(p => p.map(t => t.id === id ? { ...t, status: 'Rejected' } : t)); showToast('Transfer rejected.', 'success'); };
+  const approveSpecial  = (id) => { setSpecialList(p => p.map(s => s.id === id ? { ...s, status: 'Approved' } : s)); showToast('Special collection approved.', 'success'); };
+  const rejectSpecial   = (id) => { setSpecialList(p => p.map(s => s.id === id ? { ...s, status: 'Rejected' } : s)); showToast('Special collection rejected.', 'success'); };
+
+  const StatusBadge = ({ status }) => {
+    const map = {
+      'Pending':          { color: '#d97706', bg: 'rgba(217,119,6,0.1)'   },
+      'Pending Approval': { color: '#d97706', bg: 'rgba(217,119,6,0.1)'   },
+      'Approved':         { color: '#059669', bg: 'rgba(5,150,105,0.1)'   },
+      'Rejected':         { color: '#dc2626', bg: 'rgba(220,38,38,0.08)'  },
+    };
+    const s = map[status] ?? { color: '#64748b', bg: 'rgba(100,116,139,0.1)' };
+    return <span style={{ padding: '3px 10px', borderRadius: 999, fontSize: '0.72rem', fontWeight: 700, textTransform: 'uppercase', background: s.bg, color: s.color, whiteSpace: 'nowrap' }}>{status}</span>;
+  };
+
+  const RiskBadge = ({ score }) => {
+    const color = score >= 70 ? '#dc2626' : score >= 40 ? '#d97706' : '#059669';
+    const bg    = score >= 70 ? 'rgba(220,38,38,0.08)' : score >= 40 ? 'rgba(217,119,6,0.1)' : 'rgba(5,150,105,0.1)';
+    const label = score >= 70 ? 'High Risk' : score >= 40 ? 'Medium' : 'Low Risk';
+    return <span style={{ padding: '3px 10px', borderRadius: 999, fontSize: '0.72rem', fontWeight: 700, background: bg, color, whiteSpace: 'nowrap' }}>{label} ({score})</span>;
+  };
+
+  return (
+    <div className="page">
+      {/* Summary bar */}
+      <section className="stats-grid">
+        {[
+          { label: 'Total Pending',           value: String(totalPending),                                                    idx: 0 },
+          { label: 'CI Approvals',            value: String(ciList.filter(c => c.status === 'Pending').length),                idx: 1 },
+          { label: 'Transfer Approvals',      value: String(transferList.filter(t => t.status === 'Pending Approval').length), idx: 2 },
+          { label: 'Special Collections',     value: String(specialList.filter(s => s.status === 'Pending').length),           idx: 3 },
+        ].map((s, i) => (
+          <article key={s.label} className="stat-card" style={{ '--stat-index': i }}>
+            <div className="stat-card-top"><span className="stat-index">{String(i + 1).padStart(2, '0')}</span><span className="stat-dot" /></div>
+            <strong className="stat-value">{s.value}</strong>
+            <span className="stat-label">{s.label}</span>
+          </article>
+        ))}
+      </section>
+
+      {/* Tab navigation */}
+      <div className="segmented-control" style={{ marginBottom: 0, flexWrap: 'wrap' }}>
+        {tabs.map(t => (
+          <button key={t.key} className={tab === t.key ? 'segment active' : 'segment'} type="button" onClick={() => setTab(t.key)}>{t.label}</button>
+        ))}
+      </div>
+
+      {/* ── CI Approvals ── */}
+      {tab === 'ci' && (
+        <section className="panel content-panel">
+          <div className="panel-section-header">
+            <h3>Credit Investigation Queue</h3>
+            <button className="button ghost" type="button" onClick={() => navigate('/branch-manager/ci-approvals')}>Open Full CI Queue</button>
+          </div>
+          {ciList.length ? (
+            <div className="table-shell">
+              <table className="data-table">
+                <thead>
+                  <tr><th>Customer</th><th>Submitted By</th><th>Purpose</th><th>Income</th><th>Risk Score</th><th>Delinquency</th><th>Status</th><th>Actions</th></tr>
+                </thead>
+                <tbody>
+                  {ciList.map(ci => (
+                    <tr key={ci.id}>
+                      <td><strong>{ci.customerName}</strong><span className="muted" style={{ display: 'block', fontSize: '0.8rem' }}>{ci.id}</span></td>
+                      <td>{ci.submittedBy}<span className="muted" style={{ display: 'block', fontSize: '0.8rem' }}>{ci.submissionDate}</span></td>
+                      <td>{ci.purpose}</td>
+                      <td>{formatCurrency(ci.monthlyIncome)}</td>
+                      <td><RiskBadge score={ci.riskScore} /></td>
+                      <td style={{ color: ci.delinquencyStatus === 'Clear' ? '#059669' : '#dc2626', fontWeight: 600 }}>{ci.delinquencyStatus}</td>
+                      <td><StatusBadge status={ci.status} /></td>
+                      <td className="table-actions">
+                        <button className="icon-action-button" type="button" title="Review" onClick={() => navigate(`/branch-manager/ci-approvals/${ci.id}`)}><NavIcon name="view" /></button>
+                        {ci.status === 'Pending' && <>
+                          <button className="icon-action-button" type="button" title="Approve" onClick={() => approveCI(ci.id)}><NavIcon name="check" /></button>
+                          <button className="icon-action-button danger" type="button" title="Reject" onClick={() => rejectCI(ci.id)}><NavIcon name="close" /></button>
+                        </>}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ) : <EmptyState title="No CI records" description="No credit investigation forms on file." />}
+        </section>
+      )}
+
+      {/* ── Inventory Transfers ── */}
+      {tab === 'transfers' && (
+        <section className="panel content-panel">
+          <div className="panel-section-header">
+            <h3>Inventory Transfer Requests</h3>
+            <p className="muted" style={{ margin: 0, fontSize: '0.85rem' }}>Review and approve cross-branch stock movements.</p>
+          </div>
+          {transferList.length ? (
+            <div className="table-shell">
+              <table className="data-table">
+                <thead>
+                  <tr><th>Transfer ID</th><th>Product</th><th>Qty</th><th>From</th><th>To</th><th>Value</th><th>Requested By</th><th>Date</th><th>Status</th><th>Actions</th></tr>
+                </thead>
+                <tbody>
+                  {transferList.map(t => (
+                    <tr key={t.id}>
+                      <td><strong>{t.id}</strong></td>
+                      <td>{t.product}</td>
+                      <td>{t.qty} units</td>
+                      <td style={{ fontSize: '0.85rem' }}>{t.from.replace(' Branch', '')}</td>
+                      <td style={{ fontSize: '0.85rem' }}>{t.to.replace(' Branch', '')}</td>
+                      <td style={{ fontWeight: 600 }}>{formatCurrency(t.value)}</td>
+                      <td>{t.requestedBy}</td>
+                      <td>{t.date}</td>
+                      <td><StatusBadge status={t.status} /></td>
+                      <td className="table-actions">
+                        {t.status === 'Pending Approval' && <>
+                          <button className="icon-action-button" type="button" title="Approve" onClick={() => approveTransfer(t.id)}><NavIcon name="check" /></button>
+                          <button className="icon-action-button danger" type="button" title="Reject" onClick={() => rejectTransfer(t.id)}><NavIcon name="close" /></button>
+                        </>}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ) : <EmptyState title="No transfer requests" description="All transfers have been processed." />}
+        </section>
+      )}
+
+      {/* ── Special Collections ── */}
+      {tab === 'special' && (
+        <section className="panel content-panel">
+          <div className="panel-section-header">
+            <h3>Special Collection Requests</h3>
+            <p className="muted" style={{ margin: 0, fontSize: '0.85rem' }}>Extended terms and partial collection approvals submitted by field collectors.</p>
+          </div>
+          {specialList.length ? (
+            <div className="grid" style={{ gap: 16 }}>
+              {specialList.map(s => (
+                <article key={s.id} className="panel content-panel" style={{ padding: 20 }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 16, marginBottom: 12 }}>
+                    <div>
+                      <h4 style={{ margin: 0, fontSize: '1rem' }}>{s.customerName}</h4>
+                      <span className="muted" style={{ fontSize: '0.82rem' }}>{s.accountNumber} · submitted by {s.requestedBy} on {s.date}</span>
+                    </div>
+                    <StatusBadge status={s.status} />
+                  </div>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 12, marginBottom: 14 }}>
+                    <div><span className="metric-label" style={{ fontSize: '0.75rem', textTransform: 'uppercase', letterSpacing: '0.06em', color: '#64748b' }}>Request Type</span><strong style={{ display: 'block', marginTop: 2 }}>{s.requestType}</strong></div>
+                    <div><span className="metric-label" style={{ fontSize: '0.75rem', textTransform: 'uppercase', letterSpacing: '0.06em', color: '#64748b' }}>Amount Involved</span><strong style={{ display: 'block', marginTop: 2 }}>{formatCurrency(s.amount)}</strong></div>
+                  </div>
+                  <p style={{ margin: '0 0 14px', fontSize: '0.88rem', color: '#475569', padding: '10px 14px', background: '#f8fafc', borderRadius: 8, border: '1px solid #e2e8f0' }}>{s.notes}</p>
+                  {s.status === 'Pending' && (
+                    <div style={{ display: 'flex', gap: 10 }}>
+                      <button className="button" type="button" onClick={() => approveSpecial(s.id)}>Approve Request</button>
+                      <button className="button secondary" type="button" onClick={() => rejectSpecial(s.id)}>Reject</button>
+                    </div>
+                  )}
+                </article>
+              ))}
+            </div>
+          ) : <EmptyState title="No special collection requests" description="All requests have been processed." />}
+        </section>
+      )}
+    </div>
+  );
+}
+
+function AuditLogPage({ navigate }) {
+  return (
+    <div className="page">
+      <section className="panel content-panel">
+        <div className="panel-section-header"><h3>Audit Log</h3></div>
+        <div className="table-shell"><table className="data-table"><thead><tr><th>Action</th><th>Detail</th><th>Timestamp</th></tr></thead><tbody>{AUDIT_LOGS.map((l)=><tr key={l.id}><td>{l.action}</td><td>{l.detail}</td><td>{l.timestamp}</td></tr>)}</tbody></table></div>
+      </section>
+      <Toolbar actions={[{label:'Back to Profile',to:'/branch-manager/profile',variant:'ghost'}]} onAction={(a)=>navigate(a.to)}/>
+    </div>
+  );
+}
+
+// ── Main export ───────────────────────────────────────────────────────────────
+export function BranchManagerPageBody({ page, navigate, showToast, currentUser }) {
+  const isOperatingManager = currentUser?.role?.slug === 'operating_manager';
+  if (!isOperatingManager && !currentUser?.branch) {
+    return (
+      <section className="panel empty-state">
+        <h3>Branch not assigned</h3>
+        <p className="muted">Your account is not linked to a branch. Please contact an administrator.</p>
+      </section>
+    );
+  }
+
+  const branchName = currentUser?.branch?.name || 'All Branches';
+
+  if (!page) return <EmptyState title="Page not found" description="Use the sidebar to open a supported screen." />;
+  const p = { collectorId: page.params?.collectorId, agentId: page.params?.agentId, ciId: page.params?.ciId, accountId: page.params?.accountId, customerId: page.params?.customerId, navigate, showToast, branchName };
+  switch (page.pageType) {
+    case 'dashboard':           return <DashboardPage {...p} />;
+    case 'customers':           return <CustomersPage {...p} />;
+    case 'customerDetail':      return <CustomerDetailPage {...p} />;
+    case 'fieldOperations':
+    case 'collectorRoutes':
+    case 'salesSchedules':
+    case 'routePerformance':    return <FieldOperationsHub {...p} />;
+    case 'collectorDetail':     return <CollectorDetailPage {...p} />;
+    case 'salesAgentDetail':    return <SalesAgentDetailPage {...p} />;
+    case 'ciQueue':             return <CIQueuePage {...p} />;
+    case 'ciDetail':            return <CIDetailPage {...p} />;
+    case 'leafletMap':
+    case 'leafletTerritory':
+    case 'leafletDelinquency':
+    case 'leafletProfitability':    return <LeafletPage pageType={page.pageType} {...p} />;
+    case 'reports':
+    case 'reportCollection':
+    case 'reportSales':
+    case 'reportInventory':
+    case 'reportDelinquency':   return <ReportsHubPage {...p} />;
+    case 'staffPerformance':
+    case 'staffCollectors':
+    case 'staffSales':
+    case 'staffScorecards':     return <StaffPerformancePage {...p} />;
+    case 'alerts':              return <AlertsPage {...p} />;
+    case 'creditHistory':       return <CreditHistoryListPage navigate={navigate} showToast={showToast} basePath="/branch-manager/credit-history" userBranch={currentUser?.branch?.name} />;
+    case 'creditDetail':        return <CreditHistoryDetailPage creditId={page.params?.creditId} navigate={navigate} basePath="/branch-manager/credit-history" />;
+    case 'notifications':       return <NotificationsPage {...p} />;
+    case 'approvalCenter':      return <ApprovalCenterPage {...p} />;
+    case 'profile':             return <ProfilePage {...p} />;
+    case 'auditLog':            return <AuditLogPage {...p} />;
+    default:                    return <EmptyState title="Page not found" description="This screen is not configured yet." />;
+  }
+}

@@ -1,0 +1,626 @@
+import { useState, useEffect, useCallback } from 'react';
+import apiClient from '../../api/apiClient';
+import {
+  LineChart, Line, AreaChart, Area, BarChart, Bar,
+  XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
+} from 'recharts';
+import {
+  AUDIT_LOGS, BACKUP_HISTORY, ROLES_PERMISSIONS, SECURITY_ALERTS,
+  SERVER_METRICS, SUPER_ADMIN_PROFILE, SYSTEM_HEALTH, SYSTEM_SETTINGS,
+} from '../../data/adminMockData';
+import { EmptyState } from '../collector/EmptyState';
+import { NavIcon } from '../../navIcons';
+import { StatusBadge } from '../StatusBadge';
+import { useFailures } from '../../context/FailureContext';
+
+function btn(v) {
+  if (v === 'secondary') return 'button secondary';
+  if (v === 'ghost') return 'button ghost';
+  return 'button';
+}
+
+function Toolbar({ actions, onAction }) {
+  if (!actions?.length) return null;
+  return (
+    <header className="page-toolbar">
+      <div className="page-toolbar-main">
+        <div className="page-toolbar-actions">
+          {actions.map((a) => (
+            <button key={a.label} className={btn(a.variant)} type="button" onClick={() => onAction(a)}>{a.label}</button>
+          ))}
+        </div>
+      </div>
+    </header>
+  );
+}
+
+function Stats({ stats }) {
+  return (
+    <section className="stats-grid">
+      {stats.map((s, i) => (
+        <article key={s.label} className="stat-card" style={{ '--stat-index': i }}>
+          <div className="stat-card-top"><span className="stat-index">{String(i + 1).padStart(2, '0')}</span><span className="stat-dot" /></div>
+          <strong className="stat-value">{s.value}</strong>
+          <span className="stat-label">{s.label}</span>
+        </article>
+      ))}
+    </section>
+  );
+}
+
+function Card({ title, sub, children, action, onAction }) {
+  return (
+    <section className="panel content-panel">
+      <div className="panel-section-header">
+        <div><h3>{title}</h3>{sub && <p className="muted" style={{ margin: '2px 0 0', fontSize: '0.85rem' }}>{sub}</p>}</div>
+        {action && <button className="button ghost" type="button" onClick={onAction}>{action}</button>}
+      </div>
+      {children}
+    </section>
+  );
+}
+
+function MetricBar({ label, value, max = 100, color = '#2563eb' }) {
+  return (
+    <div style={{ marginBottom: 14 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
+        <span style={{ fontSize: '0.88rem', fontWeight: 600 }}>{label}</span>
+        <span style={{ fontSize: '0.88rem', color: '#64748b' }}>{value}{max === 100 ? '%' : ' ms'}</span>
+      </div>
+      <div style={{ height: 8, background: '#f1f5f9', borderRadius: 999, overflow: 'hidden' }}>
+        <div style={{ height: '100%', width: `${(value / max) * 100}%`, background: color, borderRadius: 999, transition: 'width 0.4s' }} />
+      </div>
+    </div>
+  );
+}
+
+function SeverityBadge({ severity }) {
+  const cls = { Critical: 'severity-critical', Warning: 'severity-warning', Informational: 'severity-info' }[severity] ?? '';
+  return <span className={`severity-badge ${cls}`}>{severity}</span>;
+}
+
+// ── Dashboard ─────────────────────────────────────────────────────────────────
+function DashboardPage({ navigate }) {
+  const dbColor = SYSTEM_HEALTH.dbStatus === 'Online' ? '#059669' : '#dc2626';
+  return (
+    <div className="page">
+      <section className="panel dashboard-greeting">
+        <div className="dashboard-greeting-main">
+          <p className="dashboard-eyebrow">Super Admin</p>
+          <h2>{SUPER_ADMIN_PROFILE.name}</h2>
+          <p className="muted">Full system control & infrastructure</p>
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 16px', borderRadius: 12, border: `1.5px solid ${dbColor}22`, background: `${dbColor}0d` }}>
+          <span style={{ width: 10, height: 10, borderRadius: '50%', background: dbColor, flexShrink: 0 }} />
+          <span style={{ fontSize: '0.82rem', fontWeight: 700, color: dbColor }}>DB {SYSTEM_HEALTH.dbStatus}</span>
+        </div>
+      </section>
+
+      <Stats stats={[
+        { label: 'Total Users',     value: String(SYSTEM_HEALTH.totalUsers) },
+        { label: 'Total Branches',  value: String(SYSTEM_HEALTH.totalBranches) },
+        { label: 'Active Sessions', value: String(SYSTEM_HEALTH.activeSessions) },
+      ]} />
+
+      <div className="grid two-up">
+        <Card title="Server Performance" sub="CPU & Memory (today)">
+          <ResponsiveContainer width="100%" height={220}>
+            <LineChart data={SERVER_METRICS}>
+              <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
+              <XAxis dataKey="time" tick={{ fontSize: 11 }} />
+              <YAxis domain={[0, 100]} tick={{ fontSize: 11 }} unit="%" />
+              <Tooltip formatter={v => `${v}%`} />
+              <Legend />
+              <Line type="monotone" dataKey="cpu" name="CPU" stroke="#2563eb" strokeWidth={2} dot={false} />
+              <Line type="monotone" dataKey="mem" name="Memory" stroke="#64748b" strokeWidth={2} dot={false} />
+            </LineChart>
+          </ResponsiveContainer>
+        </Card>
+
+        <Card title="Current Resource Usage">
+          <div style={{ padding: '8px 0' }}>
+            <MetricBar label="CPU Usage"     value={SYSTEM_HEALTH.serverCpu}    color="#2563eb" />
+            <MetricBar label="Memory Usage"  value={SYSTEM_HEALTH.memoryUsage}  color="#8b5cf6" />
+            <MetricBar label="Storage Usage" value={SYSTEM_HEALTH.storageUsage} color="#06b6d4" />
+            <MetricBar label="API Response"  value={SYSTEM_HEALTH.apiResponseMs} max={500} color="#f59e0b" />
+          </div>
+        </Card>
+      </div>
+
+      {SECURITY_ALERTS.length > 0 && (
+        <Card title="Security Alerts" sub="Recent suspicious activity">
+          <ul className="widget-list">
+            {SECURITY_ALERTS.map(a => (
+              <li key={a.id}>
+                <div><strong>{a.type}</strong><span className="muted">{a.user} · {a.ip} · {a.time}</span></div>
+                <SeverityBadge severity={a.severity} />
+              </li>
+            ))}
+          </ul>
+        </Card>
+      )}
+
+      <section className="panel content-panel">
+        <div className="panel-section-header"><h3>Quick Access</h3></div>
+        <div className="quick-link-grid">
+          {[
+            { label: 'System Settings',       to: '/super-admin/settings',    icon: 'form' },
+            { label: 'User Management',       to: '/super-admin/users',       icon: 'accounts' },
+            { label: 'Role & Permissions',    to: '/super-admin/roles',       icon: 'accounts' },
+            { label: 'Backup & Restore',      to: '/super-admin/backup',      icon: 'history' },
+            { label: 'Database Monitoring',   to: '/super-admin/monitoring',  icon: 'reports' },
+            { label: 'Audit Logs',            to: '/super-admin/audit-logs',  icon: 'log' },
+          ].map(item => (
+            <button key={item.to} className="quick-link-card" type="button" onClick={() => navigate(item.to)} style={{ textAlign: 'left', border: 'none', background: 'none', padding: 0, cursor: 'pointer' }}>
+              <span className="quick-link-icon"><NavIcon name={item.icon} /></span>
+              <span className="quick-link-copy"><strong>{item.label}</strong><span className="muted">Open</span></span>
+              <span className="quick-link-arrow">→</span>
+            </button>
+          ))}
+        </div>
+      </section>
+    </div>
+  );
+}
+
+// ── Role & Permission Management ──────────────────────────────────────────────
+function RolesPage({ showToast }) {
+  const PERM_KEYS = ['view', 'create', 'edit', 'delete', 'approve', 'export', 'manageUsers', 'manageBranches'];
+  const PERM_LABELS = { view: 'View', create: 'Create', edit: 'Edit', delete: 'Delete', approve: 'Approve', export: 'Export', manageUsers: 'Manage Users', manageBranches: 'Manage Branches' };
+  const [perms, setPerms] = useState(ROLES_PERMISSIONS);
+
+  const toggle = (roleIdx, key) => {
+    if (perms[roleIdx].role === 'Super Admin') return;
+    setPerms(prev => prev.map((r, i) => i === roleIdx ? { ...r, permissions: { ...r.permissions, [key]: !r.permissions[key] } } : r));
+  };
+
+  return (
+    <div className="page">
+      <section className="panel content-panel" style={{ overflowX: 'auto' }}>
+        <div className="panel-section-header"><h3>Role Permission Matrix</h3><p className="muted">Super Admin row is read-only.</p></div>
+        <table className="data-table" style={{ minWidth: 720 }}>
+          <thead>
+            <tr>
+              <th>Role</th>
+              {PERM_KEYS.map(k => <th key={k}>{PERM_LABELS[k]}</th>)}
+            </tr>
+          </thead>
+          <tbody>
+            {perms.map((r, roleIdx) => (
+              <tr key={r.role}>
+                <td><strong>{r.role}</strong></td>
+                {PERM_KEYS.map(k => (
+                  <td key={k} style={{ textAlign: 'center' }}>
+                    <input
+                      type="checkbox"
+                      checked={r.permissions[k]}
+                      disabled={r.role === 'Super Admin'}
+                      onChange={() => toggle(roleIdx, k)}
+                      style={{ width: 16, height: 16, accentColor: '#2563eb', cursor: r.role === 'Super Admin' ? 'not-allowed' : 'pointer' }}
+                    />
+                  </td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </section>
+      <Toolbar actions={[{ label: 'Save Permissions', action: 'save' }]} onAction={() => showToast('Permissions saved successfully.', 'success')} />
+    </div>
+  );
+}
+
+// ── System Settings ───────────────────────────────────────────────────────────
+function SettingsPage({ showToast }) {
+  const [settings, setSettings] = useState({ ...SYSTEM_SETTINGS });
+  const set = (k, v) => setSettings(p => ({ ...p, [k]: v }));
+  const [confirmReset, setConfirmReset] = useState(false);
+
+  return (
+    <div className="page">
+      <section className="panel form-panel content-panel">
+        <div className="panel-section-header"><h3>Company Information</h3></div>
+        <div className="grid two-up">
+          <div className="form-group"><label>Company Name</label><input value={settings.companyName} onChange={e => set('companyName', e.target.value)} /></div>
+          <div className="form-group"><label>Company Email</label><input type="email" value={settings.companyEmail} onChange={e => set('companyEmail', e.target.value)} /></div>
+          <div className="form-group"><label>Logo Upload</label><input type="file" accept="image/*" /></div>
+        </div>
+      </section>
+
+      <section className="panel form-panel content-panel">
+        <div className="panel-section-header"><h3>Integrations & API</h3></div>
+        <div className="grid two-up">
+          <div className="form-group"><label>Leaflet API Key</label><input value={settings.leafletApiKey} onChange={e => set('leafletApiKey', e.target.value)} /></div>
+          <div className="form-group"><label>Backup Schedule</label><input value={settings.backupSchedule} onChange={e => set('backupSchedule', e.target.value)} /></div>
+        </div>
+      </section>
+
+      <section className="panel form-panel content-panel">
+        <div className="panel-section-header"><h3>Notification Settings</h3></div>
+        <div style={{ display: 'flex', gap: 24 }}>
+          <label className="toggle-label"><input type="checkbox" checked={settings.notificationsEmail} onChange={e => set('notificationsEmail', e.target.checked)} />Email Notifications</label>
+          <label className="toggle-label"><input type="checkbox" checked={settings.notificationsSms} onChange={e => set('notificationsSms', e.target.checked)} />SMS Notifications</label>
+          <label className="toggle-label"><input type="checkbox" checked={settings.smsEnabled} onChange={e => set('smsEnabled', e.target.checked)} />SMS / OTP Enabled</label>
+        </div>
+      </section>
+
+      {confirmReset && (
+        <section className="panel content-panel" style={{ borderColor: '#fca5a5', background: 'rgba(220,38,38,0.04)' }}>
+          <p>Restore all settings to factory defaults? This cannot be undone.</p>
+          <div style={{ display: 'flex', gap: 10, marginTop: 12 }}>
+            <button className="button" type="button" style={{ background: '#dc2626' }} onClick={() => { showToast('Settings restored to defaults.', 'success'); setSettings({ ...SYSTEM_SETTINGS }); setConfirmReset(false); }}>Confirm Reset</button>
+            <button className="button secondary" type="button" onClick={() => setConfirmReset(false)}>Cancel</button>
+          </div>
+        </section>
+      )}
+
+      <Toolbar
+        actions={[{ label: 'Save Settings', action: 'save' }, { label: 'Restore Defaults', action: 'reset', variant: 'secondary' }]}
+        onAction={a => { if (a.action === 'save') showToast('Settings saved.', 'success'); else setConfirmReset(true); }}
+      />
+    </div>
+  );
+}
+
+// ── Backup & Restore ──────────────────────────────────────────────────────────
+function BackupPage({ showToast }) {
+  const [confirmRestore, setConfirmRestore] = useState(null);
+  return (
+    <div className="page">
+      <Stats stats={[
+        { label: 'Total Backups',   value: String(BACKUP_HISTORY.length) },
+        { label: 'Latest Backup',   value: BACKUP_HISTORY[0]?.date ?? '—' },
+        { label: 'Latest Size',     value: BACKUP_HISTORY[0]?.size ?? '—' },
+        { label: 'Schedule',        value: 'Daily 02:00 AM' },
+      ]} />
+
+      <Toolbar actions={[{ label: 'Create Manual Backup', action: 'backup' }]} onAction={() => showToast('Manual backup started. This may take a few minutes.', 'success')} />
+
+      {confirmRestore && (
+        <section className="panel content-panel" style={{ borderColor: '#fca5a5', background: 'rgba(220,38,38,0.04)' }}>
+          <p><strong>Warning:</strong> Restoring backup from <strong>{confirmRestore.date}</strong> will replace all current data. This cannot be undone.</p>
+          <div style={{ display: 'flex', gap: 10, marginTop: 12 }}>
+            <button className="button" type="button" style={{ background: '#dc2626' }} onClick={() => { showToast(`Database restored from ${confirmRestore.date}.`, 'success'); setConfirmRestore(null); }}>Confirm Restore</button>
+            <button className="button secondary" type="button" onClick={() => setConfirmRestore(null)}>Cancel</button>
+          </div>
+        </section>
+      )}
+
+      <section className="panel content-panel">
+        <div className="panel-section-header"><h3>Backup History</h3></div>
+        <div className="table-shell">
+          <table className="data-table">
+            <thead><tr><th>Type</th><th>Date</th><th>Size</th><th>Created By</th><th>Status</th><th>Actions</th></tr></thead>
+            <tbody>
+              {BACKUP_HISTORY.map(b => (
+                <tr key={b.id}>
+                  <td>{b.type}</td><td>{b.date}</td><td>{b.size}</td><td>{b.by}</td>
+                  <td><StatusBadge status={b.status} /></td>
+                  <td className="table-actions">
+                    <button className="icon-action-button" type="button" title="Download" onClick={() => showToast(`Downloading ${b.date} backup.`, 'success')}><NavIcon name="download" /></button>
+                    <button className="icon-action-button" type="button" title="Restore" onClick={() => setConfirmRestore(b)}><NavIcon name="history" /></button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </section>
+    </div>
+  );
+}
+
+// ── Database & Server Monitoring ──────────────────────────────────────────────
+function MonitoringPage({ showToast }) {
+  const [loading, setLoading] = useState(false);
+  const { systemFailures, clearFailures } = useFailures();
+  
+  const refresh = () => { setLoading(true); setTimeout(() => setLoading(false), 800); };
+
+  return (
+    <div className="page">
+      <Toolbar
+        actions={[
+          { label: loading ? 'Refreshing…' : 'Refresh', action: 'refresh' }, 
+          { label: 'Clear Failures', action: 'clear', variant: 'secondary' }
+        ]}
+        onAction={a => { if (a.action === 'refresh') refresh(); else { clearFailures(); showToast('Failures cleared.', 'success'); } }}
+      />
+
+      <Stats stats={[
+        { label: 'Database Status',  value: SYSTEM_HEALTH.dbStatus },
+        { label: 'Active Failures',  value: String(systemFailures.length) },
+        { label: 'Memory Usage',     value: `${SYSTEM_HEALTH.memoryUsage}%` },
+        { label: 'Storage Usage',    value: `${SYSTEM_HEALTH.storageUsage}%` },
+        { label: 'API Response',     value: `${SYSTEM_HEALTH.apiResponseMs} ms` },
+        { label: 'Active Users',     value: String(SYSTEM_HEALTH.activeSessions) },
+      ]} />
+
+      {systemFailures.length > 0 && (
+        <section className="panel content-panel" style={{ borderColor: '#fca5a5' }}>
+          <div className="panel-section-header"><h3>Active System Failures</h3></div>
+          <div className="table-shell">
+            <table className="data-table">
+              <thead><tr><th>Time</th><th>Module</th><th>Service / API</th><th>Error Type</th><th>Cause</th></tr></thead>
+              <tbody>
+                {systemFailures.map(f => (
+                  <tr key={f.id}>
+                    <td>{f.time}</td>
+                    <td><strong>{f.module}</strong></td>
+                    <td>{f.service}</td>
+                    <td><span className="severity-badge severity-critical">{f.type}</span></td>
+                    <td style={{ color: '#b91c1c' }}>{f.cause}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      )}
+
+      <Card title="Server Performance Timeline" sub="CPU & Memory over the last 24h">
+        <ResponsiveContainer width="100%" height={240}>
+          <LineChart data={SERVER_METRICS}>
+            <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
+            <XAxis dataKey="time" tick={{ fontSize: 11 }} />
+            <YAxis domain={[0, 100]} tick={{ fontSize: 11 }} unit="%" />
+            <Tooltip formatter={v => `${v}%`} />
+            <Legend />
+            <Line type="monotone" dataKey="cpu" name="CPU" stroke="#2563eb" strokeWidth={2} dot={false} />
+            <Line type="monotone" dataKey="mem" name="Memory" stroke="#64748b" strokeWidth={2} dot={false} />
+          </LineChart>
+        </ResponsiveContainer>
+      </Card>
+
+      <section className="panel content-panel">
+        <div className="panel-section-header"><h3>Audit Logs (Failed Attempts)</h3></div>
+        {AUDIT_LOGS.filter(l => l.status === 'Failed').length ? (
+          <div className="table-shell">
+            <table className="data-table">
+              <thead><tr><th>Timestamp</th><th>User</th><th>Action</th><th>Module</th><th>IP</th></tr></thead>
+              <tbody>
+                {AUDIT_LOGS.filter(l => l.status === 'Failed').map(l => (
+                  <tr key={l.id}><td>{l.timestamp}</td><td>{l.user}</td><td>{l.action}</td><td>{l.module}</td><td>{l.ip}</td></tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : <EmptyState title="No errors logged" description="System is running clean." />}
+      </section>
+    </div>
+  );
+}
+
+// ── Audit Logs ────────────────────────────────────────────────────────────────
+function AuditLogsPage({ showToast }) {
+  return (
+    <div className="page">
+      <Toolbar actions={[{ label: 'Export Logs', action: 'export' }]} onAction={() => showToast('Logs exported.', 'success')} />
+      <section className="panel content-panel">
+        <div className="panel-section-header"><h3>System Audit Log</h3></div>
+        <div className="table-shell">
+          <table className="data-table">
+            <thead><tr><th>Timestamp</th><th>User</th><th>Action</th><th>Module</th><th>IP Address</th><th>Status</th></tr></thead>
+            <tbody>
+              {AUDIT_LOGS.map(l => (
+                <tr key={l.id}>
+                  <td>{l.timestamp}</td><td>{l.user}</td><td>{l.action}</td><td>{l.module}</td><td>{l.ip}</td>
+                  <td><StatusBadge status={l.status} /></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function ProfilePage({ navigate, showToast }) {
+  return (
+    <div className="page">
+      <section className="panel content-panel">
+        <div className="panel-section-header"><h3>Super Admin Profile</h3></div>
+        <ul className="info-grid">
+          <li><span className="info-item-label">Name</span><span className="info-item-value">{SUPER_ADMIN_PROFILE.name}</span></li>
+          <li><span className="info-item-label">Employee ID</span><span className="info-item-value">{SUPER_ADMIN_PROFILE.employeeId}</span></li>
+          <li><span className="info-item-label">Email</span><span className="info-item-value">{SUPER_ADMIN_PROFILE.email}</span></li>
+          <li><span className="info-item-label">Phone</span><span className="info-item-value">{SUPER_ADMIN_PROFILE.phone}</span></li>
+          <li><span className="info-item-label">Role</span><span className="info-item-value">{SUPER_ADMIN_PROFILE.role}</span></li>
+        </ul>
+      </section>
+      <Toolbar
+        actions={[{ label: 'Update Profile', action: 'update' }, { label: 'Change Password', action: 'pw', variant: 'secondary' }, { label: 'Logout', action: 'logout', variant: 'ghost' }]}
+        onAction={a => { if (a.action === 'logout') requestLogout(); else showToast(`${a.label} opened.`, 'success'); }}
+      />
+    </div>
+  );
+}
+
+// ── Users Management (API-Backed) ─────────────────────────────────────────────
+function UsersPage({ showToast }) {
+  const [users, setUsers] = useState([]);
+  const [roles, setRoles] = useState([]);
+  const [branches, setBranches] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [showModal, setShowModal] = useState(false);
+  const [editingUser, setEditingUser] = useState(null);
+
+  const [formData, setFormData] = useState({
+    full_name: '', username: '', email: '', password: '', role_id: '', branch_id: '',
+    contact_number: '', employee_id: '', status: 'Active'
+  });
+
+  const fetchData = useCallback(async () => {
+    setLoading(true);
+    try {
+      const [uRes, rRes, bRes] = await Promise.all([
+        apiClient.get('/users?limit=100'),
+        apiClient.get('/roles'),
+        apiClient.get('/dashboard/branches') // using branches summary for dropdown
+      ]);
+      setUsers(uRes.data.data || []);
+      setRoles(rRes.data.data.roles || []);
+      setBranches(bRes.data.data || []);
+    } catch (err) {
+      showToast('Failed to load users data.', 'error');
+    } finally {
+      setLoading(false);
+    }
+  }, [showToast]);
+
+  useEffect(() => { fetchData(); }, [fetchData]);
+
+  const openAdd = () => {
+    setEditingUser(null);
+    setFormData({ full_name: '', username: '', email: '', password: '', role_id: '', branch_id: '', contact_number: '', employee_id: '', status: 'Active' });
+    setShowModal(true);
+  };
+
+  const openEdit = (u) => {
+    setEditingUser(u);
+    setFormData({
+      full_name: u.fullName, username: u.username, email: u.email, password: '',
+      role_id: u.role?.id || '', branch_id: u.branch?.id || '',
+      contact_number: u.contactNumber || '', employee_id: u.employeeId || '', status: u.status
+    });
+    setShowModal(true);
+  };
+
+  const handleSave = async (e) => {
+    e.preventDefault();
+    try {
+      if (editingUser) {
+        // password is optional on edit
+        const payload = { ...formData };
+        if (!payload.password) delete payload.password;
+        await apiClient.put(`/users/${editingUser.id}`, payload);
+        showToast('User updated successfully.', 'success');
+      } else {
+        await apiClient.post('/users', formData);
+        showToast('User created successfully.', 'success');
+      }
+      setShowModal(false);
+      fetchData();
+    } catch (err) {
+      showToast(err.response?.data?.message || 'Failed to save user.', 'error');
+    }
+  };
+
+  const deactivateUser = async (id) => {
+    if (!window.confirm('Are you sure you want to deactivate this user?')) return;
+    try {
+      await apiClient.delete(`/users/${id}`);
+      showToast('User deactivated.', 'success');
+      fetchData();
+    } catch (err) {
+      showToast('Failed to deactivate user.', 'error');
+    }
+  };
+
+  return (
+    <div className="page">
+      <Toolbar actions={[{ label: 'Add User', action: 'add' }]} onAction={openAdd} />
+      <section className="panel content-panel">
+        <div className="panel-section-header"><h3>User Directory</h3></div>
+        <div className="table-shell">
+          <table className="data-table">
+            <thead>
+              <tr><th>Name</th><th>Email / Username</th><th>Role</th><th>Branch</th><th>Status</th><th>Actions</th></tr>
+            </thead>
+            <tbody>
+              {loading ? (
+                <tr><td colSpan="6" style={{ textAlign: 'center', padding: '20px' }}>Loading...</td></tr>
+              ) : users.length === 0 ? (
+                <tr><td colSpan="6" style={{ textAlign: 'center', padding: '20px' }}>No users found.</td></tr>
+              ) : (
+                users.map(u => (
+                  <tr key={u.id}>
+                    <td><strong>{u.fullName}</strong><br/><span className="muted" style={{fontSize:'0.75rem'}}>{u.employeeId}</span></td>
+                    <td>{u.email}<br/><span className="muted" style={{fontSize:'0.75rem'}}>@{u.username}</span></td>
+                    <td>{u.role?.name}</td>
+                    <td>{u.branch?.name || '—'}</td>
+                    <td>
+                      <StatusBadge status={u.status} />
+                    </td>
+                    <td className="table-actions">
+                      <button className="icon-action-button" type="button" title="Edit" onClick={() => openEdit(u)}><NavIcon name="edit" /></button>
+                      <button className="icon-action-button danger" type="button" title="Deactivate" onClick={() => deactivateUser(u.id)}><NavIcon name="trash" /></button>
+                    </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      {showModal && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, padding: 20 }}>
+          <div className="panel form-panel" style={{ width: '100%', maxWidth: 600, background: '#fff', maxHeight: '90vh', overflowY: 'auto' }}>
+            <div className="panel-section-header">
+              <h3>{editingUser ? 'Edit User' : 'Create User'}</h3>
+            </div>
+            <form onSubmit={handleSave} style={{ padding: '0 20px 20px' }}>
+              <div className="grid two-up" style={{ marginBottom: 16 }}>
+                <div className="form-group"><label>Full Name</label><input required value={formData.full_name} onChange={e => setFormData({...formData, full_name: e.target.value})} /></div>
+                <div className="form-group"><label>Username</label><input required value={formData.username} onChange={e => setFormData({...formData, username: e.target.value})} /></div>
+                <div className="form-group"><label>Email</label><input required type="email" value={formData.email} onChange={e => setFormData({...formData, email: e.target.value})} /></div>
+                <div className="form-group">
+                  <label>Password {editingUser && <span className="muted">(leave blank to keep)</span>}</label>
+                  <input type="password" required={!editingUser} value={formData.password} onChange={e => setFormData({...formData, password: e.target.value})} />
+                </div>
+                <div className="form-group">
+                  <label>Role</label>
+                  <select required value={formData.role_id} onChange={e => setFormData({...formData, role_id: e.target.value})}>
+                    <option value="">Select Role</option>
+                    {roles.map(r => <option key={r.id} value={r.id}>{r.name}</option>)}
+                  </select>
+                </div>
+                <div className="form-group">
+                  <label>Branch <span className="muted">(optional)</span></label>
+                  <select value={formData.branch_id} onChange={e => setFormData({...formData, branch_id: e.target.value})}>
+                    <option value="">No Branch (Head Office)</option>
+                    {branches.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
+                  </select>
+                </div>
+                <div className="form-group"><label>Employee ID</label><input value={formData.employee_id} onChange={e => setFormData({...formData, employee_id: e.target.value})} /></div>
+                <div className="form-group"><label>Contact Number</label><input value={formData.contact_number} onChange={e => setFormData({...formData, contact_number: e.target.value})} /></div>
+                <div className="form-group">
+                  <label>Status</label>
+                  <select value={formData.status} onChange={e => setFormData({...formData, status: e.target.value})}>
+                    <option value="Active">Active</option>
+                    <option value="Inactive">Inactive</option>
+                    <option value="Suspended">Suspended</option>
+                  </select>
+                </div>
+              </div>
+              <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
+                <button className="button secondary" type="button" onClick={() => setShowModal(false)}>Cancel</button>
+                <button className="button" type="submit">Save</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Export ────────────────────────────────────────────────────────────────────
+export function SuperAdminPageBody({ page, navigate, showToast }) {
+  if (!page) return <EmptyState title="Page not found" description="Use the sidebar to navigate." />;
+  const p = { navigate, showToast };
+  switch (page.pageType) {
+    case 'dashboard':     return <DashboardPage {...p} />;
+    case 'users':         return <UsersPage {...p} />;
+    case 'roles':         return <RolesPage {...p} />;
+    case 'settings':      return <SettingsPage {...p} />;
+    case 'backup':        return <BackupPage {...p} />;
+    case 'monitoring':    return <MonitoringPage {...p} />;
+    case 'auditLogs':     return <AuditLogsPage {...p} />;
+    case 'notifications': return <EmptyState title="No notifications" description="System notifications will appear here." />;
+    case 'profile':       return <ProfilePage {...p} />;
+    default:              return <EmptyState title="Page not found" />;
+  }
+}
