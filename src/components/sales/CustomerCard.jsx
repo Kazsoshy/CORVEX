@@ -12,7 +12,7 @@ export function CustomerCard({ customer, onViewDetails, onLogVisit, onNavigate, 
         <div>
           {showRank && customer.rank ? <span className="customer-rank">#{customer.rank}</span> : null}
           <h4>{customer.first_name} {customer.last_name}</h4>
-          <p className="muted account-meta">Contact: {customer.contact_person_fname} {customer.contact_person_lname}</p>
+          <p className="muted account-meta">ID: {customer.customer_id} · Branch: {customer.branch_name || customer.branch_id}</p>
         </div>
         {customer.status !== 'Inactive' ? (
           <span className={`status-badge ${STATUS_CLASS[customer.status] ?? ''}`}>{customer.status}</span>
@@ -25,11 +25,19 @@ export function CustomerCard({ customer, onViewDetails, onLogVisit, onNavigate, 
         <p className="account-address">{customer.address}</p>
         <div className="account-metrics">
           <div>
-            <span className="metric-label">Last Visit</span>
-            <strong>{customer.lastVisitDate}</strong>
+            <span className="metric-label">Contact Person</span>
+            <strong>{customer.contact_person_fname} {customer.contact_person_lname}</strong>
           </div>
           <div>
-            <span className="metric-label">{showRank ? 'Volume (units)' : 'Total Volume'}</span>
+            <span className="metric-label">Contact Phone</span>
+            <strong className="customer-phone">{customer.contact_person_phone || customer.contact_phone || customer.phone}</strong>
+          </div>
+          <div>
+            <span className="metric-label">Last Visit</span>
+            <strong>{customer.lastVisitDate || 'N/A'}</strong>
+          </div>
+          <div>
+            <span className="metric-label">{showRank ? 'Volume (units)' : 'Purchase Volume'}</span>
             <strong>{showRank ? customer.purchaseVolume : formatCurrency(customer.totalPurchaseVolume || 0)}</strong>
           </div>
           {showRank ? (
@@ -39,8 +47,8 @@ export function CustomerCard({ customer, onViewDetails, onLogVisit, onNavigate, 
             </div>
           ) : (
             <div>
-              <span className="metric-label">Contact</span>
-              <strong className="customer-phone">{customer.phone}</strong>
+              <span className="metric-label">Account Manager</span>
+              <strong>{customer.account_manager_name || '—'}</strong>
             </div>
           )}
         </div>

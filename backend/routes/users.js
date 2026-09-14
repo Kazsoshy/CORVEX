@@ -32,7 +32,7 @@ router.get('/', async (req, res) => {
       params.push(Number(branch_id));
     }
     if (search) {
-      conditions.push(`(u.full_name ILIKE $${pIdx} OR u.email ILIKE $${pIdx} OR u.username ILIKE $${pIdx})`);
+      conditions.push(`(u.first_name ILIKE $${pIdx} OR u.last_name ILIKE $${pIdx} OR u.email ILIKE $${pIdx})`);
       params.push(`%${search}%`);
       pIdx++;
     }
@@ -48,11 +48,18 @@ router.get('/', async (req, res) => {
 
     const result = await pool.query(
       `SELECT
-         u.id, u.full_name, u.username, u.email,
-         u.employee_id, u.avatar_initials, u.contact_number,
-         u.address, u.status, u.last_login, u.created_at, u.updated_at,
-         r.role_id, r.role_name, r.slug AS role_slug,
-         b.id AS branch_id, b.name AS branch_name
+         u.id AS user_id,
+         u.branch_id,
+         u.role_id,
+         u.first_name,
+         u.last_name,
+         u.email,
+         u.status,
+         u.created_at,
+         u.updated_at,
+         r.role_name,
+         r.slug AS role_slug,
+         b.name AS branch_name
        FROM users u
        JOIN roles r ON r.role_id = u.role_id
        LEFT JOIN branches b ON b.id = u.branch_id
@@ -86,11 +93,18 @@ router.get('/:id', async (req, res) => {
     const pool = req.app.locals.pool;
     const result = await pool.query(
       `SELECT
-         u.id, u.full_name, u.username, u.email,
-         u.employee_id, u.avatar_initials, u.contact_number,
-         u.address, u.status, u.last_login, u.created_at, u.updated_at,
-         r.role_id, r.role_name, r.slug AS role_slug,
-         b.id AS branch_id, b.name AS branch_name
+         u.id AS user_id,
+         u.branch_id,
+         u.role_id,
+         u.first_name,
+         u.last_name,
+         u.email,
+         u.status,
+         u.created_at,
+         u.updated_at,
+         r.role_name,
+         r.slug AS role_slug,
+         b.name AS branch_name
        FROM users u
        JOIN roles r ON r.role_id = u.role_id
        LEFT JOIN branches b ON b.id = u.branch_id
@@ -114,15 +128,14 @@ router.post('/', async (req, res) => {
   try {
     const pool = req.app.locals.pool;
     const {
-      full_name, username, email, password, role_id,
-      branch_id, contact_number, address, employee_id,
-      avatar_initials, status = 'Active',
+      first_name, last_name, email, password, role_id,
+      branch_id, status = 'Active',
     } = req.body;
 
     // Validate required fields
     const missing = [];
-    if (!full_name)  missing.push('full_name');
-    if (!username)   missing.push('username');
+    if (!first_name)  missing.push('first_name');
+    if (!last_name)   missing.push('last_name');
     if (!email)      missing.push('email');
     if (!password)   missing.push('password');
     if (!role_id)    missing.push('role_id');
@@ -136,43 +149,50 @@ router.post('/', async (req, res) => {
 
     // Check uniqueness
     const dupCheck = await pool.query(
-      `SELECT id FROM users WHERE email = $1 OR username = $2`,
-      [email.toLowerCase().trim(), username.toLowerCase().trim()]
+      `SELECT id AS user_id FROM users WHERE email = $1`,
+      [email.toLowerCase().trim()]
     );
     if (dupCheck.rows.length > 0) {
-      return res.status(409).json({ success: false, message: 'Email or username already in use.' });
+      return res.status(409).json({ success: false, message: 'Email already in use.' });
     }
 
-    const password_hash = await bcrypt.hash(password, 12);
+    const passwordHash = await bcrypt.hash(password, 12);
 
     const result = await pool.query(
       `INSERT INTO users
-         (full_name, username, email, password_hash, role_id, branch_id,
-          contact_number, address, employee_id, avatar_initials, status)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
-       RETURNING id`,
+         (first_name, last_name, email, password_hash, role_id, branch_id, status)
+       VALUES ($1,$2,$3,$4,$5,$6,$7)
+       RETURNING id AS user_id`,
       [
-        full_name.trim(),
-        username.toLowerCase().trim(),
+        first_name.trim(),
+        last_name.trim(),
         email.toLowerCase().trim(),
-        password_hash,
+        passwordHash,
         Number(role_id),
         branch_id ? Number(branch_id) : null,
-        contact_number || null,
-        address || null,
-        employee_id || null,
-        (avatar_initials || full_name.split(' ').map(w => w[0]).join('').slice(0, 4)).toUpperCase(),
         status,
       ]
     );
 
     const newUser = await pool.query(
-      `SELECT u.*, r.role_id, r.role_name, r.slug AS role_slug, b.name AS branch_name
+      `SELECT
+         u.id AS user_id,
+         u.branch_id,
+         u.role_id,
+         u.first_name,
+         u.last_name,
+         u.email,
+         u.status,
+         u.created_at,
+         u.updated_at,
+         r.role_name,
+         r.slug AS role_slug,
+         b.name AS branch_name
        FROM users u
        JOIN roles r ON r.role_id = u.role_id
        LEFT JOIN branches b ON b.id = u.branch_id
        WHERE u.id = $1`,
-      [result.rows[0].id]
+      [result.rows[0].user_id]
     );
 
     return res.status(201).json({
@@ -194,13 +214,12 @@ router.put('/:id', async (req, res) => {
     const pool = req.app.locals.pool;
     const userId = Number(req.params.id);
     const {
-      full_name, username, email, password, role_id,
-      branch_id, contact_number, address, employee_id,
-      avatar_initials, status,
+      first_name, last_name, email, password, role_id,
+      branch_id, status,
     } = req.body;
 
     // Check user exists
-    const existing = await pool.query(`SELECT id FROM users WHERE id = $1`, [userId]);
+    const existing = await pool.query(`SELECT id AS user_id FROM users WHERE id = $1`, [userId]);
     if (existing.rows.length === 0) {
       return res.status(404).json({ success: false, message: 'User not found.' });
     }
@@ -210,15 +229,11 @@ router.put('/:id', async (req, res) => {
     const params = [];
     let pIdx = 1;
 
-    if (full_name)       { updates.push(`full_name = $${pIdx++}`);       params.push(full_name.trim()); }
-    if (username)        { updates.push(`username = $${pIdx++}`);        params.push(username.toLowerCase().trim()); }
+    if (first_name)       { updates.push(`first_name = $${pIdx++}`);       params.push(first_name.trim()); }
+    if (last_name)        { updates.push(`last_name = $${pIdx++}`);        params.push(last_name.trim()); }
     if (email)           { updates.push(`email = $${pIdx++}`);           params.push(email.toLowerCase().trim()); }
     if (role_id)         { updates.push(`role_id = $${pIdx++}`);         params.push(Number(role_id)); }
     if (branch_id !== undefined) { updates.push(`branch_id = $${pIdx++}`); params.push(branch_id ? Number(branch_id) : null); }
-    if (contact_number !== undefined) { updates.push(`contact_number = $${pIdx++}`); params.push(contact_number || null); }
-    if (address !== undefined)        { updates.push(`address = $${pIdx++}`);         params.push(address || null); }
-    if (employee_id !== undefined)    { updates.push(`employee_id = $${pIdx++}`);     params.push(employee_id || null); }
-    if (avatar_initials)              { updates.push(`avatar_initials = $${pIdx++}`); params.push(avatar_initials.toUpperCase()); }
     if (status)          { updates.push(`status = $${pIdx++}`);          params.push(status); }
 
     if (password) {
@@ -241,7 +256,19 @@ router.put('/:id', async (req, res) => {
     );
 
     const updated = await pool.query(
-      `SELECT u.*, r.role_id, r.role_name, r.slug AS role_slug, b.name AS branch_name
+      `SELECT
+         u.id AS user_id,
+         u.branch_id,
+         u.role_id,
+         u.first_name,
+         u.last_name,
+         u.email,
+         u.status,
+         u.created_at,
+         u.updated_at,
+         r.role_name,
+         r.slug AS role_slug,
+         b.name AS branch_name
        FROM users u
        JOIN roles r ON r.role_id = u.role_id
        LEFT JOIN branches b ON b.id = u.branch_id
@@ -269,7 +296,7 @@ router.delete('/:id', async (req, res) => {
     const userId = Number(req.params.id);
 
     const result = await pool.query(
-      `UPDATE users SET status = 'Inactive', updated_at = NOW() WHERE id = $1 RETURNING id`,
+      `UPDATE users SET status = 'Inactive', updated_at = NOW() WHERE id = $1 RETURNING id AS user_id`,
       [userId]
     );
     if (result.rows.length === 0) {
@@ -284,22 +311,19 @@ router.delete('/:id', async (req, res) => {
 });
 
 // ──────────────────────────────────────────────────────────────────────────────
-// Helper: format user row for response (strip password_hash)
+// Helper: format user row for response (strip password)
 // ──────────────────────────────────────────────────────────────────────────────
 function formatUser(row) {
   return {
-    id:             row.id,
-    fullName:       row.full_name,
-    username:       row.username,
-    email:          row.email,
-    employeeId:     row.employee_id,
-    avatarInitials: row.avatar_initials,
-    contactNumber:  row.contact_number,
-    address:        row.address,
-    status:         row.status,
-    lastLogin:      row.last_login,
-    createdAt:      row.created_at,
-    updatedAt:      row.updated_at,
+    user_id:       row.user_id,
+    branch_id:     row.branch_id,
+    role_id:       row.role_id,
+    first_name:    row.first_name,
+    last_name:     row.last_name,
+    email:         row.email,
+    status:        row.status,
+    created_at:    row.created_at,
+    updated_at:    row.updated_at,
     role: {
       id:   row.role_id,
       name: row.role_name,

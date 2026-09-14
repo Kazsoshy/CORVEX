@@ -17,15 +17,22 @@ const pool = new Pool({
 const MIGRATIONS_DIR = path.join(process.cwd(), 'backend', 'migrations');
 
 const MIGRATIONS = [
-  { file: '001_initial_schema.sql',          label: '001_initial_schema.sql' },
-  { file: '000_prepare_existing_tables.sql', label: '000_prepare_existing_tables.sql' },
-  { file: '002_seed_data.sql',               label: '002_seed_data.sql' },
-  { file: '004_fix_password_hash.sql',       label: '004_fix_password_hash.sql' },
-  { file: '008_seed_customers.sql',          label: '008_seed_customers.sql' },
-  { file: '009_seed_customer_activity.sql',  label: '009_seed_customer_activity.sql' },
-  { file: '010_seed_field_operations.sql',    label: '010_seed_field_operations.sql' },
-  { file: '011_seed_reports.sql',             label: '011_seed_reports.sql' },
-  { file: '012_seed_customer_activity.sql',  label: '012_seed_customer_activity.sql' },
+  { file: '001_initial_schema.sql',                  label: '001_initial_schema.sql' },
+  { file: '000_prepare_existing_tables.sql',         label: '000_prepare_existing_tables.sql' },
+  { file: '002_seed_data.sql',                       label: '002_seed_data.sql' },
+  { file: '004_fix_password_hash.sql',               label: '004_fix_password_hash.sql' },
+  { file: '008_seed_customers.sql',                  label: '008_seed_customers.sql' },
+  { file: '009_seed_customer_activity.sql',          label: '009_seed_customer_activity.sql' },
+  { file: '010_seed_field_operations.sql',           label: '010_seed_field_operations.sql' },
+  { file: '011_seed_reports.sql',                    label: '011_seed_reports.sql' },
+  { file: '012_seed_customer_activity.sql',          label: '012_seed_customer_activity.sql' },
+  { file: '013_seed_realistic_transactions.sql',     label: '013_seed_realistic_transactions.sql' },
+  { file: '014_acm_schema_alignment.sql',            label: '014_acm_schema_alignment.sql' },
+  { file: '015_cleanup_branch_columns.sql',          label: '015_cleanup_branch_columns.sql' },
+  { file: '016_seed_missing_tables.sql',             label: '016_seed_missing_tables.sql' },
+  { file: '017_fix_unscoped_roles.sql',              label: '017_fix_unscoped_roles.sql' },
+  { file: '018_seed_credit_history.sql',             label: '018_seed_credit_history.sql' },
+  { file: '019_seed_digital_receipts.sql',           label: '019_seed_digital_receipts.sql' },
 ];
 
 async function ensureMigrationsTable() {

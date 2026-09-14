@@ -61,7 +61,7 @@ WHERE r.slug = 'branch_manager';
 -- ============================================================
 -- BRANCHES
 -- ============================================================
-INSERT INTO branches (branch_name, address, latitude, longitude, contact_no, email, status) VALUES
+INSERT INTO branches (branch_name, address, latitude, longitude, phone, email, status) VALUES
 ('Davao City Branch', '88 MacArthur Highway, Davao City', 7.0731, 125.6128, '(082) 221-4488', 'davao@corvex.ph', 'Active'),
 ('General Santos Branch', '12 Magsaysay Ave, General Santos City', 6.1164, 125.1756, '(083) 552-8800', 'gensan@corvex.ph', 'Active'),
 ('Davao Oriental Branch', '5 Dahican Road, Mati City, Davao Oriental', 6.9564, 126.2219, '(087) 388-1122', 'davoriental@corvex.ph', 'Active');
@@ -72,20 +72,20 @@ INSERT INTO branches (branch_name, address, latitude, longitude, contact_no, ema
 -- Default password hash for all users: Corvex@2026
 -- Hash: $2b$12$B67sR9t9LbsT8ig/8RcpL.X0kll/Rta9tqJOJHC.9btNekutqMlRm
 
--- Super Admin
+-- Super Admin (no branch — org-level role)
 INSERT INTO users (branch_id, first_name, last_name, role_id, email, password, status)
 SELECT 
-    (SELECT branch_id FROM branches WHERE branch_name = 'Davao City Branch'),
+    NULL,
     'Corazon', 'Villanueva',
     (SELECT role_id FROM roles WHERE slug = 'super_admin'),
     'corazon.v@corvex.ph',
     '$2b$12$B67sR9t9LbsT8ig/8RcpL.X0kll/Rta9tqJOJHC.9btNekutqMlRm',
     'Active';
 
--- Operating Manager
+-- Operating Manager (no branch — oversees all branches)
 INSERT INTO users (branch_id, first_name, last_name, role_id, email, password, status)
 SELECT 
-    (SELECT branch_id FROM branches WHERE branch_name = 'Davao City Branch'),
+    NULL,
     'Elena', 'Mercado',
     (SELECT role_id FROM roles WHERE slug = 'operating_manager'),
     'elena.mercado@corvex.ph',

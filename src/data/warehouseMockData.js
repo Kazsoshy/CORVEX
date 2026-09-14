@@ -239,7 +239,7 @@ export const STOCK_MOVEMENTS = [
   { id: 'MOV-1037', productId: 'p3', productName: 'Ergonomic Office Chair (Black Mesh)',  quantity: -4, type: 'Sale Deduction', branch: 'Davao City Branch', date: '2026-06-23', notes: 'Bulk office order' },
 ];
 
-export const TRANSFERS = [
+export const INVENTORY_TRANSFERS = [
   { id: 'TRF-301', productId: 'p1', productName: '3-Seater Fabric Sofa (Beige)',         quantity: 4, sourceBranch: 'Davao City Branch', destinationBranch: 'Davao City Branch',    status: 'Pending Approval', submittedBy: 'Ana Reyes', submittedDate: '2026-06-25', approvalInfo: null,                             notes: 'Davao City showroom restock' },
   { id: 'TRF-300', productId: 'p2', productName: '6-Seater Dining Table Set (Narra)',    quantity: 2, sourceBranch: 'Davao City Branch', destinationBranch: 'Davao City Branch',status: 'Approved',          submittedBy: 'Ana Reyes', submittedDate: '2026-06-24', approvalInfo: 'Approved by Operating Manager', notes: 'Branch showroom replenishment' },
   { id: 'TRF-299', productId: 'p1', productName: '3-Seater Fabric Sofa (Beige)',         quantity: 3, sourceBranch: 'Davao City Branch', destinationBranch: 'Davao City Branch',    status: 'Completed',         submittedBy: 'Ana Reyes', submittedDate: '2026-06-18', approvalInfo: 'Completed by receiving branch', notes: 'Routine stock rebalancing' },
@@ -247,7 +247,7 @@ export const TRANSFERS = [
   { id: 'TRF-297', productId: 'p6', productName: 'Coffee Table (Tempered Glass & Steel)', quantity: 5, sourceBranch: 'Davao City Branch', destinationBranch: 'Davao City Branch',status: 'Submitted',         submittedBy: 'Ana Reyes', submittedDate: '2026-06-25', approvalInfo: null,                             notes: 'Awaiting review' },
 ];
 
-export const RESTOCK_RECORDS = [
+export const RESTOCKS = [
   { id: 'RST-8821', productId: 'p1', productName: '3-Seater Fabric Sofa (Beige)',         supplier: 'PhilFurniture Manufacturing', quantity: 10, dateReceived: '2026-06-20', deliveryRef: 'DEL-4421', branch: 'Davao City Branch' },
   { id: 'RST-8819', productId: 'p2', productName: '6-Seater Dining Table Set (Narra)',    supplier: 'Mindanao Wood Crafts',        quantity: 6,  dateReceived: '2026-06-18', deliveryRef: 'DEL-4398', branch: 'Davao City Branch' },
   { id: 'RST-8815', productId: 'p6', productName: 'Coffee Table (Tempered Glass & Steel)',supplier: 'Glasscraft Furniture',        quantity: 12, dateReceived: '2026-06-15', deliveryRef: 'DEL-4355', branch: 'Davao City Branch' },
@@ -295,8 +295,8 @@ export const EXISTING_SKUS = PRODUCTS.map((p) => p.sku);
 
 export function getProductById(id)  { return PRODUCTS.find((p) => p.id === String(id)) ?? null; }
 export function getMovementById(id) { return STOCK_MOVEMENTS.find((m) => m.id === id) ?? null; }
-export function getTransferById(id) { return TRANSFERS.find((t) => t.id === id) ?? null; }
-export function getRestockById(id)  { return RESTOCK_RECORDS.find((r) => r.id === id) ?? null; }
+export function getTransferById(id) { return INVENTORY_TRANSFERS.find((t) => t.id === id) ?? null; }
+export function getRestockById(id)  { return RESTOCKS.find((r) => r.id === id) ?? null; }
 export function getStockStatus(stock, reorderPoint) {
   if (stock <= 0) return 'Out of Stock';
   if (stock <= reorderPoint * 0.3) return 'Critical Stock';

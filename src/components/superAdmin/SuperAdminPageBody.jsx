@@ -1,14 +1,15 @@
 import { useState, useEffect, useCallback } from 'react';
 import apiClient from '../../api/apiClient';
 import {
-  LineChart, Line, AreaChart, Area, BarChart, Bar,
+  LineChart, Line,
   XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
 } from 'recharts';
 import {
   AUDIT_LOGS, BACKUP_HISTORY, ROLES_PERMISSIONS, SECURITY_ALERTS,
-  SERVER_METRICS, SUPER_ADMIN_PROFILE, SYSTEM_HEALTH, SYSTEM_SETTINGS,
+  SERVER_METRICS, SYSTEM_SETTINGS,
 } from '../../data/adminMockData';
 import { EmptyState } from '../collector/EmptyState';
+import { LoadingState } from '../collector/LoadingState';
 import { NavIcon } from '../../navIcons';
 import { StatusBadge } from '../StatusBadge';
 
@@ -78,85 +79,159 @@ function SeverityBadge({ severity }) {
   return <span className={`severity-badge ${cls}`}>{severity}</span>;
 }
 
-// ── Dashboard ─────────────────────────────────────────────────────────────────
+// â”€â”€ Dashboard â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 function DashboardPage({ navigate }) {
-  const dbColor = SYSTEM_HEALTH.dbStatus === 'Online' ? '#059669' : '#dc2626';
+  const [health, setHealth]   = useState(null);
+  const [userStats, setUserStats] = useState(null);
+  const [branches, setBranches]   = useState([]);
+  const [auditLogs, setAuditLogs] = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    async function load() {
+      setLoading(true);
+      try {
+        const [hRes, uRes, bRes, aRes] = await Promise.all([
+          apiClient.get('/dashboard/system-health'),
+          apiClient.get('/dashboard/user-stats'),
+          apiClient.get('/branches'),
+          apiClient.get('/dashboard/recent-audit'),
+        ]);
+        if (hRes.data.success)  setHealth(hRes.data.data);
+        if (uRes.data.success)  setUserStats(uRes.data.data);
+        if (bRes.data.success)  setBranches(bRes.data.data);
+        if (aRes.data.success)  setAuditLogs(aRes.data.data);
+      } catch (err) {
+        console.error('[SuperAdmin] dashboard load error:', err.message);
+      }
+      setLoading(false);
+    }
+    load();
+  }, []);
+
+  if (loading) return <LoadingState message="Loading system dashboard..." />;
+
+  const dbColor = health?.dbStatus === 'Online' ? '#059669' : '#dc2626';
+
   return (
     <div className="page">
       <section className="panel dashboard-greeting">
         <div className="dashboard-greeting-main">
           <p className="dashboard-eyebrow">Super Admin</p>
-          <h2>{SUPER_ADMIN_PROFILE.name}</h2>
-          <p className="muted">Full system control & infrastructure</p>
+          <h2>System Overview</h2>
+          <p className="muted">Full system control &amp; infrastructure</p>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 16px', borderRadius: 12, border: `1.5px solid ${dbColor}22`, background: `${dbColor}0d` }}>
           <span style={{ width: 10, height: 10, borderRadius: '50%', background: dbColor, flexShrink: 0 }} />
-          <span style={{ fontSize: '0.82rem', fontWeight: 700, color: dbColor }}>DB {SYSTEM_HEALTH.dbStatus}</span>
+          <span style={{ fontSize: '0.82rem', fontWeight: 700, color: dbColor }}>DB {health?.dbStatus || 'Unknown'}</span>
         </div>
       </section>
 
       <Stats stats={[
-        { label: 'Total Users',     value: String(SYSTEM_HEALTH.totalUsers) },
-        { label: 'Total Branches',  value: String(SYSTEM_HEALTH.totalBranches) },
-        { label: 'Active Sessions', value: String(SYSTEM_HEALTH.activeSessions) },
-        { label: 'API Response',    value: `${SYSTEM_HEALTH.apiResponseMs} ms` },
-        { label: 'System Uptime',   value: SYSTEM_HEALTH.uptime },
-        { label: 'Last Backup',     value: SYSTEM_HEALTH.lastBackup },
+        { label: 'Total Users',      value: String(health?.totalUsers    || 0) },
+        { label: 'Active Users',     value: String(health?.activeUsers   || 0) },
+        { label: 'Total Branches',   value: String(health?.totalBranches || 0) },
+        { label: 'API Response',     value: `${health?.apiResponseMs     || 0} ms` },
+        { label: 'Login Errors (24h)', value: String(health?.errorCount  || 0) },
+        { label: 'New Users (Month)', value: String(userStats?.newThisMonth || 0) },
       ]} />
 
-      <div className="grid two-up">
-        <Card title="Server Performance" sub="CPU & Memory (today)">
-          <ResponsiveContainer width="100%" height={220}>
-            <LineChart data={SERVER_METRICS}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
-              <XAxis dataKey="time" tick={{ fontSize: 11 }} />
-              <YAxis domain={[0, 100]} tick={{ fontSize: 11 }} unit="%" />
-              <Tooltip formatter={v => `${v}%`} />
-              <Legend />
-              <Line type="monotone" dataKey="cpu" name="CPU" stroke="#2563eb" strokeWidth={2} dot={false} />
-              <Line type="monotone" dataKey="mem" name="Memory" stroke="#8b5cf6" strokeWidth={2} dot={false} />
-            </LineChart>
-          </ResponsiveContainer>
-        </Card>
-
-        <Card title="Current Resource Usage">
-          <div style={{ padding: '8px 0' }}>
-            <MetricBar label="CPU Usage"     value={SYSTEM_HEALTH.serverCpu}    color="#2563eb" />
-            <MetricBar label="Memory Usage"  value={SYSTEM_HEALTH.memoryUsage}  color="#8b5cf6" />
-            <MetricBar label="Storage Usage" value={SYSTEM_HEALTH.storageUsage} color="#06b6d4" />
-            <MetricBar label="API Response"  value={SYSTEM_HEALTH.apiResponseMs} max={500} color="#f59e0b" />
+      {/* User breakdown by role â€” from users table */}
+      {userStats?.byRole?.length ? (
+        <Card title="Users by Role" sub="Source: users table â€” COUNT(*) grouped by role">
+          <div className="table-shell">
+            <table className="data-table">
+              <thead><tr><th>Role</th><th>Total</th><th>Active</th><th>Inactive</th></tr></thead>
+              <tbody>
+                {userStats.byRole.map((r) => (
+                  <tr key={r.slug}>
+                    <td><strong>{r.role}</strong></td>
+                    <td>{r.total}</td>
+                    <td style={{ color: '#059669' }}>{r.active}</td>
+                    <td style={{ color: '#dc2626' }}>{r.inactive}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
         </Card>
-      </div>
+      ) : null}
 
-      {SECURITY_ALERTS.length > 0 && (
-        <Card title="Security Alerts" sub="Recent suspicious activity">
-          <ul className="widget-list">
-            {SECURITY_ALERTS.map(a => (
-              <li key={a.id}>
-                <div><strong>{a.type}</strong><span className="muted">{a.user} · {a.ip} · {a.time}</span></div>
-                <SeverityBadge severity={a.severity} />
-              </li>
-            ))}
-          </ul>
+      {/* Branch directory â€” from branches table with full fields */}
+      {branches.length ? (
+        <Card title="Branch Directory" sub="Source: branches table â€” branch_id, branch_name, address, latitude, longitude, contact_no, email, status, created_at">
+          <div className="table-shell">
+            <table className="data-table">
+              <thead>
+                <tr><th>Branch ID</th><th>Branch Name</th><th>Address</th><th>Latitude</th><th>Longitude</th><th>Contact No</th><th>Email</th><th>Status</th><th>Created At</th></tr>
+              </thead>
+              <tbody>
+                {branches.map((b) => (
+                  <tr key={b.branch_id}>
+                    <td>{b.branch_id}</td>
+                    <td><strong>{b.branch_name}</strong></td>
+                    <td>{b.address}</td>
+                    <td>{b.latitude}</td>
+                    <td>{b.longitude}</td>
+                    <td>{b.contact_no}</td>
+                    <td>{b.email}</td>
+                    <td><StatusBadge status={b.status} /></td>
+                    <td>{new Date(b.created_at).toLocaleString()}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         </Card>
-      )}
+      ) : null}
+
+      {/* System performance chart â€” from dashboard/system-health */}
+      <Card title="System Resource Usage" sub="Source: dashboard/system-health endpoint">
+        <div style={{ padding: '8px 0' }}>
+          <MetricBar label="CPU Usage"     value={health?.serverCpu    || 0} color="#2563eb" />
+          <MetricBar label="Memory Usage"  value={health?.memoryUsage  || 0} color="#8b5cf6" />
+          <MetricBar label="Storage Usage" value={health?.storageUsage || 0} color="#06b6d4" />
+          <MetricBar label="API Response"  value={health?.apiResponseMs || 0} max={500} color="#f59e0b" />
+        </div>
+      </Card>
+
+      {/* Recent audit logs â€” from audit_logs table */}
+      {auditLogs.length ? (
+        <Card title="Recent Audit Activity" sub="Source: audit_logs table â€” last 10 entries">
+          <div className="table-shell">
+            <table className="data-table">
+              <thead><tr><th>User</th><th>Action</th><th>IP Address</th><th>Details</th><th>Time</th></tr></thead>
+              <tbody>
+                {auditLogs.map((l) => (
+                  <tr key={l.log_id}>
+                    <td><strong>{l.user_name}</strong></td>
+                    <td>{l.action}</td>
+                    <td><span style={{ fontFamily: 'monospace', fontSize: '0.8rem' }}>{l.ip_address}</span></td>
+                    <td>{l.status_details}</td>
+                    <td className="muted" style={{ fontSize: '0.8rem' }}>{new Date(l.created_at).toLocaleString('en-PH')}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </Card>
+      ) : null}
 
       <section className="panel content-panel">
         <div className="panel-section-header"><h3>Quick Access</h3></div>
         <div className="quick-link-grid">
           {[
-            { label: 'System Settings',       to: '/super-admin/settings',    icon: 'form' },
-            { label: 'User Management',       to: '/super-admin/users',       icon: 'accounts' },
-            { label: 'Role & Permissions',    to: '/super-admin/roles',       icon: 'accounts' },
-            { label: 'Backup & Restore',      to: '/super-admin/backup',      icon: 'history' },
-            { label: 'Database Monitoring',   to: '/super-admin/monitoring',  icon: 'reports' },
-            { label: 'Audit Logs',            to: '/super-admin/audit-logs',  icon: 'log' },
+            { label: 'System Settings',     to: '/super-admin/settings',   icon: 'form' },
+            { label: 'User Management',     to: '/super-admin/users',      icon: 'accounts' },
+            { label: 'Role & Permissions',  to: '/super-admin/roles',      icon: 'accounts' },
+            { label: 'Backup & Restore',    to: '/super-admin/backup',     icon: 'history' },
+            { label: 'Database Monitoring', to: '/super-admin/monitoring', icon: 'reports' },
+            { label: 'Audit Logs',          to: '/super-admin/audit-logs', icon: 'log' },
           ].map(item => (
             <button key={item.to} className="quick-link-card" type="button" onClick={() => navigate(item.to)} style={{ textAlign: 'left', border: 'none', background: 'none', padding: 0, cursor: 'pointer' }}>
               <span className="quick-link-icon"><NavIcon name={item.icon} /></span>
               <span className="quick-link-copy"><strong>{item.label}</strong><span className="muted">Open</span></span>
-              <span className="quick-link-arrow">→</span>
+              <span className="quick-link-arrow">â†’</span>
             </button>
           ))}
         </div>
@@ -165,54 +240,286 @@ function DashboardPage({ navigate }) {
   );
 }
 
-// ── Role & Permission Management ──────────────────────────────────────────────
+// â”€â”€ Role & Permission Management â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ──────────────────────────────────────────────────────────────────────────────
+// Role & Permission Management
+// ──────────────────────────────────────────────────────────────────────────────
 function RolesPage({ showToast }) {
-  const PERM_KEYS = ['view', 'create', 'edit', 'delete', 'approve', 'export', 'manageUsers', 'manageBranches'];
-  const PERM_LABELS = { view: 'View', create: 'Create', edit: 'Edit', delete: 'Delete', approve: 'Approve', export: 'Export', manageUsers: 'Manage Users', manageBranches: 'Manage Branches' };
-  const [perms, setPerms] = useState(ROLES_PERMISSIONS);
+  const [tab, setTab] = useState('matrix'); // matrix, roles, permissions
+  const [loading, setLoading] = useState(true);
+  
+  const [roles, setRoles] = useState([]);
+  const [permissions, setPermissions] = useState([]);
+  const [rolePermissions, setRolePermissions] = useState([]); // Array of role objects with permissions object
 
-  const toggle = (roleIdx, key) => {
-    if (perms[roleIdx].role === 'Super Admin') return;
-    setPerms(prev => prev.map((r, i) => i === roleIdx ? { ...r, permissions: { ...r.permissions, [key]: !r.permissions[key] } } : r));
+  const [modalType, setModalType] = useState(null); // 'role' or 'permission'
+  const [editingItem, setEditingItem] = useState(null);
+  
+  const [roleForm, setRoleForm] = useState({ role_name: '', slug: '' });
+  const [permForm, setPermForm] = useState({ label: '', description: '' });
+
+  const fetchData = useCallback(async () => {
+    setLoading(true);
+    try {
+      const res = await apiClient.get('/roles');
+      if (res.data.success) {
+        setRolePermissions(res.data.data.roles);
+        setRoles(res.data.data.roles); // roles table view
+        setPermissions(res.data.data.permissions); // permissions table view
+      }
+    } catch (err) {
+      showToast('Failed to load roles data.', 'error');
+    }
+    setLoading(false);
+  }, [showToast]);
+
+  useEffect(() => { fetchData(); }, [fetchData]);
+
+  // MATRIX 
+  const togglePermission = (roleIndex, permId) => {
+    const role = rolePermissions[roleIndex];
+    if (role.slug === 'super_admin') return;
+    
+    setRolePermissions(prev => prev.map((r, i) => {
+      if (i === roleIndex) {
+        return { ...r, permissions: { ...r.permissions, [permId]: !r.permissions[permId] } };
+      }
+      return r;
+    }));
+  };
+
+  const savePermissions = async () => {
+    try {
+      // Find what changed? Actually, just saving the current state for all roles (or only changed ones, but let's just do all or find a way)
+      // For simplicity, we might just save all, but API endpoint /api/roles/:id/permissions handles one role at a time.
+      for (const role of rolePermissions) {
+        if (role.slug === 'super_admin') continue;
+        await apiClient.put(`/roles/${role.id}/permissions`, { permissions: role.permissions });
+      }
+      showToast('Permissions saved successfully.', 'success');
+      fetchData();
+    } catch (err) {
+      showToast('Failed to save permissions.', 'error');
+    }
+  };
+
+  // ROLES CRUD
+  const openRoleModal = (role = null) => {
+    setEditingItem(role);
+    setRoleForm(role ? { role_name: role.name, slug: role.slug } : { role_name: '', slug: '' });
+    setModalType('role');
+  };
+  
+  const saveRole = async (e) => {
+    e.preventDefault();
+    try {
+      if (editingItem) {
+        await apiClient.put(`/roles/${editingItem.id}`, roleForm);
+        showToast('Role updated.', 'success');
+      } else {
+        await apiClient.post('/roles', roleForm);
+        showToast('Role created.', 'success');
+      }
+      setModalType(null);
+      fetchData();
+    } catch (err) {
+      showToast(err.response?.data?.message || 'Failed to save role.', 'error');
+    }
+  };
+
+  const deleteRole = async (role) => {
+    if (role.slug === 'super_admin') return showToast('Cannot delete super admin.', 'error');
+    if (!window.confirm(`Delete role ${role.name}?`)) return;
+    try {
+      await apiClient.delete(`/roles/${role.id}`);
+      showToast('Role deleted.', 'success');
+      fetchData();
+    } catch (err) {
+      showToast('Failed to delete role.', 'error');
+    }
+  };
+
+  // PERMISSIONS CRUD
+  const openPermModal = (perm = null) => {
+    setEditingItem(perm);
+    setPermForm(perm ? { label: perm.label, description: perm.description } : { label: '', description: '' });
+    setModalType('permission');
+  };
+
+  const savePerm = async (e) => {
+    e.preventDefault();
+    try {
+      if (editingItem) {
+        await apiClient.put(`/permissions/${editingItem.permission_id}`, permForm);
+        showToast('Permission updated.', 'success');
+      } else {
+        await apiClient.post('/permissions', permForm);
+        showToast('Permission created.', 'success');
+      }
+      setModalType(null);
+      fetchData();
+    } catch (err) {
+      showToast(err.response?.data?.message || 'Failed to save permission.', 'error');
+    }
+  };
+
+  const deletePerm = async (perm) => {
+    if (!window.confirm(`Delete permission ${perm.label}?`)) return;
+    try {
+      await apiClient.delete(`/permissions/${perm.permission_id}`);
+      showToast('Permission deleted.', 'success');
+      fetchData();
+    } catch (err) {
+      showToast('Failed to delete permission.', 'error');
+    }
   };
 
   return (
     <div className="page">
-      <section className="panel content-panel" style={{ overflowX: 'auto' }}>
-        <div className="panel-section-header"><h3>Role Permission Matrix</h3><p className="muted">Super Admin row is read-only.</p></div>
-        <table className="data-table" style={{ minWidth: 720 }}>
-          <thead>
-            <tr>
-              <th>Role</th>
-              {PERM_KEYS.map(k => <th key={k}>{PERM_LABELS[k]}</th>)}
-            </tr>
-          </thead>
-          <tbody>
-            {perms.map((r, roleIdx) => (
-              <tr key={r.role}>
-                <td><strong>{r.role}</strong></td>
-                {PERM_KEYS.map(k => (
-                  <td key={k} style={{ textAlign: 'center' }}>
-                    <input
-                      type="checkbox"
-                      checked={r.permissions[k]}
-                      disabled={r.role === 'Super Admin'}
-                      onChange={() => toggle(roleIdx, k)}
-                      style={{ width: 16, height: 16, accentColor: '#2563eb', cursor: r.role === 'Super Admin' ? 'not-allowed' : 'pointer' }}
-                    />
-                  </td>
-                ))}
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </section>
-      <Toolbar actions={[{ label: 'Save Permissions', action: 'save' }]} onAction={() => showToast('Permissions saved successfully.', 'success')} />
+      <div style={{ display: 'flex', gap: 10, marginBottom: 20 }}>
+        <button className={tab === 'matrix' ? 'button' : 'button ghost'} onClick={() => setTab('matrix')}>Matrix</button>
+        <button className={tab === 'roles' ? 'button' : 'button ghost'} onClick={() => setTab('roles')}>Roles</button>
+        <button className={tab === 'permissions' ? 'button' : 'button ghost'} onClick={() => setTab('permissions')}>Permissions</button>
+      </div>
+
+      {loading ? (
+        <LoadingState message="Loading roles & permissions..." />
+      ) : (
+        <>
+          {tab === 'matrix' && (
+            <>
+              <section className="panel content-panel" style={{ overflowX: 'auto' }}>
+                <div className="panel-section-header"><h3>Role Permission Matrix</h3><p className="muted">Super Admin row is read-only.</p></div>
+                <table className="data-table" style={{ minWidth: 720 }}>
+                  <thead>
+                    <tr>
+                      <th>Role</th>
+                      {permissions.map(p => <th key={p.permission_id} title={p.description}>{p.label}</th>)}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {rolePermissions.map((r, roleIdx) => (
+                      <tr key={r.id}>
+                        <td><strong>{r.name}</strong></td>
+                        {permissions.map(p => (
+                          <td key={p.permission_id} style={{ textAlign: 'center' }}>
+                            <input
+                              type="checkbox"
+                              checked={r.permissions[p.permission_id] || false}
+                              disabled={r.slug === 'super_admin'}
+                              onChange={() => togglePermission(roleIdx, p.permission_id)}
+                              style={{ width: 16, height: 16, accentColor: '#2563eb', cursor: r.slug === 'super_admin' ? 'not-allowed' : 'pointer' }}
+                            />
+                          </td>
+                        ))}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </section>
+              <Toolbar actions={[{ label: 'Save Permissions', action: 'save' }]} onAction={savePermissions} />
+            </>
+          )}
+
+          {tab === 'roles' && (
+            <>
+              <Toolbar actions={[{ label: 'Add Role', action: 'add' }]} onAction={() => openRoleModal()} />
+              <section className="panel content-panel">
+                <div className="panel-section-header"><h3>Roles</h3></div>
+                <div className="table-shell">
+                  <table className="data-table">
+                    <thead><tr><th>ID</th><th>Role Name</th><th>Slug</th><th>Created At</th><th>Updated At</th><th>Actions</th></tr></thead>
+                    <tbody>
+                      {roles.map(r => (
+                        <tr key={r.id}>
+                          <td>{r.id}</td>
+                          <td><strong>{r.name}</strong></td>
+                          <td><code>{r.slug}</code></td>
+                          <td>{new Date(r.created_at).toLocaleString()}</td>
+                          <td>{new Date(r.updated_at).toLocaleString()}</td>
+                          <td className="table-actions">
+                            <button className="icon-action-button" title="Edit" onClick={() => openRoleModal(r)}><NavIcon name="edit" /></button>
+                            <button className="icon-action-button danger" title="Delete" disabled={r.slug==='super_admin'} onClick={() => deleteRole(r)}><NavIcon name="trash" /></button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </section>
+            </>
+          )}
+
+          {tab === 'permissions' && (
+            <>
+              <Toolbar actions={[{ label: 'Add Permission', action: 'add' }]} onAction={() => openPermModal()} />
+              <section className="panel content-panel">
+                <div className="panel-section-header"><h3>Permissions</h3></div>
+                <div className="table-shell">
+                  <table className="data-table">
+                    <thead><tr><th>ID</th><th>Label</th><th>Description</th><th>Created At</th><th>Actions</th></tr></thead>
+                    <tbody>
+                      {permissions.map(p => (
+                        <tr key={p.permission_id}>
+                          <td>{p.permission_id}</td>
+                          <td><strong>{p.label}</strong></td>
+                          <td>{p.description}</td>
+                          <td>{new Date(p.created_at).toLocaleString()}</td>
+                          <td className="table-actions">
+                            <button className="icon-action-button" title="Edit" onClick={() => openPermModal(p)}><NavIcon name="edit" /></button>
+                            <button className="icon-action-button danger" title="Delete" onClick={() => deletePerm(p)}><NavIcon name="trash" /></button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </section>
+            </>
+          )}
+        </>
+      )}
+
+      {modalType === 'role' && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, padding: 20 }}>
+          <div className="panel form-panel" style={{ width: '100%', maxWidth: 500, background: '#fff' }}>
+            <div className="panel-section-header">
+              <h3>{editingItem ? 'Edit Role' : 'Create Role'}</h3>
+            </div>
+            <form onSubmit={saveRole} style={{ padding: '0 20px 20px' }}>
+              <div className="form-group"><label>Role Name</label><input required value={roleForm.role_name} onChange={e => setRoleForm({...roleForm, role_name: e.target.value})} /></div>
+              <div className="form-group"><label>Slug</label><input required value={roleForm.slug} disabled={editingItem?.slug==='super_admin'} onChange={e => setRoleForm({...roleForm, slug: e.target.value})} /></div>
+              <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', marginTop: 16 }}>
+                <button className="button secondary" type="button" onClick={() => setModalType(null)}>Cancel</button>
+                <button className="button" type="submit">Save</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {modalType === 'permission' && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, padding: 20 }}>
+          <div className="panel form-panel" style={{ width: '100%', maxWidth: 500, background: '#fff' }}>
+            <div className="panel-section-header">
+              <h3>{editingItem ? 'Edit Permission' : 'Create Permission'}</h3>
+            </div>
+            <form onSubmit={savePerm} style={{ padding: '0 20px 20px' }}>
+              <div className="form-group"><label>Label</label><input required value={permForm.label} onChange={e => setPermForm({...permForm, label: e.target.value})} /></div>
+              <div className="form-group"><label>Description</label><textarea required value={permForm.description} onChange={e => setPermForm({...permForm, description: e.target.value})} style={{ width: '100%', padding: '8px 12px', border: '1px solid #cbd5e1', borderRadius: 8 }} /></div>
+              <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', marginTop: 16 }}>
+                <button className="button secondary" type="button" onClick={() => setModalType(null)}>Cancel</button>
+                <button className="button" type="submit">Save</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
 
-// ── System Settings ───────────────────────────────────────────────────────────
+// â”€â”€ System Settings â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 function SettingsPage({ showToast }) {
   const [settings, setSettings] = useState({ ...SYSTEM_SETTINGS });
   const set = (k, v) => setSettings(p => ({ ...p, [k]: v }));
@@ -264,15 +571,15 @@ function SettingsPage({ showToast }) {
   );
 }
 
-// ── Backup & Restore ──────────────────────────────────────────────────────────
+// â”€â”€ Backup & Restore â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 function BackupPage({ showToast }) {
   const [confirmRestore, setConfirmRestore] = useState(null);
   return (
     <div className="page">
       <Stats stats={[
         { label: 'Total Backups',   value: String(BACKUP_HISTORY.length) },
-        { label: 'Latest Backup',   value: BACKUP_HISTORY[0]?.date ?? '—' },
-        { label: 'Latest Size',     value: BACKUP_HISTORY[0]?.size ?? '—' },
+        { label: 'Latest Backup',   value: BACKUP_HISTORY[0]?.date ?? 'â€”' },
+        { label: 'Latest Size',     value: BACKUP_HISTORY[0]?.size ?? 'â€”' },
         { label: 'Schedule',        value: 'Daily 02:00 AM' },
       ]} />
 
@@ -312,7 +619,7 @@ function BackupPage({ showToast }) {
   );
 }
 
-// ── Database & Server Monitoring ──────────────────────────────────────────────
+// â”€â”€ Database & Server Monitoring â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 function MonitoringPage({ showToast }) {
   const [loading, setLoading] = useState(false);
   const refresh = () => { setLoading(true); setTimeout(() => setLoading(false), 800); };
@@ -320,7 +627,7 @@ function MonitoringPage({ showToast }) {
   return (
     <div className="page">
       <Toolbar
-        actions={[{ label: loading ? 'Refreshing…' : 'Refresh', action: 'refresh' }, { label: 'Download Logs', action: 'download', variant: 'secondary' }]}
+        actions={[{ label: loading ? 'Refreshingâ€¦' : 'Refresh', action: 'refresh' }, { label: 'Download Logs', action: 'download', variant: 'secondary' }]}
         onAction={a => { if (a.action === 'refresh') refresh(); else showToast('Error logs downloaded.', 'success'); }}
       />
 
@@ -366,7 +673,7 @@ function MonitoringPage({ showToast }) {
   );
 }
 
-// ── Audit Logs ────────────────────────────────────────────────────────────────
+// â”€â”€ Audit Logs â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 function AuditLogsPage({ showToast }) {
   return (
     <div className="page">
@@ -412,7 +719,7 @@ function ProfilePage({ navigate, showToast }) {
   );
 }
 
-// ── Users Management (API-Backed) ─────────────────────────────────────────────
+// â”€â”€ Users Management (API-Backed) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 function UsersPage({ showToast }) {
   const [users, setUsers] = useState([]);
   const [roles, setRoles] = useState([]);
@@ -501,23 +808,34 @@ function UsersPage({ showToast }) {
         <div className="table-shell">
           <table className="data-table">
             <thead>
-              <tr><th>Name</th><th>Email / Username</th><th>Role</th><th>Branch</th><th>Status</th><th>Actions</th></tr>
+              <tr><th>Name</th><th>Email / Username</th><th>Role</th><th>Branch</th><th>Last Login</th><th>Status</th><th>Actions</th></tr>
             </thead>
             <tbody>
               {loading ? (
-                <tr><td colSpan="6" style={{ textAlign: 'center', padding: '20px' }}>Loading...</td></tr>
+                <tr><td colSpan="7" style={{ textAlign: 'center', padding: '20px' }}>Loading...</td></tr>
               ) : users.length === 0 ? (
-                <tr><td colSpan="6" style={{ textAlign: 'center', padding: '20px' }}>No users found.</td></tr>
+                <tr><td colSpan="7" style={{ textAlign: 'center', padding: '20px' }}>No users found.</td></tr>
               ) : (
                 users.map(u => (
                   <tr key={u.id}>
-                    <td><strong>{u.fullName}</strong><br/><span className="muted" style={{fontSize:'0.75rem'}}>{u.employeeId}</span></td>
-                    <td>{u.email}<br/><span className="muted" style={{fontSize:'0.75rem'}}>@{u.username}</span></td>
-                    <td>{u.role?.name}</td>
-                    <td>{u.branch?.name || '—'}</td>
                     <td>
-                      <StatusBadge status={u.status} />
+                      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                        <span style={{ width: 32, height: 32, borderRadius: "50%", background: "#2563eb", color: "#fff", display: "grid", placeItems: "center", fontSize: "0.75rem", fontWeight: 700, flexShrink: 0 }}>
+                          {u.avatarInitials || (u.fullName || "?").split(" ").map(w => w[0]).join("").slice(0,2).toUpperCase()}
+                        </span>
+                        <div>
+                          <strong>{u.fullName}</strong>
+                          <br /><span className="muted" style={{ fontSize: "0.75rem" }}>{u.employeeId || "—"}</span>
+                        </div>
+                      </div>
                     </td>
+                    <td>{u.email}<br/><span className="muted" style={{ fontSize: "0.75rem" }}>@{u.username}</span></td>
+                    <td>{u.role?.name}</td>
+                    <td>{u.branch?.name || "—"}</td>
+                    <td className="muted" style={{ fontSize: "0.82rem" }}>
+                      {u.lastLogin ? new Date(u.lastLogin).toLocaleString("en-PH", { dateStyle: "medium", timeStyle: "short" }) : "Never"}
+                    </td>
+                    <td><StatusBadge status={u.status} /></td>
                     <td className="table-actions">
                       <button className="icon-action-button" type="button" title="Edit" onClick={() => openEdit(u)}><NavIcon name="edit" /></button>
                       <button className="icon-action-button danger" type="button" title="Deactivate" onClick={() => deactivateUser(u.id)}><NavIcon name="trash" /></button>
@@ -582,7 +900,7 @@ function UsersPage({ showToast }) {
   );
 }
 
-// ── Export ────────────────────────────────────────────────────────────────────
+// â”€â”€ Export â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 export function SuperAdminPageBody({ page, navigate, showToast }) {
   if (!page) return <EmptyState title="Page not found" description="Use the sidebar to navigate." />;
   const p = { navigate, showToast };

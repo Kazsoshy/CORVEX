@@ -44,12 +44,7 @@ router.post('/login', async (req, res) => {
     );
 
     if (result.rows.length === 0) {
-      // Log failed attempt
-      await pool.query(
-        `INSERT INTO audit_logs (user_id, user_name, action, ip_address, status_details)
-         VALUES (NULL, $1, 'Login Failed', $2, 'User not found')`,
-        [email, req.ip]
-      );
+      // Do not log to audit_logs here — user_id is NOT NULL and we have no valid ID
       return res.status(401).json({ success: false, message: 'Invalid email or password.' });
     }
 

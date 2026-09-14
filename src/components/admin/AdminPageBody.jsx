@@ -1,15 +1,17 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
+import apiClient from '../../api/apiClient';
 import {
   AreaChart, Area, BarChart, Bar, LineChart, Line,
   XAxis, YAxis, CartesianGrid, Tooltip, Legend,
   ResponsiveContainer,
 } from 'recharts';
 import {
-  ADMIN_BRANCHES, ADMIN_INVENTORY, ADMIN_PROFILE, AUDIT_LOGS,
+  ADMIN_BRANCHES, ADMIN_INVENTORY, ADMIN_PROFILE,
   BRANCH_PERFORMANCE_CHART, RESTOCK_REQUESTS, SYSTEM_MONTHLY_COLLECTIONS,
   SYSTEM_MONTHLY_SALES, TRANSFER_REQUESTS, USER_GROWTH, USER_STATS, USERS,
   getBranchById, getUserById,
 } from '../../data/adminMockData';
+import { fetchAuditLogs } from '../../api/adminService';
 import { EmptyState } from '../collector/EmptyState';
 import { NavIcon } from '../../navIcons';
 
@@ -175,18 +177,57 @@ function UserListPage({ navigate, showToast }) {
   const [branchFilter, setBranchFilter] = useState('All');
   const [statusFilter, setStatusFilter] = useState('All');
   const [confirmDisable, setConfirmDisable] = useState(null);
+  const [users, setUsers] = useState([]);
+  const [roles, setRoles] = useState([]);
+  const [branches, setBranches] = useState([]);
+  const [loading, setLoading] = useState(true);
 
-  const roles = ['All', 'Operating Manager', 'Collector', 'Sales Agent', 'Warehouse Staff', 'Customer'];
-  const branches = ['All', ...ADMIN_BRANCHES.map(b => b.name)];
+  useEffect(() => {
+    async function loadData() {
+      setLoading(true);
+      try {
+        const [usersRes, rolesRes, branchesRes] = await Promise.all([
+          apiClient.get('/users'),
+          apiClient.get('/roles'),
+          apiClient.get('/branches'),
+        ]);
+        if (usersRes.data.success) setUsers(usersRes.data.data || []);
+        if (rolesRes.data.success) setRoles(rolesRes.data.data.roles || []);
+        if (branchesRes.data.success) setBranches(branchesRes.data.data || []);
+      } catch (err) {
+        console.error('Error loading data:', err);
+        showToast('Failed to load users.', 'error');
+      }
+      setLoading(false);
+    }
+    loadData();
+  }, []);
 
-  const filtered = useMemo(() => USERS.filter(u => {
+  const filtered = useMemo(() => users.filter(u => {
     const q = search.toLowerCase();
-    if (q && !u.name.toLowerCase().includes(q) && !u.email.toLowerCase().includes(q)) return false;
-    if (roleFilter !== 'All' && u.role !== roleFilter) return false;
-    if (branchFilter !== 'All' && u.branch !== branchFilter) return false;
+    const fullName = `${u.first_name} ${u.last_name}`.toLowerCase();
+    if (q && !fullName.includes(q) && !u.email.toLowerCase().includes(q)) return false;
+    if (roleFilter !== 'All' && u.role?.slug !== roleFilter) return false;
+    if (branchFilter !== 'All' && u.branch?.id !== Number(branchFilter)) return false;
     if (statusFilter !== 'All' && u.status !== statusFilter) return false;
     return true;
-  }), [search, roleFilter, branchFilter, statusFilter]);
+  }), [users, search, roleFilter, branchFilter, statusFilter]);
+
+  const handleDisable = async (user) => {
+    try {
+      await apiClient.delete(`/users/${user.user_id}`);
+      showToast(`${user.first_name} ${user.last_name} disabled.`, 'success');
+      setConfirmDisable(null);
+      // Reload users
+      const usersRes = await apiClient.get('/users');
+      if (usersRes.data.success) setUsers(usersRes.data.data || []);
+    } catch (err) {
+      console.error('Error disabling user:', err);
+      showToast('Failed to disable user.', 'error');
+    }
+  };
+
+  if (loading) return <div className="page"><section className="panel content-panel"><p>Loading users...</p></section></div>;
 
   return (
     <div className="page">
@@ -197,10 +238,12 @@ function UserListPage({ navigate, showToast }) {
           <input className="search-input" type="search" placeholder="Search by name or email…" value={search} onChange={e => setSearch(e.target.value)} />
           <div className="accounts-filters">
             <select value={roleFilter} onChange={e => setRoleFilter(e.target.value)}>
-              {roles.map(r => <option key={r}>{r}</option>)}
+              <option value="All">All Roles</option>
+              {roles.map(r => <option key={r.role_id} value={r.slug}>{r.role_name}</option>)}
             </select>
             <select value={branchFilter} onChange={e => setBranchFilter(e.target.value)}>
-              {branches.map(b => <option key={b}>{b}</option>)}
+              <option value="All">All Branches</option>
+              {branches.map(b => <option key={b.branch_id} value={b.branch_id}>{b.branch_name}</option>)}
             </select>
             <select value={statusFilter} onChange={e => setStatusFilter(e.target.value)}>
               {['All', 'Active', 'Inactive'].map(s => <option key={s}>{s}</option>)}
@@ -211,9 +254,9 @@ function UserListPage({ navigate, showToast }) {
 
       {confirmDisable && (
         <section className="panel content-panel" style={{ borderColor: '#fca5a5', background: 'rgba(220,38,38,0.04)' }}>
-          <p>Disable <strong>{confirmDisable.name}</strong>? They will lose system access immediately.</p>
+          <p>Disable <strong>{confirmDisable.first_name} {confirmDisable.last_name}</strong>? They will lose system access immediately.</p>
           <div style={{ display: 'flex', gap: 10, marginTop: 12 }}>
-            <button className="button" type="button" style={{ background: '#dc2626' }} onClick={() => { showToast(`${confirmDisable.name} disabled.`, 'success'); setConfirmDisable(null); }}>Confirm Disable</button>
+            <button className="button" type="button" style={{ background: '#dc2626' }} onClick={() => handleDisable(confirmDisable)}>Confirm Disable</button>
             <button className="button secondary" type="button" onClick={() => setConfirmDisable(null)}>Cancel</button>
           </div>
         </section>
@@ -225,21 +268,23 @@ function UserListPage({ navigate, showToast }) {
           <div className="table-shell">
             <table className="data-table">
               <thead>
-                <tr><th>Name</th><th>Email</th><th>Role</th><th>Branch</th><th>Status</th><th>Last Login</th><th>Actions</th></tr>
+                <tr><th>User ID</th><th>First Name</th><th>Last Name</th><th>Email</th><th>Role</th><th>Branch</th><th>Status</th><th>Created At</th><th>Updated At</th><th>Actions</th></tr>
               </thead>
               <tbody>
                 {filtered.map(u => (
-                  <tr key={u.id}>
-                    <td><strong>{u.name}</strong></td>
+                  <tr key={u.user_id}>
+                    <td>{u.user_id}</td>
+                    <td>{u.first_name}</td>
+                    <td>{u.last_name}</td>
                     <td>{u.email}</td>
-                    <td>{u.role}</td>
-                    <td>{u.branch}</td>
+                    <td>{u.role?.name || '—'}</td>
+                    <td>{u.branch?.name || '—'}</td>
                     <td><StatusPill status={u.status} /></td>
-                    <td>{u.lastLogin}</td>
+                    <td>{u.created_at ? new Date(u.created_at).toLocaleDateString('en-PH') : '—'}</td>
+                    <td>{u.updated_at ? new Date(u.updated_at).toLocaleDateString('en-PH') : '—'}</td>
                     <td className="table-actions">
-                      <button className="icon-action-button" type="button" title="Edit" onClick={() => navigate(`/operating-manager/admin/users/${u.id}`)}><NavIcon name="edit" /></button>
+                      <button className="icon-action-button" type="button" title="Edit" onClick={() => navigate(`/operating-manager/admin/users/${u.user_id}`)}><NavIcon name="edit" /></button>
                       <button className="icon-action-button danger" type="button" title="Disable" onClick={() => setConfirmDisable(u)}><NavIcon name="trash" /></button>
-                      <button className="icon-action-button" type="button" title="Reset PW" onClick={() => showToast(`Password reset sent to ${u.email}.`, 'success')}><NavIcon name="reset" /></button>
                     </td>
                   </tr>
                 ))}
@@ -253,59 +298,155 @@ function UserListPage({ navigate, showToast }) {
 }
 
 function UserFormPage({ userId, navigate, showToast }) {
-  const existing = userId ? getUserById(userId) : null;
+  const [loading, setLoading] = useState(true);
+  const [branches, setBranches] = useState([]);
+  const [roles, setRoles] = useState([]);
   const [form, setForm] = useState({
-    name: existing?.name ?? '',
-    email: existing?.email ?? '',
-    phone: '',
-    role: existing?.role ?? '',
-    branch: existing?.branch ?? '',
-    username: existing?.email?.split('@')[0] ?? '',
+    first_name: '',
+    last_name: '',
+    email: '',
     password: '',
-    status: existing?.status ?? 'Active',
+    role_id: '',
+    branch_id: '',
+    status: 'Active',
   });
-  const set = (k, v) => setForm(p => ({ ...p, [k]: v }));
-  const roles = ['Operating Manager', 'Collector', 'Sales Agent', 'Warehouse Staff', 'Customer'];
+  const [errors, setErrors] = useState({});
+
+  useEffect(() => {
+    async function loadData() {
+      setLoading(true);
+      try {
+        const [branchesRes, rolesRes] = await Promise.all([
+          apiClient.get('/branches'),
+          apiClient.get('/roles'),
+        ]);
+        if (branchesRes.data.success) setBranches(branchesRes.data.data || []);
+        if (rolesRes.data.success) setRoles(rolesRes.data.data || []);
+
+        if (userId) {
+          const userRes = await apiClient.get(`/users/${userId}`);
+          if (userRes.data.success) {
+            const user = userRes.data.data;
+            setForm({
+              first_name: user.first_name || '',
+              last_name: user.last_name || '',
+              email: user.email || '',
+              password: '',
+              role_id: user.role_id || '',
+              branch_id: user.branch_id || '',
+              status: user.status || 'Active',
+            });
+          }
+        }
+      } catch (err) {
+        console.error('Error loading data:', err);
+        showToast('Failed to load data.', 'error');
+      }
+      setLoading(false);
+    }
+    loadData();
+  }, [userId]);
+
+  const handleSubmit = async () => {
+    const newErrors = {};
+    if (!form.first_name.trim()) newErrors.first_name = 'First name is required';
+    if (!form.last_name.trim()) newErrors.last_name = 'Last name is required';
+    if (!form.email.trim()) newErrors.email = 'Email is required';
+    if (!form.email.includes('@')) newErrors.email = 'Invalid email format';
+    if (!userId && !form.password) newErrors.password = 'Password is required';
+    if (form.password && form.password.length < 8) newErrors.password = 'Password must be at least 8 characters';
+    if (!form.role_id) newErrors.role_id = 'Role is required';
+    if (!form.branch_id) newErrors.branch_id = 'Branch is required';
+
+    if (Object.keys(newErrors).length > 0) {
+      setErrors(newErrors);
+      return;
+    }
+
+    try {
+      const payload = {
+        first_name: form.first_name.trim(),
+        last_name: form.last_name.trim(),
+        email: form.email.trim(),
+        role_id: Number(form.role_id),
+        branch_id: Number(form.branch_id),
+        status: form.status,
+      };
+      if (form.password) payload.password = form.password;
+
+      if (userId) {
+        await apiClient.put(`/users/${userId}`, payload);
+        showToast('User updated successfully.', 'success');
+      } else {
+        await apiClient.post('/users', payload);
+        showToast('User created successfully.', 'success');
+      }
+      navigate('/operating-manager/admin/users');
+    } catch (err) {
+      console.error('Error saving user:', err);
+      showToast(err.response?.data?.message || 'Failed to save user.', 'error');
+    }
+  };
+
+  if (loading) return <div className="page"><section className="panel content-panel"><p>Loading...</p></section></div>;
 
   return (
     <div className="page">
       <section className="panel form-panel content-panel">
-        <div className="panel-section-header"><h3>{existing ? 'Edit User' : 'Add New User'}</h3></div>
+        <div className="panel-section-header"><h3>{userId ? 'Edit User' : 'Add New User'}</h3></div>
         <div className="grid two-up">
-          <div className="form-group"><label>Full Name <span className="required">*</span></label><input value={form.name} onChange={e => set('name', e.target.value)} placeholder="Full name" /></div>
-          <div className="form-group"><label>Email <span className="required">*</span></label><input type="email" value={form.email} onChange={e => set('email', e.target.value)} placeholder="name@corvex.ph" /></div>
-          <div className="form-group"><label>Contact Number</label><input value={form.phone} onChange={e => set('phone', e.target.value)} placeholder="+63 9XX XXX XXXX" /></div>
+          <div className="form-group">
+            <label>First Name <span className="required">*</span></label>
+            <input value={form.first_name} onChange={e => setForm({ ...form, first_name: e.target.value })} placeholder="First name" />
+            {errors.first_name && <p className="form-error">{errors.first_name}</p>}
+          </div>
+          <div className="form-group">
+            <label>Last Name <span className="required">*</span></label>
+            <input value={form.last_name} onChange={e => setForm({ ...form, last_name: e.target.value })} placeholder="Last name" />
+            {errors.last_name && <p className="form-error">{errors.last_name}</p>}
+          </div>
+          <div className="form-group">
+            <label>Email <span className="required">*</span></label>
+            <input type="email" value={form.email} onChange={e => setForm({ ...form, email: e.target.value })} placeholder="name@corvex.ph" />
+            {errors.email && <p className="form-error">{errors.email}</p>}
+          </div>
+          <div className="form-group">
+            <label>Password {userId ? '(leave blank to keep current)' : '<span className="required">*</span>'}</label>
+            <input type="password" value={form.password} onChange={e => setForm({ ...form, password: e.target.value })} placeholder="Password" />
+            {errors.password && <p className="form-error">{errors.password}</p>}
+          </div>
           <div className="form-group">
             <label>Role <span className="required">*</span></label>
-            <select value={form.role} onChange={e => set('role', e.target.value)}>
+            <select value={form.role_id} onChange={e => setForm({ ...form, role_id: e.target.value })}>
               <option value="">Select role</option>
-              {roles.map(r => <option key={r}>{r}</option>)}
+              {roles.map(r => <option key={r.role_id} value={r.role_id}>{r.role_name}</option>)}
             </select>
+            {errors.role_id && <p className="form-error">{errors.role_id}</p>}
           </div>
           <div className="form-group">
-            <label>Assigned Branch <span className="required">*</span></label>
-            <select value={form.branch} onChange={e => set('branch', e.target.value)}>
+            <label>Branch <span className="required">*</span></label>
+            <select value={form.branch_id} onChange={e => setForm({ ...form, branch_id: e.target.value })}>
               <option value="">Select branch</option>
-              {ADMIN_BRANCHES.map(b => <option key={b.id}>{b.name}</option>)}
+              {branches.map(b => <option key={b.branch_id} value={b.branch_id}>{b.branch_name}</option>)}
             </select>
+            {errors.branch_id && <p className="form-error">{errors.branch_id}</p>}
           </div>
-          <div className="form-group"><label>Username</label><input value={form.username} onChange={e => set('username', e.target.value)} placeholder="Username" /></div>
-          <div className="form-group"><label>Temporary Password</label><input type="password" value={form.password} onChange={e => set('password', e.target.value)} placeholder="Temporary password" /></div>
           <div className="form-group">
             <label>Status</label>
-            <select value={form.status} onChange={e => set('status', e.target.value)}>
-              <option>Active</option><option>Inactive</option>
+            <select value={form.status} onChange={e => setForm({ ...form, status: e.target.value })}>
+              <option value="Active">Active</option>
+              <option value="Inactive">Inactive</option>
             </select>
           </div>
         </div>
       </section>
       <Toolbar
         actions={[
-          { label: existing ? 'Save Changes' : 'Create User', action: 'save' },
+          { label: userId ? 'Save Changes' : 'Create User', action: 'save' },
           { label: 'Cancel', to: '/operating-manager/admin/users', variant: 'secondary' },
         ]}
         onAction={a => {
-          if (a.action === 'save') { showToast(existing ? 'User updated.' : 'User created.', 'success'); navigate('/operating-manager/admin/users'); }
+          if (a.action === 'save') handleSubmit();
           else navigate(a.to);
         }}
       />
@@ -315,42 +456,92 @@ function UserFormPage({ userId, navigate, showToast }) {
 
 // ── Branch Management ─────────────────────────────────────────────────────────
 function BranchListPage({ navigate, showToast }) {
+  const [branches, setBranches] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
   const [confirmDisable, setConfirmDisable] = useState(null);
+
+  useEffect(() => {
+    async function loadBranches() {
+      setLoading(true);
+      try {
+        const response = await apiClient.get('/branches');
+        if (response.data.success) {
+          setBranches(response.data.data || []);
+        } else {
+          setError(response.data.message || 'Failed to load branches');
+        }
+      } catch (err) {
+        console.error('Error fetching branches:', err);
+        setError('Failed to load branches');
+      }
+      setLoading(false);
+    }
+    loadBranches();
+  }, []);
+
+  if (loading) {
+    return (
+      <div className="page">
+        <section className="panel content-panel">
+          <div className="panel-section-header"><h3>All Branches</h3></div>
+          <div style={{ padding: '40px', textAlign: 'center', color: '#64748b' }}>Loading branches...</div>
+        </section>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="page">
+        <section className="panel content-panel">
+          <div className="panel-section-header"><h3>All Branches</h3></div>
+          <div style={{ padding: '40px', textAlign: 'center', color: '#dc2626' }}>{error}</div>
+        </section>
+      </div>
+    );
+  }
+
   return (
     <div className="page">
       <Toolbar actions={[{ label: '+ Add Branch', action: 'add' }]} onAction={() => showToast('Add Branch form coming soon.', 'success')} />
       <section className="panel content-panel">
-        <div className="panel-section-header"><h3>All Branches</h3></div>
+        <div className="panel-section-header"><h3>All Branches <span className="muted" style={{ fontWeight: 400, fontSize: '0.88rem' }}>({branches.length})</span></h3></div>
         <div className="table-shell">
           <table className="data-table">
-            <thead><tr><th>Branch</th><th>Manager</th><th>Employees</th><th>Collectors</th><th>Sales</th><th>Warehouse</th><th>Status</th><th>Actions</th></tr></thead>
+            <thead><tr><th>Branch ID</th><th>Branch Name</th><th>Address</th><th>Latitude</th><th>Longitude</th><th>Contact No</th><th>Email</th><th>Status</th><th>Created At</th><th>Actions</th></tr></thead>
             <tbody>
-              {ADMIN_BRANCHES.map(b => (
-                <tr key={b.id}>
-                  <td><strong>{b.name}</strong><span className="muted" style={{ display: 'block', fontSize: '0.8rem' }}>{b.city}, {b.region}</span></td>
-                  <td>{b.manager}</td>
-                  <td>{b.employees}</td>
-                  <td>{b.collectors}</td>
-                  <td>{b.salesAgents}</td>
-                  <td>{b.warehouseStaff}</td>
-                  <td><StatusPill status={b.status} /></td>
-                  <td className="table-actions">
-                    <button className="icon-action-button" type="button" title="View" onClick={() => navigate(`/admin/branches/${b.id}`)}><NavIcon name="view" /></button>
-                    <button className="icon-action-button" type="button" title="Edit" onClick={() => showToast(`Editing ${b.name}.`, 'success')}><NavIcon name="edit" /></button>
-                    <button className="icon-action-button" type="button" title="Assign Manager" onClick={() => showToast(`Assign Manager form for ${b.name}.`, 'success')}><NavIcon name="accounts" /></button>
-                    <button className="icon-action-button danger" type="button" title="Disable" onClick={() => setConfirmDisable(b)}><NavIcon name="trash" /></button>
-                  </td>
-                </tr>
-              ))}
+              {branches.length === 0 ? (
+                <tr><td colSpan="10" style={{ textAlign: 'center', padding: '40px', color: '#64748b' }}>No branches found</td></tr>
+              ) : (
+                branches.map(b => (
+                  <tr key={b.branch_id}>
+                    <td>{b.branch_id}</td>
+                    <td><strong>{b.branch_name}</strong></td>
+                    <td>{b.address}</td>
+                    <td>{b.latitude}</td>
+                    <td>{b.longitude}</td>
+                    <td>{b.contact_no}</td>
+                    <td>{b.email}</td>
+                    <td><StatusPill status={b.status} /></td>
+                    <td>{new Date(b.created_at).toLocaleString()}</td>
+                    <td className="table-actions">
+                      <button className="icon-action-button" type="button" title="View" onClick={() => navigate(`/admin/branches/${b.branch_id}`)}><NavIcon name="view" /></button>
+                      <button className="icon-action-button" type="button" title="Edit" onClick={() => showToast(`Editing ${b.branch_name}.`, 'success')}><NavIcon name="edit" /></button>
+                      <button className="icon-action-button danger" type="button" title="Disable" onClick={() => setConfirmDisable(b)}><NavIcon name="trash" /></button>
+                    </td>
+                  </tr>
+                ))
+              )}
             </tbody>
           </table>
         </div>
       </section>
       {confirmDisable && (
         <section className="panel content-panel" style={{ borderColor: '#fca5a5', background: 'rgba(220,38,38,0.04)' }}>
-          <p>Disable <strong>{confirmDisable.name}</strong>? This will restrict all branch operations.</p>
+          <p>Disable <strong>{confirmDisable.branch_name}</strong>? This will restrict all branch operations.</p>
           <div style={{ display: 'flex', gap: 10, marginTop: 12 }}>
-            <button className="button" type="button" style={{ background: '#dc2626' }} onClick={() => { showToast(`${confirmDisable.name} disabled.`, 'success'); setConfirmDisable(null); }}>Confirm Disable</button>
+            <button className="button" type="button" style={{ background: '#dc2626' }} onClick={() => { showToast(`${confirmDisable.branch_name} disabled.`, 'success'); setConfirmDisable(null); }}>Confirm Disable</button>
             <button className="button secondary" type="button" onClick={() => setConfirmDisable(null)}>Cancel</button>
           </div>
         </section>
@@ -562,21 +753,66 @@ function ReportsPage({ showToast }) {
 
 // ── Audit Logs ────────────────────────────────────────────────────────────────
 function AuditLogsPage({ showToast }) {
-  const [moduleFilter, setModuleFilter] = useState('All');
-  const [statusFilter, setStatusFilter] = useState('All');
-  const modules = ['All', 'User Management', 'Branch Management', 'Reports', 'Auth', 'System', 'Leaflet | OpenStreetMap', 'Credit Investigation'];
-  const filtered = useMemo(() => AUDIT_LOGS.filter(l => {
-    if (moduleFilter !== 'All' && l.module !== moduleFilter) return false;
-    if (statusFilter !== 'All' && l.status !== statusFilter) return false;
+  const [auditLogs, setAuditLogs] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+
+  useEffect(() => {
+    async function loadAuditLogs() {
+      setLoading(true);
+      const result = await fetchAuditLogs();
+      if (result.success) {
+        setAuditLogs(result.data || []);
+      } else {
+        setError(result.message || 'Failed to load audit logs');
+      }
+      setLoading(false);
+    }
+    loadAuditLogs();
+  }, []);
+
+  const [searchFilter, setSearchFilter] = useState('');
+  const filtered = useMemo(() => auditLogs.filter(l => {
+    if (searchFilter && !l.action.toLowerCase().includes(searchFilter.toLowerCase()) && 
+        !l.status_details.toLowerCase().includes(searchFilter.toLowerCase())) {
+      return false;
+    }
     return true;
-  }), [moduleFilter, statusFilter]);
+  }), [auditLogs, searchFilter]);
+
+  if (loading) {
+    return (
+      <div className="page">
+        <section className="panel content-panel">
+          <div className="panel-section-header"><h3>Audit Logs</h3></div>
+          <div style={{ padding: '40px', textAlign: 'center', color: '#64748b' }}>Loading audit logs...</div>
+        </section>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="page">
+        <section className="panel content-panel">
+          <div className="panel-section-header"><h3>Audit Logs</h3></div>
+          <div style={{ padding: '40px', textAlign: 'center', color: '#dc2626' }}>{error}</div>
+        </section>
+      </div>
+    );
+  }
 
   return (
     <div className="page">
       <section className="panel content-panel">
         <div className="accounts-filters">
-          <select value={moduleFilter} onChange={e => setModuleFilter(e.target.value)}>{modules.map(m => <option key={m}>{m}</option>)}</select>
-          <select value={statusFilter} onChange={e => setStatusFilter(e.target.value)}>{['All', 'Success', 'Failed'].map(s => <option key={s}>{s}</option>)}</select>
+          <input 
+            type="text" 
+            placeholder="Search by action or status..." 
+            value={searchFilter}
+            onChange={e => setSearchFilter(e.target.value)}
+            style={{ padding: '8px 12px', borderRadius: '6px', border: '1px solid #e2e8f0', fontSize: '0.9rem' }}
+          />
         </div>
       </section>
       <Toolbar actions={[{ label: 'Export Logs', action: 'export' }]} onAction={() => showToast('Logs exported.', 'success')} />
@@ -584,14 +820,22 @@ function AuditLogsPage({ showToast }) {
         <div className="panel-section-header"><h3>Audit Log <span className="muted" style={{ fontWeight: 400, fontSize: '0.88rem' }}>({filtered.length} entries)</span></h3></div>
         <div className="table-shell">
           <table className="data-table">
-            <thead><tr><th>Timestamp</th><th>User</th><th>Action</th><th>Module</th><th>IP Address</th><th>Status</th></tr></thead>
+            <thead><tr><th>Log ID</th><th>User ID</th><th>Action</th><th>IP Address</th><th>Status Details</th><th>Created At</th></tr></thead>
             <tbody>
-              {filtered.map(l => (
-                <tr key={l.id}>
-                  <td>{l.timestamp}</td><td>{l.user}</td><td>{l.action}</td><td>{l.module}</td><td>{l.ip}</td>
-                  <td><StatusPill status={l.status === 'Success' ? 'Active' : 'Inactive'} /></td>
-                </tr>
-              ))}
+              {filtered.length === 0 ? (
+                <tr><td colSpan="6" style={{ textAlign: 'center', padding: '40px', color: '#64748b' }}>No audit logs found</td></tr>
+              ) : (
+                filtered.map(l => (
+                  <tr key={l.log_id}>
+                    <td>{l.log_id}</td>
+                    <td>{l.user_id}</td>
+                    <td>{l.action}</td>
+                    <td>{l.ip_address}</td>
+                    <td>{l.status_details}</td>
+                    <td>{new Date(l.created_at).toLocaleString()}</td>
+                  </tr>
+                ))
+              )}
             </tbody>
           </table>
         </div>

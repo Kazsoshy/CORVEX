@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { fetchCustomerById, fetchCustomers } from '../../api/salesService';
+import { fetchCustomerById, fetchCustomers, fetchFieldVisits, fetchFieldVisitById, fetchInvoices, updateFieldVisit } from '../../api/salesService';
 import { getCurrentUser } from '../../api/authService.js';
 import {
   AUDIT_LOGS,
@@ -19,12 +19,12 @@ import {
 
   getCustomerById,
   getProductById,
-  getProductStock,
-  getSaleById,
 } from '../../data/salesMockData';
 import { CustomerCard } from './CustomerCard';
+import { InvoiceDetailsPage } from './InvoiceDetailsPage';
 import { EmptyState } from '../collector/EmptyState';
 import { LoadingState } from '../collector/LoadingState';
+import { StatusBadge } from '../StatusBadge';
 import { NavIcon } from '../../navIcons';
 import LeafletMap from '../common/LeafletMap';
 import { CreditHistoryListPage, CreditHistoryDetailPage } from '../shared/CreditHistoryPages';
@@ -42,7 +42,7 @@ function PageToolbar({ actions, onAction }) {
       <div className="page-toolbar-main">
         <div className="page-toolbar-actions">
           {actions.map((action) => (
-            <button key={action.label} className={actionButtonClass(action.variant)} type="button" onClick={() => onAction(action)}>
+            <button key={action.label} className={actionButtonClass(action.variant)} type="button" disabled={action.disabled || false} onClick={() => onAction(action)}>
               {action.label}
             </button>
           ))}
@@ -142,7 +142,7 @@ function DashboardPage({ navigate, showToast }) {
       <PageToolbar
         actions={[
           { label: "View Today's Schedule", to: '/sales/schedule' },
-          { label: 'Log a Sale', to: firstPending ? `/sales/visit-log/${firstPending.id}?from=schedule` : '/sales/customers', variant: 'secondary' },
+          { label: 'Log a Sale', to: firstPending ? `/sales/visit-log/${firstPending.id}` : '/sales/schedule', variant: 'secondary' },
           { label: 'Check Inventory', to: '/sales/inventory', variant: 'secondary' },
         ]}
         onAction={(a) => navigate(a.to)}
@@ -209,94 +209,170 @@ function DashboardPage({ navigate, showToast }) {
   );
 }
 
+function haversine(a, b) {
+  const toRad = (v) => (v * Math.PI) / 180;
+  const R = 6371;
+  const dLat = toRad(b[0] - a[0]);
+  const dLon = toRad(b[1] - a[1]);
+  const la1 = toRad(a[0]);
+  const la2 = toRad(b[0]);
+  const x = Math.sin(dLat / 2) ** 2 + Math.cos(la1) * Math.cos(la2) * Math.sin(dLon / 2) ** 2;
+  return R * 2 * Math.atan2(Math.sqrt(x), Math.sqrt(1 - x));
+}
+
 function SchedulePage({ pageType, navigate, showToast }) {
-  const [customers, setCustomers] = useState([]);
+  const [visits, setVisits] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
 
   useEffect(() => {
-    async function loadCustomers() {
+    async function load() {
       setLoading(true);
-      const result = await fetchCustomers();
+      setError(null);
+      const result = await fetchFieldVisits();
       if (result.success) {
-        const scheduleData = result.data.map((customer, index) => ({
-          id: String(customer.customer_id),
-          first_name: customer.first_name,
-          last_name: customer.last_name,
-          contact_person_fname: customer.contact_person_fname,
-          contact_person_lname: customer.contact_person_lname,
-          address: customer.address,
-          phone: customer.contact_phone,
-          lastVisitDate: customer.updated_at ? new Date(customer.updated_at).toISOString().split('T')[0] : 'N/A',
-          purchaseVolume: 0,
-          totalPurchaseVolume: 0,
-          distanceKm: 0,
-          status: customer.status === 'Active' ? 'Pending' : 'Inactive',
-          assignedToday: true,
-          rank: index + 1,
-          active: customer.status === 'Active',
-          highValue: false,
-          delinquent: false,
-          lastPurchaseDate: 'N/A',
-          paymentHistory: [],
-          account_number: `ACC-${customer.customer_id}`,
-          business_type: 'Retail',
-          credit_limit: 0,
-          outstanding_balance: 0,
-          days_overdue: 0,
-        }));
-        setCustomers(scheduleData);
+        setVisits(result.data || []);
+      } else {
+        setError(result.message || 'Failed to load field visits.');
+        if (showToast) showToast(result.message || 'Failed to load field visits', 'error');
       }
       setLoading(false);
     }
-    loadCustomers();
-  }, []);
+    load();
+  }, [showToast]);
+
   const [filter, setFilter] = useState('All');
   const [showMap, setShowMap] = useState(pageType === 'scheduleMap');
 
   const filtered = useMemo(() => {
-    if (filter === 'All') return customers;
-    if (filter === 'Pending') return customers.filter((c) => c.status === 'Pending');
-    if (filter === 'Completed') return customers.filter((c) => c.status === 'Completed');
-    return customers.filter((c) => c.status === 'Rescheduled');
-  }, [filter, customers]);
+    if (filter === 'All') return visits;
+    return visits.filter((v) => v.status === filter);
+  }, [filter, visits]);
 
-  if (loading) return <LoadingState />;
+  const completed = visits.filter((v) => v.status === 'Completed').length;
+
+  const coordVisits = visits.filter((v) => v.latitude && v.longitude);
+  const mapCenter = coordVisits.length
+    ? [
+        coordVisits.reduce((s, v) => s + Number(v.latitude), 0) / coordVisits.length,
+        coordVisits.reduce((s, v) => s + Number(v.longitude), 0) / coordVisits.length,
+      ]
+    : [7.1907, 125.4553];
+
+  const totalDistance = useMemo(() => {
+    const sorted = [...coordVisits].sort((a, b) => new Date(a.scheduled_date || 0) - new Date(b.scheduled_date || 0));
+    let sum = 0;
+    for (let i = 1; i < sorted.length; i++) {
+      sum += haversine(
+        [Number(sorted[i - 1].latitude), Number(sorted[i - 1].longitude)],
+        [Number(sorted[i].latitude), Number(sorted[i].longitude)]
+      );
+    }
+    return sum;
+  }, [coordVisits]);
+
+  const visitColor = (v) => (v.status === 'Completed' ? '#10b981' : v.status === 'Pending' ? '#2563eb' : '#f59e0b');
+
+  const mapMarkers = filtered.map((v) => ({
+    id: v.visit_id,
+    position: v.latitude && v.longitude ? [Number(v.latitude), Number(v.longitude)] : mapCenter,
+    label: String(v.visit_id),
+    color: visitColor(v),
+    popup: `<strong>Visit #${v.visit_id}</strong> · ${v.visit_type || '—'}<br/>${v.customer_name || `${v.first_name || ''} ${v.last_name || ''}`.trim() || '—'}<br/>${v.agent_name || '—'} · ${v.status}`,
+  }));
 
   const actions = [
     { label: 'Schedule List', to: '/sales/schedule', variant: pageType === 'scheduleList' && !showMap ? undefined : 'secondary' },
     { label: 'Territory Map', to: '/sales/schedule/map', variant: pageType === 'scheduleMap' || showMap ? undefined : 'secondary' },
   ];
 
+  if (loading) return <LoadingState message="Loading schedule..." />;
+
+  if (error && !visits.length) {
+    return (
+      <EmptyState
+        title="Unable to load schedule"
+        description={error}
+        actionLabel="Retry"
+        onAction={() => window.location.reload()}
+      />
+    );
+  }
+
   if (pageType === 'scheduleMap' || showMap) {
     return (
       <div className="page">
         <PageToolbar actions={actions} onAction={(a) => navigate(a.to)} />
         <StatsGrid stats={[
-          { label: 'Clients to Visit', value: String(SCHEDULE_STOPS.length) },
-          { label: 'Distance Today', value: '22 km' },
-          { label: 'Completed', value: String(DASHBOARD_SUMMARY.completedVisits) },
+          { label: 'Visits Scheduled', value: String(visits.length) },
+          { label: 'Distance Covered', value: totalDistance ? `${totalDistance.toFixed(1)} km` : '—' },
+          { label: 'Completed', value: String(completed) },
         ]} />
         <section className="panel content-panel">
           <div className="panel-section-header">
-            <h3>Territory Route View</h3>
-            <button className="button secondary" type="button" onClick={() => navigate('/sales/schedule')}>Show List View</button>
+            <div className="inline-toolbar">
+              <div className="segmented-control">
+                {['All', 'Pending', 'Completed'].map((item) => (
+                  <button key={item} className={filter === item ? 'segment active' : 'segment'} type="button" onClick={() => setFilter(item)}>{item}</button>
+                ))}
+              </div>
+              <button className="button secondary" type="button" onClick={() => setShowMap(false)}>Show List View</button>
+            </div>
           </div>
           <div style={{ marginTop: 16 }}>
-            <LeafletMap 
-              center={[7.1907, 125.4553]} 
-              zoom={13} 
+            <LeafletMap
+              center={mapCenter}
+              zoom={13}
               height={500}
-              markers={customers.map((stop, i) => ({
-                id: stop.id,
-                position: [7.1907 + (i * 0.006), 125.4553 + (i * 0.006)],
-                label: stop.id.replace('customer-', ''),
-                color: stop.status === 'Completed' ? '#10b981' : '#2563eb',
-                popup: `${stop.first_name} ${stop.last_name} - ${stop.status}`
-              }))}
+              markers={mapMarkers}
+              polylines={totalDistance ? [{
+                id: 'route',
+                positions: [...coordVisits]
+                  .sort((a, b) => new Date(a.scheduled_date || 0) - new Date(b.scheduled_date || 0))
+                  .map((v) => [Number(v.latitude), Number(v.longitude)]),
+                color: '#2563eb',
+              }] : []}
             />
           </div>
-          <p className="muted">GPS tracking active · Territory coverage: {ROUTE_TRACKING.territoryCoverage}% · Visits verified: {ROUTE_TRACKING.visitsVerified}/{ROUTE_TRACKING.visitsPlanned}</p>
+          <p className="muted">Visits mapped: {filtered.length}{totalDistance ? ` · Route distance: ${totalDistance.toFixed(1)} km` : ''}</p>
         </section>
+        {filtered.length ? (
+          <section className="panel content-panel">
+            <div className="panel-section-header"><h3>Visit List</h3></div>
+            <div className="table-shell">
+              <table className="data-table">
+                <thead>
+                  <tr>
+                    <th>Visit ID</th>
+                    <th>Customer</th>
+                    <th>Visit Type</th>
+                    <th>Scheduled</th>
+                    <th>Status</th>
+                    <th>Agent</th>
+                    <th>Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filtered.map((v) => (
+                    <tr key={v.visit_id}>
+                      <td><span style={{ fontFamily: 'monospace', fontSize: '0.82rem' }}>{v.visit_id}</span></td>
+                      <td>{v.customer_name || `${v.first_name || ''} ${v.last_name || ''}`.trim() || '—'}</td>
+                      <td>{v.visit_type || '—'}</td>
+                      <td>{v.scheduled_date ? new Date(v.scheduled_date).toLocaleDateString('en-PH') : '—'}</td>
+                      <td><StatusBadge status={v.status} /></td>
+                      <td>{v.agent_name || '—'}</td>
+                      <td>
+                        <button className="icon-action-button" type="button" title="View" onClick={() => navigate(`/sales/visit-log/${v.visit_id}`)}>
+                          <NavIcon name="view" />
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </section>
+        ) : <EmptyState title="No visits match this filter" description="Try a different status filter." />}
       </div>
     );
   }
@@ -305,22 +381,16 @@ function SchedulePage({ pageType, navigate, showToast }) {
     <div className="page">
       <PageToolbar actions={actions} onAction={(a) => navigate(a.to)} />
       <StatsGrid stats={[
-        { label: 'Clients to Visit', value: String(SCHEDULE_STOPS.length) },
-        { label: 'Distance Today', value: '22 km' },
-        { label: 'Completed', value: String(DASHBOARD_SUMMARY.completedVisits) },
+        { label: 'Visits Scheduled', value: String(visits.length) },
+        { label: 'Distance Covered', value: totalDistance ? `${totalDistance.toFixed(1)} km` : '—' },
+        { label: 'Completed', value: String(completed) },
       ]} />
-      <section className="panel content-panel" style={{ padding: '14px 20px' }}>
-        <p style={{ margin: 0, fontSize: '0.85rem', color: '#64748b' }}>
-          <strong style={{ color: '#1e293b' }}>SAW Priority Engine</strong> — Clients are ranked using Simple Additive Weighting:
-          purchase volume <strong>(40%)</strong>, delinquency risk <strong>(35%)</strong>, proximity <strong>(25%)</strong>. Highest score = visit first.
-        </p>
-      </section>
+
       <section className="panel content-panel">
         <div className="panel-section-header">
-          <h3>SAW Prioritized Visit Schedule</h3>
           <div className="inline-toolbar">
             <div className="segmented-control">
-              {['All', 'Pending', 'Completed', 'Rescheduled'].map((item) => (
+              {['All', 'Pending', 'Completed'].map((item) => (
                 <button key={item} className={filter === item ? 'segment active' : 'segment'} type="button" onClick={() => setFilter(item)}>{item}</button>
               ))}
             </div>
@@ -328,20 +398,48 @@ function SchedulePage({ pageType, navigate, showToast }) {
           </div>
         </div>
         {filtered.length ? (
-          <div className="account-card-grid">
-            {filtered.map((customer) => (
-              <CustomerCard
-                key={customer.id}
-                customer={customer}
-                showRank
-                onViewDetails={(c) => navigate(`/sales/customer-detail/${c.id}?from=schedule`)}
-                onLogVisit={(c) => navigate(`/sales/visit-log/${c.id}?from=schedule`)}
-              onNavigate={() => showToast(`Opening navigation to ${customer.address}`, 'success')}
-              />
-            ))}
+          <div className="table-shell">
+            <table className="data-table">
+              <thead>
+                <tr>
+                  <th>Visit ID</th>
+                  <th>User ID</th>
+                  <th>Visit Type</th>
+                  <th>Scheduled Date</th>
+                  <th>Status</th>
+                  <th>Customer</th>
+                  <th>Customer ID</th>
+                  <th>Agent</th>
+                  <th>Created At</th>
+                  <th>Updated At</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filtered.map((v) => (
+                  <tr key={v.visit_id}>
+                    <td><span style={{ fontFamily: 'monospace', fontSize: '0.82rem' }}>{v.visit_id}</span></td>
+                    <td>{v.user_id ?? '—'}</td>
+                    <td>{v.visit_type || '—'}</td>
+                    <td>{v.scheduled_date ? new Date(v.scheduled_date).toLocaleDateString('en-PH') : '—'}</td>
+                    <td><StatusBadge status={v.status} /></td>
+                    <td>{v.customer_name || `${v.first_name || ''} ${v.last_name || ''}`.trim() || '—'}</td>
+                    <td>{v.customer_id ?? '—'}</td>
+                    <td>{v.agent_name || '—'}</td>
+                    <td>{v.created_at ? new Date(v.created_at).toLocaleString() : '—'}</td>
+                    <td>{v.updated_at ? new Date(v.updated_at).toLocaleString() : '—'}</td>
+                    <td>
+                      <button className="icon-action-button" type="button" title="View" onClick={() => navigate(`/sales/visit-log/${v.visit_id}`)}>
+                        <NavIcon name="view" />
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
         ) : (
-          <EmptyState title="No customers match this filter" description="Try a different status filter." />
+          <EmptyState title="No visits match this filter" description="Try a different status filter." />
         )}
       </section>
     </div>
@@ -414,7 +512,14 @@ function CustomersPage({ navigate, showToast }) {
           {filteredCustomers.map((customer) => (
             <CustomerCard
               key={customer.customer_id}
-              customer={{...customer, id: String(customer.customer_id)}}
+              customer={{
+                ...customer,
+                id: String(customer.customer_id),
+                // Handle both quoted (camelCase) and unquoted (lowercase) pg aliases
+                lastVisitDate: customer.lastVisitDate || customer.lastvisitdate || 'N/A',
+                totalPurchaseVolume: Number(customer.totalPurchaseVolume || customer.totalpurchasevolume || 0),
+                phone: customer.contact_phone || customer.phone || '—',
+              }}
               onViewDetails={(c) => navigate(`/sales/customer-detail/${c.id}?from=customers`)}
               onNavigate={() => showToast(`Opening navigation to ${customer.address}`, 'success')}
             />
@@ -448,66 +553,161 @@ function CustomerDetailPage({ customerId, parentContext, navigate, showToast }) 
 
   const purchaseVolume = customer.activity?.purchase_volume || 0;
   const outstandingBalance = customer.activity?.outstanding_balance || 0;
-  const lastVisit = customer.activity?.last_sales_visit ? new Date(customer.activity.last_sales_visit).toLocaleDateString() : 'N/A';
+  const lastVisit = customer.activity?.last_sales_visit ? new Date(customer.activity.last_sales_visit).toLocaleDateString('en-PH') : 'N/A';
   const creditLimit = customer.creditInfo?.credit_limit || 10000;
-  const avgOrder = customer.paymentHistory && customer.paymentHistory.length 
-    ? Math.round(purchaseVolume / customer.paymentHistory.length) 
+  const avgOrder = customer.paymentHistory && customer.paymentHistory.length
+    ? Math.round(purchaseVolume / customer.paymentHistory.length)
     : purchaseVolume;
+  const customerSince = customer.created_at
+    ? new Date(customer.created_at).toLocaleDateString('en-PH', { year: 'numeric', month: 'long', day: 'numeric' })
+    : 'N/A';
 
   return (
     <div className="page account-detail-page">
       <StatsGrid stats={[
-        { label: 'Total Purchases', value: formatCurrency(purchaseVolume) },
-        { label: 'Last Visit', value: lastVisit },
-        { label: 'Avg Order', value: formatCurrency(avgOrder) },
+        { label: 'Customer ID',       value: String(customer.customer_id) },
+        { label: 'Purchase Volume',   value: formatCurrency(purchaseVolume) },
+        { label: 'Outstanding',       value: formatCurrency(outstandingBalance) },
+        { label: 'Last Visit',        value: lastVisit },
+        { label: 'Account Manager',   value: customer.account_manager_name || '—' },
+        { label: 'Customer Since',    value: customerSince },
       ]} />
-      
+
       <section className="panel content-panel account-detail-panel">
         <div className="panel-section-header">
           <h3>{customer.first_name} {customer.last_name}</h3>
-          <p className="muted">Contact: {customer.contact_person_fname} {customer.contact_person_lname}</p>
+          <p className="muted">Customer ID: {customer.customer_id} · Status: {customer.status}</p>
         </div>
         <div className="account-detail-grid two-up">
           <div>
+            <p><strong>Customer ID:</strong> {customer.customer_id}</p>
+            <p><strong>User ID:</strong> {customer.user_id || '—'}</p>
+            <p><strong>Branch ID:</strong> {customer.branch_id}</p>
+            <p><strong>Branch Name:</strong> {customer.branch_name || '—'}</p>
+            <p><strong>Account Manager ID:</strong> {customer.account_manager_id || '—'}</p>
+            <p><strong>Account Manager:</strong> {customer.account_manager_name || '—'}</p>
+            <p><strong>Territory ID:</strong> {customer.territory_id || '—'}</p>
+          </div>
+          <div>
+            <p><strong>First Name:</strong> {customer.first_name}</p>
+            <p><strong>Last Name:</strong> {customer.last_name}</p>
             <p><strong>Address:</strong> {customer.address}</p>
-            <p><strong>Contact:</strong> {customer.contact_phone}</p>
-            <p><strong>Last Collection:</strong> {customer.activity?.last_collection_date ? new Date(customer.activity.last_collection_date).toLocaleDateString() : 'N/A'}</p>
+            <p><strong>Latitude:</strong> {customer.latitude}</p>
+            <p><strong>Longitude:</strong> {customer.longitude}</p>
+            <p><strong>Contact Phone:</strong> {customer.contact_phone}</p>
+            <p><strong>Contact Person:</strong> {customer.contact_person_fname} {customer.contact_person_lname}</p>
+            <p><strong>Contact Person Phone:</strong> {customer.contact_person_phone}</p>
+            <p><strong>Status:</strong> {customer.status}</p>
+            <p><strong>Created At:</strong> {customer.created_at ? new Date(customer.created_at).toLocaleString() : 'N/A'}</p>
+            <p><strong>Updated At:</strong> {customer.updated_at ? new Date(customer.updated_at).toLocaleString() : 'N/A'}</p>
+          </div>
+        </div>
+      </section>
+
+      <section className="panel content-panel account-detail-panel">
+        <div className="panel-section-header">
+          <h3>Customer Activity</h3>
+        </div>
+        <div className="account-detail-grid two-up">
+          <div>
+            <p><strong>Purchase Volume:</strong> {formatCurrency(purchaseVolume)}</p>
+            <p><strong>Outstanding Balance:</strong> {formatCurrency(outstandingBalance)}</p>
+            <p><strong>Last Sales Visit:</strong> {lastVisit}</p>
+            <p><strong>Last Collection Date:</strong> {customer.activity?.last_collection_date ? new Date(customer.activity.last_collection_date).toLocaleDateString('en-PH') : 'N/A'}</p>
           </div>
           <div>
             <h4 className="subsection-title">Credit Performance</h4>
             <p>Credit Limit: {formatCurrency(creditLimit)}</p>
             <p>Outstanding Balance: {formatCurrency(outstandingBalance)}</p>
             <div className="progress-bar-container" style={{ marginTop: 8 }}>
-              <div className="progress-bar" style={{ width: `${Math.min((outstandingBalance / creditLimit) * 100, 100)}%`, backgroundColor: outstandingBalance > creditLimit * 0.8 ? '#ef4444' : '#3b82f6' }}></div>
+              <div className="progress-bar" style={{ width: `${Math.min((outstandingBalance / (creditLimit || 1)) * 100, 100)}%`, backgroundColor: outstandingBalance > creditLimit * 0.8 ? '#ef4444' : '#3b82f6' }} />
             </div>
           </div>
         </div>
       </section>
-      
+
+      {customer.creditInfo && (
+        <section className="panel content-panel account-detail-panel">
+          <div className="panel-section-header">
+            <h3>Credit Information</h3>
+          </div>
+          <div className="account-detail-grid two-up">
+            <div>
+              <p><strong>Credit Limit:</strong> {formatCurrency(Number(customer.creditInfo.credit_limit || 0))}</p>
+              <p><strong>Monthly Income:</strong> {formatCurrency(Number(customer.creditInfo.monthly_income || 0))}</p>
+              <p><strong>Credit Score:</strong> {customer.creditInfo.credit_score || '—'}</p>
+              <p><strong>Employment Status:</strong> {customer.creditInfo.employment_status || '—'}</p>
+            </div>
+            <div>
+              <p><strong>Approved By:</strong> {customer.creditInfo.approved_by_name || '—'}</p>
+              <p><strong>Approved Date:</strong> {customer.creditInfo.approved_date ? new Date(customer.creditInfo.approved_date).toLocaleDateString('en-PH') : '—'}</p>
+              <p><strong>Credit Info ID:</strong> {customer.creditInfo.credit_info_id || '—'}</p>
+              <p><strong>Created At:</strong> {customer.creditInfo.created_at ? new Date(customer.creditInfo.created_at).toLocaleString() : '—'}</p>
+              <p><strong>Updated At:</strong> {customer.creditInfo.updated_at ? new Date(customer.creditInfo.updated_at).toLocaleString() : '—'}</p>
+            </div>
+          </div>
+        </section>
+      )}
+
+      <section className="panel content-panel">
+        <div className="panel-section-header">
+          <h3>Location Map</h3>
+          <p className="muted">Customer address: {customer.address}</p>
+        </div>
+        <div style={{ minHeight: 300, borderRadius: 8, overflow: 'hidden' }}>
+          <LeafletMap
+            center={customer.latitude && customer.longitude ? [Number(customer.latitude), Number(customer.longitude)] : [7.1907, 125.4553]}
+            zoom={15}
+            height={300}
+            markers={[
+              {
+                id: customer.customer_id,
+                position: customer.latitude && customer.longitude ? [Number(customer.latitude), Number(customer.longitude)] : [7.1907, 125.4553],
+                popup: `<strong>${customer.first_name} ${customer.last_name}</strong><br/>${customer.address}`,
+                label: String(customer.customer_id),
+                color: '#2563eb'
+              }
+            ]}
+          />
+        </div>
+      </section>
+
       <section className="panel content-panel">
         <div className="panel-section-header">
           <h3>Recent Payments</h3>
         </div>
-        <div className="table-responsive">
+        <div className="table-shell">
           <table className="data-table">
             <thead>
               <tr>
                 <th>Date</th>
+                <th>Receipt #</th>
                 <th>Amount</th>
                 <th>Method</th>
+                <th>Collector</th>
+                <th>Status</th>
               </tr>
             </thead>
             <tbody>
               {customer.paymentHistory && customer.paymentHistory.length ? customer.paymentHistory.map((p) => (
-                <tr key={p.payment_id}>
-                  <td>{new Date(p.payment_date).toLocaleDateString()}</td>
-                  <td>{formatCurrency(p.amount)}</td>
+                <tr key={p.payment_id || p.receipt_number}>
+                  <td>{new Date(p.payment_date).toLocaleDateString('en-PH')}</td>
+                  <td><span style={{ fontFamily: 'monospace', fontSize: '0.82rem' }}>{p.receipt_number || '—'}</span></td>
+                  <td>{formatCurrency(Number(p.amount))}</td>
                   <td>{p.payment_method || 'Cash'}</td>
+                  <td>{p.collector_name || '—'}</td>
+                  <td>
+                    <span style={{
+                      padding: '2px 8px', borderRadius: 999, fontSize: '0.78rem', fontWeight: 600,
+                      background: p.payment_status === 'Completed' ? 'rgba(16,185,129,0.1)' : 'rgba(245,158,11,0.1)',
+                      color: p.payment_status === 'Completed' ? '#059669' : '#d97706',
+                    }}>
+                      {p.payment_status || 'Completed'}
+                    </span>
+                  </td>
                 </tr>
               )) : (
-                <tr>
-                  <td colSpan="3" className="text-center muted">No recent payments</td>
-                </tr>
+                <tr><td colSpan="6" style={{ textAlign: 'center', color: '#64748b', padding: 16 }}>No recent payments</td></tr>
               )}
             </tbody>
           </table>
@@ -517,117 +717,149 @@ function CustomerDetailPage({ customerId, parentContext, navigate, showToast }) 
   );
 }
 
-function VisitLogPage({ customerId, parentContext, navigate, showToast }) {
-  const [customer, setCustomer] = useState(null);
+function VisitLogPage({ visitId, parentContext, navigate, showToast }) {
+  const [visit, setVisit] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [rows, setRows] = useState([{ id: 1, productId: 'p1', quantity: '', unitPrice: 250 }]);
-  const [formData, setFormData] = useState({ paymentMethod: '', deliveryDate: '', notes: '', commitmentNotes: '' });
-  const [errors, setErrors] = useState({});
-  const [submitted, setSubmitted] = useState(false);
-  const contextQuery = `?from=${parentContext}`;
+  const [error, setError] = useState(null);
+  const [updating, setUpdating] = useState(false);
 
   useEffect(() => {
     async function load() {
+      if (!visitId) {
+        setError('No visit id provided.');
+        setLoading(false);
+        return;
+      }
       setLoading(true);
-      const res = await fetchCustomerById(customerId);
-      if (res.success && res.data) setCustomer(res.data);
+      setError(null);
+      const res = await fetchFieldVisitById(visitId);
+      if (res.success && res.data) {
+        setVisit(res.data);
+      } else {
+        setError(res.message || 'Field visit not found.');
+        if (showToast) showToast(res.message || 'Field visit not found.', 'error');
+      }
       setLoading(false);
     }
     load();
-  }, [customerId]);
+  }, [visitId, showToast]);
 
-  if (loading) return <LoadingState message="Loading customer..." />;
-  if (!customer) return <EmptyState title="Customer not found" actionLabel="Back to Customers" onAction={() => navigate('/sales/customers')} />;
-
-  const lineTotal = (row) => (Number(row.quantity) || 0) * (Number(row.unitPrice) || 0);
-  const grandTotal = rows.reduce((sum, row) => sum + lineTotal(row), 0);
-
-  const addRow = () => setRows((prev) => [...prev, { id: Date.now(), productId: 'p1', quantity: '', unitPrice: PRODUCTS[0].unitPrice }]);
-  const removeRow = (id) => setRows((prev) => (prev.length > 1 ? prev.filter((r) => r.id !== id) : prev));
-  const updateRow = (id, field, value) => setRows((prev) => prev.map((r) => (r.id === id ? { ...r, [field]: value, ...(field === 'productId' ? { unitPrice: getProductById(value)?.unitPrice ?? r.unitPrice } : {}) } : r)));
-
-  const handleSubmit = () => {
-    const nextErrors = {};
-    rows.forEach((row, i) => {
-      const qty = Number(row.quantity);
-      if (!qty || qty <= 0) nextErrors[`qty-${row.id}`] = `Row ${i + 1}: quantity must be greater than zero.`;
-      const stock = getProductStock(row.productId);
-      if (qty > stock) nextErrors[`qty-${row.id}`] = `Row ${i + 1}: exceeds available inventory (${stock} units).`;
-    });
-    if (!formData.paymentMethod) nextErrors.paymentMethod = 'Select a payment method.';
-    if (submitted) nextErrors.submit = 'This sale has already been submitted.';
-    setErrors(nextErrors);
-    if (Object.keys(nextErrors).length) { showToast('Please fix the errors before submitting.', 'error'); return; }
-    setSubmitted(true);
-    showToast('Sale logged. Inventory deducted and visit marked completed.', 'success');
-    navigate(`/sales/history/INV-2024-0089`);
+  const handleMarkCompleted = async () => {
+    if (!visit) return;
+    setUpdating(true);
+    const res = await updateFieldVisit(visitId, { status: 'Completed' });
+    if (res.success && res.data) {
+      setVisit(res.data);
+      showToast('Visit marked as completed.', 'success');
+    } else {
+      showToast(res.message || 'Failed to update visit.', 'error');
+    }
+    setUpdating(false);
   };
+
+  if (loading) return <LoadingState message="Loading field visit..." />;
+
+  if (error) {
+    return (
+      <EmptyState
+        title="Visit not found"
+        description={error}
+        actionLabel="Back to Schedule"
+        onAction={() => navigate('/sales/schedule')}
+      />
+    );
+  }
+
+  const customerName = visit.customer_name || `${visit.first_name || ''} ${visit.last_name || ''}`.trim() || '—';
 
   return (
     <div className="page">
       <section className="panel content-panel">
-        <p className="muted">Logging sale for <strong>{customer.first_name} {customer.last_name}</strong></p>
+        <div className="panel-section-header">
+          <h3>Field Visit Record</h3>
+          <p className="muted">Visit ID: {visit.visit_id}</p>
+        </div>
+        <StatsGrid stats={[
+          { label: 'Visit ID', value: String(visit.visit_id) },
+          { label: 'User ID', value: String(visit.user_id ?? '—') },
+          { label: 'Visit Type', value: visit.visit_type || '—' },
+          { label: 'Scheduled Date', value: visit.scheduled_date ? new Date(visit.scheduled_date).toLocaleDateString('en-PH') : '—' },
+          { label: 'Status', value: <StatusBadge status={visit.status} /> },
+          { label: 'Customer', value: customerName },
+        ]} />
       </section>
+
       <section className="panel content-panel">
         <div className="panel-section-header">
-          <h3>Product Selection</h3>
-          <button className="button secondary" type="button" onClick={addRow}>Add Product Row</button>
+          <h3>Visit Details</h3>
         </div>
-        <div className="table-shell">
-          <table className="data-table product-table">
-            <thead><tr><th>Product Name</th><th>Quantity</th><th>Unit Price</th><th>Line Total</th><th></th></tr></thead>
-            <tbody>
-              {rows.map((row, index) => {
-                const product = getProductById(row.productId);
-                return (
-                  <tr key={row.id}>
-                    <td>
-                      <select value={row.productId} onChange={(e) => updateRow(row.id, 'productId', e.target.value)}>
-                        {PRODUCTS.map((p) => <option key={p.id} value={p.id}>{p.name} (stock: {p.stock})</option>)}
-                      </select>
-                      {errors[`qty-${row.id}`] ? <p className="form-error">{errors[`qty-${row.id}`]}</p> : null}
-                    </td>
-                    <td><input type="number" min="1" value={row.quantity} onChange={(e) => updateRow(row.id, 'quantity', e.target.value)} /></td>
-                    <td><input type="number" min="0" value={row.unitPrice} onChange={(e) => updateRow(row.id, 'unitPrice', e.target.value)} /></td>
-                    <td>{formatCurrency(lineTotal(row))}</td>
-                    <td><button className="icon-action-button danger" type="button" title="Remove" onClick={() => removeRow(row.id)} disabled={rows.length === 1}><NavIcon name="trash" /></button></td>
-                  </tr>
-                );
-              })}
-            </tbody>
-            <tfoot><tr><td colSpan="3"><strong>Grand Total</strong></td><td colSpan="2"><strong>{formatCurrency(grandTotal)}</strong></td></tr></tfoot>
-          </table>
+        <div className="account-detail-grid two-up">
+          <div>
+            <p><strong>Visit ID:</strong> {visit.visit_id}</p>
+            <p><strong>User ID:</strong> {visit.user_id ?? '—'}</p>
+            <p><strong>Visit Type:</strong> {visit.visit_type || '—'}</p>
+            <p><strong>Scheduled Date:</strong> {visit.scheduled_date ? new Date(visit.scheduled_date).toLocaleDateString('en-PH') : '—'}</p>
+            <p><strong>Status:</strong> <StatusBadge status={visit.status} /></p>
+            <p><strong>Created At:</strong> {visit.created_at ? new Date(visit.created_at).toLocaleString() : '—'}</p>
+            <p><strong>Updated At:</strong> {visit.updated_at ? new Date(visit.updated_at).toLocaleString() : '—'}</p>
+          </div>
+          <div>
+            <h4 className="subsection-title">Agent</h4>
+            <p><strong>User ID:</strong> {visit.user_id ?? '—'}</p>
+            <p><strong>Agent Name:</strong> {visit.agent_name || '—'}</p>
+            <p><strong>Agent:</strong> {visit.agent_first_name || visit.agent_last_name ? `${visit.agent_first_name || ''} ${visit.agent_last_name || ''}`.trim() : '—'}</p>
+          </div>
         </div>
       </section>
-      <section className="panel form-panel content-panel">
-        <div className="form-group">
-          <label>Payment Method<span className="required">*</span></label>
-          <select value={formData.paymentMethod} onChange={(e) => setFormData((p) => ({ ...p, paymentMethod: e.target.value }))}>
-            <option value="">Select payment method</option>
-            {['Cash', 'Check', 'Bank Transfer', 'Credit Terms'].map((o) => <option key={o} value={o}>{o}</option>)}
-          </select>
-          {errors.paymentMethod ? <p className="form-error">{errors.paymentMethod}</p> : null}
+
+      <section className="panel content-panel">
+        <div className="panel-section-header">
+          <h3>Customer Information</h3>
         </div>
-        <div className="form-group">
-          <label>Expected Delivery Date</label>
-          <input type="date" value={formData.deliveryDate} onChange={(e) => setFormData((p) => ({ ...p, deliveryDate: e.target.value }))} />
+        <div className="account-detail-grid two-up">
+          <div>
+            <p><strong>Customer ID:</strong> {visit.customer_id ?? '—'}</p>
+            <p><strong>Name:</strong> {customerName}</p>
+            <p><strong>Address:</strong> {visit.address || '—'}</p>
+            <p><strong>Contact Phone:</strong> {visit.contact_phone || '—'}</p>
+            <p><strong>Contact Person:</strong> {visit.contact_person_fname ? `${visit.contact_person_fname} ${visit.contact_person_lname || ''}` : '—'}</p>
+            <p><strong>Contact Person Phone:</strong> {visit.contact_person_phone || '—'}</p>
+            <p><strong>Customer Status:</strong> {visit.customer_status || '—'}</p>
+          </div>
+          <div>
+            <p><strong>Latitude:</strong> {visit.latitude ?? '—'}</p>
+            <p><strong>Longitude:</strong> {visit.longitude ?? '—'}</p>
+            {visit.latitude && visit.longitude ? (
+              <div style={{ minHeight: 240, borderRadius: 8, overflow: 'hidden', marginTop: 12 }}>
+                <LeafletMap
+                  center={[Number(visit.latitude), Number(visit.longitude)]}
+                  zoom={15}
+                  height={240}
+                  markers={[
+                    {
+                      id: visit.visit_id,
+                      position: [Number(visit.latitude), Number(visit.longitude)],
+                      popup: `<strong>${customerName}</strong><br/>${visit.address || ''}`,
+                      label: String(visit.visit_id),
+                      color: visit.status === 'Completed' ? '#10b981' : '#2563eb',
+                    },
+                  ]}
+                />
+              </div>
+            ) : null}
+          </div>
         </div>
-        <div className="form-group">
-          <label>Notes</label>
-          <textarea placeholder="Visit notes..." value={formData.notes} onChange={(e) => setFormData((p) => ({ ...p, notes: e.target.value }))} />
-        </div>
-        <div className="form-group">
-          <label>Commitment Notes</label>
-          <textarea placeholder="Sales commitments or follow-up actions..." value={formData.commitmentNotes} onChange={(e) => setFormData((p) => ({ ...p, commitmentNotes: e.target.value }))} />
-        </div>
-        {errors.submit ? <p className="form-error">{errors.submit}</p> : null}
       </section>
+
       <PageToolbar
         actions={[
-          { label: 'Log Sale', action: 'submit' },
-          { label: 'Cancel', to: `/sales/customer-detail/${customer.id}${contextQuery}`, variant: 'secondary' },
+          { label: 'Mark Completed', action: 'complete', variant: visit.status === 'Completed' ? 'secondary' : undefined, disabled: updating || visit.status === 'Completed' },
+          { label: 'Back to Schedule', to: '/sales/schedule', variant: 'secondary' },
         ]}
-        onAction={(a) => (a.action === 'submit' ? handleSubmit() : navigate(a.to))}
+        onAction={(a) => {
+          if (a.action === 'complete') handleMarkCompleted();
+          else if (a.to) navigate(a.to);
+        }}
       />
     </div>
   );
@@ -682,22 +914,36 @@ function InventoryPage({ navigate, showToast }) {
   const [sortBy, setSortBy] = useState('Name');
   const [selectedProduct, setSelectedProduct] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [products, setProducts] = useState([]);
+  const [categories, setCategories] = useState([]);
 
   useEffect(() => {
-    const timer = window.setTimeout(() => setLoading(false), 400);
-    return () => window.clearTimeout(timer);
+    async function loadProducts() {
+      setLoading(true);
+      try {
+        const apiClient = (await import('../../api/apiClient.js')).default;
+        const res = await apiClient.get('/products');
+        if (res.data.success) {
+          setProducts(res.data.data);
+          setCategories(res.data.categories || []);
+        }
+      } catch (err) {
+        console.error('[SalesInventory] load error:', err.message);
+      }
+      setLoading(false);
+    }
+    loadProducts();
   }, []);
 
-  const categories = ['All', ...new Set(PRODUCTS.map((p) => p.category))];
   const filtered = useMemo(() => {
-    let results = [...PRODUCTS];
+    let results = [...products];
     const query = search.trim().toLowerCase();
-    if (query) results = results.filter((p) => p.name.toLowerCase().includes(query) || p.sku.toLowerCase().includes(query));
-    if (category !== 'All') results = results.filter((p) => p.category === category);
-    if (sortBy === 'Stock Level') results.sort((a, b) => a.stock - b.stock);
-    else results.sort((a, b) => a.name.localeCompare(b.name));
+    if (query) results = results.filter((p) => p.product_name.toLowerCase().includes(query) || (p.category_name && p.category_name.toLowerCase().includes(query)));
+    if (category !== 'All') results = results.filter((p) => p.category_id === Number(category));
+    if (sortBy === 'Product Name') results.sort((a, b) => a.product_name.localeCompare(b.product_name));
+    else if (sortBy === 'Unit Price') results.sort((a, b) => a.unit_price - b.unit_price);
     return results;
-  }, [search, category, sortBy]);
+  }, [products, search, category, sortBy]);
 
   if (loading) return <LoadingState message="Loading inventory..." />;
 
@@ -706,10 +952,15 @@ function InventoryPage({ navigate, showToast }) {
       <section className="panel content-panel">
         <div className="panel-section-header"><h3>Inventory Viewer</h3><span className="muted">Read-only access</span></div>
         <div className="accounts-toolbar">
-          <input className="search-input" type="search" placeholder="Search products by name or SKU" value={search} onChange={(e) => setSearch(e.target.value)} />
+          <input className="search-input" type="search" placeholder="Search products by name or category" value={search} onChange={(e) => setSearch(e.target.value)} />
           <div className="accounts-filters">
-            <select value={category} onChange={(e) => setCategory(e.target.value)}>{categories.map((c) => <option key={c} value={c}>{c === 'All' ? 'All Categories' : c}</option>)}</select>
-            <select value={sortBy} onChange={(e) => setSortBy(e.target.value)}>{['Name', 'Stock Level'].map((o) => <option key={o} value={o}>Sort: {o}</option>)}</select>
+            <select value={category} onChange={(e) => setCategory(e.target.value)}>
+              <option value="All">All Categories</option>
+              {categories.map((c) => <option key={c.category_id} value={c.category_id}>{c.category_name}</option>)}
+            </select>
+            <select value={sortBy} onChange={(e) => setSortBy(e.target.value)}>
+              {['Product Name', 'Unit Price'].map((o) => <option key={o} value={o}>Sort: {o}</option>)}
+            </select>
           </div>
         </div>
       </section>
@@ -717,17 +968,17 @@ function InventoryPage({ navigate, showToast }) {
         <section className="panel content-panel">
           <div className="table-shell">
             <table className="data-table">
-              <thead><tr><th>Product Name</th><th>SKU</th><th>Current Stock</th><th>Branch</th><th>Status</th><th>Actions</th></tr></thead>
+              <thead><tr><th>Product ID</th><th>Product Name</th><th>Category</th><th>Unit Price</th><th>Status</th><th>Actions</th></tr></thead>
               <tbody>
                 {filtered.map((product) => (
-                  <tr key={product.id}>
-                    <td>{product.name}</td>
-                    <td>{product.sku}</td>
-                    <td>{product.stock}</td>
-                    <td>{product.branch}</td>
-                    <td><span className={`stock-status stock-${product.status.toLowerCase()}`}>{product.status}</span></td>
+                  <tr key={product.product_id}>
+                    <td>{product.product_id}</td>
+                    <td>{product.product_name}</td>
+                    <td>{product.category_name || product.category_id}</td>
+                    <td>{formatCurrency(product.unit_price)}</td>
+                    <td><StatusBadge status={product.status} /></td>
                     <td>
-                      <button className="icon-action-button" type="button" title="View" onClick={() => navigate(`/sales/inventory/${product.id}`)}><NavIcon name="view" /></button>
+                      <button className="icon-action-button" type="button" title="View" onClick={() => navigate(`/sales/inventory/${product.product_id}`)}><NavIcon name="view" /></button>
                     </td>
                   </tr>
                 ))}
@@ -781,32 +1032,73 @@ function ProductDetailsPage({ productId, navigate }) {
   );
 }
 
-function SalesHistoryPage({ navigate }) {
+function SalesHistoryPage({ navigate, showToast }) {
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('All');
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo] = useState('');
   const [productFilter, setProductFilter] = useState('All');
+  const [invoices, setInvoices] = useState([]);
+  const [pagination, setPagination] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
 
   useEffect(() => {
-    const timer = window.setTimeout(() => setLoading(false), 400);
-    return () => window.clearTimeout(timer);
-  }, []);
+    let active = true;
 
+    async function load() {
+      setLoading(true);
+      setError(null);
+      const result = await fetchInvoices({ limit: 100 });
+
+      if (!active) return;
+
+      if (result.success) {
+        setInvoices(result.data || []);
+        setPagination(result.pagination || null);
+      } else {
+        setError(result.message || 'Failed to load sales history.');
+        if (showToast) showToast(result.message || 'Failed to load sales history.', 'error');
+      }
+      setLoading(false);
+    }
+
+    load();
+    return () => {
+      active = false;
+    };
+  }, [showToast]);
+
+  const productNames = useMemo(
+    () => Array.from(new Set(invoices.flatMap((item) => item.product_names || []))).sort(),
+    [invoices]
+  );
   const filtered = useMemo(() => {
     const query = search.trim().toLowerCase();
-    return SALES_HISTORY.filter((item) => {
-      const matchesSearch = !query || (item.customerName || item.first_name + ' ' + item.last_name).toLowerCase().includes(query) || item.invoiceNumber.toLowerCase().includes(query);
+    return invoices.filter((item) => {
+      const customerName = item.customer_name || `${item.first_name || ''} ${item.last_name || ''}`.trim();
+      const invoiceDate = String(item.invoices_date || '').slice(0, 10);
+      const matchesSearch = !query || customerName.toLowerCase().includes(query) || String(item.invoice_number || '').toLowerCase().includes(query);
       const matchesStatus = statusFilter === 'All' || item.status === statusFilter;
-      const matchesFrom = !dateFrom || item.date >= dateFrom;
-      const matchesTo = !dateTo || item.date <= dateTo;
-      const matchesProduct = productFilter === 'All' || item.products.some((p) => p.name === productFilter);
+      const matchesFrom = !dateFrom || invoiceDate >= dateFrom;
+      const matchesTo = !dateTo || invoiceDate <= dateTo;
+      const matchesProduct = productFilter === 'All' || (item.product_names || []).includes(productFilter);
       return matchesSearch && matchesStatus && matchesFrom && matchesTo && matchesProduct;
     });
-  }, [search, statusFilter, dateFrom, dateTo, productFilter]);
+  }, [search, statusFilter, dateFrom, dateTo, productFilter, invoices]);
 
   if (loading) return <LoadingState message="Loading sales history..." />;
+
+  if (error && !invoices.length) {
+    return (
+      <EmptyState
+        title="Unable to load sales history"
+        description={error}
+        actionLabel="Retry"
+        onAction={() => window.location.reload()}
+      />
+    );
+  }
 
   return (
     <div className="page">
@@ -815,12 +1107,13 @@ function SalesHistoryPage({ navigate }) {
         <div className="accounts-toolbar">
           <input className="search-input" type="search" placeholder="Search by customer or invoice number" value={search} onChange={(e) => setSearch(e.target.value)} />
           <div className="accounts-filters">
-            <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}>{['All', 'Confirmed', 'Pending Review'].map((o) => <option key={o}>{o}</option>)}</select>
-            <select value={productFilter} onChange={(e) => setProductFilter(e.target.value)}><option value="All">All Products</option>{PRODUCTS.map((p) => <option key={p.id} value={p.name}>{p.name}</option>)}</select>
+            <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}>{['All', 'Confirmed', 'Pending Review', 'Draft'].map((o) => <option key={o}>{o}</option>)}</select>
+            <select value={productFilter} onChange={(e) => setProductFilter(e.target.value)}><option value="All">All Products</option>{productNames.map((name) => <option key={name} value={name}>{name}</option>)}</select>
             <input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} aria-label="From date" />
             <input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} aria-label="To date" />
           </div>
         </div>
+        {pagination ? <p className="muted" style={{ marginTop: 12 }}>Showing {filtered.length} of {pagination.total} invoices</p> : null}
       </section>
       {filtered.length ? (
         <section className="panel content-panel">
@@ -829,13 +1122,13 @@ function SalesHistoryPage({ navigate }) {
               <thead><tr><th>Invoice Number</th><th>Customer Name</th><th>Total Amount</th><th>Date</th><th>Status</th><th>Actions</th></tr></thead>
               <tbody>
                 {filtered.map((item) => (
-                  <tr key={item.id}>
-                    <td>{item.invoiceNumber}</td>
-                    <td>{item.customerName || item.first_name + ' ' + item.last_name}</td>
-                    <td>{formatCurrency(item.totalAmount)}</td>
-                    <td>{item.date}</td>
+                  <tr key={item.invoice_number || item.sales_invoices_id}>
+                    <td>{item.invoice_number}</td>
+                    <td>{item.customer_name || item.first_name + ' ' + item.last_name}</td>
+                    <td>{formatCurrency(item.total_amount)}</td>
+                    <td>{String(item.invoices_date || '').slice(0, 10)}</td>
                     <td>{item.status}</td>
-                    <td><button className="icon-action-button" type="button" title="View" onClick={() => navigate(`/sales/history/${item.id}`)}><NavIcon name="view" /></button></td>
+                    <td><button className="icon-action-button" type="button" title="View" onClick={() => navigate(`/sales/invoices/${encodeURIComponent(item.invoice_number)}`)}><NavIcon name="view" /></button></td>
                   </tr>
                 ))}
               </tbody>
@@ -843,40 +1136,6 @@ function SalesHistoryPage({ navigate }) {
           </div>
         </section>
       ) : <EmptyState title="No sales records found" description="Adjust your search or filters." />}
-    </div>
-  );
-}
-
-function SaleDetailsPage({ invoiceId, navigate, showToast }) {
-  const sale = getSaleById(invoiceId);
-  if (!sale) return <EmptyState title="Sale not found" actionLabel="Back to History" onAction={() => navigate('/sales/history')} />;
-  return (
-    <div className="page">
-      <StatsGrid stats={[
-        { label: 'Invoice Number', value: sale.invoiceNumber },
-        { label: 'Total Amount', value: formatCurrency(sale.totalAmount) },
-        { label: 'Status', value: sale.status },
-      ]} />
-      <section className="panel content-panel">
-        <ul className="info-grid">
-          <li><span className="info-item-label">Customer</span><span className="info-item-value">{sale.customerName || sale.first_name + ' ' + sale.last_name}</span></li>
-          <li><span className="info-item-label">Branch</span><span className="info-item-value">{sale.branch}</span></li>
-          <li><span className="info-item-label">Payment Method</span><span className="info-item-value">{sale.paymentMethod}</span></li>
-          <li><span className="info-item-label">Date</span><span className="info-item-value">{sale.date}</span></li>
-          <li><span className="info-item-label">Notes</span><span className="info-item-value">{sale.notes}</span></li>
-        </ul>
-        <div className="table-shell">
-          <table className="data-table">
-            <thead><tr><th>Product</th><th>Qty</th><th>Unit Price</th><th>Line Total</th></tr></thead>
-            <tbody>
-              {sale.products.map((p) => (
-                <tr key={p.name}><td>{p.name}</td><td>{p.quantity}</td><td>{formatCurrency(p.unitPrice)}</td><td>{formatCurrency(p.lineTotal)}</td></tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </section>
-      <PageToolbar actions={[{ label: 'Back to History', to: '/sales/history', variant: 'ghost' }]} onAction={(a) => navigate(a.to)} />
     </div>
   );
 }
@@ -1038,7 +1297,7 @@ function SettingsPage({ navigate }) {
 
 export function SalesPageBody({ page, navigate, showToast }) {
   if (!page) return <EmptyState title="Page not found" description="Use the sidebar to open a supported screen." />;
-  const props = { customerId: page.params?.customerId, productId: page.params?.productId, invoiceId: page.params?.invoiceId, parentContext: page.parentContext, navigate, showToast };
+  const props = { customerId: page.params?.customerId, visitId: page.params?.visitId, productId: page.params?.productId, invoiceId: page.params?.invoiceId, parentContext: page.parentContext, navigate, showToast };
   switch (page.pageType) {
     case 'dashboard': return <DashboardPage {...props} />;
     case 'settings': return <SettingsPage {...props} />;
@@ -1053,7 +1312,8 @@ export function SalesPageBody({ page, navigate, showToast }) {
     case 'inventory': return <InventoryPage {...props} />;
     case 'productDetails': return <ProductDetailsPage {...props} />;
     case 'history': return <SalesHistoryPage {...props} />;
-    case 'saleDetails': return <SaleDetailsPage {...props} />;
+    case 'invoiceDetails': return <InvoiceDetailsPage {...props} />;
+    case 'saleDetails': return <InvoiceDetailsPage {...props} />;
     case 'notifications': return <NotificationsPage {...props} />;
     case 'profile': return <ProfilePage {...props} />;
     case 'routeTracking': return <RouteTrackingPage {...props} />;

@@ -37,9 +37,10 @@ router.get('/', async (req, res) => {
       const tableCheck = await pool.query(`SELECT EXISTS (SELECT 1 FROM pg_tables WHERE schemaname = 'public' AND tablename = 'customer_activity')`);
       if (tableCheck.rows[0]?.exists) {
         activityColumns = `
-          COALESCE((SELECT purchase_volume FROM customer_activity WHERE customer_id = c.customer_id), 0) AS totalPurchaseVolume,
-          COALESCE((SELECT outstanding_balance FROM customer_activity WHERE customer_id = c.customer_id), 0) AS outstandingBalance,
-          COALESCE(TO_CHAR((SELECT last_sales_visit FROM customer_activity WHERE customer_id = c.customer_id), 'YYYY-MM-DD'), '') AS lastVisitDate,
+          COALESCE((SELECT purchase_volume FROM customer_activity WHERE customer_id = c.customer_id), 0) AS "totalPurchaseVolume",
+          COALESCE((SELECT outstanding_balance FROM customer_activity WHERE customer_id = c.customer_id), 0) AS "outstandingBalance",
+          COALESCE(TO_CHAR((SELECT last_sales_visit FROM customer_activity WHERE customer_id = c.customer_id), 'YYYY-MM-DD'), '') AS "lastVisitDate",
+          COALESCE(TO_CHAR((SELECT last_collection_date FROM customer_activity WHERE customer_id = c.customer_id), 'YYYY-MM-DD'), '') AS "lastCollectionDate",
         `;
       }
     } catch (err) {
@@ -51,6 +52,8 @@ router.get('/', async (req, res) => {
          c.customer_id,
          c.user_id,
          c.branch_id,
+         c.account_manager_id,
+         c.territory_id,
          c.first_name,
          c.last_name,
          c.address,
@@ -63,9 +66,13 @@ router.get('/', async (req, res) => {
          c.status,
          c.created_at,
          c.updated_at,
+         b.name AS branch_name,
+         mgr.full_name AS account_manager_name,
          ${activityColumns}
          COALESCE(c.contact_phone, '') AS phone
        FROM customers c
+       LEFT JOIN branches b ON b.id = c.branch_id
+       LEFT JOIN users mgr ON mgr.id = c.account_manager_id
        ${where}
        ORDER BY c.customer_id DESC
        LIMIT $${pIdx++} OFFSET $${pIdx++}`,
@@ -97,6 +104,8 @@ router.get('/:id', async (req, res) => {
          c.customer_id,
          c.user_id,
          c.branch_id,
+         c.account_manager_id,
+         c.territory_id,
          c.first_name,
          c.last_name,
          c.address,
@@ -108,8 +117,12 @@ router.get('/:id', async (req, res) => {
          c.contact_person_phone,
          c.status,
          c.created_at,
-         c.updated_at
+         c.updated_at,
+         b.name   AS branch_name,
+         mgr.full_name AS account_manager_name
        FROM customers c
+       LEFT JOIN branches b ON b.id = c.branch_id
+       LEFT JOIN users mgr ON mgr.id = c.account_manager_id
        WHERE c.customer_id = $1`,
       [req.params.id]
     );
@@ -133,7 +146,13 @@ router.get('/:id', async (req, res) => {
     try {
       const tableCheck = await pool.query(`SELECT EXISTS (SELECT 1 FROM pg_tables WHERE schemaname = 'public' AND tablename = 'customer_credit_info')`);
       if (tableCheck.rows[0]?.exists) {
-        creditResult = await pool.query(`SELECT * FROM customer_credit_info WHERE customer_id = $1`, [req.params.id]);
+        creditResult = await pool.query(
+          `SELECT cci.*, u.full_name AS approved_by_name
+           FROM customer_credit_info cci
+           LEFT JOIN users u ON u.id = cci.approved_by
+           WHERE cci.customer_id = $1`,
+          [req.params.id]
+        );
       }
     } catch (err) {
       console.error('[Customers] customer_credit_info lookup failed:', err.message);
@@ -143,10 +162,17 @@ router.get('/:id', async (req, res) => {
       const tableCheck = await pool.query(`SELECT EXISTS (SELECT 1 FROM pg_tables WHERE schemaname = 'public' AND tablename = 'payment_methods')`);
       if (tableCheck.rows[0]?.exists) {
         paymentsResult = await pool.query(
-          `SELECT cp.*, 
-             pm.method_name AS payment_method
+          `SELECT cp.collectionpayment_id AS payment_id,
+                  cp.receipt_number,
+                  cp.amount,
+                  cp.payment_date,
+                  cp.status             AS payment_status,
+                  cp.notes,
+                  pm.method_name        AS payment_method,
+                  u.full_name           AS collector_name
            FROM collection_payment cp
            LEFT JOIN payment_methods pm ON pm.payment_method_id = cp.payment_method_id
+           LEFT JOIN users u ON u.id = cp.collector_id
            WHERE cp.customer_id = $1
            ORDER BY cp.payment_date DESC
            LIMIT 30`,

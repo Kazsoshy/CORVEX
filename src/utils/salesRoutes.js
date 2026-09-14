@@ -1,4 +1,4 @@
-import { getCustomerById, getProductById, getSaleById } from '../data/salesMockData';
+import { getCustomerById, getProductById } from '../data/salesMockData';
 
 const ROUTE_DEFINITIONS = [
   { pattern: /^\/sales\/dashboard$/, pageType: 'dashboard' },
@@ -7,10 +7,11 @@ const ROUTE_DEFINITIONS = [
   { pattern: /^\/sales\/schedule$/, pageType: 'scheduleList' },
   { pattern: /^\/sales\/customers$/, pageType: 'customers' },
   { pattern: /^\/sales\/customer-detail\/([^/]+)$/, pageType: 'customerDetail', params: ['customerId'] },
-  { pattern: /^\/sales\/visit-log\/(\d+)$/, pageType: 'visitLog', params: ['customerId'] },
+  { pattern: /^\/sales\/visit-log\/(\d+)$/, pageType: 'visitLog', params: ['visitId'] },
   { pattern: /^\/sales\/ci-form\/(\d+)$/, pageType: 'ciForm', params: ['customerId'] },
   { pattern: /^\/sales\/history$/, pageType: 'history' },
-  { pattern: /^\/sales\/history\/([^/]+)$/, pageType: 'saleDetails', params: ['invoiceId'] },
+  { pattern: /^\/sales\/invoices\/([^/]+)$/, pageType: 'invoiceDetails', params: ['invoiceId'] },
+  { pattern: /^\/sales\/history\/([^/]+)$/, pageType: 'invoiceDetails', params: ['invoiceId'] },
   { pattern: /^\/sales\/inventory\/([^/]+)$/, pageType: 'productDetails', params: ['productId'] },
   { pattern: /^\/sales\/inventory$/, pageType: 'inventory' },
   { pattern: /^\/sales\/notifications$/, pageType: 'notifications' },
@@ -49,7 +50,6 @@ export function buildSalesBreadcrumbs(pageType, params = {}, parentContext = 'cu
   const customer = params.customerId ? getCustomerById(params.customerId) : null;
   const customerLabel = customer ? `${customer.first_name} ${customer.last_name}` : 'Customer Detail';
   const product = params.productId ? getProductById(params.productId) : null;
-  const sale = params.invoiceId ? getSaleById(params.invoiceId) : null;
 
   const creditCrumbs = [{ label: 'Customer Credit History', to: '/sales/credit-history' }];
 
@@ -81,9 +81,9 @@ export function buildSalesBreadcrumbs(pageType, params = {}, parentContext = 'cu
 
     case 'visitLog':
       return [
-        ...buildSalesBreadcrumbs('customerDetail', params, parentContext).slice(0, -1),
-        { label: customerLabel, to: `/sales/customer-detail/${params.customerId}?from=${parentContext}` },
-        { label: 'Sales Visit Log', to: `/sales/visit-log/${params.customerId}?from=${parentContext}` },
+        ...crumbs,
+        { label: "Today's Schedule", to: '/sales/schedule' },
+        { label: 'Field Visit Log', to: `/sales/visit-log/${params.visitId}` },
       ];
 
     case 'ciForm':
@@ -96,11 +96,11 @@ export function buildSalesBreadcrumbs(pageType, params = {}, parentContext = 'cu
     case 'history':
       return [...crumbs, { label: 'Sales History', to: '/sales/history' }];
 
-    case 'saleDetails':
+    case 'invoiceDetails':
       return [
         ...crumbs,
         { label: 'Sales History', to: '/sales/history' },
-        { label: sale?.invoiceNumber ?? 'Sales Details', to: `/sales/history/${params.invoiceId}` },
+        { label: `Invoice #${params.invoiceId}`, to: `/sales/invoices/${params.invoiceId}` },
       ];
 
     case 'inventory':
@@ -150,10 +150,10 @@ export function resolveSalesPage(pathname, search = '') {
     scheduleMap: 'Territory Map',
     customers: 'Customers',
     customerDetail: 'Customer Detail',
-    visitLog: 'Sales Visit Log',
+    visitLog: 'Field Visit Log',
     ciForm: 'Credit Investigation Form',
     history: 'Sales History',
-    saleDetails: 'Sales Details',
+    invoiceDetails: 'Invoice Details',
     inventory: 'Inventory',
     productDetails: 'Product Details',
     notifications: 'Notifications',
@@ -177,9 +177,9 @@ export function resolveSalesPage(pathname, search = '') {
 export function isSalesNavActive(fullPath, navTo) {
   const pathname = fullPath.split('?')[0];
   if (navTo === '/sales/dashboard') return pathname === '/sales/dashboard' || pathname === '/sales/settings' || pathname === '/sales/route-tracking' || pathname === '/sales/audit-log';
-  if (navTo === '/sales/schedule') return pathname.startsWith('/sales/schedule') || fullPath.includes('from=schedule');
+  if (navTo === '/sales/schedule') return pathname.startsWith('/sales/schedule') || pathname.startsWith('/sales/visit-log') || fullPath.includes('from=schedule');
   if (navTo === '/sales/customers') return pathname === '/sales/customers' || fullPath.includes('from=customers');
-  if (navTo === '/sales/history') return pathname.startsWith('/sales/history');
+  if (navTo === '/sales/history') return pathname.startsWith('/sales/history') || pathname.startsWith('/sales/invoices');
   if (navTo === '/sales/inventory') return pathname.startsWith('/sales/inventory');
   if (navTo === '/sales/notifications') return pathname === '/sales/notifications';
   if (navTo === '/sales/credit-history') return pathname.startsWith('/sales/credit-history');

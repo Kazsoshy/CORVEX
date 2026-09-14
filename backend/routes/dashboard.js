@@ -74,7 +74,7 @@ router.get('/user-stats', requireAuth, async (req, res) => {
     );
 
     const newThisMonth = await pool.query(
-      `SELECT COUNT(*) FROM users WHERE created_at >= date_trunc('month', CURRENT_TIMESTAMP)`
+      `SELECT COUNT(*) FROM users WHERE created_at >= (date_trunc('month', CURRENT_TIMESTAMP AT TIME ZONE '+08'))::DATE`
     );
 
     return res.status(200).json({
@@ -106,13 +106,13 @@ router.get('/inventory-health', requireAuth, async (req, res) => {
          END AS stock_status,
          COUNT(*) AS count
        FROM branch_inventory
-       GROUP BY stock_status`
+       GROUP BY 1`
     );
 
     const user = req.currentUser;
-    let branchFilter = '';
+    let branchCondition = '';
     if (user && user.branchId) {
-      branchFilter = `WHERE b.id = ${user.branchId}`;
+      branchCondition = `AND b.id = ${user.branchId}`;
     }
 
     const alerts = await pool.query(
@@ -120,8 +120,8 @@ router.get('/inventory-health', requireAuth, async (req, res) => {
        FROM branch_inventory bi
        JOIN products p ON p.id = bi.product_id
        JOIN branches b ON b.id = bi.branch_id
-       ${branchFilter}
        WHERE bi.available_stock <= bi.reorder_level
+         ${branchCondition}
        ORDER BY bi.available_stock ASC`
     );
 
@@ -181,14 +181,19 @@ router.get('/branches', requireAuth, async (req, res) => {
 
     const result = await pool.query(
       `SELECT
-         b.id, b.name AS branch_name, b.address, b.status,
+         b.id, b.name AS branch_name, b.address, b.phone, b.email,
+         b.latitude, b.longitude,
+         b.region, b.status,
          COUNT(DISTINCT u.id) FILTER (WHERE u.status='Active') AS employee_count,
-         COUNT(DISTINCT c.customer_id) AS customer_count
+         COUNT(DISTINCT c.customer_id) AS customer_count,
+         mgr.full_name AS manager_name,
+         mgr.id        AS manager_id
        FROM branches b
-       LEFT JOIN users u ON u.branch_id = b.id
+       LEFT JOIN users u   ON u.branch_id = b.id
        LEFT JOIN customers c ON c.branch_id = b.id
+       LEFT JOIN users mgr ON mgr.id = b.manager_id
        ${branchFilter}
-       GROUP BY b.id, b.name, b.address, b.status
+       GROUP BY b.id, b.name, b.address, b.phone, b.email, b.region, b.status, mgr.full_name, mgr.id
        ORDER BY b.name`
     );
 
@@ -232,9 +237,9 @@ router.get('/branch-summary', requireAuth, async (req, res) => {
           pool.query(`SELECT COUNT(*) FILTER (WHERE status = 'Active') AS active_staff, COUNT(*) FILTER (WHERE status = 'Inactive') AS inactive_staff, COUNT(*) AS total FROM users`),
           pool.query(`SELECT COUNT(*) AS total_customers, COUNT(*) FILTER (WHERE status = 'Active') AS active_customers, COALESCE(SUM(outstanding_balance), 0) AS total_outstanding FROM customers`),
           pool.query(`SELECT COALESCE(SUM(outstanding_balance), 0) AS total_outstanding, COALESCE(SUM(purchase_volume), 0) AS total_purchase_volume FROM customer_activity`),
-          pool.query(`SELECT CASE WHEN available_stock <= 0 THEN 'Out of Stock' WHEN available_stock <= reorder_level THEN 'Low Stock' ELSE 'Sufficient' END AS stock_status, COUNT(*) AS count, COALESCE(SUM(available_stock), 0) AS total_qty FROM branch_inventory GROUP BY stock_status`),
-          pool.query(`SELECT COUNT(*) AS total_collections, COALESCE(SUM(amount), 0) AS total_amount_collected, COUNT(*) FILTER (WHERE status = 'Pending') AS pending_collections FROM collection_payment WHERE payment_date >= date_trunc('month', CURRENT_TIMESTAMP)`),
-          pool.query(`SELECT COUNT(*) AS total_invoices, COALESCE(SUM(total_amount), 0) AS total_sales_amount, COUNT(*) FILTER (WHERE status = 'Pending') AS pending_invoices FROM sales_invoices WHERE invoices_date >= date_trunc('month', CURRENT_TIMESTAMP)`),
+          pool.query(`SELECT CASE WHEN available_stock <= 0 THEN 'Out of Stock' WHEN available_stock <= reorder_level THEN 'Low Stock' ELSE 'Sufficient' END AS stock_status, COUNT(*) AS count, COALESCE(SUM(available_stock), 0) AS total_qty FROM branch_inventory GROUP BY 1`),
+          pool.query(`SELECT COUNT(*) AS total_collections, COALESCE(SUM(amount), 0) AS total_amount_collected, COUNT(*) FILTER (WHERE status = 'Pending') AS pending_collections FROM collection_payment WHERE payment_date >= (date_trunc('month', CURRENT_TIMESTAMP AT TIME ZONE '+08'))::DATE`),
+          pool.query(`SELECT COUNT(*) AS total_invoices, COALESCE(SUM(total_amount), 0) AS total_sales_amount, COUNT(*) FILTER (WHERE status = 'Pending') AS pending_invoices FROM sales_invoices WHERE invoices_date >= (date_trunc('month', CURRENT_TIMESTAMP AT TIME ZONE '+08'))::DATE`),
         ]);
 
         return res.status(200).json({
@@ -319,7 +324,7 @@ router.get('/branch-summary', requireAuth, async (req, res) => {
            COALESCE(SUM(available_stock), 0) AS total_qty
          FROM branch_inventory
          WHERE branch_id = $1
-         GROUP BY stock_status`,
+         GROUP BY 1`,
         [bid]
       ),
       // Collections total for current month
@@ -330,7 +335,7 @@ router.get('/branch-summary', requireAuth, async (req, res) => {
            COUNT(*) FILTER (WHERE status = 'Pending')            AS pending_collections
          FROM collection_payment
          WHERE branch_id = $1
-           AND payment_date >= date_trunc('month', CURRENT_TIMESTAMP)`,
+           AND payment_date >= (date_trunc('month', CURRENT_TIMESTAMP AT TIME ZONE '+08'))::DATE`,
         [bid]
       ),
       // Sales total for current month
@@ -341,7 +346,7 @@ router.get('/branch-summary', requireAuth, async (req, res) => {
            COUNT(*) FILTER (WHERE status = 'Pending')           AS pending_invoices
          FROM sales_invoices
          WHERE branch_id = $1
-           AND invoices_date >= date_trunc('month', CURRENT_TIMESTAMP)`,
+           AND invoices_date >= (date_trunc('month', CURRENT_TIMESTAMP AT TIME ZONE '+08'))::DATE`,
         [bid]
       ),
     ]);

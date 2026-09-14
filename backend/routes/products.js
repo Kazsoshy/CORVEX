@@ -20,10 +20,10 @@ router.get('/', async (req, res) => {
       params.push(Number(branch_id));
     }
     if (category) {
-      conditions.push(`p.category = $${pIdx++}`);
-      params.push(category);
+      conditions.push(`p.category_id = $${pIdx++}`);
+      params.push(Number(category));
     }
-    if (status) {
+    if (status && branch_id) {
       conditions.push(`i.stock_status = $${pIdx++}`);
       params.push(status);
     }
@@ -35,66 +35,70 @@ router.get('/', async (req, res) => {
 
     const where = `WHERE ${conditions.join(' AND ')}`;
     const offset = (Number(page) - 1) * Number(limit);
+    const limitIdx = pIdx++;
+    const offsetIdx = pIdx++;
+    params.push(Number(limit), offset);
 
-    // If branch_id provided, join inventory for that branch
-    // Otherwise aggregate across all branches
     let query;
     if (branch_id) {
+      const branchParam = 1;
       query = `
         SELECT
-          p.product_id, p.product_name, p.sku, p.category, p.description,
-          p.unit_price, p.unit_type, p.barcode, p.reorder_point,
-          p.status, p.created_at, p.updated_at,
-          s.supplier_name,
+          p.id AS product_id,
+          p.name AS product_name,
+          p.category_id,
+          pc.category_name,
+          p.unit_price,
+          p.status,
           i.quantity, i.stock_status, i.last_updated,
           b.name AS branch_name
         FROM products p
-        LEFT JOIN suppliers s ON s.suppliers_id = p.supplier_id
-        LEFT JOIN branch_inventory i ON i.product_id = p.product_id AND i.branch_id = $${params.indexOf(Number(branch_id)) + 1}
+        LEFT JOIN product_categories pc ON pc.category_id = p.category_id
+        LEFT JOIN branch_inventory i ON i.product_id = p.id AND i.branch_id = $${branchParam}
         LEFT JOIN branches b ON b.id = i.branch_id
         ${where}
-        ORDER BY p.product_name
-        LIMIT $${pIdx++} OFFSET $${pIdx++}
+        ORDER BY p.name
+        LIMIT $${limitIdx} OFFSET $${offsetIdx}
       `;
     } else {
       query = `
         SELECT
-          p.product_id, p.product_name, p.sku, p.category, p.description,
-          p.unit_price, p.unit_type, p.barcode, p.reorder_point,
-          p.status, p.created_at, p.updated_at,
-          s.supplier_name,
+          p.id AS product_id,
+          p.name AS product_name,
+          p.category_id,
+          pc.category_name,
+          p.unit_price,
+          p.status,
           COALESCE(SUM(i.quantity), 0) AS total_quantity,
           CASE
             WHEN COALESCE(SUM(i.quantity), 0) = 0 THEN 'Out of Stock'
-            WHEN COALESCE(SUM(i.quantity), 0) <= p.reorder_point * 0.3 THEN 'Critical Stock'
-            WHEN COALESCE(SUM(i.quantity), 0) <= p.reorder_point THEN 'Low Stock'
+            WHEN COALESCE(SUM(i.quantity), 0) <= 10 THEN 'Low Stock'
             ELSE 'Sufficient'
           END AS stock_status
         FROM products p
-        LEFT JOIN suppliers s ON s.suppliers_id = p.supplier_id
-        LEFT JOIN branch_inventory i ON i.product_id = p.product_id
-        WHERE p.status = 'Active'
-        ${search ? `AND (p.product_name ILIKE $1 OR p.sku ILIKE $1)` : ''}
-        ${category ? `AND p.category = $${search ? 2 : 1}` : ''}
-        GROUP BY p.product_id, s.supplier_name
-        ORDER BY p.product_name
-        LIMIT $${pIdx - 1} OFFSET $${pIdx}
+        LEFT JOIN product_categories pc ON pc.category_id = p.category_id
+        LEFT JOIN branch_inventory i ON i.product_id = p.id
+        ${where}
+        GROUP BY p.id, p.category_id, pc.category_name, p.unit_price, p.status
+        ORDER BY p.name
+        LIMIT $${limitIdx} OFFSET $${offsetIdx}
       `;
     }
 
-    const result = await pool.query(query, [...params, Number(limit), offset]);
+    const result = await pool.query(query, params);
 
-    // Get distinct categories
-    const cats = await pool.query(`SELECT DISTINCT category FROM products WHERE status='Active' ORDER BY category`);
+    const cats = await pool.query(
+      `SELECT category_id, category_name FROM product_categories WHERE status='Active' ORDER BY category_name`
+    );
 
     return res.status(200).json({
       success: true,
       data: result.rows,
-      categories: cats.rows.map(r => r.category),
+      categories: cats.rows.map((r) => ({ category_id: r.category_id, category_name: r.category_name })),
     });
   } catch (err) {
     console.error('[Products] GET / error:', err.message);
-    return res.status(500).json({ success: false, message: 'Failed to fetch products.' });
+    return res.status(500).json({ success: false, message: 'Failed to fetch products.', error: err.message, stack: err.stack });
   }
 });
 
@@ -106,13 +110,15 @@ router.get('/:id', async (req, res) => {
     const pool = req.app.locals.pool;
 
     const productResult = await pool.query(
-      `SELECT p.product_id, p.product_name, p.sku, p.category, p.description,
-              p.unit_price, p.unit_type, p.barcode, p.reorder_point,
-              p.status, p.created_at, p.updated_at,
-              s.supplier_name
+      `SELECT p.id AS product_id,
+              p.name AS product_name,
+              p.category_id,
+              pc.category_name,
+              p.unit_price,
+              p.status
        FROM products p
-       LEFT JOIN suppliers s ON s.suppliers_id = p.supplier_id
-       WHERE p.product_id = $1`,
+       LEFT JOIN product_categories pc ON pc.category_id = p.category_id
+       WHERE p.id = $1`,
       [req.params.id]
     );
     if (productResult.rows.length === 0) {
@@ -120,7 +126,17 @@ router.get('/:id', async (req, res) => {
     }
 
     const inventoryResult = await pool.query(
-      `SELECT i.quantity, i.stock_status, i.last_updated, b.id AS branch_id, b.name AS branch_name
+      `SELECT
+         i.branch_inventory_id,
+         i.branch_id,
+         b.name    AS branch_name,
+         i.product_id,
+         i.available_stock,
+         i.reorder_level,
+         i.stock_status,
+         i.last_updated,
+         i.created_at,
+         i.updated_at
        FROM branch_inventory i
        JOIN branches b ON b.id = i.branch_id
        WHERE i.product_id = $1
@@ -159,26 +175,31 @@ router.get('/:id', async (req, res) => {
 router.post('/', async (req, res) => {
   try {
     const pool = req.app.locals.pool;
-    const { name, sku, category, description, unit_price, unit_type, barcode, supplier_id, reorder_point } = req.body;
+    const { name, sku, category_id, description, unit_price, unit_type, barcode, supplier_id, reorder_point } = req.body;
 
     if (!name || !sku) {
       return res.status(400).json({ success: false, message: 'name and sku are required.' });
     }
 
-    // Check SKU uniqueness
-    const skuCheck = await pool.query(`SELECT product_id FROM products WHERE sku = $1`, [sku.toUpperCase().trim()]);
+    const skuCheck = await pool.query(`SELECT id FROM products WHERE sku = $1`, [sku.toUpperCase().trim()]);
     if (skuCheck.rows.length > 0) {
       return res.status(409).json({ success: false, message: 'SKU already exists.' });
     }
 
     const result = await pool.query(
-      `INSERT INTO products (product_name, sku, category, description, unit_price, unit_type, barcode, supplier_id, reorder_point)
+      `INSERT INTO products (name, sku, category_id, description, unit_price, unit_type, barcode, supplier_id, reorder_point)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
-       RETURNING product_id`,
+       RETURNING id AS product_id`,
       [
-        name.trim(), sku.toUpperCase().trim(), category || null,
-        description || null, Number(unit_price) || 0, unit_type || 'Unit',
-        barcode || null, supplier_id ? Number(supplier_id) : null, Number(reorder_point) || 5,
+        name.trim(),
+        sku.toUpperCase().trim(),
+        category_id ? Number(category_id) : null,
+        description || null,
+        Number(unit_price) || 0,
+        unit_type || 'Unit',
+        barcode || null,
+        supplier_id ? Number(supplier_id) : null,
+        Number(reorder_point) || 5,
       ]
     );
 
@@ -195,34 +216,32 @@ router.post('/', async (req, res) => {
 router.put('/:id', async (req, res) => {
   try {
     const pool = req.app.locals.pool;
-    const { name, category, description, unit_price, unit_type, barcode, supplier_id, reorder_point, status } = req.body;
+    const { name, category_id, description, unit_price, unit_type, barcode, supplier_id, reorder_point, status } = req.body;
 
-    // Check product exists
-    const existing = await pool.query(`SELECT product_id FROM products WHERE product_id = $1`, [Number(req.params.id)]);
+    const existing = await pool.query(`SELECT id FROM products WHERE id = $1`, [Number(req.params.id)]);
     if (existing.rows.length === 0) {
       return res.status(404).json({ success: false, message: 'Product not found.' });
     }
 
-    // Build update fields dynamically
     const updates = [];
     const params = [];
     let pIdx = 1;
 
-    if (name)            { updates.push(`product_name = $${pIdx++}`);          params.push(name.trim()); }
-    if (category !== undefined) { updates.push(`category = $${pIdx++}`); params.push(category || null); }
+    if (name) { updates.push(`name = $${pIdx++}`); params.push(name.trim()); }
+    if (category_id !== undefined) { updates.push(`category_id = $${pIdx++}`); params.push(category_id ? Number(category_id) : null); }
     if (description !== undefined) { updates.push(`description = $${pIdx++}`); params.push(description || null); }
-    if (unit_price !== undefined)  { updates.push(`unit_price = $${pIdx++}`);  params.push(Number(unit_price)); }
-    if (unit_type)       { updates.push(`unit_type = $${pIdx++}`);     params.push(unit_type); }
+    if (unit_price !== undefined) { updates.push(`unit_price = $${pIdx++}`); params.push(Number(unit_price)); }
+    if (unit_type) { updates.push(`unit_type = $${pIdx++}`); params.push(unit_type); }
     if (barcode !== undefined) { updates.push(`barcode = $${pIdx++}`); params.push(barcode || null); }
     if (supplier_id !== undefined) { updates.push(`supplier_id = $${pIdx++}`); params.push(supplier_id ? Number(supplier_id) : null); }
     if (reorder_point !== undefined) { updates.push(`reorder_point = $${pIdx++}`); params.push(Number(reorder_point)); }
-    if (status)          { updates.push(`status = $${pIdx++}`);        params.push(status); }
+    if (status) { updates.push(`status = $${pIdx++}`); params.push(status); }
 
     if (!updates.length) return res.status(400).json({ success: false, message: 'No fields to update.' });
 
     params.push(Number(req.params.id));
     const result = await pool.query(
-      `UPDATE products SET ${updates.join(', ')}, updated_at = NOW() WHERE product_id = $${pIdx} RETURNING product_id`,
+      `UPDATE products SET ${updates.join(', ')}, updated_at = NOW() WHERE id = $${pIdx} RETURNING id AS product_id`,
       params
     );
 

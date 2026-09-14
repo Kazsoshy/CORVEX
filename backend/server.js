@@ -8,9 +8,17 @@ import usersRouter     from './routes/users.js';
 import rolesRouter     from './routes/roles.js';
 import productsRouter  from './routes/products.js';
 import customersRouter from './routes/customers.js';
+import branchesRouter  from './routes/branches.js';
+import suppliersRouter from './routes/suppliers.js';
+import territoriesRouter from './routes/territories.js';
 import dashboardRouter from './routes/dashboard.js';
 import branchManagerRouter from './routes/branchManager.js';
 import reportsRouter  from './routes/reports.js';
+import inventoryRouter from './routes/inventory.js';
+import adminRouter     from './routes/admin.js';
+import permissionsRouter from './routes/permissions.js';
+import salesRouter     from './routes/sales.js';
+import collectorRouter from './routes/collector.js';
 import { requireAuth, requireBranchScope } from './middleware/auth.js';
 
 dotenv.config();
@@ -24,7 +32,7 @@ const app = express();
 app.use(cors({
   origin: ['http://localhost:5173', 'http://localhost:5174', 'http://127.0.0.1:5173'],
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-User-Id'],
   credentials: true,
 }));
 app.use(express.json({ limit: '1mb' }));
@@ -75,13 +83,23 @@ app.use('/api/auth',      authRouter);
 // Protected routes — identity required
 app.use('/api/users',     requireAuth, usersRouter);
 app.use('/api/roles',     requireAuth, rolesRouter);
+app.use('/api/permissions', requireAuth, permissionsRouter);
 app.use('/api/products',  requireAuth, productsRouter);
+app.use('/api/branches',  requireAuth, branchesRouter);
+app.use('/api/suppliers', requireAuth, suppliersRouter);
+app.use('/api/territories', requireAuth, territoriesRouter);
 
 // Branch-scoped routes — identify + branch enforcement
 app.use('/api/customers', requireAuth, requireBranchScope, customersRouter);
 app.use('/api/dashboard', requireAuth, dashboardRouter);
 app.use('/api/branch-manager', requireAuth, branchManagerRouter);
 app.use('/api/reports', requireAuth, reportsRouter);
+app.use('/api/inventory', requireAuth, inventoryRouter);
+app.use('/api/sales',      requireAuth, salesRouter);
+app.use('/api/collector',  requireAuth, collectorRouter);
+
+// Admin routes — identify required
+app.use('/api/admin', requireAuth, adminRouter);
 
 // Health Check
 app.get('/', (req, res) => {
@@ -117,6 +135,11 @@ app.get('/', (req, res) => {
       'GET  /api/reports/delinquency',
       'GET  /api/reports/compliance',
       'GET  /api/reports/kpi',
+      'GET  /api/sales/invoices/:invoiceId/items',
+      'GET  /api/sales/visits',
+      'GET  /api/sales/visits/:id',
+      'POST /api/sales/visits',
+      'PUT  /api/sales/visits/:id',
     ],
     timestamp: new Date().toISOString(),
   });

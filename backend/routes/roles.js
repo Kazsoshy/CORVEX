@@ -11,12 +11,12 @@ router.get('/', async (req, res) => {
 
     // All roles
     const rolesResult = await pool.query(
-      `SELECT role_id, role_name, slug, description FROM roles ORDER BY role_id`
+      `SELECT role_id, role_name, slug, created_at, updated_at FROM roles ORDER BY role_id`
     );
 
     // All permissions
     const permsResult = await pool.query(
-      `SELECT permission_id, label, description FROM permissions ORDER BY permission_id`
+      `SELECT permission_id, label, description, created_at FROM permissions ORDER BY permission_id`
     );
 
     // Role-permission mapping
@@ -35,7 +35,9 @@ router.get('/', async (req, res) => {
       id:          role.role_id,
       name:        role.role_name,
       slug:        role.slug,
-      description: role.description,
+      created_at:  role.created_at,
+      updated_at:  role.updated_at,
+
       permissions: Object.fromEntries(
         permissions.map((p) => [p.permission_id, !!(rpMap[role.role_id]?.[p.permission_id])])
       ),
@@ -53,7 +55,7 @@ router.get('/', async (req, res) => {
 
 // ──────────────────────────────────────────────────────────────────────────────
 // PUT /api/roles/:id/permissions  — Update permissions for a role
-// Body: { permissions: { view: true, create: false, ... } }
+// Body: { permissions: { [permission_id]: true, ... } }
 // ──────────────────────────────────────────────────────────────────────────────
 router.put('/:id/permissions', async (req, res) => {
   const pool = req.app.locals.pool;
@@ -77,12 +79,9 @@ router.put('/:id/permissions', async (req, res) => {
   try {
     await client.query('BEGIN');
 
-    const permsResult = await client.query(`SELECT id, key FROM permissions`);
-    const permMap = Object.fromEntries(permsResult.rows.map((p) => [p.key, p.id]));
-
     for (const [key, granted] of Object.entries(permissions)) {
-      const permId = permMap[key];
-      if (!permId) continue;
+      const permId = Number(key);
+      if (!permId || isNaN(permId)) continue;
       await client.query(
         `INSERT INTO role_permissions (role_id, permission_id, granted)
          VALUES ($1, $2, $3)
@@ -99,6 +98,72 @@ router.put('/:id/permissions', async (req, res) => {
     return res.status(500).json({ success: false, message: 'Failed to update permissions.' });
   } finally {
     client.release();
+  }
+});
+
+// ──────────────────────────────────────────────────────────────────────────────
+// POST /api/roles  — Create role
+// ──────────────────────────────────────────────────────────────────────────────
+router.post('/', async (req, res) => {
+  try {
+    const pool = req.app.locals.pool;
+    const { role_name, slug } = req.body;
+    if (!role_name || !slug) return res.status(400).json({ success: false, message: 'Missing fields.' });
+    
+    const result = await pool.query(
+      `INSERT INTO roles (role_name, slug) VALUES ($1, $2) RETURNING *`,
+      [role_name.trim(), slug.trim()]
+    );
+    return res.status(201).json({ success: true, data: result.rows[0] });
+  } catch (err) {
+    console.error('[Roles] POST / error:', err.message);
+    return res.status(500).json({ success: false, message: 'Failed to create role.' });
+  }
+});
+
+// ──────────────────────────────────────────────────────────────────────────────
+// PUT /api/roles/:id  — Update role
+// ──────────────────────────────────────────────────────────────────────────────
+router.put('/:id', async (req, res) => {
+  try {
+    const pool = req.app.locals.pool;
+    const { role_name, slug } = req.body;
+    const roleId = Number(req.params.id);
+    
+    // Prevent updating Super Admin
+    const check = await pool.query(`SELECT slug FROM roles WHERE role_id = $1`, [roleId]);
+    if (check.rows.length === 0) return res.status(404).json({ success: false, message: 'Role not found.' });
+    if (check.rows[0].slug === 'super_admin') return res.status(403).json({ success: false, message: 'Cannot edit Super Admin role.' });
+    
+    const result = await pool.query(
+      `UPDATE roles SET role_name = $1, slug = $2, updated_at = NOW() WHERE role_id = $3 RETURNING *`,
+      [role_name.trim(), slug.trim(), roleId]
+    );
+    return res.status(200).json({ success: true, data: result.rows[0] });
+  } catch (err) {
+    console.error('[Roles] PUT /:id error:', err.message);
+    return res.status(500).json({ success: false, message: 'Failed to update role.' });
+  }
+});
+
+// ──────────────────────────────────────────────────────────────────────────────
+// DELETE /api/roles/:id  — Delete role
+// ──────────────────────────────────────────────────────────────────────────────
+router.delete('/:id', async (req, res) => {
+  try {
+    const pool = req.app.locals.pool;
+    const roleId = Number(req.params.id);
+    
+    const check = await pool.query(`SELECT slug FROM roles WHERE role_id = $1`, [roleId]);
+    if (check.rows.length === 0) return res.status(404).json({ success: false, message: 'Role not found.' });
+    if (check.rows[0].slug === 'super_admin') return res.status(403).json({ success: false, message: 'Cannot delete Super Admin role.' });
+    
+    // Note: this will cascade delete role_permissions due to ON DELETE CASCADE
+    await pool.query(`DELETE FROM roles WHERE role_id = $1`, [roleId]);
+    return res.status(200).json({ success: true, message: 'Role deleted.' });
+  } catch (err) {
+    console.error('[Roles] DELETE /:id error:', err.message);
+    return res.status(500).json({ success: false, message: 'Failed to delete role.' });
   }
 });
 

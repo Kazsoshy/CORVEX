@@ -10,6 +10,7 @@ export const collectorRole = {
     { label: "Today's Route", to: '/collector/route' },
     { label: 'Customers', to: '/collector/accounts' },
     { label: 'Collection History', to: '/collector/history' },
+    { label: 'Digital Receipts', to: '/collector/receipts' },
     { label: 'Notifications', to: '/collector/notifications' },
     { label: 'Profile', to: '/collector/profile' },
   ],

@@ -4,6 +4,7 @@ const ROUTE_DEFINITIONS = [
   { pattern: /^\/warehouse\/dashboard$/, pageType: 'dashboard' },
   { pattern: /^\/warehouse\/settings$/, pageType: 'settings' },
   { pattern: /^\/warehouse\/inventory$/, pageType: 'inventory' },
+  { pattern: /^\/warehouse\/branch-inventory$/, pageType: 'branchInventory' },
   { pattern: /^\/warehouse\/add-product$/, pageType: 'addProduct' },
   { pattern: /^\/warehouse\/product\/([^/]+)\/stock-count$/, pageType: 'stockCount', params: ['productId'] },
   { pattern: /^\/warehouse\/product\/([^/]+)\/restock$/, pageType: 'restock', params: ['productId'] },
@@ -21,6 +22,7 @@ const ROUTE_DEFINITIONS = [
   { pattern: /^\/warehouse\/profile$/, pageType: 'profile' },
   { pattern: /^\/warehouse\/audit-log$/, pageType: 'auditLog' },
   { pattern: /^\/warehouse\/reports$/, pageType: 'reports' },
+  { pattern: /^\/warehouse\/suppliers$/, pageType: 'suppliers' },
 ];
 
 export function matchWarehouseRoute(pathname) {
@@ -51,6 +53,8 @@ export function buildWarehouseBreadcrumbs(pageType, params = {}) {
       return [...crumbs, { label: 'Settings', to: '/warehouse/settings' }];
     case 'inventory':
       return [...crumbs, { label: 'Inventory', to: '/warehouse/inventory' }];
+    case 'branchInventory':
+      return [...crumbs, { label: 'Branch Inventory', to: '/warehouse/branch-inventory' }];
     case 'addProduct':
       return [...crumbs, { label: 'Inventory', to: '/warehouse/inventory' }, { label: 'Add Product', to: '/warehouse/add-product' }];
     case 'productDetail':
@@ -109,6 +113,8 @@ export function buildWarehouseBreadcrumbs(pageType, params = {}) {
       return [...crumbs, { label: 'Audit Log', to: '/warehouse/audit-log' }];
     case 'reports':
       return [...crumbs, { label: 'Reports', to: '/warehouse/reports' }];
+    case 'suppliers':
+      return [...crumbs, { label: 'Suppliers', to: '/warehouse/suppliers' }];
     default:
       return crumbs;
   }
@@ -123,6 +129,7 @@ export function resolveWarehousePage(pathname) {
     dashboard: 'Dashboard',
     settings: 'Settings',
     inventory: 'Inventory',
+    branchInventory: 'Branch Inventory',
     addProduct: 'Add Product',
     productDetail: 'Product Detail',
     stockCount: 'Stock Count',
@@ -140,6 +147,7 @@ export function resolveWarehousePage(pathname) {
     profile: 'Profile',
     auditLog: 'Audit Log',
     reports: 'Reports',
+    suppliers: 'Suppliers',
   };
 
   return {
@@ -159,9 +167,11 @@ export function isWarehouseNavActive(fullPath, navTo) {
   if (navTo === '/warehouse/inventory') {
     return pathname === '/warehouse/inventory' || pathname.startsWith('/warehouse/product/') || pathname === '/warehouse/add-product';
   }
+  if (navTo === '/warehouse/branch-inventory') return pathname === '/warehouse/branch-inventory';
   if (navTo === '/warehouse/movements') return pathname.startsWith('/warehouse/movements');
   if (navTo === '/warehouse/transfers') return pathname.startsWith('/warehouse/transfers');
   if (navTo === '/warehouse/restock-history') return pathname.startsWith('/warehouse/restock-history');
+  if (navTo === '/warehouse/suppliers') return pathname === '/warehouse/suppliers';
   if (navTo === '/warehouse/credit-history') return pathname.startsWith('/warehouse/credit-history');
   if (navTo === '/warehouse/notifications') return pathname === '/warehouse/notifications';
   if (navTo === '/warehouse/profile') return pathname === '/warehouse/profile';

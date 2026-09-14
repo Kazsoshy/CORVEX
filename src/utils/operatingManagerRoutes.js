@@ -23,6 +23,7 @@ const ROUTE_DEFINITIONS = [
   { pattern: /^\/operating-manager\/profile$/, pageType: 'profile' },
   { pattern: /^\/operating-manager\/customers$/, pageType: 'customers' },
   { pattern: /^\/operating-manager\/customers\/([^/]+)$/, pageType: 'customerDetail', params: ['customerId'] },
+  { pattern: /^\/operating-manager\/territories$/, pageType: 'territories' },
   // Legacy redirects support
   { pattern: /^\/operating-manager\/leaflet-map$/, pageType: 'leafletMap' },
   { pattern: /^\/operating-manager\/compare$/, pageType: 'branchComparison' },
@@ -89,6 +90,8 @@ export function buildOperatingManagerBreadcrumbs(pageType, params = {}) {
       return [...crumbs, { label: 'Customer Records', to: '/operating-manager/customers' }];
     case 'customerDetail':
       return [...crumbs, { label: 'Customer Records', to: '/operating-manager/customers' }, { label: 'Customer Detail', to: `/operating-manager/customers/${params.customerId}` }];
+    case 'territories':
+      return [...crumbs, { label: 'Territories', to: '/operating-manager/territories' }];
     default:
       return crumbs;
   }

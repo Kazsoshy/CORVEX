@@ -6,13 +6,14 @@ import {
   formatCurrency,
   getReceiptById,
 } from '../../data/collectorMockData';
-import { fetchAccounts, fetchAccountById } from '../../api/collectorService';
+import { fetchAccounts, fetchAccountById, fetchCollectionPayments, fetchDigitalReceipts, fetchDigitalReceiptById } from '../../api/collectorService';
 import { getCurrentUser } from '../../api/authService.js';
 import { AccountCard } from './AccountCard';
 import { EmptyState } from './EmptyState';
 import { LoadingState } from './LoadingState';
 import { NavIcon } from '../../navIcons';
 import LeafletMap from '../common/LeafletMap';
+import { StatusBadge } from '../StatusBadge';
 
 function actionButtonClass(variant) {
   if (variant === 'secondary') return 'button secondary';
@@ -243,7 +244,7 @@ function RoutePage({ pageType, navigate, showToast }) {
       const result = await fetchAccounts();
       if (result.success) {
         const prioritized = result.data
-          .filter((a) => a.status === 'Active' || a.status === 'Pending' || a.status === 'Overdue')
+          .filter((a) => a.rawStatus === 'Active') // only active customers on the route
           .map((a, i) => ({ ...a, rank: i + 1 }))
           .sort((a, b) => (b.outstandingBalance || 0) - (a.outstandingBalance || 0));
         setCustomers(prioritized);
@@ -540,8 +541,11 @@ function AccountDetailPage({ accountId, parentContext, navigate, showToast }) {
       <StatsGrid
         stats={[
           { label: 'Outstanding Balance', value: formatCurrency(account.outstandingBalance || 0) },
-          { label: 'Days Overdue', value: String(account.daysOverdue || 0) },
-          { label: 'Delinquency Status', value: account.status },
+          { label: 'Days Overdue',        value: String(account.daysOverdue || 0) },
+          { label: 'Delinquency Status',  value: account.status },
+          { label: 'Account Manager',     value: account.account_manager_name || '—' },
+          { label: 'Customer Since',      value: account.customer_since || '—' },
+          { label: 'Last Visit',          value: account.lastVisitDate || '—' },
         ]}
       />
 
@@ -554,19 +558,21 @@ function AccountDetailPage({ accountId, parentContext, navigate, showToast }) {
           <div>
             <p><strong>Address:</strong> {account.address}</p>
             <p><strong>Contact:</strong> {account.phone}</p>
+            <p><strong>Branch:</strong> {account.branch_name || '—'}</p>
+            <p><strong>Account Manager:</strong> {account.account_manager_name || '—'}</p>
             <p><strong>Last Visit:</strong> {account.lastVisitDate}</p>
           </div>
           <div style={{ minHeight: 200, width: '100%', borderRadius: 8, overflow: 'hidden' }}>
-            <LeafletMap 
-              center={account.latitude && account.longitude ? [account.latitude, account.longitude] : [7.1907, 125.4553]} 
-              zoom={15} 
+            <LeafletMap
+              center={account.latitude && account.longitude ? [account.latitude, account.longitude] : [7.1907, 125.4553]}
+              zoom={15}
               height={200}
               markers={[{
                 id: account.id,
                 position: account.latitude && account.longitude ? [account.latitude, account.longitude] : [7.1907, 125.4553],
                 label: (account.customerName || 'CU').substring(0, 2).toUpperCase(),
                 color: '#2563eb',
-                popup: account.customerName
+                popup: account.customerName,
               }]}
             />
           </div>
@@ -583,18 +589,30 @@ function AccountDetailPage({ accountId, parentContext, navigate, showToast }) {
               <thead>
                 <tr>
                   <th>Date</th>
-                  <th>Amount</th>
-                  <th>Collected By</th>
                   <th>Receipt #</th>
+                  <th>Amount</th>
+                  <th>Method</th>
+                  <th>Collected By</th>
+                  <th>Status</th>
                 </tr>
               </thead>
               <tbody>
-                {account.paymentHistory.map((row) => (
-                  <tr key={row.receipt}>
-                    <td>{row.date}</td>
+                {account.paymentHistory.map((row, i) => (
+                  <tr key={row.receipt || i}>
+                    <td>{row.date ? new Date(row.date).toLocaleDateString('en-PH') : '—'}</td>
+                    <td><span style={{ fontFamily: 'monospace', fontSize: '0.82rem' }}>{row.receipt || '—'}</span></td>
                     <td>{formatCurrency(row.amount)}</td>
+                    <td>{row.method || 'Cash'}</td>
                     <td>{row.collector}</td>
-                    <td>{row.receipt}</td>
+                    <td>
+                      <span style={{
+                        padding: '2px 8px', borderRadius: 999, fontSize: '0.78rem', fontWeight: 600,
+                        background: row.status === 'Completed' ? 'rgba(16,185,129,0.1)' : 'rgba(245,158,11,0.1)',
+                        color: row.status === 'Completed' ? '#059669' : '#d97706',
+                      }}>
+                        {row.status || 'Completed'}
+                      </span>
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -714,61 +732,243 @@ function CollectionLogPage({ accountId, parentContext, navigate, showToast }) {
   );
 }
 
-function DigitalReceiptPage({ accountId, parentContext, navigate, showToast }) {
-  const [account, setAccount] = useState(null);
+function ReceiptsListPage({ navigate, showToast }) {
+  const [receipts, setReceipts] = useState([]);
   const [loading, setLoading] = useState(true);
-  const contextQuery = `?from=${parentContext}`;
-  const receiptNumber = `RCP-2024-${String(accountId).padStart(4, '0')}`;
+  const [error, setError] = useState(null);
+  const [search, setSearch] = useState('');
+  const [dateFrom, setDateFrom] = useState('');
+  const [dateTo, setDateTo] = useState('');
 
   useEffect(() => {
     async function load() {
       setLoading(true);
-      const result = await fetchAccountById(accountId);
-      if (result.success) setAccount(result.data);
+      setError(null);
+      const result = await fetchDigitalReceipts();
+      if (result.success) {
+        setReceipts(result.data || []);
+      } else {
+        setError(result.message || 'Failed to load receipts.');
+        if (showToast) showToast(result.message || 'Failed to load receipts', 'error');
+      }
       setLoading(false);
     }
     load();
-  }, [accountId]);
+  }, [showToast]);
 
-  if (loading) return <LoadingState message="Loading receipt..." />;
-  if (!account) {
-    return <EmptyState title="Receipt unavailable" actionLabel="Back to Customers" onAction={() => navigate('/collector/accounts')} />;
+  const filtered = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    return receipts.filter((r) => {
+      const matchSearch =
+        !q ||
+        (r.receipt_number || '').toLowerCase().includes(q) ||
+        (r.customer_name || '').toLowerCase().includes(q) ||
+        String(r.receipts_id).includes(q);
+      const rDate = r.receipt_date ? r.receipt_date.slice(0, 10) : '';
+      const matchFrom = !dateFrom || rDate >= dateFrom;
+      const matchTo   = !dateTo   || rDate <= dateTo;
+      return matchSearch && matchFrom && matchTo;
+    });
+  }, [receipts, search, dateFrom, dateTo]);
+
+  if (loading) return <LoadingState message="Loading digital receipts..." />;
+
+  if (error && !receipts.length) {
+    return (
+      <EmptyState
+        title="Unable to load receipts"
+        description={error}
+        actionLabel="Retry"
+        onAction={() => window.location.reload()}
+      />
+    );
   }
-
-  const currentUser = getCurrentUser();
-  const collectorName = currentUser?.fullName || 'Collector';
-  const branchName = currentUser?.branch?.name || '—';
 
   return (
     <div className="page">
-      <StatsGrid
-        stats={[
-          { label: 'Receipt #', value: receiptNumber },
-          { label: 'Amount Paid', value: formatCurrency(0) },
-          { label: 'Payment Method', value: 'Cash' },
-        ]}
-      />
       <section className="panel content-panel">
         <div className="panel-section-header">
-          <h3>Receipt Information</h3>
+          <h3>Digital Receipts</h3>
+          <p className="muted">{receipts.length} record{receipts.length !== 1 ? 's' : ''} in database</p>
         </div>
+        <div className="accounts-toolbar">
+          <input
+            className="search-input"
+            type="search"
+            placeholder="Search by receipt number, customer, or ID"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+          />
+          <div className="accounts-filters">
+            <input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} aria-label="From date" />
+            <input type="date" value={dateTo}   onChange={(e) => setDateTo(e.target.value)}   aria-label="To date" />
+          </div>
+        </div>
+      </section>
+
+      {filtered.length ? (
+        <section className="panel content-panel">
+          <div className="table-shell">
+            <table className="data-table">
+              <thead>
+                <tr>
+                  <th>Receipt ID</th>
+                  <th>Receipt Number</th>
+                  <th>Collection ID</th>
+                  <th>Customer</th>
+                  <th>Branch</th>
+                  <th>Amount</th>
+                  <th>Payment Method</th>
+                  <th>Payment Status</th>
+                  <th>Generated By</th>
+                  <th>Generated By ID</th>
+                  <th>Receipt Date</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filtered.map((r) => (
+                  <tr key={r.receipts_id}>
+                    <td><span style={{ fontFamily: 'monospace', fontSize: '0.82rem' }}>{r.receipts_id}</span></td>
+                    <td><span style={{ fontFamily: 'monospace', fontSize: '0.82rem' }}>{r.receipt_number}</span></td>
+                    <td><span style={{ fontFamily: 'monospace', fontSize: '0.82rem' }}>{r.collection_id}</span></td>
+                    <td>{r.customer_name || '—'}</td>
+                    <td>{r.branch_name || '—'}</td>
+                    <td style={{ fontWeight: 600 }}>{formatCurrency(Number(r.amount))}</td>
+                    <td>{r.payment_method || '—'}</td>
+                    <td><StatusBadge status={r.payment_status} /></td>
+                    <td>{r.generated_by_name || '—'}</td>
+                    <td><span style={{ fontFamily: 'monospace', fontSize: '0.82rem' }}>{r.generated_by}</span></td>
+                    <td>{r.receipt_date ? new Date(r.receipt_date).toLocaleString('en-PH') : '—'}</td>
+                    <td>
+                      <button
+                        className="icon-action-button"
+                        type="button"
+                        title="View"
+                        onClick={() => navigate(`/collector/receipts/${r.receipts_id}`)}
+                      >
+                        <NavIcon name="view" />
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      ) : (
+        <EmptyState title="No receipts found" description="Adjust your search or date filters." />
+      )}
+    </div>
+  );
+}
+
+function DigitalReceiptPage({ receiptId, navigate, showToast }) {
+  const [receipt, setReceipt] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+
+  useEffect(() => {
+    async function load() {
+      if (!receiptId) { setError('No receipt ID provided.'); setLoading(false); return; }
+      setLoading(true);
+      setError(null);
+      const result = await fetchDigitalReceiptById(receiptId);
+      if (result.success && result.data) {
+        setReceipt(result.data);
+      } else {
+        setError(result.message || 'Receipt not found.');
+        if (showToast) showToast(result.message || 'Receipt not found', 'error');
+      }
+      setLoading(false);
+    }
+    load();
+  }, [receiptId, showToast]);
+
+  if (loading) return <LoadingState message="Loading receipt..." />;
+
+  if (error || !receipt) {
+    return (
+      <EmptyState
+        title="Receipt not found"
+        description={error || 'This receipt does not exist.'}
+        actionLabel="Back to Receipts"
+        onAction={() => navigate('/collector/receipts')}
+      />
+    );
+  }
+
+  return (
+    <div className="page">
+      {/* Header */}
+      <section className="panel dashboard-greeting">
+        <div className="dashboard-greeting-main">
+          <p className="dashboard-eyebrow">Digital Receipt · ID {receipt.receipts_id}</p>
+          <h2>{receipt.receipt_number}</h2>
+          <p className="muted">{receipt.branch_name} · {receipt.customer_name}</p>
+        </div>
+      </section>
+
+      {/* KPI strip */}
+      <StatsGrid stats={[
+        { label: 'Receipt ID',     value: String(receipt.receipts_id) },
+        { label: 'Amount',         value: formatCurrency(Number(receipt.amount)) },
+        { label: 'Payment Status', value: receipt.payment_status || '—' },
+        { label: 'Receipt Date',   value: receipt.receipt_date ? new Date(receipt.receipt_date).toLocaleString('en-PH') : '—' },
+      ]} />
+
+      {/* Full detail */}
+      <section className="panel content-panel">
+        <div className="panel-section-header"><h3>Receipt Detail</h3></div>
         <ul className="info-grid">
-          <li><span className="info-item-label">Customer</span><span className="info-item-value">{account.customerName}</span></li>
-          <li><span className="info-item-label">Collector</span><span className="info-item-value">{collectorName}</span></li>
-          <li><span className="info-item-label">Branch</span><span className="info-item-value">{branchName}</span></li>
-          <li><span className="info-item-label">Date & Time</span><span className="info-item-value">{new Date().toLocaleString('en-PH')}</span></li>
+          <li><span className="info-item-label">Receipt ID</span>
+              <span className="info-item-value" style={{ fontFamily: 'monospace' }}>{receipt.receipts_id}</span></li>
+          <li><span className="info-item-label">Receipt Number</span>
+              <span className="info-item-value" style={{ fontFamily: 'monospace' }}>{receipt.receipt_number}</span></li>
+          <li><span className="info-item-label">Collection ID</span>
+              <span className="info-item-value" style={{ fontFamily: 'monospace' }}>{receipt.collection_id}</span></li>
+          <li><span className="info-item-label">Receipt Date</span>
+              <span className="info-item-value">{receipt.receipt_date ? new Date(receipt.receipt_date).toLocaleString('en-PH') : '—'}</span></li>
+          <li><span className="info-item-label">Generated By</span>
+              <span className="info-item-value">{receipt.generated_by_name || '—'}</span></li>
+          <li><span className="info-item-label">Generated By ID</span>
+              <span className="info-item-value" style={{ fontFamily: 'monospace' }}>{receipt.generated_by}</span></li>
+          <li><span className="info-item-label">Customer</span>
+              <span className="info-item-value">{receipt.customer_name || '—'}</span></li>
+          <li><span className="info-item-label">Customer ID</span>
+              <span className="info-item-value" style={{ fontFamily: 'monospace' }}>{receipt.customer_id}</span></li>
+          <li><span className="info-item-label">Customer Address</span>
+              <span className="info-item-value">{receipt.customer_address || '—'}</span></li>
+          <li><span className="info-item-label">Customer Phone</span>
+              <span className="info-item-value">{receipt.customer_phone || '—'}</span></li>
+          <li><span className="info-item-label">Branch</span>
+              <span className="info-item-value">{receipt.branch_name || '—'}</span></li>
+          <li><span className="info-item-label">Amount</span>
+              <span className="info-item-value" style={{ fontWeight: 700, color: '#2563eb' }}>{formatCurrency(Number(receipt.amount))}</span></li>
+          <li><span className="info-item-label">Payment Method</span>
+              <span className="info-item-value">{receipt.payment_method || '—'}</span></li>
+          <li><span className="info-item-label">Payment Date</span>
+              <span className="info-item-value">{receipt.payment_date ? new Date(receipt.payment_date).toLocaleDateString('en-PH') : '—'}</span></li>
+          <li><span className="info-item-label">Payment Time</span>
+              <span className="info-item-value">{receipt.payment_time ? String(receipt.payment_time).slice(0, 8) : '—'}</span></li>
+          <li><span className="info-item-label">Payment Status</span>
+              <span className="info-item-value"><StatusBadge status={receipt.payment_status} /></span></li>
+          {receipt.notes && (
+            <li><span className="info-item-label">Notes</span>
+                <span className="info-item-value">{receipt.notes}</span></li>
+          )}
         </ul>
       </section>
+
       <PageToolbar
         actions={[
           { label: 'Download PDF', action: 'pdf' },
           { label: 'Print Receipt', action: 'print', variant: 'secondary' },
-          { label: 'Send Receipt', action: 'send', variant: 'secondary' },
-          { label: 'Return to Account Detail', to: `/collector/account-detail/${account.id}${contextQuery}`, variant: 'ghost' },
+          { label: 'Back to Receipts', to: '/collector/receipts', variant: 'ghost' },
         ]}
         onAction={(action) => {
           if (action.to) navigate(action.to);
-          else showToast(`${action.label} initiated.`, 'success');
+          else if (showToast) showToast(`${action.label} initiated.`, 'success');
         }}
       />
     </div>
@@ -898,48 +1098,76 @@ function IncidentReportPage({ accountId, parentContext, navigate, showToast }) {
 }
 
 function CollectionHistoryPage({ navigate, showToast }) {
+  const [payments, setPayments] = useState([]);
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('All');
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo] = useState('');
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
 
   useEffect(() => {
-    const timer = window.setTimeout(() => setLoading(false), 400);
-    return () => window.clearTimeout(timer);
-  }, []);
+    async function load() {
+      setLoading(true);
+      setError(null);
+      const result = await fetchCollectionPayments();
+      if (result.success) {
+        setPayments(result.data || []);
+      } else {
+        setError(result.message || 'Failed to load collection payments.');
+        if (showToast) showToast(result.message || 'Failed to load collection payments', 'error');
+      }
+      setLoading(false);
+    }
+    load();
+  }, [showToast]);
 
-  const filteredHistory = useMemo(() => {
+  const filtered = useMemo(() => {
     const query = search.trim().toLowerCase();
-    return COLLECTION_HISTORY.filter((item) => {
+    return payments.filter((p) => {
       const matchesSearch =
-        !query || item.customerName.toLowerCase().includes(query) || item.receiptNumber.toLowerCase().includes(query);
-      const matchesStatus = statusFilter === 'All' || item.status === statusFilter;
-      const matchesFrom = !dateFrom || item.date >= dateFrom;
-      const matchesTo = !dateTo || item.date <= dateTo;
+        !query ||
+        (p.customer_name || '').toLowerCase().includes(query) ||
+        (p.receipt_number || '').toLowerCase().includes(query) ||
+        String(p.collectionpayment_id).includes(query);
+      const matchesStatus = statusFilter === 'All' || p.status === statusFilter;
+      const matchesFrom = !dateFrom || p.payment_date >= dateFrom;
+      const matchesTo = !dateTo || p.payment_date <= dateTo;
       return matchesSearch && matchesStatus && matchesFrom && matchesTo;
     });
-  }, [search, statusFilter, dateFrom, dateTo]);
+  }, [payments, search, statusFilter, dateFrom, dateTo]);
 
-  if (loading) return <LoadingState message="Loading collection history..." />;
+  if (loading) return <LoadingState message="Loading collection payments..." />;
+
+  if (error && !payments.length) {
+    return (
+      <EmptyState
+        title="Unable to load collection payments"
+        description={error}
+        actionLabel="Retry"
+        onAction={() => window.location.reload()}
+      />
+    );
+  }
 
   return (
     <div className="page">
       <section className="panel content-panel">
         <div className="panel-section-header">
-          <h3>Collection History</h3>
+          <h3>Collection Payments</h3>
+          <p className="muted">{payments.length} record{payments.length !== 1 ? 's' : ''} in database</p>
         </div>
         <div className="accounts-toolbar">
           <input
             className="search-input"
             type="search"
-            placeholder="Search by customer or receipt number"
+            placeholder="Search by customer, receipt number, or ID"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
           />
           <div className="accounts-filters">
             <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}>
-              {['All', 'Confirmed', 'Pending Review'].map((option) => (
+              {['All', 'Pending', 'Completed', 'Cancelled'].map((option) => (
                 <option key={option} value={option}>
                   Status: {option}
                 </option>
@@ -951,33 +1179,51 @@ function CollectionHistoryPage({ navigate, showToast }) {
         </div>
       </section>
 
-      {filteredHistory.length ? (
+      {filtered.length ? (
         <section className="panel content-panel">
           <div className="table-shell">
             <table className="data-table">
               <thead>
                 <tr>
-                  <th>Receipt Number</th>
-                  <th>Customer Name</th>
+                  <th>Payment ID</th>
+                  <th>Receipt #</th>
+                  <th>Customer</th>
+                  <th>Customer ID</th>
+                  <th>Collector</th>
+                  <th>Collector ID</th>
+                  <th>Branch</th>
+                  <th>Branch ID</th>
+                  <th>Payment Method</th>
+                  <th>Method ID</th>
                   <th>Amount</th>
-                  <th>Date</th>
+                  <th>Payment Date</th>
+                  <th>Payment Time</th>
                   <th>Status</th>
-                  <th>Actions</th>
+                  <th>Notes</th>
+                  <th>Created At</th>
+                  <th>Updated At</th>
                 </tr>
               </thead>
               <tbody>
-                {filteredHistory.map((item) => (
-                  <tr key={item.id}>
-                    <td>{item.receiptNumber}</td>
-                    <td>{item.customerName}</td>
-                    <td>{formatCurrency(item.amount)}</td>
-                    <td>{item.date}</td>
-                    <td>{item.status}</td>
-                    <td>
-                      <button className="icon-action-button" type="button" title="
-                        View
-                      " onClick={() => navigate(`/collector/history/${item.id}`)}><NavIcon name="view" /></button>
-                    </td>
+                {filtered.map((p) => (
+                  <tr key={p.collectionpayment_id}>
+                    <td><span style={{ fontFamily: 'monospace', fontSize: '0.82rem' }}>{p.collectionpayment_id}</span></td>
+                    <td><span style={{ fontFamily: 'monospace', fontSize: '0.82rem' }}>{p.receipt_number || '—'}</span></td>
+                    <td>{p.customer_name || '—'}</td>
+                    <td><span style={{ fontFamily: 'monospace', fontSize: '0.82rem' }}>{p.customer_id ?? '—'}</span></td>
+                    <td>{p.collector_name || '—'}</td>
+                    <td><span style={{ fontFamily: 'monospace', fontSize: '0.82rem' }}>{p.collector_id ?? '—'}</span></td>
+                    <td>{p.branch_name || '—'}</td>
+                    <td><span style={{ fontFamily: 'monospace', fontSize: '0.82rem' }}>{p.branch_id ?? '—'}</span></td>
+                    <td>{p.payment_method || '—'}</td>
+                    <td><span style={{ fontFamily: 'monospace', fontSize: '0.82rem' }}>{p.payment_method_id ?? '—'}</span></td>
+                    <td>{formatCurrency(Number(p.amount))}</td>
+                    <td>{p.payment_date ? new Date(p.payment_date).toLocaleDateString('en-PH') : '—'}</td>
+                    <td>{p.payment_time ? String(p.payment_time).slice(0, 8) : '—'}</td>
+                    <td><StatusBadge status={p.status} /></td>
+                    <td style={{ maxWidth: 180, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.notes || '—'}</td>
+                    <td style={{ fontFamily: 'monospace', fontSize: '0.78rem' }}>{p.created_at ? new Date(p.created_at).toLocaleString() : '—'}</td>
+                    <td style={{ fontFamily: 'monospace', fontSize: '0.78rem' }}>{p.updated_at ? new Date(p.updated_at).toLocaleString() : '—'}</td>
                   </tr>
                 ))}
               </tbody>
@@ -1207,8 +1453,10 @@ export function CollectorPageBody({ page, navigate, showToast }) {
       return <AccountDetailPage {...props} />;
     case 'collectionLog':
       return <CollectionLogPage {...props} />;
+    case 'receiptsList':
+      return <ReceiptsListPage {...props} />;
     case 'digitalReceipt':
-      return <DigitalReceiptPage {...props} />;
+      return <DigitalReceiptPage receiptId={page.params?.receiptId} {...props} />;
     case 'ciForm':
       return <CIFormPage {...props} />;
     case 'incidentReport':

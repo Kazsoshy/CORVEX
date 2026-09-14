@@ -1,9 +1,10 @@
 import { formatCurrency } from '../../data/collectorMockData';
 
 const STATUS_CLASS = {
-  Overdue: 'status-overdue',
-  Pending: 'status-pending',
+  Overdue:   'status-overdue',
+  Pending:   'status-pending',
   Completed: 'status-completed',
+  Current:   'status-completed',
 };
 
 export function AccountCard({ account, onViewDetails, onCall, onNavigate }) {

@@ -85,12 +85,14 @@ CREATE TABLE branches (
     branch_id    SERIAL PRIMARY KEY,
     branch_name  VARCHAR(50) NOT NULL,
     address      VARCHAR(150) NOT NULL,          -- includes city
+    region       VARCHAR(100),
     latitude     DECIMAL(10,7) NOT NULL,
     longitude    DECIMAL(10,7) NOT NULL,
-    contact_no   VARCHAR(20) NOT NULL,
+    phone        VARCHAR(20) NOT NULL,           -- renamed from contact_no (ACM alignment)
     email        VARCHAR(100) NOT NULL,
     status       VARCHAR(20) NOT NULL DEFAULT 'Active'
                  CHECK (status IN ('Active', 'Inactive')),
+    manager_id   INTEGER,                        -- FK to users.user_id (set after users table)
     created_at   TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at   TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
@@ -101,7 +103,7 @@ CREATE TRIGGER trg_branches_updated_at
 -- depends on branches, roles
 CREATE TABLE users (
     user_id      SERIAL PRIMARY KEY,
-    branch_id    INTEGER NOT NULL REFERENCES branches(branch_id),
+    branch_id    INTEGER REFERENCES branches(branch_id),   -- NULL for org-level roles (super_admin, operating_manager)
     first_name   VARCHAR(50) NOT NULL,
     last_name    VARCHAR(50) NOT NULL,
     role_id      INTEGER NOT NULL REFERENCES roles(role_id),
@@ -179,6 +181,8 @@ CREATE TABLE customers (
     customer_id          SERIAL PRIMARY KEY,
     user_id              INTEGER REFERENCES users(user_id),
     branch_id            INTEGER NOT NULL REFERENCES branches(branch_id),
+    account_manager_id   INTEGER REFERENCES users(user_id),   -- ACM: account manager FK
+    territory_id         INTEGER REFERENCES territories(territory_id), -- ACM: territory FK
     first_name           VARCHAR(20) NOT NULL,
     last_name            VARCHAR(20) NOT NULL,
     address              VARCHAR(150) NOT NULL,
@@ -237,16 +241,21 @@ CREATE TABLE branch_inventory (
     inventory_id     SERIAL PRIMARY KEY,
     branch_id        INTEGER NOT NULL REFERENCES branches(branch_id),
     product_id       INTEGER NOT NULL REFERENCES products(product_id),
-    available_stock  INTEGER NOT NULL DEFAULT 0,
+    available_stock  INTEGER NOT NULL DEFAULT 0,   -- available for sale (kept from original)
+    quantity         INTEGER,                       -- ACM: physical quantity on shelf
+    status           VARCHAR(30) CHECK (status IN ('Sufficient','Low Stock','Critical Stock','Out of Stock')), -- ACM
+    stock_status     VARCHAR(30),                   -- computed label used by products API
+    last_updated     TIMESTAMP,                     -- used by products API
     reorder_level    INTEGER NOT NULL DEFAULT 0,
     updated_at       TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    UNIQUE (branch_id, product_id)      -- prevents duplicate stock rows for the same product/branch
+    UNIQUE (branch_id, product_id)
 );
 CREATE TRIGGER trg_branch_inventory_updated_at
     BEFORE UPDATE ON branch_inventory
     FOR EACH ROW EXECUTE FUNCTION set_updated_at();
 
-CREATE TABLE restock_records (
+-- renamed from restock_records (ACM alignment)
+CREATE TABLE restocks (
     restock_id    SERIAL PRIMARY KEY,
     product_id    INTEGER NOT NULL REFERENCES products(product_id),
     branch_id     INTEGER NOT NULL REFERENCES branches(branch_id),
@@ -260,6 +269,7 @@ CREATE TABLE stock_movements (
     stock_movements_id SERIAL PRIMARY KEY,
     performed_by        INTEGER NOT NULL REFERENCES users(user_id),
     product_id           INTEGER NOT NULL REFERENCES products(product_id),
+    branch_id            INTEGER REFERENCES branches(branch_id),  -- ACM: branch association
     quantity              INTEGER NOT NULL,   -- positive = stock in, negative = stock out
     type                  VARCHAR(50) NOT NULL
                           CHECK (type IN ('Sale Deduction', 'Restock', 'Transfer In',
@@ -270,7 +280,8 @@ CREATE TABLE stock_movements (
     created_at            TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
-CREATE TABLE transfers (
+-- renamed from transfers (ACM alignment)
+CREATE TABLE inventory_transfers (
     transfer_id           SERIAL PRIMARY KEY,
     transfer_ref          VARCHAR(100) NOT NULL,
     product_id            INTEGER NOT NULL REFERENCES products(product_id),
@@ -289,8 +300,8 @@ CREATE TABLE transfers (
     updated_at             TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     CHECK (source_branch_id <> destination_branch_id)
 );
-CREATE TRIGGER trg_transfers_updated_at
-    BEFORE UPDATE ON transfers
+CREATE TRIGGER trg_inventory_transfers_updated_at
+    BEFORE UPDATE ON inventory_transfers
     FOR EACH ROW EXECUTE FUNCTION set_updated_at();
 
 
@@ -309,6 +320,7 @@ CREATE TABLE sales_invoices (
     status                     VARCHAR(30) NOT NULL DEFAULT 'Draft'
                                CHECK (status IN ('Draft', 'Confirmed', 'Pending Review', 'Cancelled')),
     invoices_date               DATE NOT NULL,
+    due_date                     DATE,                 -- ACM: payment due date
     notes                        TEXT,
     created_at                    TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at                     TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
@@ -479,16 +491,20 @@ CREATE INDEX idx_territories_assigned_user ON territories(assigned_user);
 CREATE INDEX idx_products_category_id ON products(category_id);
 CREATE INDEX idx_customers_user_id ON customers(user_id);
 CREATE INDEX idx_customers_branch_id ON customers(branch_id);
+CREATE INDEX idx_customers_account_manager_id ON customers(account_manager_id);
+CREATE INDEX idx_customers_territory_id ON customers(territory_id);
 CREATE INDEX idx_customer_credit_info_approved_by ON customer_credit_info(approved_by);
 CREATE INDEX idx_branch_inventory_product_id ON branch_inventory(product_id);
-CREATE INDEX idx_restock_records_product_id ON restock_records(product_id);
-CREATE INDEX idx_restock_records_branch_id ON restock_records(branch_id);
-CREATE INDEX idx_restock_records_supplier_id ON restock_records(supplier_id);
+CREATE INDEX idx_restocks_product_id ON restocks(product_id);
+CREATE INDEX idx_restocks_branch_id ON restocks(branch_id);
+CREATE INDEX idx_restocks_supplier_id ON restocks(supplier_id);
 CREATE INDEX idx_stock_movements_product_id ON stock_movements(product_id);
 CREATE INDEX idx_stock_movements_performed_by ON stock_movements(performed_by);
-CREATE INDEX idx_transfers_product_id ON transfers(product_id);
-CREATE INDEX idx_transfers_source_branch_id ON transfers(source_branch_id);
-CREATE INDEX idx_transfers_destination_branch_id ON transfers(destination_branch_id);
+CREATE INDEX idx_stock_movements_branch_id ON stock_movements(branch_id);
+CREATE INDEX idx_inventory_transfers_product_id ON inventory_transfers(product_id);
+CREATE INDEX idx_inventory_transfers_source_branch_id ON inventory_transfers(source_branch_id);
+CREATE INDEX idx_inventory_transfers_destination_branch_id ON inventory_transfers(destination_branch_id);
+CREATE INDEX idx_branches_manager_id ON branches(manager_id);
 CREATE INDEX idx_sales_invoices_customer_id ON sales_invoices(customer_id);
 CREATE INDEX idx_sales_invoices_sales_agent_id ON sales_invoices(sales_agent_id);
 CREATE INDEX idx_sales_invoices_branch_id ON sales_invoices(branch_id);

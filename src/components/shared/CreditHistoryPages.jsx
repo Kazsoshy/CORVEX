@@ -1,7 +1,8 @@
-import { useState, useMemo } from 'react';
-import { CUSTOMER_CREDIT_RECORDS, BRANCHES, getCreditRecordById } from '../../data/warehouseMockData';
+import { useEffect, useMemo, useState } from 'react';
+import { getCreditHistory } from '../../api/reportsService';
 import { NavIcon } from '../../navIcons';
 import { EmptyState } from '../collector/EmptyState';
+import { LoadingState } from '../collector/LoadingState';
 import { StatusBadge } from '../StatusBadge';
 
 function actionButtonClass(variant) {
@@ -27,44 +28,92 @@ function PageToolbar({ actions, onAction }) {
   );
 }
 
-function normalizeBranch(branch) {
-  return (branch || '').replace(/ Branch$/, '').trim();
+function formatCurrency(amount) {
+  return `₱${Number(amount).toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 
-export function CreditHistoryListPage({ navigate, basePath = '/warehouse/credit-history', userBranch }) {
-  const normalizedUserBranch = normalizeBranch(userBranch);
+// ─────────────────────────────────────────────────────────────────────────────
+// List Page — shows all credit_history rows with every schema column
+// ─────────────────────────────────────────────────────────────────────────────
+export function CreditHistoryListPage({ navigate, basePath = '/warehouse/credit-history', showToast, userBranch }) {
+  const [records, setRecords] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+
   const [search, setSearch] = useState('');
-  const [branchFilter, setBranchFilter] = useState(normalizedUserBranch || 'All');
-  const [riskFilter, setRiskFilter] = useState('All');
+  const [statusFilter, setStatusFilter] = useState('All');
+  const [dateFrom, setDateFrom] = useState('');
+  const [dateTo, setDateTo] = useState('');
+
+  useEffect(() => {
+    async function load() {
+      setLoading(true);
+      setError(null);
+      const result = await getCreditHistory();
+      if (result.success) {
+        setRecords(result.data || []);
+      } else {
+        setError(result.message || 'Failed to load credit history.');
+        if (showToast) showToast(result.message || 'Failed to load credit history', 'error');
+      }
+      setLoading(false);
+    }
+    load();
+  }, [showToast]);
 
   const filtered = useMemo(() => {
-    const q = search.toLowerCase();
-    return CUSTOMER_CREDIT_RECORDS.filter((r) => {
-      const matchSearch = !q || r.customerName.toLowerCase().includes(q) || r.accountNumber.toLowerCase().includes(q);
-      const recordBranch = normalizeBranch(r.branch);
-      const matchBranch = !normalizedUserBranch || recordBranch === branchFilter || (branchFilter === 'All' && recordBranch === normalizedUserBranch);
-      const matchRisk   = riskFilter  === 'All' || r.riskLevel === riskFilter;
-      return matchSearch && matchBranch && matchRisk;
+    const q = search.trim().toLowerCase();
+    return records.filter((r) => {
+      const matchSearch =
+        !q ||
+        (r.customer_name || '').toLowerCase().includes(q) ||
+        (r.invoice_number || '').toLowerCase().includes(q) ||
+        (r.receipt_number || '').toLowerCase().includes(q) ||
+        String(r.credit_id).includes(q);
+      const matchStatus = statusFilter === 'All' || r.payment_status === statusFilter;
+      const txDate = r.transaction_date ? r.transaction_date.slice(0, 10) : '';
+      const matchFrom = !dateFrom || txDate >= dateFrom;
+      const matchTo   = !dateTo   || txDate <= dateTo;
+      return matchSearch && matchStatus && matchFrom && matchTo;
     });
-  }, [search, branchFilter, riskFilter, normalizedUserBranch]);
+  }, [records, search, statusFilter, dateFrom, dateTo]);
 
-  const riskStyle = { Low: { color: '#059669', bg: 'rgba(5,150,105,0.1)' }, Medium: { color: '#d97706', bg: 'rgba(217,119,6,0.1)' }, High: { color: '#dc2626', bg: 'rgba(220,38,38,0.1)' }, Critical: { color: '#7f1d1d', bg: 'rgba(127,29,29,0.12)' } };
+  if (loading) return <LoadingState message="Loading credit history..." />;
+
+  if (error && !records.length) {
+    return (
+      <EmptyState
+        title="Unable to load credit history"
+        description={error}
+        actionLabel="Retry"
+        onAction={() => window.location.reload()}
+      />
+    );
+  }
 
   return (
     <div className="page">
       <section className="panel content-panel">
-        <div className="panel-section-header"><h3>Customer Credit History</h3><p className="muted">Monitor credit standing, delinquency flags, and payment behaviour for inventory release decisions.</p></div>
+        <div className="panel-section-header">
+          <h3>Credit History</h3>
+          <p className="muted">{records.length} record{records.length !== 1 ? 's' : ''} in database</p>
+        </div>
         <div className="accounts-toolbar">
-          <input className="search-input" type="search" placeholder="Search by customer name or account number" value={search} onChange={(e) => setSearch(e.target.value)} />
+          <input
+            className="search-input"
+            type="search"
+            placeholder="Search by customer, invoice #, receipt #, or ID"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+          />
           <div className="accounts-filters">
-            <select value={branchFilter} onChange={(e) => setBranchFilter(e.target.value)} disabled={!!normalizedUserBranch}>
-              {normalizedUserBranch && <option value={normalizedUserBranch}>{normalizedUserBranch}</option>}
-              {!normalizedUserBranch && <option value="All">All Branches</option>}
-              {BRANCHES.map((b) => <option key={b}>{b}</option>)}
+            <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}>
+              {['All', 'Paid', 'Partial', 'Overdue'].map((s) => (
+                <option key={s} value={s}>{s === 'All' ? 'All Statuses' : s}</option>
+              ))}
             </select>
-            <select value={riskFilter} onChange={(e) => setRiskFilter(e.target.value)}>
-              {['All', 'Low', 'Medium', 'High', 'Critical'].map((r) => <option key={r} value={r}>{r === 'All' ? 'All Risk Levels' : r}</option>)}
-            </select>
+            <input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} aria-label="From date" />
+            <input type="date" value={dateTo}   onChange={(e) => setDateTo(e.target.value)}   aria-label="To date" />
           </div>
         </div>
       </section>
@@ -74,115 +123,187 @@ export function CreditHistoryListPage({ navigate, basePath = '/warehouse/credit-
           <div className="table-shell">
             <table className="data-table">
               <thead>
-                <tr><th>Account</th><th>Customer</th><th>Branch</th><th>Outstanding</th><th>Credit Limit</th><th>Utilization</th><th>Days Overdue</th><th>Risk</th><th>Actions</th></tr>
+                <tr>
+                  <th>Credit ID</th>
+                  <th>Customer</th>
+                  <th>Customer ID</th>
+                  <th>Branch</th>
+                  <th>Sales ID</th>
+                  <th>Invoice #</th>
+                  <th>Collection ID</th>
+                  <th>Receipt #</th>
+                  <th>Previous Balance</th>
+                  <th>Payment Amount</th>
+                  <th>Remaining Balance</th>
+                  <th>Payment Status</th>
+                  <th>Transaction Date</th>
+                  <th>Actions</th>
+                </tr>
               </thead>
               <tbody>
-                {filtered.map((r) => {
-                  const rs = riskStyle[r.riskLevel] ?? {};
-                  return (
-                    <tr key={r.id}>
-                      <td>{r.accountNumber}</td>
-                      <td><strong>{r.customerName}</strong></td>
-                      <td>{r.branch.replace(' Branch', '')}</td>
-                      <td style={{ fontWeight: 600, color: r.outstandingBalance > 0 ? '#dc2626' : '#059669' }}>
-                        {r.outstandingBalance > 0 ? `₱${r.outstandingBalance.toLocaleString('en-PH')}` : 'Clear'}
-                      </td>
-                      <td>₱{r.creditLimit.toLocaleString('en-PH')}</td>
-                      <td>
-                        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-                          <span style={{ width: 50, height: 6, background: '#f1f5f9', borderRadius: 999, overflow: 'hidden', display: 'inline-block' }}>
-                            <span style={{ display: 'block', height: '100%', width: `${r.creditUtilization}%`, background: r.creditUtilization > 70 ? '#dc2626' : '#2563eb', borderRadius: 999 }} />
-                          </span>
-                          <span style={{ fontSize: '0.8rem', color: '#64748b' }}>{r.creditUtilization}%</span>
-                        </span>
-                      </td>
-                      <td style={{ color: r.daysOverdue > 0 ? '#dc2626' : '#059669', fontWeight: 600 }}>{r.daysOverdue > 0 ? `${r.daysOverdue}d` : '—'}</td>
-                      <td>
-                        <span style={{ padding: '3px 10px', borderRadius: 999, fontSize: '0.72rem', fontWeight: 700, textTransform: 'uppercase', background: rs.bg, color: rs.color }}>
-                          {r.riskLevel}
-                        </span>
-                      </td>
-                      <td className="table-actions">
-                        <button className="icon-action-button" type="button" title="View" onClick={() => navigate(`${basePath}/${r.id}`)}><NavIcon name="view" /></button>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        </section>
-      ) : <EmptyState title="No records found" description="Adjust your search or filters." />}
-    </div>
-  );
-}
-
-export function CreditHistoryDetailPage({ creditId, navigate, basePath = '/warehouse/credit-history' }) {
-  const record = getCreditRecordById(creditId);
-  if (!record) return <EmptyState title="Record not found" actionLabel="Back" onAction={() => navigate(basePath)} />;
-
-  const riskColors = { Low: '#059669', Medium: '#d97706', High: '#dc2626', Critical: '#7f1d1d' };
-  const color = riskColors[record.riskLevel] ?? '#64748b';
-
-  return (
-    <div className="page">
-      <section className="panel dashboard-greeting">
-        <div className="dashboard-greeting-main">
-          <p className="dashboard-eyebrow" style={{ color }}>{record.riskLevel} Risk · {record.status}</p>
-          <h2>{record.customerName}</h2>
-          <p className="muted">{record.accountNumber} · {record.branch}</p>
-        </div>
-      </section>
-
-      <section className="stats-grid">
-        {[
-          { label: 'Credit Limit',       value: `₱${record.creditLimit.toLocaleString('en-PH')}` },
-          { label: 'Outstanding Balance', value: `₱${record.outstandingBalance.toLocaleString('en-PH')}` },
-          { label: 'Credit Utilization',  value: `${record.creditUtilization}%` },
-          { label: 'Days Overdue',        value: record.daysOverdue > 0 ? `${record.daysOverdue} days` : 'None' },
-          { label: 'Last Payment',        value: `₱${record.lastPaymentAmount.toLocaleString('en-PH')}` },
-          { label: 'Last Payment Date',   value: record.lastPaymentDate },
-        ].map((s, i) => (
-          <article key={s.label} className="stat-card" style={{ '--stat-index': i }}>
-            <div className="stat-card-top"><span className="stat-index">{String(i + 1).padStart(2, '0')}</span><span className="stat-dot" /></div>
-            <span className="stat-label">{s.label}</span>
-            <strong className="stat-value" style={{ fontSize: '1.1rem' }}>{s.value}</strong>
-          </article>
-        ))}
-      </section>
-
-      {record.delinquencyFlags.length > 0 && (
-        <section className="panel content-panel" style={{ borderColor: '#fca5a5', background: 'rgba(220,38,38,0.04)' }}>
-          <div className="panel-section-header"><h3 style={{ color: '#dc2626' }}>⚠ Delinquency Flags</h3></div>
-          <ul className="flag-list">
-            {record.delinquencyFlags.map((f) => <li key={f}>{f}</li>)}
-          </ul>
-        </section>
-      )}
-
-      <section className="panel content-panel">
-        <div className="panel-section-header"><h3>Payment History</h3></div>
-        {record.paymentHistory.length ? (
-          <div className="table-shell">
-            <table className="data-table">
-              <thead><tr><th>Date</th><th>Amount</th><th>Method</th><th>Status</th><th>Receipt #</th></tr></thead>
-              <tbody>
-                {record.paymentHistory.map((p) => (
-                  <tr key={p.receipt}>
-                    <td>{p.date}</td>
-                    <td>₱{p.amount.toLocaleString('en-PH')}</td>
-                    <td>{p.method}</td>
-                    <td><StatusBadge status={p.status} /></td>
-                    <td>{p.receipt}</td>
+                {filtered.map((r) => (
+                  <tr key={r.credit_id}>
+                    <td><span style={{ fontFamily: 'monospace', fontSize: '0.82rem' }}>{r.credit_id}</span></td>
+                    <td><strong>{r.customer_name}</strong></td>
+                    <td><span style={{ fontFamily: 'monospace', fontSize: '0.82rem' }}>{r.customer_id}</span></td>
+                    <td>{r.branch_name || '—'}</td>
+                    <td><span style={{ fontFamily: 'monospace', fontSize: '0.82rem' }}>{r.sales_id ?? '—'}</span></td>
+                    <td><span style={{ fontFamily: 'monospace', fontSize: '0.82rem' }}>{r.invoice_number || '—'}</span></td>
+                    <td><span style={{ fontFamily: 'monospace', fontSize: '0.82rem' }}>{r.collection_id ?? '—'}</span></td>
+                    <td><span style={{ fontFamily: 'monospace', fontSize: '0.82rem' }}>{r.receipt_number || '—'}</span></td>
+                    <td>{formatCurrency(r.previous_balance)}</td>
+                    <td style={{ fontWeight: 600, color: '#2563eb' }}>{formatCurrency(r.payment_amount)}</td>
+                    <td style={{ fontWeight: 600, color: Number(r.remaining_balance) > 0 ? '#dc2626' : '#059669' }}>
+                      {formatCurrency(r.remaining_balance)}
+                    </td>
+                    <td><StatusBadge status={r.payment_status} /></td>
+                    <td>{r.transaction_date ? new Date(r.transaction_date).toLocaleDateString('en-PH') : '—'}</td>
+                    <td>
+                      <button
+                        className="icon-action-button"
+                        type="button"
+                        title="View"
+                        onClick={() => navigate(`${basePath}/${r.credit_id}`)}
+                      >
+                        <NavIcon name="view" />
+                      </button>
+                    </td>
                   </tr>
                 ))}
               </tbody>
             </table>
           </div>
-        ) : <EmptyState title="No payment history" description="No payments on record for this account." />}
+        </section>
+      ) : (
+        <EmptyState title="No records found" description="Adjust your search or filters." />
+      )}
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Detail Page — shows a single credit_history row with full detail
+// ─────────────────────────────────────────────────────────────────────────────
+export function CreditHistoryDetailPage({ creditId, navigate, basePath = '/warehouse/credit-history', showToast }) {
+  const [record, setRecord] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+
+  useEffect(() => {
+    async function load() {
+      setLoading(true);
+      setError(null);
+      // Fetch all and find by credit_id (no dedicated detail endpoint needed)
+      const result = await getCreditHistory();
+      if (result.success) {
+        const found = (result.data || []).find((r) => String(r.credit_id) === String(creditId));
+        if (found) {
+          setRecord(found);
+        } else {
+          setError('Credit history record not found.');
+        }
+      } else {
+        setError(result.message || 'Failed to load record.');
+      }
+      setLoading(false);
+    }
+    load();
+  }, [creditId]);
+
+  if (loading) return <LoadingState message="Loading credit record..." />;
+  if (error || !record) {
+    return (
+      <EmptyState
+        title="Record not found"
+        description={error || 'This credit history record does not exist.'}
+        actionLabel="Back to Credit History"
+        onAction={() => navigate(basePath)}
+      />
+    );
+  }
+
+  const statusColor = {
+    Paid:    { color: '#059669', bg: 'rgba(5,150,105,0.1)' },
+    Partial: { color: '#d97706', bg: 'rgba(217,119,6,0.1)' },
+    Overdue: { color: '#dc2626', bg: 'rgba(220,38,38,0.1)' },
+  }[record.payment_status] ?? { color: '#64748b', bg: '#f1f5f9' };
+
+  return (
+    <div className="page">
+      {/* Header */}
+      <section className="panel dashboard-greeting">
+        <div className="dashboard-greeting-main">
+          <p className="dashboard-eyebrow" style={{ color: statusColor.color }}>
+            {record.payment_status} · Credit ID {record.credit_id}
+          </p>
+          <h2>{record.customer_name}</h2>
+          <p className="muted">{record.branch_name} · Customer ID {record.customer_id}</p>
+        </div>
       </section>
 
-      <PageToolbar actions={[{ label: 'Back to Credit History', to: basePath, variant: 'ghost' }]} onAction={(a) => navigate(a.to)} />
+      {/* KPI strip */}
+      <section className="stats-grid">
+        {[
+          { label: 'Previous Balance',  value: formatCurrency(record.previous_balance) },
+          { label: 'Payment Amount',    value: formatCurrency(record.payment_amount) },
+          { label: 'Remaining Balance', value: formatCurrency(record.remaining_balance) },
+          { label: 'Payment Status',    value: record.payment_status },
+          { label: 'Transaction Date',  value: record.transaction_date ? new Date(record.transaction_date).toLocaleDateString('en-PH') : '—' },
+        ].map((s, i) => (
+          <article key={s.label} className="stat-card" style={{ '--stat-index': i }}>
+            <div className="stat-card-top">
+              <span className="stat-index">{String(i + 1).padStart(2, '0')}</span>
+              <span className="stat-dot" aria-hidden="true" />
+            </div>
+            <span className="stat-label">{s.label}</span>
+            <strong className="stat-value" style={{ fontSize: '1rem' }}>{s.value}</strong>
+          </article>
+        ))}
+      </section>
+
+      {/* Full record */}
+      <section className="panel content-panel">
+        <div className="panel-section-header"><h3>Credit Record Detail</h3></div>
+        <ul className="info-grid">
+          <li><span className="info-item-label">Credit ID</span>
+              <span className="info-item-value" style={{ fontFamily: 'monospace' }}>{record.credit_id}</span></li>
+          <li><span className="info-item-label">Customer</span>
+              <span className="info-item-value">{record.customer_name}</span></li>
+          <li><span className="info-item-label">Customer ID</span>
+              <span className="info-item-value" style={{ fontFamily: 'monospace' }}>{record.customer_id}</span></li>
+          <li><span className="info-item-label">Branch</span>
+              <span className="info-item-value">{record.branch_name || '—'}</span></li>
+          <li><span className="info-item-label">Sales ID</span>
+              <span className="info-item-value" style={{ fontFamily: 'monospace' }}>{record.sales_id ?? '—'}</span></li>
+          <li><span className="info-item-label">Invoice Number</span>
+              <span className="info-item-value" style={{ fontFamily: 'monospace' }}>{record.invoice_number || '—'}</span></li>
+          <li><span className="info-item-label">Collection ID</span>
+              <span className="info-item-value" style={{ fontFamily: 'monospace' }}>{record.collection_id ?? '—'}</span></li>
+          <li><span className="info-item-label">Receipt Number</span>
+              <span className="info-item-value" style={{ fontFamily: 'monospace' }}>{record.receipt_number || '—'}</span></li>
+          <li><span className="info-item-label">Previous Balance</span>
+              <span className="info-item-value">{formatCurrency(record.previous_balance)}</span></li>
+          <li><span className="info-item-label">Payment Amount</span>
+              <span className="info-item-value" style={{ fontWeight: 700, color: '#2563eb' }}>{formatCurrency(record.payment_amount)}</span></li>
+          <li><span className="info-item-label">Remaining Balance</span>
+              <span className="info-item-value" style={{ fontWeight: 700, color: Number(record.remaining_balance) > 0 ? '#dc2626' : '#059669' }}>
+                {formatCurrency(record.remaining_balance)}
+              </span></li>
+          <li><span className="info-item-label">Payment Status</span>
+              <span className="info-item-value">
+                <span style={{ padding: '3px 10px', borderRadius: 999, fontSize: '0.75rem', fontWeight: 700, textTransform: 'uppercase', background: statusColor.bg, color: statusColor.color }}>
+                  {record.payment_status}
+                </span>
+              </span></li>
+          <li><span className="info-item-label">Transaction Date</span>
+              <span className="info-item-value">{record.transaction_date ? new Date(record.transaction_date).toLocaleDateString('en-PH', { year: 'numeric', month: 'long', day: 'numeric' }) : '—'}</span></li>
+        </ul>
+      </section>
+
+      <PageToolbar
+        actions={[{ label: 'Back to Credit History', to: basePath, variant: 'ghost' }]}
+        onAction={(a) => navigate(a.to)}
+      />
     </div>
   );
 }

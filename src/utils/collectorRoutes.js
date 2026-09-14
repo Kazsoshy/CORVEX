@@ -9,11 +9,13 @@ const ROUTE_DEFINITIONS = [
   { pattern: /^\/collector\/accounts$/, pageType: 'accounts' },
   { pattern: /^\/collector\/history$/, pageType: 'history' },
   { pattern: /^\/collector\/history\/([^/]+)$/, pageType: 'receiptDetails', params: ['receiptId'] },
+  { pattern: /^\/collector\/receipts$/, pageType: 'receiptsList' },
+  { pattern: /^\/collector\/receipts\/(\d+)$/, pageType: 'digitalReceipt', params: ['receiptId'] },
   { pattern: /^\/collector\/notifications$/, pageType: 'notifications' },
   { pattern: /^\/collector\/profile$/, pageType: 'profile' },
   { pattern: /^\/collector\/account-detail\/(\d+)$/, pageType: 'accountDetail', params: ['accountId'] },
   { pattern: /^\/collector\/collection-log\/(\d+)$/, pageType: 'collectionLog', params: ['accountId'] },
-  { pattern: /^\/collector\/receipt\/(\d+)$/, pageType: 'digitalReceipt', params: ['accountId'] },
+  { pattern: /^\/collector\/receipt\/(\d+)$/, pageType: 'digitalReceipt', params: ['receiptId'] },
   { pattern: /^\/collector\/ci-form\/(\d+)$/, pageType: 'ciForm', params: ['accountId'] },
   { pattern: /^\/collector\/incident\/(\d+)$/, pageType: 'incidentReport', params: ['accountId'] },
   { pattern: /^\/collector\/incident$/, pageType: 'incidentReportStandalone' },
@@ -113,14 +115,15 @@ export function buildCollectorBreadcrumbs(pageType, params = {}, parentContext =
     case 'history':
       return [...crumbs, { label: 'Collection History', to: '/collector/history' }];
 
-    case 'receiptDetails': {
-      const receipt = getReceiptById(params.receiptId);
+    case 'receiptsList':
+      return [...crumbs, { label: 'Digital Receipts', to: '/collector/receipts' }];
+
+    case 'digitalReceipt':
       return [
         ...crumbs,
-        { label: 'Collection History', to: '/collector/history' },
-        { label: receipt?.receiptNumber ?? 'Receipt Details', to: `/collector/history/${params.receiptId}` },
+        { label: 'Digital Receipts', to: '/collector/receipts' },
+        { label: `Receipt #${params.receiptId}`, to: `/collector/receipts/${params.receiptId}` },
       ];
-    }
 
     case 'notifications':
       return [...crumbs, { label: 'Notifications', to: '/collector/notifications' }];
@@ -149,6 +152,7 @@ export function resolveCollectorPage(pathname, search = '') {
     accounts: 'Customers',
     accountDetail: 'Customer Detail',
     collectionLog: 'Collection Log',
+    receiptsList: 'Digital Receipts',
     digitalReceipt: 'Digital Receipt',
     ciForm: 'Credit Investigation Form',
     incidentReport: 'Incident Report',
@@ -175,6 +179,7 @@ export function isCollectorNavActive(fullPath, navTo) {
   if (navTo === '/collector/route') return pathname.startsWith('/collector/route') || fullPath.includes('from=route');
   if (navTo === '/collector/accounts') return pathname === '/collector/accounts' || fullPath.includes('from=accounts');
   if (navTo === '/collector/history') return pathname.startsWith('/collector/history');
+  if (navTo === '/collector/receipts') return pathname.startsWith('/collector/receipts') || pathname.startsWith('/collector/receipt/');
   if (navTo === '/collector/notifications') return pathname === '/collector/notifications';
   if (navTo === '/collector/profile') return pathname === '/collector/profile';
   return pathname === navTo || pathname.startsWith(`${navTo}/`);

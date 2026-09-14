@@ -17,6 +17,7 @@ export const operatingManagerRole = {
       items: [
         { label: 'User Management', to: '/operating-manager/admin/users' },
         { label: 'Branch Management', to: '/operating-manager/admin/branches' },
+        { label: 'Territories', to: '/operating-manager/territories' },
         { label: 'Customer Records', to: '/operating-manager/customers' },
       ],
     },
@@ -60,6 +61,7 @@ export const operatingManagerRole = {
     { label: 'Dashboard', to: '/operating-manager/dashboard' },
     { label: 'User Management', to: '/operating-manager/admin/users' },
     { label: 'Branch Management', to: '/operating-manager/admin/branches' },
+    { label: 'Territories', to: '/operating-manager/territories' },
     { label: 'Customer Records', to: '/operating-manager/customers' },
     { label: 'Inventory Management', to: '/operating-manager/admin/inventory' },
     { label: 'Field Operations', to: '/operating-manager/operations/field-operations' },

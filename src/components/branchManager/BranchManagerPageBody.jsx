@@ -16,8 +16,9 @@ import LeafletMap from '../common/LeafletMap';
 import { StatusBadge } from '../StatusBadge';
 import { requestLogout, getCurrentUser } from '../../api/authService.js';
 import { getBranchAnalytics, getBranchStaff, getBranchCustomers, getBranchCustomerById, getBranchAlerts } from '../../api/branchManagerService.js';
-import { getReportCollection, getReportSales, getReportInventory, getReportDelinquency, getReportCompliance, getReportKPI } from '../../api/reportsService.js';
+import { getReportCollection, getReportSales, getReportInventory, getReportDelinquency, getReportCompliance, getReportKPI, getReportInvoices } from '../../api/reportsService.js';
 import { CreditHistoryListPage, CreditHistoryDetailPage } from '../shared/CreditHistoryPages';
+import { TerritoriesPage } from '../territories/TerritoriesPage';
 
 // Re-export for use in other components
 export { getBranchAnalytics, getBranchStaff, getBranchCustomers, getBranchAlerts };
@@ -155,7 +156,7 @@ function DashboardPage({ navigate, branchName }) {
         {label:'Route Compliance',value:`${analytics?.routeCompliance || 0}%`},
         {label:'Sales Visit Completion',value:`${analytics?.salesVisitCompletion || 0}%`},
         {label:'Pending CI Approvals',value:String(analytics?.pendingCI || 0)},
-        {label:'Overdue Accounts',value:String(kpi?.totalOutstanding > 0 ? Math.round(kpi.totalOutstanding / 1000) : 0)},
+        {label:'Overdue Accounts',value:String(kpi?.overdueCount || 0)},
         {label:'Stock Alerts',value:String(kpi?.stockAlertsCount || analytics?.stockAlertsCount || 0)},
       ]} />
 
@@ -424,13 +425,20 @@ function ReportsHubPage({ navigate, showToast }) {
   const [delinquencyData, setDelinquencyData] = useState(null);
   const [complianceData, setComplianceData] = useState(null);
   const [kpi, setKpi] = useState(null);
+  const [invoices, setInvoices] = useState([]);
   const [loading, setLoading] = useState(true);
-  const tabs = [{key:'collection',label:'Collections'},{key:'sales',label:'Sales'},{key:'inventory',label:'Inventory'},{key:'delinquency',label:'Delinquency'}];
+  const tabs = [
+    { key: 'collection', label: 'Collections' },
+    { key: 'sales', label: 'Sales' },
+    { key: 'inventory', label: 'Inventory' },
+    { key: 'delinquency', label: 'Delinquency' },
+    { key: 'invoices', label: 'Sales Invoices' },
+  ];
 
   useEffect(() => {
     async function load() {
       setLoading(true);
-      const [staffResult, collectionResult, salesResult, inventoryResult, delinquencyResult, complianceResult, kpiResult] = await Promise.all([
+      const [staffResult, collectionResult, salesResult, inventoryResult, delinquencyResult, complianceResult, kpiResult, invoiceResult] = await Promise.all([
         getBranchStaff(),
         getReportCollection(),
         getReportSales(),
@@ -438,6 +446,7 @@ function ReportsHubPage({ navigate, showToast }) {
         getReportDelinquency(),
         getReportCompliance(),
         getReportKPI(),
+        getReportInvoices(),
       ]);
       if (staffResult.success) setStaff(staffResult.data);
       if (collectionResult.success) setCollectionData(collectionResult.data);
@@ -446,181 +455,303 @@ function ReportsHubPage({ navigate, showToast }) {
       if (delinquencyResult.success) setDelinquencyData(delinquencyResult.data);
       if (complianceResult.success) setComplianceData(complianceResult.data);
       if (kpiResult.success) setKpi(kpiResult.data);
+      if (invoiceResult.success) setInvoices(invoiceResult.data || []);
       setLoading(false);
     }
     load();
   }, []);
 
-  const collectorAmt = staff.collectors.map((c)=>({name:c.name.split(' ')[0],amount:c.collectionAmount,compliance:c.complianceScore}));
-  const agentRev = staff.salesAgents.map((a)=>({name:a.name.split(' ')[0],revenue:a.totalSalesAmount,visits:a.visitCompletionRate}));
+  const collectorAmt = staff.collectors.map((c) => ({ name: c.name.split(' ')[0], amount: c.collectionAmount, compliance: c.complianceScore }));
+  const agentRev = staff.salesAgents.map((a) => ({ name: a.name.split(' ')[0], revenue: a.totalSalesAmount, visits: a.visitCompletionRate }));
 
   if (loading) return <LoadingState message="Loading reports..." />;
 
   return (
     <div className="page">
-      <div className="segmented-control" style={{marginBottom:24,flexWrap:'wrap'}}>
-        {tabs.map((t)=><button key={t.key} className={tab===t.key?'segment active':'segment'} type="button" onClick={()=>setTab(t.key)}>{t.label}</button>)}
+      <div className="segmented-control" style={{ marginBottom: 16, flexWrap: 'wrap' }}>
+        {tabs.map((t) => (
+          <button key={t.key} className={tab === t.key ? 'segment active' : 'segment'} type="button" onClick={() => setTab(t.key)}>{t.label}</button>
+        ))}
       </div>
-      <div style={{display:'flex',justifyContent:'flex-end',gap:8,marginBottom:16}}>
-        <button className="button secondary" type="button" onClick={()=>showToast('Export PDF initiated.','success')}>Export PDF</button>
-        <button className="button secondary" type="button" onClick={()=>showToast('Export Excel initiated.','success')}>Export Excel</button>
+      <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginBottom: 20 }}>
+        <button className="button secondary" type="button" onClick={() => showToast('Export PDF initiated.', 'success')}>Export PDF</button>
+        <button className="button secondary" type="button" onClick={() => showToast('Export Excel initiated.', 'success')}>Export Excel</button>
       </div>
 
-      {tab==='collection'&&(<>
-        <Stats stats={[
-          {label:'Collections (7 days)',value:formatCurrency(collectionData?.summary?.totalCollected || 0)},
-          {label:'Collection Rate',value:`${collectionData?.summary?.collectionRate || 0}%`},
-          {label:'Target',value:formatCurrency(collectionData?.summary?.totalTarget || 0)},
-          {label:'Active Days',value:String(collectionData?.summary?.daysWithCollections || 0)},
-        ]}/>
-        <div className="grid two-up">
-          <Card title="Daily Collection vs Target" sub="Last 7 days">
-            <ResponsiveContainer width="100%" height={220}>
-              <AreaChart data={collectionData?.daily || []}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9"/><XAxis dataKey="day" tick={{fontSize:12}}/><YAxis tick={{fontSize:11}} tickFormatter={(v)=>`${(v/1000).toFixed(0)}k`}/><Tooltip formatter={(v)=>formatCurrency(v)}/><Legend/>
-                <Area type="monotone" dataKey="target" name="Target" stroke="#e2e8f0" fill="#f1f5f9" strokeWidth={2} strokeDasharray="5 5"/>
-                <Area type="monotone" dataKey="amount" name="Collected" stroke="#2563eb" fill="#2563eb" fillOpacity={0.12} strokeWidth={2}/>
-              </AreaChart>
-            </ResponsiveContainer>
-          </Card>
-          <Card title="Collector Amounts">
-            <ResponsiveContainer width="100%" height={220}>
-              <BarChart data={collectorAmt}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9"/><XAxis dataKey="name" tick={{fontSize:12}}/><YAxis tick={{fontSize:11}} tickFormatter={(v)=>`${(v/1000).toFixed(0)}k`}/><Tooltip/><Legend/>
-                <Bar dataKey="amount" name="Collected (PHP)" fill="#2563eb" radius={[4,4,0,0]}/>
-                <Bar dataKey="compliance" name="Compliance %" fill="#06b6d4" radius={[4,4,0,0]}/>
-              </BarChart>
-            </ResponsiveContainer>
-          </Card>
-        </div>
-      </>)}
+      {tab === 'collection' && (
+        <>
+          <Stats stats={[
+            { label: 'Collections (7 days)', value: formatCurrency(collectionData?.summary?.totalCollected || 0) },
+            { label: 'Collection Rate', value: `${collectionData?.summary?.collectionRate || 0}%` },
+            { label: 'Target', value: formatCurrency(collectionData?.summary?.totalTarget || 0) },
+            { label: 'Active Days', value: String(collectionData?.summary?.daysWithCollections || 0) },
+          ]} />
+          <div className="grid two-up">
+            <Card title="Daily Collection vs Target" sub="Last 7 days">
+              <ResponsiveContainer width="100%" height={220}>
+                <AreaChart data={collectionData?.daily || []}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
+                  <XAxis dataKey="day" tick={{ fontSize: 12 }} />
+                  <YAxis tick={{ fontSize: 11 }} tickFormatter={(v) => `${(v / 1000).toFixed(0)}k`} />
+                  <Tooltip formatter={(v) => formatCurrency(v)} />
+                  <Legend />
+                  <Area type="monotone" dataKey="target" name="Target" stroke="#e2e8f0" fill="#f1f5f9" strokeWidth={2} strokeDasharray="5 5" />
+                  <Area type="monotone" dataKey="amount" name="Collected" stroke="#2563eb" fill="#2563eb" fillOpacity={0.12} strokeWidth={2} />
+                </AreaChart>
+              </ResponsiveContainer>
+            </Card>
+            <Card title="Collector Amounts">
+              <ResponsiveContainer width="100%" height={220}>
+                <BarChart data={collectorAmt}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
+                  <XAxis dataKey="name" tick={{ fontSize: 12 }} />
+                  <YAxis tick={{ fontSize: 11 }} tickFormatter={(v) => `${(v / 1000).toFixed(0)}k`} />
+                  <Tooltip />
+                  <Legend />
+                  <Bar dataKey="amount" name="Collected (PHP)" fill="#2563eb" radius={[4, 4, 0, 0]} />
+                  <Bar dataKey="compliance" name="Compliance %" fill="#06b6d4" radius={[4, 4, 0, 0]} />
+                </BarChart>
+              </ResponsiveContainer>
+            </Card>
+          </div>
+        </>
+      )}
 
-      {tab==='sales'&&(<>
-        <Stats stats={[
-          {label:'Sales (7 days)',value:formatCurrency(salesData?.summary?.totalActual || 0)},
-          {label:'Sales Efficiency',value:`${salesData?.summary?.salesEfficiency || 0}%`},
-          {label:'Invoices',value:String(salesData?.summary?.totalInvoices || 0)},
-          {label:'Target',value:formatCurrency(salesData?.summary?.totalTarget || 0)},
-        ]}/>
-        <div className="grid two-up">
-          <Card title="Sales vs Target" sub="Last 7 days">
-            <ResponsiveContainer width="100%" height={220}>
-              <BarChart data={salesData?.weekly || []}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9"/><XAxis dataKey="day" tick={{fontSize:12}}/><YAxis tick={{fontSize:11}} tickFormatter={(v)=>`${(v/1000).toFixed(0)}k`}/><Tooltip formatter={(v)=>formatCurrency(v)}/><Legend/>
-                <Bar dataKey="target" name="Target" fill="#e2e8f0" radius={[4,4,0,0]}/>
-                <Bar dataKey="actual" name="Actual" fill="#06b6d4" radius={[4,4,0,0]}/>
-              </BarChart>
-            </ResponsiveContainer>
-          </Card>
-          <Card title="Agent Revenue & Visits">
-            <ResponsiveContainer width="100%" height={220}>
-              <BarChart data={agentRev}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9"/><XAxis dataKey="name" tick={{fontSize:12}}/><YAxis yAxisId="l" tick={{fontSize:11}} tickFormatter={(v)=>`${(v/1000).toFixed(0)}k`}/><YAxis yAxisId="r" orientation="right" domain={[0,100]} unit="%" tick={{fontSize:12}}/><Tooltip/><Legend/>
-                <Bar yAxisId="l" dataKey="revenue" name="Revenue" fill="#8b5cf6" radius={[4,4,0,0]}/>
-                <Bar yAxisId="r" dataKey="visits" name="Visit %" fill="#10b981" radius={[4,4,0,0]}/>
-              </BarChart>
-            </ResponsiveContainer>
-          </Card>
-        </div>
-      </>)}
+      {tab === 'sales' && (
+        <>
+          <Stats stats={[
+            { label: 'Sales (7 days)', value: formatCurrency(salesData?.summary?.totalActual || 0) },
+            { label: 'Sales Efficiency', value: `${salesData?.summary?.salesEfficiency || 0}%` },
+            { label: 'Invoices', value: String(salesData?.summary?.totalInvoices || 0) },
+            { label: 'Target', value: formatCurrency(salesData?.summary?.totalTarget || 0) },
+          ]} />
+          <div className="grid two-up">
+            <Card title="Sales vs Target" sub="Last 7 days">
+              <ResponsiveContainer width="100%" height={220}>
+                <BarChart data={salesData?.weekly || []}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
+                  <XAxis dataKey="day" tick={{ fontSize: 12 }} />
+                  <YAxis tick={{ fontSize: 11 }} tickFormatter={(v) => `${(v / 1000).toFixed(0)}k`} />
+                  <Tooltip formatter={(v) => formatCurrency(v)} />
+                  <Legend />
+                  <Bar dataKey="target" name="Target" fill="#e2e8f0" radius={[4, 4, 0, 0]} />
+                  <Bar dataKey="actual" name="Actual" fill="#06b6d4" radius={[4, 4, 0, 0]} />
+                </BarChart>
+              </ResponsiveContainer>
+            </Card>
+            <Card title="Agent Revenue & Visits">
+              <ResponsiveContainer width="100%" height={220}>
+                <BarChart data={agentRev}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
+                  <XAxis dataKey="name" tick={{ fontSize: 12 }} />
+                  <YAxis yAxisId="l" tick={{ fontSize: 11 }} tickFormatter={(v) => `${(v / 1000).toFixed(0)}k`} />
+                  <YAxis yAxisId="r" orientation="right" domain={[0, 100]} unit="%" tick={{ fontSize: 12 }} />
+                  <Tooltip />
+                  <Legend />
+                  <Bar yAxisId="l" dataKey="revenue" name="Revenue" fill="#8b5cf6" radius={[4, 4, 0, 0]} />
+                  <Bar yAxisId="r" dataKey="visits" name="Visit %" fill="#10b981" radius={[4, 4, 0, 0]} />
+                </BarChart>
+              </ResponsiveContainer>
+            </Card>
+          </div>
+        </>
+      )}
 
-      {tab==='inventory'&&(<>
-        <Stats stats={[
-          {label:'Inventory Health',value:`${inventoryData?.healthPct || 0}%`},
-          {label:'Stock Alerts',value:String(inventoryData?.alertsCount || 0)},
-          {label:'Total Products',value:String(inventoryData?.totalProducts || 0)},
-          {label:'Out of Stock',value:String(inventoryData?.summary?.outOfStock || 0)},
-        ]}/>
-        <div className="grid two-up">
-          <Card title="Inventory Status">
-            <ResponsiveContainer width="100%" height={220}>
-              <PieChart>
-                <Pie data={[
-                  { name: 'Sufficient', value: inventoryData?.summary?.sufficient || 0, color: '#10b981' },
-                  { name: 'Low Stock', value: inventoryData?.summary?.low || 0, color: '#f59e0b' },
-                  { name: 'Critical', value: inventoryData?.summary?.critical || 0, color: '#ef4444' },
-                  { name: 'Out of Stock', value: inventoryData?.summary?.outOfStock || 0, color: '#64748b' },
-                ]} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={80} label={({ name, value }) => `${name}: ${value}`}>
-                  {[
-                    { name: 'Sufficient', color: '#10b981' },
-                    { name: 'Low Stock', color: '#f59e0b' },
-                    { name: 'Critical', color: '#ef4444' },
-                    { name: 'Out of Stock', color: '#64748b' },
-                  ].map((entry) => <Cell key={entry.name} fill={entry.color} />)}
-                </Pie>
-                <Tooltip />
-                <Legend />
-              </PieChart>
-            </ResponsiveContainer>
-          </Card>
-          <Card title="Items Requiring Attention">
-            <div className="table-shell">
-              <table className="data-table">
-                <thead><tr><th>Product</th><th>SKU</th><th>Stock</th><th>Status</th></tr></thead>
-                <tbody>
-                  {(inventoryData?.lowStockItems || []).length ? inventoryData.lowStockItems.map((item) => (
-                    <tr key={item.sku}>
-                      <td>{item.product_name}</td>
-                      <td>{item.sku}</td>
-                      <td>{item.available_stock}</td>
-                      <td><StatusBadge status={item.status} /></td>
+      {tab === 'inventory' && (
+        <>
+          <Stats stats={[
+            { label: 'Inventory Health', value: `${inventoryData?.healthPct || 0}%` },
+            { label: 'Stock Alerts', value: String(inventoryData?.alertsCount || 0) },
+            { label: 'Total Products', value: String(inventoryData?.totalProducts || 0) },
+            { label: 'Out of Stock', value: String(inventoryData?.summary?.outOfStock || 0) },
+          ]} />
+          <div className="grid two-up">
+            <Card title="Inventory Status">
+              <ResponsiveContainer width="100%" height={220}>
+                <PieChart>
+                  <Pie
+                    data={[
+                      { name: 'Sufficient', value: inventoryData?.summary?.sufficient || 0, color: '#10b981' },
+                      { name: 'Low Stock', value: inventoryData?.summary?.low || 0, color: '#f59e0b' },
+                      { name: 'Critical', value: inventoryData?.summary?.critical || 0, color: '#ef4444' },
+                      { name: 'Out of Stock', value: inventoryData?.summary?.outOfStock || 0, color: '#64748b' },
+                    ]}
+                    dataKey="value"
+                    nameKey="name"
+                    cx="50%"
+                    cy="50%"
+                    outerRadius={80}
+                    label={({ name, value }) => `${name}: ${value}`}
+                  >
+                    {[
+                      { name: 'Sufficient', color: '#10b981' },
+                      { name: 'Low Stock', color: '#f59e0b' },
+                      { name: 'Critical', color: '#ef4444' },
+                      { name: 'Out of Stock', color: '#64748b' },
+                    ].map((entry) => <Cell key={entry.name} fill={entry.color} />)}
+                  </Pie>
+                  <Tooltip />
+                  <Legend />
+                </PieChart>
+              </ResponsiveContainer>
+            </Card>
+            <Card title="Items Requiring Attention">
+              <div className="table-shell">
+                <table className="data-table">
+                  <thead><tr><th>Product</th><th>SKU</th><th>Stock</th><th>Status</th></tr></thead>
+                  <tbody>
+                    {(inventoryData?.lowStockItems || []).length ? inventoryData.lowStockItems.map((item) => (
+                      <tr key={item.sku}>
+                        <td>{item.product_name}</td>
+                        <td>{item.sku}</td>
+                        <td>{item.available_stock}</td>
+                        <td><StatusBadge status={item.status} /></td>
+                      </tr>
+                    )) : (
+                      <tr><td colSpan={4}>All products are at sufficient stock levels.</td></tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </Card>
+          </div>
+        </>
+      )}
+
+      {tab === 'delinquency' && (
+        <>
+          <Stats stats={[
+            { label: 'Overdue Accounts', value: String(delinquencyData?.summary?.totalOverdue || 0) },
+            { label: 'Avg Rate', value: `${delinquencyData?.summary?.avgRate || 0}%` },
+            { label: 'Trend', value: delinquencyData?.summary?.trend || 'stable' },
+            { label: 'Branch Health', value: `${kpi?.healthScore || 0}/100` },
+          ]} />
+          <div className="grid two-up">
+            <Card title="Delinquency Trend" sub="Weekly overdue accounts">
+              <ResponsiveContainer width="100%" height={220}>
+                <AreaChart data={delinquencyData?.delinquency || []}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
+                  <XAxis dataKey="week" tick={{ fontSize: 12 }} />
+                  <YAxis tick={{ fontSize: 12 }} />
+                  <Tooltip />
+                  <Legend />
+                  <Area type="monotone" dataKey="accounts" name="Overdue" stroke="#ef4444" fill="#ef4444" fillOpacity={0.1} strokeWidth={2} />
+                  <Area type="monotone" dataKey="rate" name="Rate %" stroke="#f59e0b" fill="#f59e0b" fillOpacity={0.08} strokeWidth={2} />
+                </AreaChart>
+              </ResponsiveContainer>
+            </Card>
+            <Card title="Route Compliance Trend" sub="Weekly per collector">
+              <ResponsiveContainer width="100%" height={220}>
+                <LineChart data={complianceData?.compliance?.[0]?.data?.map((d, i) => {
+                  const point = { week: d.week };
+                  complianceData.compliance.forEach((c) => { point[c.name] = c.data[i]?.rate || 0; });
+                  return point;
+                }) || []}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
+                  <XAxis dataKey="week" tick={{ fontSize: 12 }} />
+                  <YAxis domain={[80, 100]} unit="%" tick={{ fontSize: 12 }} />
+                  <Tooltip formatter={(v) => `${v}%`} />
+                  <Legend />
+                  {complianceData?.compliance?.map((c, i) => (
+                    <Line key={c.name} type="monotone" dataKey={c.name} stroke={['#2563eb', '#06b6d4', '#10b981', '#f59e0b', '#ef4444'][i % 5]} strokeWidth={2} dot={false} />
+                  ))}
+                </LineChart>
+              </ResponsiveContainer>
+            </Card>
+          </div>
+        </>
+      )}
+
+      {tab === 'invoices' && (
+        <section className="panel content-panel">
+          <div className="panel-section-header" style={{ marginBottom: 8 }}>
+            <h3>Sales Invoices</h3>
+          </div>
+
+          {invoices.length ? (
+            <>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 16, margin: '4px 0 20px' }}>
+                {[
+                  { label: 'Total Invoices', value: String(invoices.length) },
+                  { label: 'Confirmed', value: String(invoices.filter((i) => i.status === 'Confirmed').length) },
+                  { label: 'Pending Review', value: String(invoices.filter((i) => i.status === 'Pending Review').length) },
+                  { label: 'Total Value', value: formatCurrency(invoices.reduce((s, i) => s + Number(i.total_amount || 0), 0)) },
+                ].map((s) => (
+                  <div key={s.label} style={{ padding: 14, background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 8 }}>
+                    <span style={{ fontSize: '0.78rem', color: '#64748b', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.03em' }}>{s.label}</span>
+                    <strong style={{ display: 'block', fontSize: '1.35rem', marginTop: 4 }}>{s.value}</strong>
+                  </div>
+                ))}
+              </div>
+
+              <div className="table-shell">
+                <table className="data-table">
+                  <thead>
+                    <tr>
+                      <th>Invoice #</th>
+                      <th>Customer</th>
+                      <th>Sales Agent</th>
+                      <th>Branch</th>
+                      <th>Amount</th>
+                      <th>Payment</th>
+                      <th>Status</th>
+                      <th>Invoice Date</th>
+                      <th>Due Date</th>
                     </tr>
-                  )) : (
-                    <tr><td colSpan={4}>All products are at sufficient stock levels.</td></tr>
-                  )}
-                </tbody>
-              </table>
+                  </thead>
+                  <tbody>
+                    {invoices.map((inv) => {
+                      const isOverdue = inv.due_date && new Date(inv.due_date) < new Date() && inv.status !== 'Cancelled';
+                      return (
+                        <tr key={inv.sales_invoices_id}>
+                          <td style={{ fontFamily: 'monospace', fontSize: '0.82rem' }}>{inv.invoice_number}</td>
+                          <td>{inv.customer_name || '—'}</td>
+                          <td>{inv.sales_agent_name || '—'}</td>
+                          <td>{inv.branch_name || '—'}</td>
+                          <td style={{ fontWeight: 600 }}>{formatCurrency(Number(inv.total_amount))}</td>
+                          <td>{inv.payment_method || '—'}</td>
+                          <td>
+                            <span style={{
+                              padding: '2px 10px', borderRadius: 999, fontSize: '0.78rem', fontWeight: 600,
+                              background: inv.status === 'Confirmed' ? 'rgba(16,185,129,0.1)' : inv.status === 'Cancelled' ? 'rgba(239,68,68,0.1)' : inv.status === 'Pending Review' ? 'rgba(245,158,11,0.1)' : 'rgba(100,116,139,0.1)',
+                              color: inv.status === 'Confirmed' ? '#059669' : inv.status === 'Cancelled' ? '#dc2626' : inv.status === 'Pending Review' ? '#d97706' : '#475569',
+                            }}>
+                              {inv.status}
+                            </span>
+                          </td>
+                          <td>{inv.invoices_date ? new Date(inv.invoices_date).toLocaleDateString('en-PH') : '—'}</td>
+                          <td style={{ color: isOverdue ? '#dc2626' : 'inherit', fontWeight: isOverdue ? 700 : 400 }}>
+                            {inv.due_date ? new Date(inv.due_date).toLocaleDateString('en-PH') : '—'}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </>
+          ) : (
+            <EmptyState title="No invoices found" description="No sales invoices exist for this branch yet." />
+          )}
+        </section>
+      )}
+
+      {tab !== 'invoices' && (
+        <div style={{ marginTop: 24 }}>
+          <Card title="Overall KPI Summary">
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '24px 20px', padding: '16px 0' }}>
+              <div><strong>Health Score</strong><div style={{ fontSize: '1.5rem', color: '#2563eb' }}>{kpi?.healthScore || 0}/100</div></div>
+              <div><strong>Active Collectors</strong><div style={{ fontSize: '1.5rem', color: '#10b981' }}>{kpi?.activeCollectors || 0}</div></div>
+              <div><strong>Active Sales Agents</strong><div style={{ fontSize: '1.5rem', color: '#8b5cf6' }}>{kpi?.activeSalesAgents || 0}</div></div>
+              <div><strong>Total Customers</strong><div style={{ fontSize: '1.5rem' }}>{kpi?.totalCustomers || 0}</div></div>
+              <div><strong>Outstanding Balance</strong><div style={{ fontSize: '1.5rem', color: '#ef4444' }}>{formatCurrency(kpi?.totalOutstanding || 0)}</div></div>
+              <div><strong>Collections (7d)</strong><div style={{ fontSize: '1.5rem', color: '#059669' }}>{formatCurrency(kpi?.totalCollectionsAmount || 0)}</div></div>
+              <div><strong>Sales (7d)</strong><div style={{ fontSize: '1.5rem', color: '#2563eb' }}>{formatCurrency(kpi?.totalSalesAmount || 0)}</div></div>
+              <div><strong>Inventory Health</strong><div style={{ fontSize: '1.5rem' }}>{kpi?.inventoryHealth || 0}%</div></div>
             </div>
           </Card>
         </div>
-      </>)}
-
-      {tab==='delinquency'&&(<>
-        <Stats stats={[
-          {label:'Overdue Accounts',value:String(delinquencyData?.summary?.totalOverdue || 0)},
-          {label:'Avg Rate',value:`${delinquencyData?.summary?.avgRate || 0}%`},
-          {label:'Trend',value:delinquencyData?.summary?.trend || 'stable'},
-          {label:'Branch Health',value:`${kpi?.healthScore || 0}/100`},
-        ]}/>
-        <div className="grid two-up">
-          <Card title="Delinquency Trend" sub="Weekly overdue accounts">
-            <ResponsiveContainer width="100%" height={220}>
-              <AreaChart data={delinquencyData?.delinquency || []}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9"/><XAxis dataKey="week" tick={{fontSize:12}}/><YAxis tick={{fontSize:12}}/><Tooltip/><Legend/>
-                <Area type="monotone" dataKey="accounts" name="Overdue" stroke="#ef4444" fill="#ef4444" fillOpacity={0.1} strokeWidth={2}/>
-                <Area type="monotone" dataKey="rate" name="Rate %" stroke="#f59e0b" fill="#f59e0b" fillOpacity={0.08} strokeWidth={2}/>
-              </AreaChart>
-            </ResponsiveContainer>
-          </Card>
-          <Card title="Route Compliance Trend" sub="Weekly per collector">
-            <ResponsiveContainer width="100%" height={220}>
-              <LineChart data={complianceData?.compliance?.[0]?.data?.map((d, i) => {
-                const point = { week: d.week };
-                complianceData.compliance.forEach((c) => { point[c.name] = c.data[i]?.rate || 0; });
-                return point;
-              }) || []}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9"/><XAxis dataKey="week" tick={{fontSize:12}}/><YAxis domain={[80,100]} unit="%" tick={{fontSize:12}}/><Tooltip formatter={(v)=>`${v}%`}/><Legend/>
-                {complianceData?.compliance?.map((c, i) => <Line key={c.name} type="monotone" dataKey={c.name} stroke={['#2563eb','#06b6d4','#10b981','#f59e0b','#ef4444'][i % 5]} strokeWidth={2} dot={false}/>)}
-              </LineChart>
-            </ResponsiveContainer>
-          </Card>
-        </div>
-      </>)}
-
-      <div style={{ marginTop: 24 }}>
-        <Card title="Overall KPI Summary">
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 16, padding: '12px 0' }}>
-            <div><strong>Health Score</strong><div style={{ fontSize: '1.5rem', color: '#2563eb' }}>{kpi?.healthScore || 0}/100</div></div>
-            <div><strong>Active Collectors</strong><div style={{ fontSize: '1.5rem', color: '#10b981' }}>{kpi?.activeCollectors || 0}</div></div>
-            <div><strong>Active Sales Agents</strong><div style={{ fontSize: '1.5rem', color: '#8b5cf6' }}>{kpi?.activeSalesAgents || 0}</div></div>
-            <div><strong>Total Customers</strong><div style={{ fontSize: '1.5rem' }}>{kpi?.totalCustomers || 0}</div></div>
-            <div><strong>Outstanding Balance</strong><div style={{ fontSize: '1.5rem', color: '#ef4444' }}>{formatCurrency(kpi?.totalOutstanding || 0)}</div></div>
-            <div><strong>Collections (7d)</strong><div style={{ fontSize: '1.5rem', color: '#059669' }}>{formatCurrency(kpi?.totalCollectionsAmount || 0)}</div></div>
-            <div><strong>Sales (7d)</strong><div style={{ fontSize: '1.5rem', color: '#2563eb' }}>{formatCurrency(kpi?.totalSalesAmount || 0)}</div></div>
-            <div><strong>Inventory Health</strong><div style={{ fontSize: '1.5rem' }}>{kpi?.inventoryHealth || 0}%</div></div>
-          </div>
-        </Card>
-      </div>
+      )}
     </div>
   );
 }
@@ -964,6 +1095,9 @@ function CustomerDetailPage({ customerId, navigate, branchName }) {
 
   const name = `${customer.first_name} ${customer.last_name}`;
   const paymentStatus = Number(customer.activity?.outstanding_balance || 0) > 0 ? 'Overdue' : 'Current';
+  const customerSince = customer.created_at
+    ? new Date(customer.created_at).toLocaleDateString('en-PH', { year: 'numeric', month: 'long', day: 'numeric' })
+    : '—';
 
   return (
     <div className="page">
@@ -976,10 +1110,12 @@ function CustomerDetailPage({ customerId, navigate, branchName }) {
       </section>
 
       <Stats stats={[
-        { label: 'Status', value: customer.status || '—' },
-        { label: 'Payment Status', value: paymentStatus },
-        { label: 'Outstanding', value: formatCurrency(Number(customer.activity?.outstanding_balance || 0)) },
-        { label: 'Purchase Volume', value: formatCurrency(Number(customer.activity?.purchase_volume || 0)) },
+        { label: 'Status',           value: customer.status || '—' },
+        { label: 'Payment Status',   value: paymentStatus },
+        { label: 'Outstanding',      value: formatCurrency(Number(customer.activity?.outstanding_balance || 0)) },
+        { label: 'Purchase Volume',  value: formatCurrency(Number(customer.activity?.purchase_volume || 0)) },
+        { label: 'Account Manager',  value: customer.account_manager_name || '—' },
+        { label: 'Customer Since',   value: customerSince },
       ]} />
 
       <div className="grid two-up">
@@ -992,6 +1128,8 @@ function CustomerDetailPage({ customerId, navigate, branchName }) {
             <li><span className="info-item-label">Contact Phone</span><span className="info-item-value">{customer.contact_phone || '—'}</span></li>
             <li><span className="info-item-label">Contact Person</span><span className="info-item-value">{customer.contact_person_fname} {customer.contact_person_lname}</span></li>
             <li><span className="info-item-label">Contact Person Phone</span><span className="info-item-value">{customer.contact_person_phone || '—'}</span></li>
+            <li><span className="info-item-label">Account Manager</span><span className="info-item-value">{customer.account_manager_name || '—'}</span></li>
+            <li><span className="info-item-label">Customer Since</span><span className="info-item-value">{customerSince}</span></li>
           </ul>
         </section>
 
@@ -1014,6 +1152,7 @@ function CustomerDetailPage({ customerId, navigate, branchName }) {
             <li><span className="info-item-label">Monthly Income</span><span className="info-item-value">{formatCurrency(Number(customer.creditInfo.monthly_income || 0))}</span></li>
             <li><span className="info-item-label">Credit Score</span><span className="info-item-value">{customer.creditInfo.credit_score || '—'}</span></li>
             <li><span className="info-item-label">Employment Status</span><span className="info-item-value">{customer.creditInfo.employment_status || '—'}</span></li>
+            <li><span className="info-item-label">Approved By</span><span className="info-item-value">{customer.creditInfo.approved_by_name || '—'}</span></li>
             <li><span className="info-item-label">Approved Date</span><span className="info-item-value">{customer.creditInfo.approved_date || '—'}</span></li>
           </ul>
         </section>
@@ -1414,6 +1553,7 @@ export function BranchManagerPageBody({ page, navigate, showToast, currentUser }
     case 'dashboard':           return <DashboardPage {...p} />;
     case 'customers':           return <CustomersPage {...p} />;
     case 'customerDetail':      return <CustomerDetailPage {...p} />;
+    case 'territories':         return <TerritoriesPage {...p} />;
     case 'fieldOperations':
     case 'collectorRoutes':
     case 'salesSchedules':

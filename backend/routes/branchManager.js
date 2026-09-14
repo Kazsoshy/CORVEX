@@ -39,7 +39,8 @@ router.get('/analytics', requireAuth, async (req, res) => {
         `SELECT
            COUNT(*) AS total_customers,
            COUNT(*) FILTER (WHERE status = 'Active') AS active_customers,
-           COALESCE(SUM(ca.outstanding_balance), 0) AS total_outstanding
+           COALESCE(SUM(ca.outstanding_balance), 0) AS total_outstanding,
+           COUNT(*) FILTER (WHERE ca.outstanding_balance > 0) AS overdue_count
          FROM customers c
          LEFT JOIN customer_activity ca ON c.customer_id = ca.customer_id
          ${isBranchScoped ? 'WHERE c.branch_id = $1' : ''}`,
@@ -58,7 +59,12 @@ router.get('/analytics', requireAuth, async (req, res) => {
            COUNT(*) AS total_collections,
            COALESCE(SUM(amount), 0) AS total_amount_collected
          FROM collection_payment
-         ${isBranchScoped ? 'WHERE branch_id = $1 AND payment_date >= CURRENT_DATE' : 'WHERE payment_date >= CURRENT_DATE'}`,
+         WHERE payment_date >= MAKE_DATE(
+           EXTRACT(YEAR  FROM NOW() AT TIME ZONE 'Asia/Manila')::INT,
+           EXTRACT(MONTH FROM NOW() AT TIME ZONE 'Asia/Manila')::INT,
+           1
+         )
+           ${isBranchScoped ? 'AND branch_id = $1' : ''}`,
         isBranchScoped ? [bid] : []
       ),
       pool.query(
@@ -66,7 +72,12 @@ router.get('/analytics', requireAuth, async (req, res) => {
            COUNT(*) AS total_invoices,
            COALESCE(SUM(total_amount), 0) AS total_sales_amount
          FROM sales_invoices
-         ${isBranchScoped ? 'WHERE branch_id = $1 AND invoices_date >= CURRENT_DATE' : 'WHERE invoices_date >= CURRENT_DATE'}`,
+         WHERE invoices_date >= MAKE_DATE(
+           EXTRACT(YEAR  FROM NOW() AT TIME ZONE 'Asia/Manila')::INT,
+           EXTRACT(MONTH FROM NOW() AT TIME ZONE 'Asia/Manila')::INT,
+           1
+         )
+           ${isBranchScoped ? 'AND branch_id = $1' : ''}`,
         isBranchScoped ? [bid] : []
       ),
       pool.query(
@@ -96,6 +107,7 @@ router.get('/analytics', requireAuth, async (req, res) => {
         `SELECT
            u.id AS user_id,
            COUNT(DISTINCT fv.customer_id) AS customers_assigned,
+           COUNT(*) FILTER (WHERE fv.visit_type = 'Sales') AS total_assigned,
            COUNT(*) FILTER (WHERE fv.status = 'Completed' AND fv.visit_type = 'Sales') AS visits_completed,
            COALESCE(si.sales_logged, 0) AS sales_logged,
            COALESCE(si.total_sales_amount, 0) AS total_sales_amount
@@ -130,8 +142,10 @@ router.get('/analytics', requireAuth, async (req, res) => {
       ? Math.round((collectorPerf.reduce((sum, c) => sum + (c.assigned > 0 ? (c.visited / c.assigned) * 100 : 100), 0) / totalCollectors) * 10) / 10
       : 0;
 
-    const salesCompletion = totalSalesAgents > 0
-      ? Math.round((salesPerf.reduce((sum, s) => sum + (s.visits_completed / Math.max(1, s.customers_assigned)) * 100, 0) / totalSalesAgents) * 10) / 10
+    const salesCompleted = salesPerf.reduce((sum, s) => sum + (Number(s.visits_completed) || 0), 0);
+    const salesTotal = salesPerf.reduce((sum, s) => sum + (Number(s.total_assigned) || 0), 0);
+    const salesCompletion = salesTotal > 0
+      ? Math.round((salesCompleted / salesTotal) * 100)
       : 0;
 
     const healthScore = Math.min(100, Math.max(0,
@@ -145,15 +159,15 @@ router.get('/analytics', requireAuth, async (req, res) => {
       success: true,
       data: {
         healthScore: Math.round(healthScore),
-        collectionEfficiency: 85,
-        salesEfficiency: 80,
+        collectionEfficiency: Math.round(collectorCompliance),
+        salesEfficiency: Math.round(salesCompletion),
         inventoryHealth: Number(inventory.stockout_count) === 0 ? 100 : Math.max(0, 100 - Number(inventory.stockout_count) * 10),
-        collectionRateToday: Number(collections.total_collections) > 0 ? 88 : 0,
+        collectionRateToday: Number(collections.total_collections) > 0 ? Math.min(100, Math.round((Number(collections.total_amount_collected) / 180000) * 100)) : 0,
         routeCompliance: Math.round(collectorCompliance),
         salesVisitCompletion: Math.round(salesCompletion),
         stockAlertsCount: Number(inventory.low_stock_count),
         pendingCI: 0,
-        overdueAccounts: 0,
+        overdueAccounts: Number(customers.overdue_count) || 0,
         totalCollectionsToday: Number(collections.total_amount_collected),
         totalSalesToday: Number(sales.total_sales_amount),
         activeCollectors: Number(staff.active_collectors),
@@ -241,8 +255,8 @@ router.get('/staff', requireAuth, async (req, res) => {
         const visitsResult = await pool.query(
           `SELECT
              COUNT(DISTINCT customer_id) AS customers_assigned,
-             COUNT(*) FILTER (WHERE status = 'Completed' AND visit_type = 'Sales') AS visits_completed,
-             COUNT(*) AS total_assigned
+             COUNT(*) FILTER (WHERE visit_type = 'Sales') AS total_assigned,
+             COUNT(*) FILTER (WHERE status = 'Completed' AND visit_type = 'Sales') AS visits_completed
            FROM field_visits
            WHERE user_id = $1`,
           [u.id]
@@ -312,13 +326,16 @@ router.get('/customers', requireAuth, async (req, res) => {
       `SELECT c.customer_id, c.first_name, c.last_name, c.contact_phone, c.status,
               c.latitude, c.longitude, c.address,
               c.contact_person_fname, c.contact_person_lname, c.contact_person_phone,
+              c.account_manager_id, c.created_at,
               b.name AS branch_name,
+              mgr.full_name AS account_manager_name,
               COALESCE(ca.outstanding_balance, 0) AS outstanding_balance,
               COALESCE(ca.purchase_volume, 0) AS purchase_volume,
               ca.last_collection_date, ca.last_sales_visit
        FROM customers c
        JOIN branches b ON b.id = c.branch_id
        LEFT JOIN customer_activity ca ON c.customer_id = ca.customer_id
+       LEFT JOIN users mgr ON mgr.id = c.account_manager_id
        ${isBranchScoped ? 'WHERE c.branch_id = $1' : ''}
        ORDER BY c.last_name, c.first_name`,
       isBranchScoped ? [bid] : []
@@ -337,6 +354,9 @@ router.get('/customers', requireAuth, async (req, res) => {
       contact_person_phone: c.contact_person_phone,
       status: c.status,
       branch_name: c.branch_name,
+      account_manager_id: c.account_manager_id,
+      account_manager_name: c.account_manager_name || '—',
+      customer_since: c.created_at,
       outstanding_balance: Number(c.outstanding_balance),
       purchase_volume: Number(c.purchase_volume),
       last_collection_date: c.last_collection_date,
@@ -382,9 +402,12 @@ router.get('/customers/:id', requireAuth, async (req, res) => {
     let customerQuery = `SELECT c.customer_id, c.first_name, c.last_name, c.address, c.latitude, c.longitude,
               c.contact_phone, c.contact_person_fname, c.contact_person_lname,
               c.contact_person_phone, c.status, c.created_at, c.updated_at,
-              b.name AS branch_name
+              c.account_manager_id,
+              b.name AS branch_name,
+              mgr.full_name AS account_manager_name
        FROM customers c
        JOIN branches b ON b.id = c.branch_id
+       LEFT JOIN users mgr ON mgr.id = c.account_manager_id
        WHERE c.customer_id = $1`;
     const params = [req.params.id];
     if (isBranchScoped) {
@@ -402,7 +425,13 @@ router.get('/customers/:id', requireAuth, async (req, res) => {
 
     const [activityResult, creditResult] = await Promise.all([
       pool.query(`SELECT * FROM customer_activity WHERE customer_id = $1`, [req.params.id]),
-      pool.query(`SELECT * FROM customer_credit_info WHERE customer_id = $1`, [req.params.id]),
+      pool.query(
+        `SELECT cci.*, u.full_name AS approved_by_name
+         FROM customer_credit_info cci
+         LEFT JOIN users u ON u.id = cci.approved_by
+         WHERE cci.customer_id = $1`,
+        [req.params.id]
+      ),
     ]);
 
     return res.status(200).json({

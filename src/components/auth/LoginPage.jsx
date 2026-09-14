@@ -23,81 +23,53 @@ const OFFLINE_CREDENTIALS = {
   'luntiang.tahanan@email.com':   'Corvex@2026',
 };
 
+// IDs must match the live database (see backend/migrations/002_seed_data.sql)
+// so offline sessions still work once the API is reachable again.
 const OFFLINE_USERS = [
-  // Super Admins
   {
-    id: 1, fullName: 'Marcus Santos', username: 'marcus.santos',
-    email: 'marcus.santos@corvex.ph', employeeId: 'SA-0001', avatarInitials: 'MS', status: 'Active',
-    role: { id: 1, name: 'Super Admin', slug: 'super_admin' }, branch: null,
-  },
-  {
-    id: 2, fullName: 'Corazon Villanueva', username: 'corazon.v',
+    id: 1, fullName: 'Corazon Villanueva', username: 'corazon.v',
     email: 'corazon.v@corvex.ph', employeeId: 'SA-0002', avatarInitials: 'CV', status: 'Active',
     role: { id: 1, name: 'Super Admin', slug: 'super_admin' }, branch: null,
   },
-  // Operating Managers
   {
-    id: 3, fullName: 'Elena Mercado', username: 'elena.mercado',
+    id: 2, fullName: 'Elena Mercado', username: 'elena.mercado',
     email: 'elena.mercado@corvex.ph', employeeId: 'OM-2001', avatarInitials: 'EM', status: 'Active',
     role: { id: 2, name: 'Operating Manager', slug: 'operating_manager' }, branch: null,
   },
-  // Branch Managers
   {
-    id: 10, fullName: 'Roberto Villanueva', username: 'roberto.v',
+    id: 3, fullName: 'Roberto Villanueva', username: 'roberto.v',
     email: 'roberto.villanueva@corvex.ph', employeeId: 'BM-0001', avatarInitials: 'RV', status: 'Active',
     role: { id: 7, name: 'Branch Manager', slug: 'branch_manager' },
     branch: { id: 1, name: 'Davao City Branch' },
   },
   {
-    id: 11, fullName: 'Miguel Flores', username: 'miguel.flores',
+    id: 4, fullName: 'Miguel Flores', username: 'miguel.flores',
     email: 'miguel.f@corvex.ph', employeeId: 'BM-0002', avatarInitials: 'MF', status: 'Active',
     role: { id: 7, name: 'Branch Manager', slug: 'branch_manager' },
     branch: { id: 2, name: 'General Santos Branch' },
   },
   {
-    id: 12, fullName: 'Grace Tan', username: 'grace.tan',
+    id: 5, fullName: 'Grace Tan', username: 'grace.tan',
     email: 'grace.t@corvex.ph', employeeId: 'BM-0003', avatarInitials: 'GT', status: 'Active',
     role: { id: 7, name: 'Branch Manager', slug: 'branch_manager' },
     branch: { id: 3, name: 'Davao Oriental Branch' },
   },
-  // Inventory Staff
   {
-    id: 20, fullName: 'Ana Reyes', username: 'ana.reyes',
+    id: 6, fullName: 'Ana Reyes', username: 'ana.reyes',
     email: 'ana.r@corvex.ph', employeeId: 'WH-3051', avatarInitials: 'AR', status: 'Active',
     role: { id: 3, name: 'Inventory Staff', slug: 'inventory_staff' },
     branch: { id: 3, name: 'Davao Oriental Branch' },
   },
   {
-    id: 21, fullName: 'Florencia Ramos', username: 'florencia.ramos',
-    email: 'florencia.r@corvex.ph', employeeId: 'WH-3053', avatarInitials: 'FR', status: 'Active',
-    role: { id: 3, name: 'Inventory Staff', slug: 'inventory_staff' },
-    branch: { id: 1, name: 'Davao City Branch' },
-  },
-  // Sales Staff
-  {
-    id: 22, fullName: 'Carlos Mendoza', username: 'carlos.mendoza',
-    email: 'carlos.m@corvex.ph', employeeId: 'SA-1087', avatarInitials: 'CM', status: 'Active',
-    role: { id: 4, name: 'Sales Staff', slug: 'sales_staff' },
-    branch: { id: 2, name: 'General Santos Branch' },
-  },
-  {
-    id: 23, fullName: 'Jane Smith', username: 'jane.smith',
+    id: 7, fullName: 'Jane Smith', username: 'jane.smith',
     email: 'jane.s@corvex.ph', employeeId: 'SA-1088', avatarInitials: 'JS', status: 'Active',
     role: { id: 4, name: 'Sales Staff', slug: 'sales_staff' },
     branch: { id: 1, name: 'Davao City Branch' },
   },
-  // Collector
   {
-    id: 24, fullName: 'Maria Dela Cruz', username: 'maria.delacruz',
+    id: 10, fullName: 'Maria Dela Cruz', username: 'maria.delacruz',
     email: 'maria.dc@corvex.ph', employeeId: 'COL-2048', avatarInitials: 'MD', status: 'Active',
     role: { id: 5, name: 'Collector', slug: 'collector' },
-    branch: { id: 1, name: 'Davao City Branch' },
-  },
-  // Client
-  {
-    id: 25, fullName: 'Luntiang Tahanan Interiors', username: 'luntiang.tahanan',
-    email: 'luntiang.tahanan@email.com', employeeId: null, avatarInitials: 'LT', status: 'Active',
-    role: { id: 6, name: 'Customer', slug: 'customer' },
     branch: { id: 1, name: 'Davao City Branch' },
   },
 ];

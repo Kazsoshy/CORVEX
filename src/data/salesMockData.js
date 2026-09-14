@@ -256,7 +256,7 @@ export const SALES_HISTORY = [
 export const NOTIFICATIONS = [
   { id: 'sn1', type: 'stock',    title: 'Zero stock alert',    message: 'Office Chair (Ergonomic) is out of stock at Davao City branch.', time: '9:10 AM', read: false, relatedTo: '/sales/inventory/p3' },
   { id: 'sn2', type: 'schedule', title: 'Schedule change',     message: 'Abode Furniture Warehouse visit rescheduled to 2:00 PM.',           time: '8:30 AM', read: false, relatedTo: '/sales/schedule' },
-  { id: 'sn3', type: 'sale',     title: 'Sale confirmed',       message: 'Invoice INV-2024-0089 confirmed for Casa Elegante GenSan.',         time: 'Yesterday',read: true,  relatedTo: '/sales/history/INV-2024-0089' },
+  { id: 'sn3', type: 'sale',     title: 'Sale confirmed',       message: 'Invoice INV-2024-0089 confirmed for Casa Elegante GenSan.',         time: 'Yesterday',read: true,  relatedTo: '/sales/history' },
   { id: 'sn4', type: 'assignment',title: 'New customer assigned', message: 'Living Space Interiors added to your territory.',                   time: 'Jun 23',  read: true,  relatedTo: '/sales/customers' },
   { id: 'sn5', type: 'ci',       title: 'CI response',         message: 'Credit investigation for Abode Furniture approved.',               time: 'Jun 22',  read: true,  relatedTo: '/sales/customer-detail/4?from=customers' },
 ];

@@ -7,6 +7,7 @@ const ROUTE_DEFINITIONS = [
   { pattern: /^\/branch-manager\/audit-log$/, pageType: 'auditLog' },
   { pattern: /^\/branch-manager\/customers$/, pageType: 'customers' },
   { pattern: /^\/branch-manager\/customers\/([^/]+)$/, pageType: 'customerDetail', params: ['customerId'] },
+  { pattern: /^\/branch-manager\/territories$/, pageType: 'territories' },
   { pattern: /^\/branch-manager\/field-operations$/, pageType: 'fieldOperations' },
   { pattern: /^\/branch-manager\/field-operations\/performance$/, pageType: 'routePerformance' },
   { pattern: /^\/branch-manager\/field-operations\/collectors$/, pageType: 'collectorRoutes' },
@@ -70,6 +71,7 @@ export function buildBranchManagerBreadcrumbs(pageType, params = {}) {
     case 'auditLog': return [...crumbs, { label: 'Audit Log', to: '/branch-manager/audit-log' }];
     case 'customers': return [...crumbs, { label: 'Customers', to: '/branch-manager/customers' }];
     case 'customerDetail': return [...crumbs, { label: 'Customers', to: '/branch-manager/customers' }, { label: 'Customer Detail', to: `/branch-manager/customers/${params.customerId}` }];
+    case 'territories': return [...crumbs, { label: 'Territories', to: '/branch-manager/territories' }];
     case 'creditHistory': return [...crumbs, ...creditCrumbs];
     case 'creditDetail': return [...crumbs, ...creditCrumbs, { label: 'Credit Record', to: `/branch-manager/credit-history/${params.creditId}` }];
     case 'fieldOperations': return [...crumbs, ...fieldOps];
