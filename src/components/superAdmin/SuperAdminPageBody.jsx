@@ -6,10 +6,10 @@ import {
 } from 'recharts';
 import {
   AUDIT_LOGS, BACKUP_HISTORY, ROLES_PERMISSIONS, SECURITY_ALERTS,
-  SERVER_METRICS, SYSTEM_SETTINGS,
+  SERVER_METRICS, SYSTEM_SETTINGS, SYSTEM_HEALTH, SUPER_ADMIN_PROFILE,
 } from '../../data/adminMockData';
-import { EmptyState } from '../collector/EmptyState';
-import { LoadingState } from '../collector/LoadingState';
+import { EmptyState } from '../shared/EmptyState';
+import { LoadingState } from '../shared/LoadingState';
 import { NavIcon } from '../../navIcons';
 import { StatusBadge } from '../StatusBadge';
 
@@ -19,18 +19,23 @@ function btn(v) {
   return 'button';
 }
 
-function Toolbar({ actions, onAction }) {
-  if (!actions?.length) return null;
+function Toolbar({ actions, onAction, children }) {
+  if (!actions?.length && !children) return null;
   return (
-    <header className="page-toolbar">
-      <div className="page-toolbar-main">
-        <div className="page-toolbar-actions">
-          {actions.map((a) => (
-            <button key={a.label} className={btn(a.variant)} type="button" onClick={() => onAction(a)}>{a.label}</button>
-          ))}
+    <section className="panel content-panel filter-panel">
+      <div className="filter-panel-header">
+        <div className="filter-panel-search" style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
+          {children}
         </div>
+        {actions?.length > 0 && (
+          <div className="filter-panel-actions">
+            {actions.map((a) => (
+              <button key={a.label} className={btn(a.variant)} type="button" onClick={() => onAction(a)}>{a.label}</button>
+            ))}
+          </div>
+        )}
       </div>
-    </header>
+    </section>
   );
 }
 
@@ -50,17 +55,17 @@ function Stats({ stats }) {
 
 function Card({ title, sub, children, action, onAction }) {
   return (
-    <section className="panel content-panel">
-      <div className="panel-section-header">
-        <div><h3>{title}</h3>{sub && <p className="muted" style={{ margin: '2px 0 0', fontSize: '0.85rem' }}>{sub}</p>}</div>
-        {action && <button className="button ghost" type="button" onClick={onAction}>{action}</button>}
+    <section className="panel content-panel relative overflow-hidden">
+      <div className="flex flex-col md:flex-row justify-between gap-4 items-start md:items-center mb-4">
+        <div><h3>{title}</h3>{sub && <p className="text-ink/70" style={{ margin: '2px 0 0', fontSize: '0.85rem' }}>{sub}</p>}</div>
+        {action && <button className="inline-flex justify-center items-center gap-2 px-5 py-2.5 rounded-md bg-transparent text-blue border-[1.5px] border-blue-30 shadow-none hover:bg-blue-08 transition-all duration-160 cursor-pointer" type="button" onClick={onAction}>{action}</button>}
       </div>
       {children}
     </section>
   );
 }
 
-function MetricBar({ label, value, max = 100, color = '#2563eb' }) {
+function MetricBar({ label, value, max = 100, color = '#093850' }) {
   return (
     <div style={{ marginBottom: 14 }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
@@ -114,12 +119,12 @@ function DashboardPage({ navigate }) {
   const dbColor = health?.dbStatus === 'Online' ? '#059669' : '#dc2626';
 
   return (
-    <div className="page">
+    <div className="relative z-10 grid gap-[22px] w-full">
       <section className="panel dashboard-greeting">
-        <div className="dashboard-greeting-main">
-          <p className="dashboard-eyebrow">Super Admin</p>
+        <div className="flex flex-col gap-1">
+          <p className="text-[0.82rem] font-bold tracking-widest uppercase text-navy/60 m-0">Super Admin</p>
           <h2>System Overview</h2>
-          <p className="muted">Full system control &amp; infrastructure</p>
+          <p className="text-ink/70">Full system control &amp; infrastructure</p>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 16px', borderRadius: 12, border: `1.5px solid ${dbColor}22`, background: `${dbColor}0d` }}>
           <span style={{ width: 10, height: 10, borderRadius: '50%', background: dbColor, flexShrink: 0 }} />
@@ -139,8 +144,8 @@ function DashboardPage({ navigate }) {
       {/* User breakdown by role â€” from users table */}
       {userStats?.byRole?.length ? (
         <Card title="Users by Role" sub="Source: users table â€” COUNT(*) grouped by role">
-          <div className="table-shell">
-            <table className="data-table">
+          <div className="corvex-table-wrapper">
+            <table className="corvex-table">
               <thead><tr><th>Role</th><th>Total</th><th>Active</th><th>Inactive</th></tr></thead>
               <tbody>
                 {userStats.byRole.map((r) => (
@@ -160,8 +165,8 @@ function DashboardPage({ navigate }) {
       {/* Branch directory â€” from branches table with full fields */}
       {branches.length ? (
         <Card title="Branch Directory" sub="Source: branches table â€” branch_id, branch_name, address, latitude, longitude, contact_no, email, status, created_at">
-          <div className="table-shell">
-            <table className="data-table">
+          <div className="corvex-table-wrapper">
+            <table className="corvex-table">
               <thead>
                 <tr><th>Branch ID</th><th>Branch Name</th><th>Address</th><th>Latitude</th><th>Longitude</th><th>Contact No</th><th>Email</th><th>Status</th><th>Created At</th></tr>
               </thead>
@@ -188,7 +193,7 @@ function DashboardPage({ navigate }) {
       {/* System performance chart â€” from dashboard/system-health */}
       <Card title="System Resource Usage" sub="Source: dashboard/system-health endpoint">
         <div style={{ padding: '8px 0' }}>
-          <MetricBar label="CPU Usage"     value={health?.serverCpu    || 0} color="#2563eb" />
+          <MetricBar label="CPU Usage"     value={health?.serverCpu    || 0} color="#093850" />
           <MetricBar label="Memory Usage"  value={health?.memoryUsage  || 0} color="#8b5cf6" />
           <MetricBar label="Storage Usage" value={health?.storageUsage || 0} color="#06b6d4" />
           <MetricBar label="API Response"  value={health?.apiResponseMs || 0} max={500} color="#f59e0b" />
@@ -198,8 +203,8 @@ function DashboardPage({ navigate }) {
       {/* Recent audit logs â€” from audit_logs table */}
       {auditLogs.length ? (
         <Card title="Recent Audit Activity" sub="Source: audit_logs table â€” last 10 entries">
-          <div className="table-shell">
-            <table className="data-table">
+          <div className="corvex-table-wrapper">
+            <table className="corvex-table">
               <thead><tr><th>User</th><th>Action</th><th>IP Address</th><th>Details</th><th>Time</th></tr></thead>
               <tbody>
                 {auditLogs.map((l) => (
@@ -208,7 +213,7 @@ function DashboardPage({ navigate }) {
                     <td>{l.action}</td>
                     <td><span style={{ fontFamily: 'monospace', fontSize: '0.8rem' }}>{l.ip_address}</span></td>
                     <td>{l.status_details}</td>
-                    <td className="muted" style={{ fontSize: '0.8rem' }}>{new Date(l.created_at).toLocaleString('en-PH')}</td>
+                    <td className="text-ink/70" style={{ fontSize: '0.8rem' }}>{new Date(l.created_at).toLocaleString('en-PH')}</td>
                   </tr>
                 ))}
               </tbody>
@@ -217,8 +222,8 @@ function DashboardPage({ navigate }) {
         </Card>
       ) : null}
 
-      <section className="panel content-panel">
-        <div className="panel-section-header"><h3>Quick Access</h3></div>
+      <section className="panel content-panel relative overflow-hidden">
+        <div className="flex flex-col md:flex-row justify-between gap-4 items-start md:items-center mb-4"><h3>Quick Access</h3></div>
         <div className="quick-link-grid">
           {[
             { label: 'System Settings',     to: '/super-admin/settings',   icon: 'form' },
@@ -230,7 +235,7 @@ function DashboardPage({ navigate }) {
           ].map(item => (
             <button key={item.to} className="quick-link-card" type="button" onClick={() => navigate(item.to)} style={{ textAlign: 'left', border: 'none', background: 'none', padding: 0, cursor: 'pointer' }}>
               <span className="quick-link-icon"><NavIcon name={item.icon} /></span>
-              <span className="quick-link-copy"><strong>{item.label}</strong><span className="muted">Open</span></span>
+              <span className="quick-link-copy"><strong>{item.label}</strong><span className="text-ink/70">Open</span></span>
               <span className="quick-link-arrow">â†’</span>
             </button>
           ))}
@@ -375,7 +380,7 @@ function RolesPage({ showToast }) {
   };
 
   return (
-    <div className="page">
+    <div className="relative z-10 grid gap-[22px] w-full">
       <div style={{ display: 'flex', gap: 10, marginBottom: 20 }}>
         <button className={tab === 'matrix' ? 'button' : 'button ghost'} onClick={() => setTab('matrix')}>Matrix</button>
         <button className={tab === 'roles' ? 'button' : 'button ghost'} onClick={() => setTab('roles')}>Roles</button>
@@ -388,9 +393,15 @@ function RolesPage({ showToast }) {
         <>
           {tab === 'matrix' && (
             <>
-              <section className="panel content-panel" style={{ overflowX: 'auto' }}>
-                <div className="panel-section-header"><h3>Role Permission Matrix</h3><p className="muted">Super Admin row is read-only.</p></div>
-                <table className="data-table" style={{ minWidth: 720 }}>
+              <section className="panel content-panel relative overflow-hidden" style={{ overflowX: 'auto' }}>
+                <div className="flex flex-col md:flex-row justify-between gap-4 items-start md:items-center mb-4">
+                  <div>
+                    <h3>Role Permission Matrix</h3>
+                    <p className="text-ink/70" style={{ margin: '2px 0 0', fontSize: '0.85rem' }}>Super Admin row is read-only.</p>
+                  </div>
+                  <button className="button" type="button" onClick={savePermissions}>Save Permissions</button>
+                </div>
+                <table className="corvex-table" style={{ minWidth: 720 }}>
                   <thead>
                     <tr>
                       <th>Role</th>
@@ -408,7 +419,7 @@ function RolesPage({ showToast }) {
                               checked={r.permissions[p.permission_id] || false}
                               disabled={r.slug === 'super_admin'}
                               onChange={() => togglePermission(roleIdx, p.permission_id)}
-                              style={{ width: 16, height: 16, accentColor: '#2563eb', cursor: r.slug === 'super_admin' ? 'not-allowed' : 'pointer' }}
+                              style={{ width: 16, height: 16, accentColor: '#093850', cursor: r.slug === 'super_admin' ? 'not-allowed' : 'pointer' }}
                             />
                           </td>
                         ))}
@@ -417,17 +428,18 @@ function RolesPage({ showToast }) {
                   </tbody>
                 </table>
               </section>
-              <Toolbar actions={[{ label: 'Save Permissions', action: 'save' }]} onAction={savePermissions} />
             </>
           )}
 
           {tab === 'roles' && (
             <>
-              <Toolbar actions={[{ label: 'Add Role', action: 'add' }]} onAction={() => openRoleModal()} />
-              <section className="panel content-panel">
-                <div className="panel-section-header"><h3>Roles</h3></div>
-                <div className="table-shell">
-                  <table className="data-table">
+              <section className="panel content-panel relative overflow-hidden">
+                <div className="flex flex-col md:flex-row justify-between gap-4 items-start md:items-center mb-4">
+                  <h3>Roles</h3>
+                  <button className="button" type="button" onClick={() => openRoleModal()}>Add Role</button>
+                </div>
+                <div className="corvex-table-wrapper">
+                  <table className="corvex-table">
                     <thead><tr><th>ID</th><th>Role Name</th><th>Slug</th><th>Created At</th><th>Updated At</th><th>Actions</th></tr></thead>
                     <tbody>
                       {roles.map(r => (
@@ -452,11 +464,13 @@ function RolesPage({ showToast }) {
 
           {tab === 'permissions' && (
             <>
-              <Toolbar actions={[{ label: 'Add Permission', action: 'add' }]} onAction={() => openPermModal()} />
-              <section className="panel content-panel">
-                <div className="panel-section-header"><h3>Permissions</h3></div>
-                <div className="table-shell">
-                  <table className="data-table">
+              <section className="panel content-panel relative overflow-hidden">
+                <div className="flex flex-col md:flex-row justify-between gap-4 items-start md:items-center mb-4">
+                  <h3>Permissions</h3>
+                  <button className="button" type="button" onClick={() => openPermModal()}>Add Permission</button>
+                </div>
+                <div className="corvex-table-wrapper">
+                  <table className="corvex-table">
                     <thead><tr><th>ID</th><th>Label</th><th>Description</th><th>Created At</th><th>Actions</th></tr></thead>
                     <tbody>
                       {permissions.map(p => (
@@ -483,15 +497,15 @@ function RolesPage({ showToast }) {
       {modalType === 'role' && (
         <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, padding: 20 }}>
           <div className="panel form-panel" style={{ width: '100%', maxWidth: 500, background: '#fff' }}>
-            <div className="panel-section-header">
+            <div className="flex flex-col md:flex-row justify-between gap-4 items-start md:items-center mb-4">
               <h3>{editingItem ? 'Edit Role' : 'Create Role'}</h3>
             </div>
             <form onSubmit={saveRole} style={{ padding: '0 20px 20px' }}>
               <div className="form-group"><label>Role Name</label><input required value={roleForm.role_name} onChange={e => setRoleForm({...roleForm, role_name: e.target.value})} /></div>
               <div className="form-group"><label>Slug</label><input required value={roleForm.slug} disabled={editingItem?.slug==='super_admin'} onChange={e => setRoleForm({...roleForm, slug: e.target.value})} /></div>
               <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', marginTop: 16 }}>
-                <button className="button secondary" type="button" onClick={() => setModalType(null)}>Cancel</button>
-                <button className="button" type="submit">Save</button>
+                <button className="inline-flex justify-center items-center gap-2 px-5 py-2.5 rounded-md bg-mint text-ink border-[1.5px] border-surface-3 shadow-none hover:border-blue hover:text-blue transition-all duration-160 cursor-pointer" type="button" onClick={() => setModalType(null)}>Cancel</button>
+                <button className="inline-flex justify-center items-center gap-2 px-5 py-2.5 rounded-md border-0 bg-blue text-white font-semibold cursor-pointer transition-all duration-160 hover:-translate-y-[1px] hover:shadow-[0_4px_16px_rgba(37,99,235,0.35)] hover:brightness-105 active:translate-y-0" type="submit">Save</button>
               </div>
             </form>
           </div>
@@ -501,15 +515,15 @@ function RolesPage({ showToast }) {
       {modalType === 'permission' && (
         <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, padding: 20 }}>
           <div className="panel form-panel" style={{ width: '100%', maxWidth: 500, background: '#fff' }}>
-            <div className="panel-section-header">
+            <div className="flex flex-col md:flex-row justify-between gap-4 items-start md:items-center mb-4">
               <h3>{editingItem ? 'Edit Permission' : 'Create Permission'}</h3>
             </div>
             <form onSubmit={savePerm} style={{ padding: '0 20px 20px' }}>
               <div className="form-group"><label>Label</label><input required value={permForm.label} onChange={e => setPermForm({...permForm, label: e.target.value})} /></div>
               <div className="form-group"><label>Description</label><textarea required value={permForm.description} onChange={e => setPermForm({...permForm, description: e.target.value})} style={{ width: '100%', padding: '8px 12px', border: '1px solid #cbd5e1', borderRadius: 8 }} /></div>
               <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', marginTop: 16 }}>
-                <button className="button secondary" type="button" onClick={() => setModalType(null)}>Cancel</button>
-                <button className="button" type="submit">Save</button>
+                <button className="inline-flex justify-center items-center gap-2 px-5 py-2.5 rounded-md bg-mint text-ink border-[1.5px] border-surface-3 shadow-none hover:border-blue hover:text-blue transition-all duration-160 cursor-pointer" type="button" onClick={() => setModalType(null)}>Cancel</button>
+                <button className="inline-flex justify-center items-center gap-2 px-5 py-2.5 rounded-md border-0 bg-blue text-white font-semibold cursor-pointer transition-all duration-160 hover:-translate-y-[1px] hover:shadow-[0_4px_16px_rgba(37,99,235,0.35)] hover:brightness-105 active:translate-y-0" type="submit">Save</button>
               </div>
             </form>
           </div>
@@ -526,9 +540,9 @@ function SettingsPage({ showToast }) {
   const [confirmReset, setConfirmReset] = useState(false);
 
   return (
-    <div className="page">
+    <div className="relative z-10 grid gap-[22px] w-full">
       <section className="panel form-panel content-panel">
-        <div className="panel-section-header"><h3>Company Information</h3></div>
+        <div className="flex flex-col md:flex-row justify-between gap-4 items-start md:items-center mb-4"><h3>Company Information</h3></div>
         <div className="grid two-up">
           <div className="form-group"><label>Company Name</label><input value={settings.companyName} onChange={e => set('companyName', e.target.value)} /></div>
           <div className="form-group"><label>Company Email</label><input type="email" value={settings.companyEmail} onChange={e => set('companyEmail', e.target.value)} /></div>
@@ -537,7 +551,7 @@ function SettingsPage({ showToast }) {
       </section>
 
       <section className="panel form-panel content-panel">
-        <div className="panel-section-header"><h3>Integrations & API</h3></div>
+        <div className="flex flex-col md:flex-row justify-between gap-4 items-start md:items-center mb-4"><h3>Integrations & API</h3></div>
         <div className="grid two-up">
           <div className="form-group"><label>Leaflet API Key</label><input value={settings.leafletApiKey} onChange={e => set('leafletApiKey', e.target.value)} /></div>
           <div className="form-group"><label>Backup Schedule</label><input value={settings.backupSchedule} onChange={e => set('backupSchedule', e.target.value)} /></div>
@@ -545,7 +559,7 @@ function SettingsPage({ showToast }) {
       </section>
 
       <section className="panel form-panel content-panel">
-        <div className="panel-section-header"><h3>Notification Settings</h3></div>
+        <div className="flex flex-col md:flex-row justify-between gap-4 items-start md:items-center mb-4"><h3>Notification Settings</h3></div>
         <div style={{ display: 'flex', gap: 24 }}>
           <label className="toggle-label"><input type="checkbox" checked={settings.notificationsEmail} onChange={e => set('notificationsEmail', e.target.checked)} />Email Notifications</label>
           <label className="toggle-label"><input type="checkbox" checked={settings.notificationsSms} onChange={e => set('notificationsSms', e.target.checked)} />SMS Notifications</label>
@@ -554,19 +568,19 @@ function SettingsPage({ showToast }) {
       </section>
 
       {confirmReset && (
-        <section className="panel content-panel" style={{ borderColor: '#fca5a5', background: 'rgba(220,38,38,0.04)' }}>
+        <section className="panel content-panel relative overflow-hidden" style={{ borderColor: '#fca5a5', background: 'rgba(220,38,38,0.04)' }}>
           <p>Restore all settings to factory defaults? This cannot be undone.</p>
           <div style={{ display: 'flex', gap: 10, marginTop: 12 }}>
-            <button className="button" type="button" style={{ background: '#dc2626' }} onClick={() => { showToast('Settings restored to defaults.', 'success'); setSettings({ ...SYSTEM_SETTINGS }); setConfirmReset(false); }}>Confirm Reset</button>
-            <button className="button secondary" type="button" onClick={() => setConfirmReset(false)}>Cancel</button>
+            <button className="inline-flex justify-center items-center gap-2 px-5 py-2.5 rounded-md border-0 bg-blue text-white font-semibold cursor-pointer transition-all duration-160 hover:-translate-y-[1px] hover:shadow-[0_4px_16px_rgba(37,99,235,0.35)] hover:brightness-105 active:translate-y-0" type="button" style={{ background: '#dc2626' }} onClick={() => { showToast('Settings restored to defaults.', 'success'); setSettings({ ...SYSTEM_SETTINGS }); setConfirmReset(false); }}>Confirm Reset</button>
+            <button className="inline-flex justify-center items-center gap-2 px-5 py-2.5 rounded-md bg-mint text-ink border-[1.5px] border-surface-3 shadow-none hover:border-blue hover:text-blue transition-all duration-160 cursor-pointer" type="button" onClick={() => setConfirmReset(false)}>Cancel</button>
           </div>
         </section>
       )}
 
-      <Toolbar
-        actions={[{ label: 'Save Settings', action: 'save' }, { label: 'Restore Defaults', action: 'reset', variant: 'secondary' }]}
-        onAction={a => { if (a.action === 'save') showToast('Settings saved.', 'success'); else setConfirmReset(true); }}
-      />
+      <div className="flex justify-end gap-2 mt-2">
+        <button className="button secondary" type="button" onClick={() => setConfirmReset(true)}>Restore Defaults</button>
+        <button className="button" type="button" onClick={() => showToast('Settings saved.', 'success')}>Save Settings</button>
+      </div>
     </div>
   );
 }
@@ -575,7 +589,7 @@ function SettingsPage({ showToast }) {
 function BackupPage({ showToast }) {
   const [confirmRestore, setConfirmRestore] = useState(null);
   return (
-    <div className="page">
+    <div className="relative z-10 grid gap-[22px] w-full">
       <Stats stats={[
         { label: 'Total Backups',   value: String(BACKUP_HISTORY.length) },
         { label: 'Latest Backup',   value: BACKUP_HISTORY[0]?.date ?? 'â€”' },
@@ -583,22 +597,23 @@ function BackupPage({ showToast }) {
         { label: 'Schedule',        value: 'Daily 02:00 AM' },
       ]} />
 
-      <Toolbar actions={[{ label: 'Create Manual Backup', action: 'backup' }]} onAction={() => showToast('Manual backup started. This may take a few minutes.', 'success')} />
-
       {confirmRestore && (
-        <section className="panel content-panel" style={{ borderColor: '#fca5a5', background: 'rgba(220,38,38,0.04)' }}>
+        <section className="panel content-panel relative overflow-hidden" style={{ borderColor: '#fca5a5', background: 'rgba(220,38,38,0.04)' }}>
           <p><strong>Warning:</strong> Restoring backup from <strong>{confirmRestore.date}</strong> will replace all current data. This cannot be undone.</p>
           <div style={{ display: 'flex', gap: 10, marginTop: 12 }}>
-            <button className="button" type="button" style={{ background: '#dc2626' }} onClick={() => { showToast(`Database restored from ${confirmRestore.date}.`, 'success'); setConfirmRestore(null); }}>Confirm Restore</button>
-            <button className="button secondary" type="button" onClick={() => setConfirmRestore(null)}>Cancel</button>
+            <button className="inline-flex justify-center items-center gap-2 px-5 py-2.5 rounded-md border-0 bg-blue text-white font-semibold cursor-pointer transition-all duration-160 hover:-translate-y-[1px] hover:shadow-[0_4px_16px_rgba(37,99,235,0.35)] hover:brightness-105 active:translate-y-0" type="button" style={{ background: '#dc2626' }} onClick={() => { showToast(`Database restored from ${confirmRestore.date}.`, 'success'); setConfirmRestore(null); }}>Confirm Restore</button>
+            <button className="inline-flex justify-center items-center gap-2 px-5 py-2.5 rounded-md bg-mint text-ink border-[1.5px] border-surface-3 shadow-none hover:border-blue hover:text-blue transition-all duration-160 cursor-pointer" type="button" onClick={() => setConfirmRestore(null)}>Cancel</button>
           </div>
         </section>
       )}
 
-      <section className="panel content-panel">
-        <div className="panel-section-header"><h3>Backup History</h3></div>
-        <div className="table-shell">
-          <table className="data-table">
+      <section className="panel content-panel relative overflow-hidden">
+        <div className="flex flex-col md:flex-row justify-between gap-4 items-start md:items-center mb-4">
+          <h3>Backup History</h3>
+          <button className="button" type="button" onClick={() => showToast('Manual backup started. This may take a few minutes.', 'success')}>Create Manual Backup</button>
+        </div>
+        <div className="corvex-table-wrapper">
+          <table className="corvex-table">
             <thead><tr><th>Type</th><th>Date</th><th>Size</th><th>Created By</th><th>Status</th><th>Actions</th></tr></thead>
             <tbody>
               {BACKUP_HISTORY.map(b => (
@@ -625,7 +640,7 @@ function MonitoringPage({ showToast }) {
   const refresh = () => { setLoading(true); setTimeout(() => setLoading(false), 800); };
 
   return (
-    <div className="page">
+    <div className="relative z-10 grid gap-[22px] w-full">
       <Toolbar
         actions={[{ label: loading ? 'Refreshingâ€¦' : 'Refresh', action: 'refresh' }, { label: 'Download Logs', action: 'download', variant: 'secondary' }]}
         onAction={a => { if (a.action === 'refresh') refresh(); else showToast('Error logs downloaded.', 'success'); }}
@@ -648,17 +663,17 @@ function MonitoringPage({ showToast }) {
             <YAxis domain={[0, 100]} tick={{ fontSize: 11 }} unit="%" />
             <Tooltip formatter={v => `${v}%`} />
             <Legend />
-            <Line type="monotone" dataKey="cpu" name="CPU" stroke="#2563eb" strokeWidth={2} dot={false} />
+            <Line type="monotone" dataKey="cpu" name="CPU" stroke="#093850" strokeWidth={2} dot={false} />
             <Line type="monotone" dataKey="mem" name="Memory" stroke="#8b5cf6" strokeWidth={2} dot={false} />
           </LineChart>
         </ResponsiveContainer>
       </Card>
 
-      <section className="panel content-panel">
-        <div className="panel-section-header"><h3>Error Logs</h3></div>
+      <section className="panel content-panel relative overflow-hidden">
+        <div className="flex flex-col md:flex-row justify-between gap-4 items-start md:items-center mb-4"><h3>Error Logs</h3></div>
         {AUDIT_LOGS.filter(l => l.status === 'Failed').length ? (
-          <div className="table-shell">
-            <table className="data-table">
+          <div className="corvex-table-wrapper">
+            <table className="corvex-table">
               <thead><tr><th>Timestamp</th><th>User</th><th>Action</th><th>Module</th><th>IP</th></tr></thead>
               <tbody>
                 {AUDIT_LOGS.filter(l => l.status === 'Failed').map(l => (
@@ -676,12 +691,14 @@ function MonitoringPage({ showToast }) {
 // â”€â”€ Audit Logs â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 function AuditLogsPage({ showToast }) {
   return (
-    <div className="page">
-      <Toolbar actions={[{ label: 'Export Logs', action: 'export' }]} onAction={() => showToast('Logs exported.', 'success')} />
-      <section className="panel content-panel">
-        <div className="panel-section-header"><h3>System Audit Log</h3></div>
-        <div className="table-shell">
-          <table className="data-table">
+    <div className="relative z-10 grid gap-[22px] w-full">
+      <section className="panel content-panel relative overflow-hidden">
+        <div className="flex flex-col md:flex-row justify-between gap-4 items-start md:items-center mb-4">
+          <h3>System Audit Log</h3>
+          <button className="button" type="button" onClick={() => showToast('Logs exported.', 'success')}>Export Logs</button>
+        </div>
+        <div className="corvex-table-wrapper">
+          <table className="corvex-table">
             <thead><tr><th>Timestamp</th><th>User</th><th>Action</th><th>Module</th><th>IP Address</th><th>Status</th></tr></thead>
             <tbody>
               {AUDIT_LOGS.map(l => (
@@ -700,9 +717,9 @@ function AuditLogsPage({ showToast }) {
 
 function ProfilePage({ navigate, showToast }) {
   return (
-    <div className="page">
-      <section className="panel content-panel">
-        <div className="panel-section-header"><h3>Super Admin Profile</h3></div>
+    <div className="relative z-10 grid gap-[22px] w-full">
+      <section className="panel content-panel relative overflow-hidden">
+        <div className="flex flex-col md:flex-row justify-between gap-4 items-start md:items-center mb-4"><h3>Super Admin Profile</h3></div>
         <ul className="info-grid">
           <li><span className="info-item-label">Name</span><span className="info-item-value">{SUPER_ADMIN_PROFILE.name}</span></li>
           <li><span className="info-item-label">Employee ID</span><span className="info-item-value">{SUPER_ADMIN_PROFILE.employeeId}</span></li>
@@ -710,11 +727,12 @@ function ProfilePage({ navigate, showToast }) {
           <li><span className="info-item-label">Phone</span><span className="info-item-value">{SUPER_ADMIN_PROFILE.phone}</span></li>
           <li><span className="info-item-label">Role</span><span className="info-item-value">{SUPER_ADMIN_PROFILE.role}</span></li>
         </ul>
+        <div className="flex justify-end gap-2 mt-6">
+          <button className="button ghost" type="button" onClick={() => {/* requestLogout() is not defined here but simulating logic */ showToast('Logout clicked.', 'success')}}>Logout</button>
+          <button className="button secondary" type="button" onClick={() => showToast('Change Password opened.', 'success')}>Change Password</button>
+          <button className="button" type="button" onClick={() => showToast('Update Profile opened.', 'success')}>Update Profile</button>
+        </div>
       </section>
-      <Toolbar
-        actions={[{ label: 'Update Profile', action: 'update' }, { label: 'Change Password', action: 'pw', variant: 'secondary' }, { label: 'Logout', action: 'logout', variant: 'ghost' }]}
-        onAction={a => { if (a.action === 'logout') requestLogout(); else showToast(`${a.label} opened.`, 'success'); }}
-      />
     </div>
   );
 }
@@ -801,12 +819,14 @@ function UsersPage({ showToast }) {
   };
 
   return (
-    <div className="page">
-      <Toolbar actions={[{ label: 'Add User', action: 'add' }]} onAction={openAdd} />
-      <section className="panel content-panel">
-        <div className="panel-section-header"><h3>User Directory</h3></div>
-        <div className="table-shell">
-          <table className="data-table">
+    <div className="relative z-10 grid gap-[22px] w-full">
+      <section className="panel content-panel relative overflow-hidden">
+        <div className="flex flex-col md:flex-row justify-between gap-4 items-start md:items-center mb-4">
+          <h3>User Directory</h3>
+          <button className="button" type="button" onClick={openAdd}>Add User</button>
+        </div>
+        <div className="corvex-table-wrapper">
+          <table className="corvex-table">
             <thead>
               <tr><th>Name</th><th>Email / Username</th><th>Role</th><th>Branch</th><th>Last Login</th><th>Status</th><th>Actions</th></tr>
             </thead>
@@ -820,19 +840,19 @@ function UsersPage({ showToast }) {
                   <tr key={u.id}>
                     <td>
                       <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                        <span style={{ width: 32, height: 32, borderRadius: "50%", background: "#2563eb", color: "#fff", display: "grid", placeItems: "center", fontSize: "0.75rem", fontWeight: 700, flexShrink: 0 }}>
+                        <span style={{ width: 32, height: 32, borderRadius: "50%", background: "#093850", color: "#fff", display: "grid", placeItems: "center", fontSize: "0.75rem", fontWeight: 700, flexShrink: 0 }}>
                           {u.avatarInitials || (u.fullName || "?").split(" ").map(w => w[0]).join("").slice(0,2).toUpperCase()}
                         </span>
                         <div>
                           <strong>{u.fullName}</strong>
-                          <br /><span className="muted" style={{ fontSize: "0.75rem" }}>{u.employeeId || "—"}</span>
+                          <br /><span className="text-ink/70" style={{ fontSize: "0.75rem" }}>{u.employeeId || "—"}</span>
                         </div>
                       </div>
                     </td>
-                    <td>{u.email}<br/><span className="muted" style={{ fontSize: "0.75rem" }}>@{u.username}</span></td>
+                    <td>{u.email}<br/><span className="text-ink/70" style={{ fontSize: "0.75rem" }}>@{u.username}</span></td>
                     <td>{u.role?.name}</td>
                     <td>{u.branch?.name || "—"}</td>
-                    <td className="muted" style={{ fontSize: "0.82rem" }}>
+                    <td className="text-ink/70" style={{ fontSize: "0.82rem" }}>
                       {u.lastLogin ? new Date(u.lastLogin).toLocaleString("en-PH", { dateStyle: "medium", timeStyle: "short" }) : "Never"}
                     </td>
                     <td><StatusBadge status={u.status} /></td>
@@ -851,7 +871,7 @@ function UsersPage({ showToast }) {
       {showModal && (
         <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, padding: 20 }}>
           <div className="panel form-panel" style={{ width: '100%', maxWidth: 600, background: '#fff', maxHeight: '90vh', overflowY: 'auto' }}>
-            <div className="panel-section-header">
+            <div className="flex flex-col md:flex-row justify-between gap-4 items-start md:items-center mb-4">
               <h3>{editingUser ? 'Edit User' : 'Create User'}</h3>
             </div>
             <form onSubmit={handleSave} style={{ padding: '0 20px 20px' }}>
@@ -860,7 +880,7 @@ function UsersPage({ showToast }) {
                 <div className="form-group"><label>Username</label><input required value={formData.username} onChange={e => setFormData({...formData, username: e.target.value})} /></div>
                 <div className="form-group"><label>Email</label><input required type="email" value={formData.email} onChange={e => setFormData({...formData, email: e.target.value})} /></div>
                 <div className="form-group">
-                  <label>Password {editingUser && <span className="muted">(leave blank to keep)</span>}</label>
+                  <label>Password {editingUser && <span className="text-ink/70">(leave blank to keep)</span>}</label>
                   <input type="password" required={!editingUser} value={formData.password} onChange={e => setFormData({...formData, password: e.target.value})} />
                 </div>
                 <div className="form-group">
@@ -871,7 +891,7 @@ function UsersPage({ showToast }) {
                   </select>
                 </div>
                 <div className="form-group">
-                  <label>Branch <span className="muted">(optional)</span></label>
+                  <label>Branch <span className="text-ink/70">(optional)</span></label>
                   <select value={formData.branch_id} onChange={e => setFormData({...formData, branch_id: e.target.value})}>
                     <option value="">No Branch (Head Office)</option>
                     {branches.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
@@ -889,8 +909,8 @@ function UsersPage({ showToast }) {
                 </div>
               </div>
               <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
-                <button className="button secondary" type="button" onClick={() => setShowModal(false)}>Cancel</button>
-                <button className="button" type="submit">Save</button>
+                <button className="inline-flex justify-center items-center gap-2 px-5 py-2.5 rounded-md bg-mint text-ink border-[1.5px] border-surface-3 shadow-none hover:border-blue hover:text-blue transition-all duration-160 cursor-pointer" type="button" onClick={() => setShowModal(false)}>Cancel</button>
+                <button className="inline-flex justify-center items-center gap-2 px-5 py-2.5 rounded-md border-0 bg-blue text-white font-semibold cursor-pointer transition-all duration-160 hover:-translate-y-[1px] hover:shadow-[0_4px_16px_rgba(37,99,235,0.35)] hover:brightness-105 active:translate-y-0" type="submit">Save</button>
               </div>
             </form>
           </div>

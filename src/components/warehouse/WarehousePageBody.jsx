@@ -20,38 +20,14 @@ import {
   getTransferById,
 } from '../../data/warehouseMockData';
 import { fetchInventoryTransfers, fetchInventoryTransferById, fetchRestocks, fetchBranchInventory } from '../../api/inventoryService';
-import { EmptyState } from '../collector/EmptyState';
-import { LoadingState } from '../collector/LoadingState';
+import { EmptyState } from '../shared/EmptyState';
+import { LoadingState } from '../shared/LoadingState';
 import { NavIcon } from '../../navIcons';
 import { StatusBadge } from '../StatusBadge';
 import { CreditHistoryListPage, CreditHistoryDetailPage } from '../shared/CreditHistoryPages';
 
-export function formatCurrency(amount) {
-  return new Intl.NumberFormat('en-PH', { style: 'currency', currency: 'PHP' }).format(Number(amount) || 0);
-}
+import { formatCurrency } from '../../utils/formatters.js';
 
-function actionButtonClass(variant) {
-  if (variant === 'secondary') return 'button secondary';
-  if (variant === 'ghost') return 'button ghost';
-  return 'button';
-}
-
-function PageToolbar({ actions, onAction }) {
-  if (!actions?.length) return null;
-  return (
-    <header className="page-toolbar">
-      <div className="page-toolbar-main">
-        <div className="page-toolbar-actions">
-          {actions.map((action) => (
-            <button key={action.label} className={actionButtonClass(action.variant)} type="button" onClick={() => onAction(action)}>
-              {action.label}
-            </button>
-          ))}
-        </div>
-      </div>
-    </header>
-  );
-}
 
 function StatsGrid({ stats }) {
   if (!stats?.length) return null;
@@ -85,9 +61,9 @@ function Pagination({ page, totalPages, onPageChange }) {
   if (totalPages <= 1) return null;
   return (
     <div className="pagination">
-      <button className="button ghost" type="button" disabled={page <= 1} onClick={() => onPageChange(page - 1)}>Previous</button>
-      <span className="muted">Page {page} of {totalPages}</span>
-      <button className="button ghost" type="button" disabled={page >= totalPages} onClick={() => onPageChange(page + 1)}>Next</button>
+      <button className="inline-flex justify-center items-center gap-2 px-5 py-2.5 rounded-md bg-transparent text-blue border-[1.5px] border-blue-30 shadow-none hover:bg-blue-08 transition-all duration-160 cursor-pointer" type="button" disabled={page <= 1} onClick={() => onPageChange(page - 1)}>Previous</button>
+      <span className="text-ink/70">Page {page} of {totalPages}</span>
+      <button className="inline-flex justify-center items-center gap-2 px-5 py-2.5 rounded-md bg-transparent text-blue border-[1.5px] border-blue-30 shadow-none hover:bg-blue-08 transition-all duration-160 cursor-pointer" type="button" disabled={page >= totalPages} onClick={() => onPageChange(page + 1)}>Next</button>
     </div>
   );
 }
@@ -100,16 +76,16 @@ function DashboardPage({ navigate, showToast }) {
   const firstProduct = PRODUCTS[0];
 
   return (
-    <div className="page">
+    <div className="relative z-10 grid gap-[22px] w-full">
       <section className="panel dashboard-greeting">
-        <div className="dashboard-greeting-main">
-          <p className="dashboard-eyebrow">Warehouse operations</p>
+        <div className="flex flex-col gap-1">
+          <p className="text-[0.82rem] font-bold tracking-widest uppercase text-navy/60 m-0">Warehouse operations</p>
           <h2>{WAREHOUSE_STAFF_PROFILE.name}</h2>
-          <p className="muted">{WAREHOUSE_STAFF_PROFILE.warehouse}</p>
+          <p className="text-ink/70">{WAREHOUSE_STAFF_PROFILE.warehouse}</p>
         </div>
-        <Link to="/warehouse/notifications" className="notification-bell" aria-label={`${unreadCount} unread notifications`}>
+        <Link to="/warehouse/notifications" className="relative p-2 text-ink/70 hover:text-blue hover:bg-blue/5 rounded-full transition-colors cursor-pointer" aria-label={`${unreadCount} unread notifications`}>
           <NavIcon name="bell" />
-          {unreadCount > 0 ? <span className="notification-badge">{unreadCount}</span> : null}
+          {unreadCount > 0 ? <span className="absolute top-0 right-0 min-w-[18px] h-[18px] px-1 flex justify-center items-center rounded-full bg-red text-white text-[0.7rem] font-bold border-2 border-mint">{unreadCount}</span> : null}
         </Link>
       </section>
 
@@ -120,20 +96,20 @@ function DashboardPage({ navigate, showToast }) {
         { label: "Today's Stock Movements", value: String(DASHBOARD_SUMMARY.movementsToday) },
       ]} />
 
-      <PageToolbar actions={[
-        { label: 'Log Stock Count', to: `/warehouse/product/${firstProduct.id}/stock-count` },
-        { label: 'Record Restock', to: `/warehouse/product/${firstProduct.id}/restock`, variant: 'secondary' },
-        { label: 'Transfer Stock', to: `/warehouse/product/${firstProduct.id}/transfer`, variant: 'secondary' },
-        { label: 'View Inventory', to: '/warehouse/inventory', variant: 'secondary' },
-      ]} onAction={(a) => navigate(a.to)} />
+      <div className="flex flex-wrap gap-2 justify-end mt-2 mb-2">
+        <button className="button secondary" type="button" onClick={() => navigate('/warehouse/inventory')}>View Inventory</button>
+        <button className="button secondary" type="button" onClick={() => navigate(`/warehouse/product/${firstProduct.id}/transfer`)}>Transfer Stock</button>
+        <button className="button secondary" type="button" onClick={() => navigate(`/warehouse/product/${firstProduct.id}/restock`)}>Record Restock</button>
+        <button className="button" type="button" onClick={() => navigate(`/warehouse/product/${firstProduct.id}/stock-count`)}>Log Stock Count</button>
+      </div>
 
       {criticalProducts.length ? (
         <section className="panel content-panel alert-panel">
-          <div className="panel-section-header"><h3>Critical Stock Alerts</h3></div>
-          <ul className="widget-list">
+          <div className="flex flex-col md:flex-row justify-between gap-4 items-start md:items-center mb-4"><h3>Critical Stock Alerts</h3></div>
+          <ul className="list-none p-0 m-0 flex flex-col gap-3">
             {criticalProducts.map((p) => (
               <li key={p.id}>
-                <div><strong>{p.name}</strong><span className="muted">{p.sku} · {p.branch}</span></div>
+                <div><strong>{p.name}</strong><span className="text-ink/70">{p.sku} · {p.branch}</span></div>
                 <StatusBadge status={p.status} />
               </li>
             ))}
@@ -142,35 +118,35 @@ function DashboardPage({ navigate, showToast }) {
       ) : null}
 
       <div className="dashboard-widgets grid two-up">
-        <section className="panel content-panel">
-          <div className="panel-section-header"><h3>Recent Transfers</h3></div>
-          <ul className="widget-list">
+        <section className="panel content-panel relative overflow-hidden">
+          <div className="flex flex-col md:flex-row justify-between gap-4 items-start md:items-center mb-4"><h3>Recent Transfers</h3></div>
+          <ul className="list-none p-0 m-0 flex flex-col gap-3">
             {INVENTORY_TRANSFERS.slice(0, 3).map((t) => (
-              <li key={t.id}><div><strong>{t.id}</strong><span className="muted">{t.productName}</span></div><span>{t.status}</span></li>
+              <li key={t.id}><div><strong>{t.id}</strong><span className="text-ink/70">{t.productName}</span></div><span>{t.status}</span></li>
             ))}
           </ul>
         </section>
-        <section className="panel content-panel">
-          <div className="panel-section-header"><h3>Recent Restocks</h3></div>
-          <ul className="widget-list">
+        <section className="panel content-panel relative overflow-hidden">
+          <div className="flex flex-col md:flex-row justify-between gap-4 items-start md:items-center mb-4"><h3>Recent Restocks</h3></div>
+          <ul className="list-none p-0 m-0 flex flex-col gap-3">
             {RESTOCKS.slice(0, 3).map((r) => (
-              <li key={r.id}><div><strong>{r.productName}</strong><span className="muted">{r.dateReceived}</span></div><span>+{r.quantity}</span></li>
+              <li key={r.id}><div><strong>{r.productName}</strong><span className="text-ink/70">{r.dateReceived}</span></div><span>+{r.quantity}</span></li>
             ))}
           </ul>
         </section>
       </div>
 
       <div className="dashboard-widgets grid two-up">
-        <section className="panel content-panel">
-          <div className="panel-section-header"><h3>Top Moving Products</h3></div>
-          <ul className="widget-list">
+        <section className="panel content-panel relative overflow-hidden">
+          <div className="flex flex-col md:flex-row justify-between gap-4 items-start md:items-center mb-4"><h3>Top Moving Products</h3></div>
+          <ul className="list-none p-0 m-0 flex flex-col gap-3">
             {TOP_MOVING_PRODUCTS.map((p) => (
               <li key={p.name}><div><strong>{p.name}</strong></div><span>{p.movements} movements</span></li>
             ))}
           </ul>
         </section>
-        <section className="panel content-panel">
-          <div className="panel-section-header"><h3>Inventory Health Summary</h3></div>
+        <section className="panel content-panel relative overflow-hidden">
+          <div className="flex flex-col md:flex-row justify-between gap-4 items-start md:items-center mb-4"><h3>Inventory Health Summary</h3></div>
           <div className="analytics-grid two-up">
             <div className="analytics-card"><span className="metric-label">Sufficient</span><strong>{INVENTORY_HEALTH.sufficient}</strong></div>
             <div className="analytics-card"><span className="metric-label">Low Stock</span><strong>{INVENTORY_HEALTH.low}</strong></div>
@@ -230,37 +206,37 @@ function InventoryPage({ navigate, showToast }) {
   if (loading) return <LoadingState message="Loading inventory..." />;
 
   return (
-    <div className="page">
-      <section className="panel content-panel">
-        <div className="panel-section-header">
-          <h3>Product List</h3>
-          <div className="inline-toolbar">
-            <button className="button secondary" type="button" onClick={() => showToast('PDF export initiated.', 'success')}>Export PDF</button>
-            <button className="button secondary" type="button" onClick={() => showToast('Excel export initiated.', 'success')}>Export Excel</button>
-            <button className="button" type="button" onClick={() => navigate('/warehouse/add-product')}>Add Product</button>
-          </div>
-        </div>
-        <div className="accounts-toolbar">
-          <input className="search-input" type="search" placeholder="Search by product name or category" value={search} onChange={(e) => { setSearch(e.target.value); setPage(1); }} />
-          <div className="accounts-filters">
-            <select value={category} onChange={(e) => { setCategory(e.target.value); setPage(1); }}>
+    <div className="relative z-10 grid gap-[22px] w-full">
+      <section className="panel content-panel relative overflow-hidden mb-4">
+        <div className="flex flex-col md:flex-row justify-between gap-4 items-start md:items-center">
+          <div className="flex flex-wrap gap-2 items-center w-full md:w-auto flex-1">
+            <input className="filter-input search" type="search" placeholder="Search by product name or category" value={search} onChange={(e) => { setSearch(e.target.value); setPage(1); }} style={{ padding: '8px 12px', borderRadius: '6px', border: '1px solid #e2e8f0', fontSize: '0.9rem', flex: 1, minWidth: '200px' }} />
+            <select className="filter-select" value={category} onChange={(e) => { setCategory(e.target.value); setPage(1); }} style={{ padding: '8px 12px', borderRadius: '6px', border: '1px solid #e2e8f0', fontSize: '0.9rem' }}>
               <option value="All">All Categories</option>
               {categories.map((c) => <option key={c.category_id} value={c.category_id}>{c.category_name}</option>)}
             </select>
-            <select value={statusFilter} onChange={(e) => { setStatusFilter(e.target.value); setPage(1); }}>
+            <select className="filter-select" value={statusFilter} onChange={(e) => { setStatusFilter(e.target.value); setPage(1); }} style={{ padding: '8px 12px', borderRadius: '6px', border: '1px solid #e2e8f0', fontSize: '0.9rem' }}>
               {['All', 'Active', 'Inactive'].map((s) => <option key={s}>{s === 'All' ? 'All Statuses' : s}</option>)}
             </select>
-            <select value={sortBy} onChange={(e) => setSortBy(e.target.value)}>
+            <select className="filter-select" value={sortBy} onChange={(e) => setSortBy(e.target.value)} style={{ padding: '8px 12px', borderRadius: '6px', border: '1px solid #e2e8f0', fontSize: '0.9rem' }}>
               {['Product Name', 'Unit Price'].map((s) => <option key={s}>Sort: {s}</option>)}
             </select>
+          </div>
+          <div className="flex gap-2">
+            <button className="button secondary" type="button" onClick={() => showToast('Excel export initiated.', 'success')}>Export Excel</button>
+            <button className="button secondary" type="button" onClick={() => showToast('PDF export initiated.', 'success')}>Export PDF</button>
+            <button className="button" type="button" onClick={() => navigate('/warehouse/add-product')}>Add Product</button>
           </div>
         </div>
       </section>
 
       {paginated.length ? (
-        <section className="panel content-panel">
-          <div className="table-shell">
-            <table className="data-table">
+        <section className="panel content-panel relative overflow-hidden">
+          <div className="flex flex-col md:flex-row justify-between gap-4 items-start md:items-center mb-4">
+            <h3>Product List</h3>
+          </div>
+          <div className="corvex-table-wrapper">
+            <table className="corvex-table">
               <thead>
                 <tr><th>Product ID</th><th>Product Name</th><th>Category</th><th>Unit Price</th><th>Status</th><th>Actions</th></tr>
               </thead>
@@ -330,7 +306,7 @@ function ProductDetailPage({ productId, navigate, showToast }) {
     : (mockProduct?.stock ?? 0);
 
   return (
-    <div className="page">
+    <div className="relative z-10 grid gap-[22px] w-full">
       <StatsGrid stats={[
         { label: 'Product ID', value: String(product_id) },
         { label: 'Unit Price', value: formatCurrency(unit_price) },
@@ -338,10 +314,10 @@ function ProductDetailPage({ productId, navigate, showToast }) {
         { label: 'Total Stock (All Branches)', value: `${totalStock} units` },
       ]} />
 
-      <section className="panel content-panel">
-        <div className="panel-section-header">
+      <section className="panel content-panel relative overflow-hidden">
+        <div className="flex flex-col md:flex-row justify-between gap-4 items-start md:items-center mb-4">
           <h3>{product_name}</h3>
-          <p className="muted">Product ID: {product_id}</p>
+          <p className="text-ink/70">Product ID: {product_id}</p>
         </div>
         <ul className="info-grid">
           <li><span className="info-item-label">Product ID</span><span className="info-item-value">{product_id}</span></li>
@@ -355,13 +331,13 @@ function ProductDetailPage({ productId, navigate, showToast }) {
 
       {/* Inventory per branch — from branch_inventory */}
       {inventory.length > 0 && (
-        <section className="panel content-panel">
-          <div className="panel-section-header">
+        <section className="panel content-panel relative overflow-hidden">
+          <div className="flex flex-col md:flex-row justify-between gap-4 items-start md:items-center mb-4">
             <h3>Stock by Branch</h3>
-            <p className="muted" style={{ margin: 0, fontSize: '0.82rem' }}>Source: branch_inventory table</p>
+            <p className="text-ink/70" style={{ margin: 0, fontSize: '0.82rem' }}>Source: branch_inventory table</p>
           </div>
-          <div className="table-shell">
-            <table className="data-table">
+          <div className="corvex-table-wrapper">
+            <table className="corvex-table">
               <thead>
                 <tr>
                   <th>Inventory ID</th>
@@ -386,13 +362,7 @@ function ProductDetailPage({ productId, navigate, showToast }) {
                     <td style={{ fontWeight: 600 }}>{b.available_stock ?? b.quantity ?? '—'}</td>
                     <td>{b.reorder_level ?? '—'}</td>
                     <td>
-                      <span style={{
-                        padding: '2px 8px', borderRadius: 999, fontSize: '0.78rem', fontWeight: 600,
-                        background: b.stock_status === 'Sufficient' ? 'rgba(16,185,129,0.1)' : b.stock_status === 'Out of Stock' ? 'rgba(239,68,68,0.1)' : 'rgba(245,158,11,0.1)',
-                        color:      b.stock_status === 'Sufficient' ? '#059669' : b.stock_status === 'Out of Stock' ? '#dc2626' : '#d97706',
-                      }}>
-                        {b.stock_status || '—'}
-                      </span>
+                      <StatusBadge status={b.stock_status || '—'} />
                     </td>
                     <td style={{ fontSize: '0.82rem' }}>{b.last_updated ? new Date(b.last_updated).toLocaleDateString('en-PH') : '—'}</td>
                     <td style={{ fontFamily: 'monospace', fontSize: '0.78rem' }}>{b.created_at ? new Date(b.created_at).toLocaleString() : '—'}</td>
@@ -406,14 +376,14 @@ function ProductDetailPage({ productId, navigate, showToast }) {
       )}
 
       {/* Stock movements — from stock_movements table with movement_ref */}
-      <section className="panel content-panel">
-        <div className="panel-section-header">
+      <section className="panel content-panel relative overflow-hidden">
+        <div className="flex flex-col md:flex-row justify-between gap-4 items-start md:items-center mb-4">
           <h3>Stock Movement History</h3>
-          <p className="muted" style={{ margin: 0, fontSize: '0.82rem' }}>Source: stock_movements table — type, quantity, movement_ref, branch, performed_by</p>
+          <p className="text-ink/70" style={{ margin: 0, fontSize: '0.82rem' }}>Source: stock_movements table — type, quantity, movement_ref, branch, performed_by</p>
         </div>
         {movements.length ? (
-          <div className="table-shell">
-            <table className="data-table">
+          <div className="corvex-table-wrapper">
+            <table className="corvex-table">
               <thead>
                 <tr>
                   <th>Date</th>
@@ -429,13 +399,7 @@ function ProductDetailPage({ productId, navigate, showToast }) {
                   <tr key={m.id || m.stock_movements_id || i}>
                     <td>{m.movement_date ? new Date(m.movement_date).toLocaleDateString('en-PH') : (m.date || '—')}</td>
                     <td>
-                      <span style={{
-                        padding: '2px 8px', borderRadius: 999, fontSize: '0.78rem', fontWeight: 600,
-                        background: m.type === 'Restock' || m.type === 'Transfer In' ? 'rgba(16,185,129,0.1)' : 'rgba(239,68,68,0.1)',
-                        color:      m.type === 'Restock' || m.type === 'Transfer In' ? '#059669' : '#dc2626',
-                      }}>
-                        {m.type}
-                      </span>
+                      <StatusBadge status={m.type} />
                     </td>
                     <td style={{ fontWeight: 600, color: (m.quantity || 0) > 0 ? '#059669' : '#dc2626' }}>
                       {(m.quantity || 0) > 0 ? `+${m.quantity}` : m.quantity}
@@ -451,12 +415,12 @@ function ProductDetailPage({ productId, navigate, showToast }) {
         ) : <EmptyState title="No movement history" description="Stock movements for this product will appear here." />}
       </section>
 
-      <PageToolbar actions={[
-        { label: 'Log Stock Count', to: `/warehouse/product/${productId}/stock-count` },
-        { label: 'Record Restock',  to: `/warehouse/product/${productId}/restock`,      variant: 'secondary' },
-        { label: 'Transfer Stock',  to: `/warehouse/product/${productId}/transfer`,     variant: 'secondary' },
-        { label: 'Back to Inventory', to: '/warehouse/inventory', variant: 'ghost' },
-      ]} onAction={(a) => navigate(a.to)} />
+      <div className="flex flex-wrap justify-end gap-2 mt-4">
+        <button className="button ghost" type="button" onClick={() => navigate('/warehouse/inventory')}>Back to Inventory</button>
+        <button className="button secondary" type="button" onClick={() => navigate(`/warehouse/product/${productId}/transfer`)}>Transfer Stock</button>
+        <button className="button secondary" type="button" onClick={() => navigate(`/warehouse/product/${productId}/restock`)}>Record Restock</button>
+        <button className="button" type="button" onClick={() => navigate(`/warehouse/product/${productId}/stock-count`)}>Log Stock Count</button>
+      </div>
     </div>
   );
 }
@@ -478,9 +442,9 @@ function AddProductPage({ navigate, showToast }) {
   };
 
   return (
-    <div className="page">
+    <div className="relative z-10 grid gap-[22px] w-full">
       <section className="panel form-panel content-panel">
-        <div className="panel-section-header"><h3>Add New Product</h3></div>
+        <div className="flex flex-col md:flex-row justify-between gap-4 items-start md:items-center mb-4"><h3>Add New Product</h3></div>
         {[
           { name: 'productName', label: 'Product Name', type: 'text', required: true },
           { name: 'sku', label: 'SKU', type: 'text' },
@@ -494,7 +458,7 @@ function AddProductPage({ navigate, showToast }) {
           <div key={field.name} className="form-group">
             <label>{field.label}{field.required ? <span className="required">*</span> : null}</label>
             {field.type === 'select' ? (
-              <select value={form[field.name]} onChange={(e) => setForm((p) => ({ ...p, [field.name]: e.target.value }))}>
+              <select className="filter-select" value={form[field.name]} onChange={(e) => setForm((p) => ({ ...p, [field.name]: e.target.value }))}>
                 <option value="">Select category</option>
                 {field.options.map((o) => <option key={o}>{o}</option>)}
               </select>
@@ -507,10 +471,10 @@ function AddProductPage({ navigate, showToast }) {
           </div>
         ))}
       </section>
-      <PageToolbar actions={[
-        { label: 'Create Product Record', action: 'submit' },
-        { label: 'Cancel', to: '/warehouse/inventory', variant: 'secondary' },
-      ]} onAction={(a) => (a.action === 'submit' ? handleSubmit() : navigate(a.to))} />
+      <div className="flex justify-end gap-2 mt-4">
+        <button className="button secondary" type="button" onClick={() => navigate('/warehouse/inventory')}>Cancel</button>
+        <button className="button" type="button" onClick={handleSubmit}>Create Product Record</button>
+      </div>
     </div>
   );
 }
@@ -540,9 +504,9 @@ function StockCountPage({ productId, navigate, showToast }) {
   };
 
   return (
-    <div className="page">
+    <div className="relative z-10 grid gap-[22px] w-full">
       <section className="panel form-panel content-panel">
-        <div className="panel-section-header"><h3>Stock Count — {product.name}</h3></div>
+        <div className="flex flex-col md:flex-row justify-between gap-4 items-start md:items-center mb-4"><h3>Stock Count — {product.name}</h3></div>
         <div className="form-group"><label>System Quantity</label><p className="field-preview">{product.stock} units</p></div>
         <div className="form-group">
           <label>Physical Quantity<span className="required">*</span></label>
@@ -562,10 +526,10 @@ function StockCountPage({ productId, navigate, showToast }) {
         </div>
         {errors.submit ? <p className="form-error">{errors.submit}</p> : null}
       </section>
-      <PageToolbar actions={[
-        { label: 'Submit Stock Count', action: 'submit' },
-        { label: 'Cancel', to: `/warehouse/product/${product.id}`, variant: 'secondary' },
-      ]} onAction={(a) => (a.action === 'submit' ? handleSubmit() : navigate(a.to))} />
+      <div className="flex justify-end gap-2 mt-4">
+        <button className="button secondary" type="button" onClick={() => navigate(`/warehouse/product/${product.id}`)}>Cancel</button>
+        <button className="button" type="button" onClick={handleSubmit}>Submit Stock Count</button>
+      </div>
     </div>
   );
 }
@@ -587,9 +551,9 @@ function RestockPage({ productId, navigate, showToast }) {
   };
 
   return (
-    <div className="page">
+    <div className="relative z-10 grid gap-[22px] w-full">
       <section className="panel form-panel content-panel">
-        <div className="panel-section-header"><h3>Record Restock — {product.name}</h3></div>
+        <div className="flex flex-col md:flex-row justify-between gap-4 items-start md:items-center mb-4"><h3>Record Restock — {product.name}</h3></div>
         <div className="form-group"><label>Product Name</label><p className="field-preview">{product.name}</p></div>
         <div className="form-group">
           <label>Quantity Restocked<span className="required">*</span></label>
@@ -598,12 +562,12 @@ function RestockPage({ productId, navigate, showToast }) {
         </div>
         <div className="form-group"><label>Supplier</label><input type="text" value={form.supplier} onChange={(e) => setForm((p) => ({ ...p, supplier: e.target.value }))} /></div>
         <div className="form-group"><label>Delivery Reference Number</label><input type="text" value={form.deliveryRef} onChange={(e) => setForm((p) => ({ ...p, deliveryRef: e.target.value }))} /></div>
-        <div className="form-group"><label>Date Received</label><input type="date" value={form.dateReceived} onChange={(e) => setForm((p) => ({ ...p, dateReceived: e.target.value }))} /></div>
+        <div className="form-group"><label>Date Received</label><input className="filter-input" type="date" value={form.dateReceived} onChange={(e) => setForm((p) => ({ ...p, dateReceived: e.target.value }))} /></div>
       </section>
-      <PageToolbar actions={[
-        { label: 'Create Restock Transaction', action: 'submit' },
-        { label: 'Cancel', to: `/warehouse/product/${product.id}`, variant: 'secondary' },
-      ]} onAction={(a) => (a.action === 'submit' ? handleSubmit() : navigate(a.to))} />
+      <div className="flex justify-end gap-2 mt-4">
+        <button className="button secondary" type="button" onClick={() => navigate(`/warehouse/product/${product.id}`)}>Cancel</button>
+        <button className="button" type="button" onClick={handleSubmit}>Create Restock Transaction</button>
+      </div>
     </div>
   );
 }
@@ -628,14 +592,14 @@ function TransferPage({ productId, navigate, showToast }) {
   };
 
   return (
-    <div className="page">
+    <div className="relative z-10 grid gap-[22px] w-full">
       <section className="panel form-panel content-panel">
-        <div className="panel-section-header"><h3>Transfer Stock — {product.name}</h3></div>
+        <div className="flex flex-col md:flex-row justify-between gap-4 items-start md:items-center mb-4"><h3>Transfer Stock — {product.name}</h3></div>
         <div className="form-group"><label>Product Name</label><p className="field-preview">{product.name}</p></div>
         <div className="form-group"><label>Source Branch</label><p className="field-preview">{product.branch}</p></div>
         <div className="form-group">
           <label>Destination Branch<span className="required">*</span></label>
-          <select value={form.destination} onChange={(e) => setForm((p) => ({ ...p, destination: e.target.value }))}>
+          <select className="filter-select" value={form.destination} onChange={(e) => setForm((p) => ({ ...p, destination: e.target.value }))}>
             <option value="">Select destination</option>
             {BRANCHES.filter((b) => b !== product.branch).map((b) => <option key={b}>{b}</option>)}
           </select>
@@ -648,10 +612,10 @@ function TransferPage({ productId, navigate, showToast }) {
         </div>
         <div className="form-group"><label>Notes</label><textarea value={form.notes} onChange={(e) => setForm((p) => ({ ...p, notes: e.target.value }))} /></div>
       </section>
-      <PageToolbar actions={[
-        { label: 'Create Transfer Transaction', action: 'submit' },
-        { label: 'Cancel', to: `/warehouse/product/${product.id}`, variant: 'secondary' },
-      ]} onAction={(a) => (a.action === 'submit' ? handleSubmit() : navigate(a.to))} />
+      <div className="flex justify-end gap-2 mt-4">
+        <button className="button secondary" type="button" onClick={() => navigate(`/warehouse/product/${product.id}`)}>Cancel</button>
+        <button className="button" type="button" onClick={handleSubmit}>Create Transfer Transaction</button>
+      </div>
     </div>
   );
 }
@@ -683,21 +647,21 @@ function MovementsPage({ navigate }) {
   if (loading) return <LoadingState message="Loading stock movements..." />;
 
   return (
-    <div className="page">
-      <section className="panel content-panel">
-        <div className="panel-section-header"><h3>Movement History</h3></div>
+    <div className="relative z-10 grid gap-[22px] w-full">
+      <section className="panel content-panel relative overflow-hidden">
+        <div className="flex flex-col md:flex-row justify-between gap-4 items-start md:items-center mb-4"><h3>Movement History</h3></div>
         <div className="accounts-filters">
-          <select value={productFilter} onChange={(e) => setProductFilter(e.target.value)}><option value="All">All Products</option>{PRODUCTS.map((p) => <option key={p.id} value={p.name}>{p.name}</option>)}</select>
-          <select value={branchFilter} onChange={(e) => setBranchFilter(e.target.value)}><option value="All">All Branches</option>{BRANCHES.map((b) => <option key={b}>{b}</option>)}</select>
-          <select value={typeFilter} onChange={(e) => setTypeFilter(e.target.value)}>{movementTypes.map((t) => <option key={t}>{t === 'All' ? 'All Types' : t}</option>)}</select>
-          <input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} aria-label="From date" />
-          <input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} aria-label="To date" />
+          <select className="filter-select" value={productFilter} onChange={(e) => setProductFilter(e.target.value)}><option value="All">All Products</option>{PRODUCTS.map((p) => <option key={p.id} value={p.name}>{p.name}</option>)}</select>
+          <select className="filter-select" value={branchFilter} onChange={(e) => setBranchFilter(e.target.value)}><option value="All">All Branches</option>{BRANCHES.map((b) => <option key={b}>{b}</option>)}</select>
+          <select className="filter-select" value={typeFilter} onChange={(e) => setTypeFilter(e.target.value)}>{movementTypes.map((t) => <option key={t}>{t === 'All' ? 'All Types' : t}</option>)}</select>
+          <input className="filter-input" type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} aria-label="From date" />
+          <input className="filter-input" type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} aria-label="To date" />
         </div>
       </section>
       {filtered.length ? (
-        <section className="panel content-panel">
-          <div className="table-shell">
-            <table className="data-table">
+        <section className="panel content-panel relative overflow-hidden">
+          <div className="corvex-table-wrapper">
+            <table className="corvex-table">
               <thead><tr><th>Transaction ID</th><th>Product Name</th><th>Quantity</th><th>Type</th><th>Branch</th><th>Date</th><th>Actions</th></tr></thead>
               <tbody>
                 {filtered.map((m) => (
@@ -724,13 +688,13 @@ function MovementDetailPage({ movementId, navigate }) {
   const movement = getMovementById(movementId);
   if (!movement) return <EmptyState title="Movement not found" actionLabel="Back" onAction={() => navigate('/warehouse/movements')} />;
   return (
-    <div className="page">
+    <div className="relative z-10 grid gap-[22px] w-full">
       <StatsGrid stats={[
         { label: 'Transaction ID', value: movement.id },
         { label: 'Quantity', value: String(movement.quantity) },
         { label: 'Type', value: movement.type },
       ]} />
-      <section className="panel content-panel">
+      <section className="panel content-panel relative overflow-hidden">
         <div className="transfer-detail-grid">
           <article className="transfer-detail-card">
             <span>Product</span>
@@ -750,7 +714,9 @@ function MovementDetailPage({ movementId, navigate }) {
           </article>
         </div>
       </section>
-      <PageToolbar actions={[{ label: 'Back to Movements', to: '/warehouse/movements', variant: 'ghost' }]} onAction={(a) => navigate(a.to)} />
+      <div className="flex justify-end mt-4">
+        <button className="button ghost" type="button" onClick={() => navigate('/warehouse/movements')}>Back to Movements</button>
+      </div>
     </div>
   );
 }
@@ -782,9 +748,9 @@ function TransfersPage({ navigate }) {
   if (loading) return <LoadingState message="Loading transfers..." />;
 
   return (
-    <div className="page">
-      <section className="panel content-panel">
-        <div className="panel-section-header"><h3>Inventory Transfer Requests</h3></div>
+    <div className="relative z-10 grid gap-[22px] w-full">
+      <section className="panel content-panel relative overflow-hidden">
+        <div className="flex flex-col md:flex-row justify-between gap-4 items-start md:items-center mb-4"><h3>Inventory Transfer Requests</h3></div>
         <div className="segmented-control">
           {['All', 'Pending Transfers', 'Approved Transfers', 'Completed Transfers', 'Cancelled Transfers'].map((s) => (
             <button key={s} className={statusFilter === s ? 'segment active' : 'segment'} type="button" onClick={() => setStatusFilter(s)}>
@@ -794,9 +760,9 @@ function TransfersPage({ navigate }) {
         </div>
       </section>
       {filtered.length ? (
-        <section className="panel content-panel">
-          <div className="table-shell">
-            <table className="data-table">
+        <section className="panel content-panel relative overflow-hidden">
+          <div className="corvex-table-wrapper">
+            <table className="corvex-table">
               <thead>
                 <tr>
                   <th>Transfer Ref</th>
@@ -814,22 +780,16 @@ function TransfersPage({ navigate }) {
                 {filtered.map((t) => (
                   <tr key={t.transfer_id}>
                     <td><span style={{ fontFamily: 'monospace', fontSize: '0.82rem' }}>{t.transfer_ref}</span></td>
-                    <td>{t.product_name}<br /><span className="muted" style={{ fontSize: '0.75rem' }}>{t.sku}</span></td>
+                    <td>{t.product_name}<br /><span className="text-ink/70" style={{ fontSize: '0.75rem' }}>{t.sku}</span></td>
                     <td>{t.quantity}</td>
                     <td>{t.source_branch}</td>
                     <td>{t.destination_branch}</td>
                     <td>{t.submitted_by_name || '—'}</td>
-                    <td className="muted" style={{ fontSize: '0.82rem' }}>
+                    <td className="text-ink/70" style={{ fontSize: '0.82rem' }}>
                       {t.submitted_date ? new Date(t.submitted_date).toLocaleDateString('en-PH') : '—'}
                     </td>
                     <td>
-                      <span style={{
-                        padding: '2px 8px', borderRadius: 999, fontSize: '0.78rem', fontWeight: 600,
-                        background: t.status === 'Completed' ? 'rgba(16,185,129,0.1)' : t.status === 'Rejected' ? 'rgba(239,68,68,0.1)' : t.status === 'Approved' ? 'rgba(37,99,235,0.1)' : 'rgba(245,158,11,0.1)',
-                        color: t.status === 'Completed' ? '#059669' : t.status === 'Rejected' ? '#dc2626' : t.status === 'Approved' ? '#2563eb' : '#d97706',
-                      }}>
-                        {t.status}
-                      </span>
+                      <StatusBadge status={t.status} />
                     </td>
                     <td>
                       <button className="icon-action-button" type="button" title="View" onClick={() => navigate(`/warehouse/transfers/${t.transfer_id}`)}>
@@ -867,18 +827,18 @@ function TransferDetailPage({ transferId, navigate, showToast }) {
   const workflowSteps = ['Submitted', 'Pending Approval', 'Approved', 'Completed'];
 
   return (
-    <div className="page">
+    <div className="relative z-10 grid gap-[22px] w-full">
       <StatsGrid stats={[
         { label: 'Transfer Ref', value: transfer.transfer_ref },
         { label: 'Product',      value: transfer.product_name },
         { label: 'Quantity',     value: String(transfer.quantity) },
         { label: 'Status',       value: transfer.status },
       ]} />
-      <section className="panel content-panel">
+      <section className="panel content-panel relative overflow-hidden">
         <div className="transfer-detail-grid">
           <article className="transfer-detail-card">
             <span>Product</span>
-            <strong>{transfer.product_name} <span className="muted" style={{ fontSize: '0.78rem' }}>({transfer.sku})</span></strong>
+            <strong>{transfer.product_name} <span className="text-ink/70" style={{ fontSize: '0.78rem' }}>({transfer.sku})</span></strong>
           </article>
           <article className="transfer-detail-card">
             <span>Source Branch</span>
@@ -927,17 +887,15 @@ function TransferDetailPage({ transferId, navigate, showToast }) {
         ) : null}
       </section>
       {transfer.status === 'Pending Approval' ? (
-        <PageToolbar actions={[
-          { label: 'Approve Transfer', action: 'approve' },
-          { label: 'Reject Transfer',  action: 'reject',  variant: 'secondary' },
-          { label: 'Back',             to: '/warehouse/transfers', variant: 'ghost' },
-        ]} onAction={(a) => {
-          if (a.action === 'approve') showToast('Transfer approved.', 'success');
-          else if (a.action === 'reject') showToast('Transfer rejected.', 'error');
-          else navigate(a.to);
-        }} />
+        <div className="flex justify-end gap-2 mt-4">
+          <button className="button ghost" type="button" onClick={() => navigate('/warehouse/transfers')}>Back</button>
+          <button className="button secondary" type="button" onClick={() => showToast('Transfer rejected.', 'error')}>Reject Transfer</button>
+          <button className="button" type="button" onClick={() => showToast('Transfer approved.', 'success')}>Approve Transfer</button>
+        </div>
       ) : (
-        <PageToolbar actions={[{ label: 'Back to Transfers', to: '/warehouse/transfers', variant: 'ghost' }]} onAction={(a) => navigate(a.to)} />
+        <div className="flex justify-end mt-4">
+          <button className="button ghost" type="button" onClick={() => navigate('/warehouse/transfers')}>Back to Transfers</button>
+        </div>
       )}
     </div>
   );
@@ -975,24 +933,24 @@ function RestockHistoryPage({ navigate }) {
   if (loading) return <LoadingState message="Loading restock history..." />;
 
   return (
-    <div className="page">
-      <section className="panel content-panel">
-        <div className="panel-section-header"><h3>Restock Records</h3></div>
+    <div className="relative z-10 grid gap-[22px] w-full">
+      <section className="panel content-panel relative overflow-hidden">
+        <div className="flex flex-col md:flex-row justify-between gap-4 items-start md:items-center mb-4"><h3>Restock Records</h3></div>
         <div className="accounts-filters">
-          <select value={supplier} onChange={(e) => setSupplier(e.target.value)}>
+          <select className="filter-select" value={supplier} onChange={(e) => setSupplier(e.target.value)}>
             {suppliers.map((s) => <option key={s} value={s}>{s === 'All' ? 'All Suppliers' : s}</option>)}
           </select>
-          <select value={productFilter} onChange={(e) => setProductFilter(e.target.value)}>
+          <select className="filter-select" value={productFilter} onChange={(e) => setProductFilter(e.target.value)}>
             {productNames.map((p) => <option key={p} value={p}>{p === 'All' ? 'All Products' : p}</option>)}
           </select>
-          <input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} aria-label="From date" />
-          <input type="date" value={dateTo}   onChange={(e) => setDateTo(e.target.value)}   aria-label="To date" />
+          <input className="filter-input" type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} aria-label="From date" />
+          <input className="filter-input" type="date" value={dateTo}   onChange={(e) => setDateTo(e.target.value)}   aria-label="To date" />
         </div>
       </section>
       {filtered.length ? (
-        <section className="panel content-panel">
-          <div className="table-shell">
-            <table className="data-table">
+        <section className="panel content-panel relative overflow-hidden">
+          <div className="corvex-table-wrapper">
+            <table className="corvex-table">
               <thead>
                 <tr>
                   <th>Delivery Ref</th>
@@ -1025,7 +983,7 @@ function RestockHistoryPage({ navigate }) {
 
 function RestockDetailPage({ restockId, navigate }) {
   return (
-    <div className="page">
+    <div className="relative z-10 grid gap-[22px] w-full">
       <EmptyState title="Restock Detail" description="Select a record from the Restock History page." actionLabel="Back" onAction={() => navigate('/warehouse/restock-history')} />
     </div>
   );
@@ -1046,9 +1004,11 @@ function NotificationsPage({ navigate, showToast }) {
   }, [notifications, filter]);
 
   return (
-    <div className="page">
-      <PageToolbar actions={[{ label: 'Mark All as Read', action: 'markAll' }]} onAction={() => { setNotifications((items) => items.map((n) => ({ ...n, read: true }))); showToast('All marked as read.', 'success'); }} />
-      <section className="panel content-panel">
+    <div className="relative z-10 grid gap-[22px] w-full">
+      <div className="flex justify-end mt-2 mb-2">
+        <button className="button secondary" type="button" onClick={() => { setNotifications((items) => items.map((n) => ({ ...n, read: true }))); showToast('All marked as read.', 'success'); }}>Mark All as Read</button>
+      </div>
+      <section className="panel content-panel relative overflow-hidden">
         <div className="segmented-control">
           {['All', 'Unread', 'Read', 'Low Stock', 'Critical', 'Transfers', 'Restocks', 'Forecast'].map((f) => (
             <button key={f} className={filter === f ? 'segment active' : 'segment'} type="button" onClick={() => setFilter(f)}>{f}</button>
@@ -1059,10 +1019,10 @@ function NotificationsPage({ navigate, showToast }) {
         <div className="notification-list">
           {filtered.map((item) => (
             <article key={item.id} className={`notification-item${item.read ? '' : ' unread'}`}>
-              <div><h4>{item.title}</h4><p className="muted">{item.message}</p><span className="notification-time">{item.time}</span></div>
+              <div><h4>{item.title}</h4><p className="text-ink/70">{item.message}</p><span className="notification-time">{item.time}</span></div>
               <div className="notification-actions">
-                {!item.read ? <button className="button ghost" type="button" onClick={() => { setNotifications((items) => items.map((n) => (n.id === item.id ? { ...n, read: true } : n))); showToast('Marked as read.', 'success'); }}>Mark as Read</button> : null}
-                <button className="button secondary" type="button" onClick={() => navigate(item.relatedTo)}>Open Related Record</button>
+                {!item.read ? <button className="inline-flex justify-center items-center gap-2 px-5 py-2.5 rounded-md bg-transparent text-blue border-[1.5px] border-blue-30 shadow-none hover:bg-blue-08 transition-all duration-160 cursor-pointer" type="button" onClick={() => { setNotifications((items) => items.map((n) => (n.id === item.id ? { ...n, read: true } : n))); showToast('Marked as read.', 'success'); }}>Mark as Read</button> : null}
+                <button className="inline-flex justify-center items-center gap-2 px-5 py-2.5 rounded-md bg-mint text-ink border-[1.5px] border-surface-3 shadow-none hover:border-blue hover:text-blue transition-all duration-160 cursor-pointer" type="button" onClick={() => navigate(item.relatedTo)}>Open Related Record</button>
               </div>
             </article>
           ))}
@@ -1074,11 +1034,11 @@ function NotificationsPage({ navigate, showToast }) {
 
 function ProfilePage({ navigate, showToast }) {
   return (
-    <div className="page">
+    <div className="relative z-10 grid gap-[22px] w-full">
       <section className="panel content-panel profile-panel">
         <div className="profile-header">
           <div className="profile-avatar">{WAREHOUSE_STAFF_PROFILE.avatarInitials}</div>
-          <div><h3>{WAREHOUSE_STAFF_PROFILE.name}</h3><p className="muted">{WAREHOUSE_STAFF_PROFILE.employeeId}</p></div>
+          <div><h3>{WAREHOUSE_STAFF_PROFILE.name}</h3><p className="text-ink/70">{WAREHOUSE_STAFF_PROFILE.employeeId}</p></div>
         </div>
         <div className="transfer-detail-grid">
           <article className="transfer-detail-card">
@@ -1099,34 +1059,32 @@ function ProfilePage({ navigate, showToast }) {
           </article>
         </div>
       </section>
-      <PageToolbar actions={[
-        { label: 'Update Profile', action: 'update' },
-        { label: 'Change Password', action: 'password', variant: 'secondary' },
-        { label: 'Audit Log', to: '/warehouse/audit-log', variant: 'ghost' },
-        { label: 'Reports', to: '/warehouse/reports', variant: 'ghost' },
-        { label: 'Logout', action: 'logout', variant: 'ghost' },
-      ]} onAction={(a) => {
-        if (a.to) navigate(a.to);
-        else if (a.action === 'logout') { requestLogout(); }
-        else showToast(`${a.label} form would open here.`, 'success');
-      }} />
+      <div className="flex justify-end gap-2 mt-4">
+        <button className="button ghost" type="button" onClick={() => navigate('/warehouse/audit-log')}>Audit Log</button>
+        <button className="button ghost" type="button" onClick={() => navigate('/warehouse/reports')}>Reports</button>
+        <button className="button ghost" type="button" onClick={() => requestLogout()}>Logout</button>
+        <button className="button secondary" type="button" onClick={() => showToast('Change Password form would open here.', 'success')}>Change Password</button>
+        <button className="button" type="button" onClick={() => showToast('Update Profile form would open here.', 'success')}>Update Profile</button>
+      </div>
     </div>
   );
 }
 
 function AuditLogPage({ navigate }) {
   return (
-    <div className="page">
-      <section className="panel content-panel">
-        <div className="panel-section-header"><h3>Audit Log</h3><p className="muted">Product creation, updates, stock adjustments, restocks, and transfers.</p></div>
-        <div className="table-shell">
-          <table className="data-table">
+    <div className="relative z-10 grid gap-[22px] w-full">
+      <section className="panel content-panel relative overflow-hidden">
+        <div className="flex flex-col md:flex-row justify-between gap-4 items-start md:items-center mb-4"><h3>Audit Log</h3><p className="text-ink/70">Product creation, updates, stock adjustments, restocks, and transfers.</p></div>
+        <div className="corvex-table-wrapper">
+          <table className="corvex-table">
             <thead><tr><th>Action</th><th>Detail</th><th>Timestamp</th></tr></thead>
             <tbody>{AUDIT_LOGS.map((log) => <tr key={log.id}><td>{log.action}</td><td>{log.detail}</td><td>{log.timestamp}</td></tr>)}</tbody>
           </table>
         </div>
       </section>
-      <PageToolbar actions={[{ label: 'Back to Profile', to: '/warehouse/profile', variant: 'ghost' }]} onAction={(a) => navigate(a.to)} />
+      <div className="flex justify-end mt-4">
+        <button className="button ghost" type="button" onClick={() => navigate('/warehouse/profile')}>Back to Profile</button>
+      </div>
     </div>
   );
 }
@@ -1134,32 +1092,36 @@ function AuditLogPage({ navigate }) {
 function ReportsPage({ navigate, showToast }) {
   const reports = ['Inventory Report', 'Low Stock Report', 'Transfer Report', 'Restock Report', 'Stock Adjustment Report'];
   return (
-    <div className="page">
-      <section className="panel content-panel">
-        <div className="panel-section-header"><h3>Generate Reports</h3></div>
+    <div className="relative z-10 grid gap-[22px] w-full">
+      <section className="panel content-panel relative overflow-hidden">
+        <div className="flex flex-col md:flex-row justify-between gap-4 items-start md:items-center mb-4"><h3>Generate Reports</h3></div>
         <div className="quick-link-grid">
           {reports.map((report) => (
             <button key={report} className="quick-link-card report-card" type="button" onClick={() => showToast(`${report} generated.`, 'success')}>
               <span className="quick-link-icon"><NavIcon name="reports" /></span>
-              <span className="quick-link-copy"><strong>{report}</strong><span className="muted">Export PDF or Excel</span></span>
+              <span className="quick-link-copy"><strong>{report}</strong><span className="text-ink/70">Export PDF or Excel</span></span>
             </button>
           ))}
         </div>
       </section>
-      <PageToolbar actions={[{ label: 'Back to Profile', to: '/warehouse/profile', variant: 'ghost' }]} onAction={(a) => navigate(a.to)} />
+      <div className="flex justify-end mt-4">
+        <button className="button ghost" type="button" onClick={() => navigate('/warehouse/profile')}>Back to Profile</button>
+      </div>
     </div>
   );
 }
 
 function SettingsPage({ navigate }) {
   return (
-    <div className="page">
+    <div className="relative z-10 grid gap-[22px] w-full">
       <section className="panel form-panel content-panel">
-        <div className="panel-section-header"><h3>Settings</h3></div>
+        <div className="flex flex-col md:flex-row justify-between gap-4 items-start md:items-center mb-4"><h3>Settings</h3></div>
         <div className="form-group"><label className="toggle-label"><input type="checkbox" defaultChecked />Enable barcode scanning</label></div>
         <div className="form-group"><label className="toggle-label"><input type="checkbox" defaultChecked />Low stock alert notifications</label></div>
       </section>
-      <PageToolbar actions={[{ label: 'Back to Dashboard', to: '/warehouse/dashboard', variant: 'ghost' }]} onAction={(a) => navigate(a.to)} />
+      <div className="flex justify-end mt-4">
+        <button className="button ghost" type="button" onClick={() => navigate('/warehouse/dashboard')}>Back to Dashboard</button>
+      </div>
     </div>
   );
 }
@@ -1271,18 +1233,18 @@ function SuppliersPage({ navigate, showToast }) {
   if (loading) return <LoadingState message="Loading suppliers..." />;
 
   return (
-    <div className="page">
-      <section className="panel content-panel">
-        <div className="panel-section-header">
+    <div className="relative z-10 grid gap-[22px] w-full">
+      <section className="panel content-panel relative overflow-hidden">
+        <div className="flex flex-col md:flex-row justify-between gap-4 items-start md:items-center mb-4">
           <h3>Suppliers</h3>
           <div className="inline-toolbar">
-            <button className="button" type="button" onClick={handleAdd}>Add Supplier</button>
+            <button className="inline-flex justify-center items-center gap-2 px-5 py-2.5 rounded-md border-0 bg-blue text-white font-semibold cursor-pointer transition-all duration-160 hover:-translate-y-[1px] hover:shadow-[0_4px_16px_rgba(37,99,235,0.35)] hover:brightness-105 active:translate-y-0" type="button" onClick={handleAdd}>Add Supplier</button>
           </div>
         </div>
         <div className="accounts-toolbar">
-          <input className="search-input" type="search" placeholder="Search by name, contact, or email" value={search} onChange={(e) => { setSearch(e.target.value); setPage(1); }} />
+          <input className="filter-input search" type="search" placeholder="Search by name, contact, or email" value={search} onChange={(e) => { setSearch(e.target.value); setPage(1); }} />
           <div className="accounts-filters">
-            <select value={statusFilter} onChange={(e) => { setStatusFilter(e.target.value); setPage(1); }}>
+            <select className="filter-select" value={statusFilter} onChange={(e) => { setStatusFilter(e.target.value); setPage(1); }}>
               {['All', 'Active', 'Inactive'].map((s) => <option key={s}>{s === 'All' ? 'All Statuses' : s}</option>)}
             </select>
           </div>
@@ -1290,9 +1252,9 @@ function SuppliersPage({ navigate, showToast }) {
       </section>
 
       {suppliers.length ? (
-        <section className="panel content-panel">
-          <div className="table-shell">
-            <table className="data-table">
+        <section className="panel content-panel relative overflow-hidden">
+          <div className="corvex-table-wrapper">
+            <table className="corvex-table">
               <thead>
                 <tr><th>Supplier ID</th><th>Supplier Name</th><th>Contact</th><th>Email</th><th>Address</th><th>Status</th><th>Created At</th><th>Updated At</th><th>Actions</th></tr>
               </thead>
@@ -1350,14 +1312,14 @@ function SuppliersPage({ navigate, showToast }) {
               </div>
               <div className="form-group">
                 <label>Status</label>
-                <select value={form.status} onChange={(e) => setForm({ ...form, status: e.target.value })}>
+                <select className="filter-select" value={form.status} onChange={(e) => setForm({ ...form, status: e.target.value })}>
                   <option value="Active">Active</option>
                   <option value="Inactive">Inactive</option>
                 </select>
               </div>
               <div className="modal-actions">
-                <button type="button" className="button secondary" onClick={() => { setShowAddModal(false); setEditingSupplier(null); }}>Cancel</button>
-                <button type="submit" className="button">{editingSupplier ? 'Update' : 'Create'}</button>
+                <button type="button" className="inline-flex justify-center items-center gap-2 px-5 py-2.5 rounded-md bg-mint text-ink border-[1.5px] border-surface-3 shadow-none hover:border-blue hover:text-blue transition-all duration-160 cursor-pointer" onClick={() => { setShowAddModal(false); setEditingSupplier(null); }}>Cancel</button>
+                <button type="submit" className="inline-flex justify-center items-center gap-2 px-5 py-2.5 rounded-md border-0 bg-blue text-white font-semibold cursor-pointer transition-all duration-160 hover:-translate-y-[1px] hover:shadow-[0_4px_16px_rgba(37,99,235,0.35)] hover:brightness-105 active:translate-y-0">{editingSupplier ? 'Update' : 'Create'}</button>
               </div>
             </form>
           </div>
@@ -1421,25 +1383,25 @@ function BranchInventoryPage({ navigate, showToast }) {
   }
 
   return (
-    <div className="page">
-      <section className="panel content-panel">
-        <div className="panel-section-header">
+    <div className="relative z-10 grid gap-[22px] w-full">
+      <section className="panel content-panel relative overflow-hidden">
+        <div className="flex flex-col md:flex-row justify-between gap-4 items-start md:items-center mb-4">
           <h3>Branch Inventory</h3>
-          <p className="muted">{records.length} record{records.length !== 1 ? 's' : ''} in database</p>
+          <p className="text-ink/70">{records.length} record{records.length !== 1 ? 's' : ''} in database</p>
         </div>
         <div className="accounts-toolbar">
           <input
-            className="search-input"
+            className="filter-input search"
             type="search"
             placeholder="Search by product name, SKU, or ID"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
           />
           <div className="accounts-filters">
-            <select value={branchFilter} onChange={(e) => setBranchFilter(e.target.value)}>
+            <select className="filter-select" value={branchFilter} onChange={(e) => setBranchFilter(e.target.value)}>
               {branches.map((b) => <option key={b} value={b}>{b === 'All' ? 'All Branches' : b}</option>)}
             </select>
-            <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}>
+            <select className="filter-select" value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}>
               {['All', 'Sufficient', 'Low Stock', 'Out of Stock'].map((s) => (
                 <option key={s} value={s}>{s === 'All' ? 'All Statuses' : s}</option>
               ))}
@@ -1449,9 +1411,9 @@ function BranchInventoryPage({ navigate, showToast }) {
       </section>
 
       {filtered.length ? (
-        <section className="panel content-panel">
-          <div className="table-shell">
-            <table className="data-table">
+        <section className="panel content-panel relative overflow-hidden">
+          <div className="corvex-table-wrapper">
+            <table className="corvex-table">
               <thead>
                 <tr>
                   <th>Inventory ID</th>
@@ -1484,13 +1446,7 @@ function BranchInventoryPage({ navigate, showToast }) {
                     </td>
                     <td>{r.reorder_level}</td>
                     <td>
-                      <span style={{
-                        padding: '2px 8px', borderRadius: 999, fontSize: '0.78rem', fontWeight: 600,
-                        background: r.stock_status === 'Sufficient' ? 'rgba(16,185,129,0.1)' : r.stock_status === 'Out of Stock' ? 'rgba(239,68,68,0.1)' : 'rgba(245,158,11,0.1)',
-                        color:      r.stock_status === 'Sufficient' ? '#059669'               : r.stock_status === 'Out of Stock' ? '#dc2626'              : '#d97706',
-                      }}>
-                        {r.stock_status || '—'}
-                      </span>
+                      <StatusBadge status={r.stock_status || '—'} />
                     </td>
                     <td style={{ fontSize: '0.82rem' }}>{r.last_updated ? new Date(r.last_updated).toLocaleDateString('en-PH') : '—'}</td>
                     <td style={{ fontFamily: 'monospace', fontSize: '0.78rem' }}>{r.created_at ? new Date(r.created_at).toLocaleString() : '—'}</td>

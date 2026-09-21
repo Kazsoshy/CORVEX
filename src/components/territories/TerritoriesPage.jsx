@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { NavIcon } from '../../navIcons';
-import { EmptyState } from '../collector/EmptyState';
+import { EmptyState } from '../shared/EmptyState';
 import { fetchTerritories, createTerritory, updateTerritory, deleteTerritory } from '../../api/territoriesService';
 import { getCurrentUser } from '../../api/authService';
 
@@ -95,19 +95,15 @@ export function TerritoriesPage({ navigate, showToast }) {
 
   return (
     <div className="page-container">
-      <header className="page-toolbar">
-        <div className="page-toolbar-main">
-          <div className="page-toolbar-actions">
-            <button className="button" type="button" onClick={handleAdd}>Add Territory</button>
-          </div>
-        </div>
-      </header>
+      <div className="flex justify-end gap-2 mt-4 mb-4">
+        <button className="button" type="button" onClick={handleAdd}>Add Territory</button>
+      </div>
 
-      <section className="panel content-panel">
-        <div className="panel-section-header">
+      <section className="panel content-panel relative overflow-hidden">
+        <div className="flex flex-col md:flex-row justify-between gap-4 items-start md:items-center mb-4">
           <div>
             <h3>Territories</h3>
-            <p className="muted" style={{ margin: '2px 0 0', fontSize: '0.85rem' }}>
+            <p className="text-ink/70" style={{ margin: '2px 0 0', fontSize: '0.85rem' }}>
               Manage sales territories and coverage areas
             </p>
           </div>
@@ -123,8 +119,8 @@ export function TerritoriesPage({ navigate, showToast }) {
           </div>
         </div>
 
-        <div className="table-shell">
-          <table className="data-table">
+        <div className="corvex-table-wrapper">
+          <table className="corvex-table">
             <thead>
               <tr>
                 <th>ID</th>
@@ -212,8 +208,8 @@ export function TerritoriesPage({ navigate, showToast }) {
               </div>
 
               <div className="modal-actions">
-                <button type="button" className="button ghost" onClick={() => setShowForm(false)}>Cancel</button>
-                <button type="submit" className="button">{editing ? 'Save Changes' : 'Create Territory'}</button>
+                <button type="button" className="inline-flex justify-center items-center gap-2 px-5 py-2.5 rounded-md bg-transparent text-blue border-[1.5px] border-blue-30 shadow-none hover:bg-blue-08 transition-all duration-160 cursor-pointer" onClick={() => setShowForm(false)}>Cancel</button>
+                <button type="submit" className="inline-flex justify-center items-center gap-2 px-5 py-2.5 rounded-md border-0 bg-blue text-white font-semibold cursor-pointer transition-all duration-160 hover:-translate-y-[1px] hover:shadow-[0_4px_16px_rgba(37,99,235,0.35)] hover:brightness-105 active:translate-y-0">{editing ? 'Save Changes' : 'Create Territory'}</button>
               </div>
             </form>
           </div>

@@ -55,15 +55,15 @@ export function CustomerCard({ customer, onViewDetails, onLogVisit, onNavigate, 
       </div>
 
       <div className="account-card-actions">
-        <button className="button" type="button" onClick={() => onViewDetails(customer)}>
+        <button className="inline-flex justify-center items-center gap-2 px-5 py-2.5 rounded-md border-0 bg-blue text-white font-semibold cursor-pointer transition-all duration-160 hover:-translate-y-[1px] hover:shadow-[0_4px_16px_rgba(37,99,235,0.35)] hover:brightness-105 active:translate-y-0" type="button" onClick={() => onViewDetails(customer)}>
           View Customer
         </button>
         {onLogVisit ? (
-          <button className="button secondary" type="button" onClick={() => onLogVisit(customer)}>
+          <button className="inline-flex justify-center items-center gap-2 px-5 py-2.5 rounded-md bg-mint text-ink border-[1.5px] border-surface-3 shadow-none hover:border-blue hover:text-blue transition-all duration-160 cursor-pointer" type="button" onClick={() => onLogVisit(customer)}>
             Log Visit
           </button>
         ) : null}
-        <button className="button ghost" type="button" onClick={() => onNavigate(customer)}>
+        <button className="inline-flex justify-center items-center gap-2 px-5 py-2.5 rounded-md bg-transparent text-blue border-[1.5px] border-blue-30 shadow-none hover:bg-blue-08 transition-all duration-160 cursor-pointer" type="button" onClick={() => onNavigate(customer)}>
           Open Map
         </button>
       </div>

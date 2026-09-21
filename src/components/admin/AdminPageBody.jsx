@@ -12,7 +12,7 @@ import {
   getBranchById, getUserById,
 } from '../../data/adminMockData';
 import { fetchAuditLogs } from '../../api/adminService';
-import { EmptyState } from '../collector/EmptyState';
+import { EmptyState } from '../shared/EmptyState';
 import { NavIcon } from '../../navIcons';
 
 function btn(v) {
@@ -21,18 +21,23 @@ function btn(v) {
   return 'button';
 }
 
-function Toolbar({ actions, onAction }) {
-  if (!actions?.length) return null;
+function Toolbar({ actions, onAction, children }) {
+  if (!actions?.length && !children) return null;
   return (
-    <header className="page-toolbar">
-      <div className="page-toolbar-main">
-        <div className="page-toolbar-actions">
-          {actions.map((a) => (
-            <button key={a.label} className={btn(a.variant)} type="button" onClick={() => onAction(a)}>{a.label}</button>
-          ))}
+    <section className="panel content-panel filter-panel">
+      <div className="filter-panel-header">
+        <div className="filter-panel-search" style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
+          {children}
         </div>
+        {actions?.length > 0 && (
+          <div className="filter-panel-actions">
+            {actions.map((a) => (
+              <button key={a.label} className={btn(a.variant)} type="button" onClick={() => onAction(a)}>{a.label}</button>
+            ))}
+          </div>
+        )}
       </div>
-    </header>
+    </section>
   );
 }
 
@@ -52,10 +57,10 @@ function Stats({ stats }) {
 
 function Card({ title, sub, children, action, onAction }) {
   return (
-    <section className="panel content-panel">
-      <div className="panel-section-header">
-        <div><h3>{title}</h3>{sub && <p className="muted" style={{ margin: '2px 0 0', fontSize: '0.85rem' }}>{sub}</p>}</div>
-        {action && <button className="button ghost" type="button" onClick={onAction}>{action}</button>}
+    <section className="panel content-panel relative overflow-hidden">
+      <div className="flex flex-col md:flex-row justify-between gap-4 items-start md:items-center mb-4">
+        <div><h3>{title}</h3>{sub && <p className="text-ink/70" style={{ margin: '2px 0 0', fontSize: '0.85rem' }}>{sub}</p>}</div>
+        {action && <button className="inline-flex justify-center items-center gap-2 px-5 py-2.5 rounded-md bg-transparent text-blue border-[1.5px] border-blue-30 shadow-none hover:bg-blue-08 transition-all duration-160 cursor-pointer" type="button" onClick={onAction}>{action}</button>}
       </div>
       {children}
     </section>
@@ -78,12 +83,12 @@ function StatusPill({ status }) {
 // ── Dashboard ─────────────────────────────────────────────────────────────────
 function DashboardPage({ navigate, showToast }) {
   return (
-    <div className="page">
+    <div className="relative z-10 grid gap-[22px] w-full">
       <section className="panel dashboard-greeting">
-        <div className="dashboard-greeting-main">
-          <p className="dashboard-eyebrow">Operating Manager Administration</p>
+        <div className="flex flex-col gap-1">
+          <p className="text-[0.82rem] font-bold tracking-widest uppercase text-navy/60 m-0">Operating Manager Administration</p>
           <h2>{ADMIN_PROFILE.name}</h2>
-          <p className="muted">System Administration</p>
+          <p className="text-ink/70">System Administration</p>
         </div>
       </section>
 
@@ -104,7 +109,7 @@ function DashboardPage({ navigate, showToast }) {
               <XAxis dataKey="month" tick={{ fontSize: 12 }} />
               <YAxis tick={{ fontSize: 12 }} />
               <Tooltip />
-              <Area type="monotone" dataKey="users" name="Users" stroke="#2563eb" fill="#2563eb" fillOpacity={0.1} strokeWidth={2} />
+              <Area type="monotone" dataKey="users" name="Users" stroke="#093850" fill="#093850" fillOpacity={0.1} strokeWidth={2} />
             </AreaChart>
           </ResponsiveContainer>
         </Card>
@@ -117,7 +122,7 @@ function DashboardPage({ navigate, showToast }) {
               <YAxis domain={[0, 100]} tick={{ fontSize: 12 }} />
               <Tooltip />
               <Legend />
-              <Bar dataKey="performance" name="Performance" fill="#2563eb" radius={[4, 4, 0, 0]} />
+              <Bar dataKey="performance" name="Performance" fill="#093850" radius={[4, 4, 0, 0]} />
               <Bar dataKey="risk" name="Risk Score" fill="#ef4444" radius={[4, 4, 0, 0]} />
             </BarChart>
           </ResponsiveContainer>
@@ -126,10 +131,10 @@ function DashboardPage({ navigate, showToast }) {
 
       <div className="grid two-up">
         <Card title="Inventory Alerts" sub="Low stock & out of stock" action="Manage Inventory" onAction={() => navigate('/operating-manager/admin/inventory')}>
-          <ul className="widget-list">
+          <ul className="list-none p-0 m-0 flex flex-col gap-3">
             {ADMIN_INVENTORY.filter(p => p.status !== 'Sufficient').map(p => (
               <li key={p.id}>
-                <div><strong>{p.name}</strong><span className="muted">{p.branch}</span></div>
+                <div><strong>{p.name}</strong><span className="text-ink/70">{p.branch}</span></div>
                 <StatusPill status={p.status === 'Out of Stock' ? 'Inactive' : 'Pending'} />
               </li>
             ))}
@@ -137,10 +142,10 @@ function DashboardPage({ navigate, showToast }) {
         </Card>
 
         <Card title="Pending Transfer Requests" sub="Awaiting approval" action="View All" onAction={() => navigate('/operating-manager/admin/inventory')}>
-          <ul className="widget-list">
+          <ul className="list-none p-0 m-0 flex flex-col gap-3">
             {TRANSFER_REQUESTS.filter(t => t.status === 'Pending').map(t => (
               <li key={t.id}>
-                <div><strong>{t.product}</strong><span className="muted">{t.from} → {t.to}</span></div>
+                <div><strong>{t.product}</strong><span className="text-ink/70">{t.from} → {t.to}</span></div>
                 <StatusPill status={t.status} />
               </li>
             ))}
@@ -148,8 +153,8 @@ function DashboardPage({ navigate, showToast }) {
         </Card>
       </div>
 
-      <section className="panel content-panel">
-        <div className="panel-section-header"><h3>Quick Access</h3></div>
+      <section className="panel content-panel relative overflow-hidden">
+        <div className="flex flex-col md:flex-row justify-between gap-4 items-start md:items-center mb-4"><h3>Quick Access</h3></div>
         <div className="quick-link-grid">
           {[
             { label: 'User Management',      to: '/operating-manager/admin/users',      icon: 'account' },
@@ -160,7 +165,7 @@ function DashboardPage({ navigate, showToast }) {
           ].map(item => (
             <button key={item.to} className="quick-link-card" type="button" onClick={() => navigate(item.to)} style={{ textAlign: 'left', border: 'none', background: 'none', padding: 0, cursor: 'pointer' }}>
               <span className="quick-link-icon"><NavIcon name={item.icon} /></span>
-              <span className="quick-link-copy"><strong>{item.label}</strong><span className="muted">Open</span></span>
+              <span className="quick-link-copy"><strong>{item.label}</strong><span className="text-ink/70">Open</span></span>
               <span className="quick-link-arrow">→</span>
             </button>
           ))}
@@ -227,46 +232,45 @@ function UserListPage({ navigate, showToast }) {
     }
   };
 
-  if (loading) return <div className="page"><section className="panel content-panel"><p>Loading users...</p></section></div>;
+  if (loading) return <div className="relative z-10 grid gap-[22px] w-full"><section className="panel content-panel relative overflow-hidden"><p>Loading users...</p></section></div>;
 
   return (
-    <div className="page">
-      <Toolbar actions={[{ label: '+ Add User', action: 'add' }]} onAction={() => navigate('/operating-manager/admin/users/add')} />
-
-      <section className="panel content-panel">
-        <div className="accounts-toolbar">
-          <input className="search-input" type="search" placeholder="Search by name or email…" value={search} onChange={e => setSearch(e.target.value)} />
-          <div className="accounts-filters">
-            <select value={roleFilter} onChange={e => setRoleFilter(e.target.value)}>
-              <option value="All">All Roles</option>
-              {roles.map(r => <option key={r.role_id} value={r.slug}>{r.role_name}</option>)}
-            </select>
-            <select value={branchFilter} onChange={e => setBranchFilter(e.target.value)}>
-              <option value="All">All Branches</option>
-              {branches.map(b => <option key={b.branch_id} value={b.branch_id}>{b.branch_name}</option>)}
-            </select>
-            <select value={statusFilter} onChange={e => setStatusFilter(e.target.value)}>
-              {['All', 'Active', 'Inactive'].map(s => <option key={s}>{s}</option>)}
-            </select>
-          </div>
-        </div>
-      </section>
-
+    <div className="relative z-10 grid gap-[22px] w-full">
       {confirmDisable && (
-        <section className="panel content-panel" style={{ borderColor: '#fca5a5', background: 'rgba(220,38,38,0.04)' }}>
+        <section className="panel content-panel relative overflow-hidden" style={{ borderColor: '#fca5a5', background: 'rgba(220,38,38,0.04)', marginBottom: 24 }}>
           <p>Disable <strong>{confirmDisable.first_name} {confirmDisable.last_name}</strong>? They will lose system access immediately.</p>
           <div style={{ display: 'flex', gap: 10, marginTop: 12 }}>
-            <button className="button" type="button" style={{ background: '#dc2626' }} onClick={() => handleDisable(confirmDisable)}>Confirm Disable</button>
-            <button className="button secondary" type="button" onClick={() => setConfirmDisable(null)}>Cancel</button>
+            <button className="inline-flex justify-center items-center gap-2 px-5 py-2.5 rounded-md border-0 bg-blue text-white font-semibold cursor-pointer transition-all duration-160 hover:-translate-y-[1px] hover:shadow-[0_4px_16px_rgba(37,99,235,0.35)] hover:brightness-105 active:translate-y-0" type="button" style={{ background: '#dc2626' }} onClick={() => handleDisable(confirmDisable)}>Confirm Disable</button>
+            <button className="inline-flex justify-center items-center gap-2 px-5 py-2.5 rounded-md bg-mint text-ink border-[1.5px] border-surface-3 shadow-none hover:border-blue hover:text-blue transition-all duration-160 cursor-pointer" type="button" onClick={() => setConfirmDisable(null)}>Cancel</button>
           </div>
         </section>
       )}
 
-      <section className="panel content-panel">
-        <div className="panel-section-header"><h3>Users <span className="muted" style={{ fontWeight: 400, fontSize: '0.88rem' }}>({filtered.length})</span></h3></div>
+      <section className="panel content-panel relative overflow-hidden">
+        <div className="filter-panel-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20, flexWrap: 'wrap', gap: 10 }}>
+          <div className="filter-panel-search" style={{ display: 'flex', gap: 10, flexWrap: 'nowrap', alignItems: 'center', flex: 1 }}>
+            <input className="filter-input search" type="search" placeholder="Search by name or email…" value={search} onChange={e => setSearch(e.target.value)} />
+            <select className="filter-select" value={statusFilter} onChange={e => setStatusFilter(e.target.value)}>
+              {['All', 'Active', 'Inactive'].map(s => <option key={s}>{s}</option>)}
+            </select>
+            <select className="filter-select" value={roleFilter} onChange={e => setRoleFilter(e.target.value)}>
+              <option value="All">All Roles</option>
+              {roles.map(r => <option key={r.role_id} value={r.slug}>{r.role_name}</option>)}
+            </select>
+            <select className="filter-select" value={branchFilter} onChange={e => setBranchFilter(e.target.value)}>
+              <option value="All">All Branches</option>
+              {branches.map(b => <option key={b.branch_id} value={b.branch_id}>{b.branch_name}</option>)}
+            </select>
+          </div>
+          <div className="filter-panel-actions">
+            <button className="inline-flex justify-center items-center gap-2 px-5 py-2.5 rounded-md border-0 bg-blue text-white font-semibold cursor-pointer transition-all duration-160 hover:-translate-y-[1px] hover:shadow-[0_4px_16px_rgba(37,99,235,0.35)] hover:brightness-105 active:translate-y-0" type="button" onClick={() => navigate('/operating-manager/admin/users/add')}>+ Add User</button>
+          </div>
+        </div>
+
+        <div className="flex flex-col md:flex-row justify-between gap-4 items-start md:items-center mb-4"><h3>Users <span className="text-ink/70" style={{ fontWeight: 400, fontSize: '0.88rem' }}>({filtered.length})</span></h3></div>
         {filtered.length ? (
-          <div className="table-shell">
-            <table className="data-table">
+          <div className="corvex-table-wrapper">
+            <table className="corvex-table">
               <thead>
                 <tr><th>User ID</th><th>First Name</th><th>Last Name</th><th>Email</th><th>Role</th><th>Branch</th><th>Status</th><th>Created At</th><th>Updated At</th><th>Actions</th></tr>
               </thead>
@@ -388,12 +392,12 @@ function UserFormPage({ userId, navigate, showToast }) {
     }
   };
 
-  if (loading) return <div className="page"><section className="panel content-panel"><p>Loading...</p></section></div>;
+  if (loading) return <div className="relative z-10 grid gap-[22px] w-full"><section className="panel content-panel relative overflow-hidden"><p>Loading...</p></section></div>;
 
   return (
-    <div className="page">
+    <div className="relative z-10 grid gap-[22px] w-full">
       <section className="panel form-panel content-panel">
-        <div className="panel-section-header"><h3>{userId ? 'Edit User' : 'Add New User'}</h3></div>
+        <div className="flex flex-col md:flex-row justify-between gap-4 items-start md:items-center mb-4"><h3>{userId ? 'Edit User' : 'Add New User'}</h3></div>
         <div className="grid two-up">
           <div className="form-group">
             <label>First Name <span className="required">*</span></label>
@@ -417,7 +421,7 @@ function UserFormPage({ userId, navigate, showToast }) {
           </div>
           <div className="form-group">
             <label>Role <span className="required">*</span></label>
-            <select value={form.role_id} onChange={e => setForm({ ...form, role_id: e.target.value })}>
+            <select className="filter-select" value={form.role_id} onChange={e => setForm({ ...form, role_id: e.target.value })}>
               <option value="">Select role</option>
               {roles.map(r => <option key={r.role_id} value={r.role_id}>{r.role_name}</option>)}
             </select>
@@ -425,7 +429,7 @@ function UserFormPage({ userId, navigate, showToast }) {
           </div>
           <div className="form-group">
             <label>Branch <span className="required">*</span></label>
-            <select value={form.branch_id} onChange={e => setForm({ ...form, branch_id: e.target.value })}>
+            <select className="filter-select" value={form.branch_id} onChange={e => setForm({ ...form, branch_id: e.target.value })}>
               <option value="">Select branch</option>
               {branches.map(b => <option key={b.branch_id} value={b.branch_id}>{b.branch_name}</option>)}
             </select>
@@ -433,23 +437,17 @@ function UserFormPage({ userId, navigate, showToast }) {
           </div>
           <div className="form-group">
             <label>Status</label>
-            <select value={form.status} onChange={e => setForm({ ...form, status: e.target.value })}>
+            <select className="filter-select" value={form.status} onChange={e => setForm({ ...form, status: e.target.value })}>
               <option value="Active">Active</option>
               <option value="Inactive">Inactive</option>
             </select>
           </div>
         </div>
       </section>
-      <Toolbar
-        actions={[
-          { label: userId ? 'Save Changes' : 'Create User', action: 'save' },
-          { label: 'Cancel', to: '/operating-manager/admin/users', variant: 'secondary' },
-        ]}
-        onAction={a => {
-          if (a.action === 'save') handleSubmit();
-          else navigate(a.to);
-        }}
-      />
+      <div className="flex justify-end gap-2 mt-2">
+        <button className="button secondary" type="button" onClick={() => navigate('/operating-manager/admin/users')}>Cancel</button>
+        <button className="button" type="button" onClick={handleSubmit}>{userId ? 'Save Changes' : 'Create User'}</button>
+      </div>
     </div>
   );
 }
@@ -482,9 +480,9 @@ function BranchListPage({ navigate, showToast }) {
 
   if (loading) {
     return (
-      <div className="page">
-        <section className="panel content-panel">
-          <div className="panel-section-header"><h3>All Branches</h3></div>
+      <div className="relative z-10 grid gap-[22px] w-full">
+        <section className="panel content-panel relative overflow-hidden">
+          <div className="flex flex-col md:flex-row justify-between gap-4 items-start md:items-center mb-4"><h3>All Branches</h3></div>
           <div style={{ padding: '40px', textAlign: 'center', color: '#64748b' }}>Loading branches...</div>
         </section>
       </div>
@@ -493,9 +491,9 @@ function BranchListPage({ navigate, showToast }) {
 
   if (error) {
     return (
-      <div className="page">
-        <section className="panel content-panel">
-          <div className="panel-section-header"><h3>All Branches</h3></div>
+      <div className="relative z-10 grid gap-[22px] w-full">
+        <section className="panel content-panel relative overflow-hidden">
+          <div className="flex flex-col md:flex-row justify-between gap-4 items-start md:items-center mb-4"><h3>All Branches</h3></div>
           <div style={{ padding: '40px', textAlign: 'center', color: '#dc2626' }}>{error}</div>
         </section>
       </div>
@@ -503,12 +501,14 @@ function BranchListPage({ navigate, showToast }) {
   }
 
   return (
-    <div className="page">
-      <Toolbar actions={[{ label: '+ Add Branch', action: 'add' }]} onAction={() => showToast('Add Branch form coming soon.', 'success')} />
-      <section className="panel content-panel">
-        <div className="panel-section-header"><h3>All Branches <span className="muted" style={{ fontWeight: 400, fontSize: '0.88rem' }}>({branches.length})</span></h3></div>
-        <div className="table-shell">
-          <table className="data-table">
+    <div className="relative z-10 grid gap-[22px] w-full">
+      <section className="panel content-panel relative overflow-hidden">
+        <div className="flex flex-col md:flex-row justify-between gap-4 items-start md:items-center mb-4">
+          <h3>All Branches <span className="text-ink/70" style={{ fontWeight: 400, fontSize: '0.88rem' }}>({branches.length})</span></h3>
+          <button className="button" type="button" onClick={() => showToast('Add Branch form coming soon.', 'success')}>+ Add Branch</button>
+        </div>
+        <div className="corvex-table-wrapper">
+          <table className="corvex-table">
             <thead><tr><th>Branch ID</th><th>Branch Name</th><th>Address</th><th>Latitude</th><th>Longitude</th><th>Contact No</th><th>Email</th><th>Status</th><th>Created At</th><th>Actions</th></tr></thead>
             <tbody>
               {branches.length === 0 ? (
@@ -538,11 +538,11 @@ function BranchListPage({ navigate, showToast }) {
         </div>
       </section>
       {confirmDisable && (
-        <section className="panel content-panel" style={{ borderColor: '#fca5a5', background: 'rgba(220,38,38,0.04)' }}>
+        <section className="panel content-panel relative overflow-hidden" style={{ borderColor: '#fca5a5', background: 'rgba(220,38,38,0.04)' }}>
           <p>Disable <strong>{confirmDisable.branch_name}</strong>? This will restrict all branch operations.</p>
           <div style={{ display: 'flex', gap: 10, marginTop: 12 }}>
-            <button className="button" type="button" style={{ background: '#dc2626' }} onClick={() => { showToast(`${confirmDisable.branch_name} disabled.`, 'success'); setConfirmDisable(null); }}>Confirm Disable</button>
-            <button className="button secondary" type="button" onClick={() => setConfirmDisable(null)}>Cancel</button>
+            <button className="inline-flex justify-center items-center gap-2 px-5 py-2.5 rounded-md border-0 bg-blue text-white font-semibold cursor-pointer transition-all duration-160 hover:-translate-y-[1px] hover:shadow-[0_4px_16px_rgba(37,99,235,0.35)] hover:brightness-105 active:translate-y-0" type="button" style={{ background: '#dc2626' }} onClick={() => { showToast(`${confirmDisable.branch_name} disabled.`, 'success'); setConfirmDisable(null); }}>Confirm Disable</button>
+            <button className="inline-flex justify-center items-center gap-2 px-5 py-2.5 rounded-md bg-mint text-ink border-[1.5px] border-surface-3 shadow-none hover:border-blue hover:text-blue transition-all duration-160 cursor-pointer" type="button" onClick={() => setConfirmDisable(null)}>Cancel</button>
           </div>
         </section>
       )}
@@ -555,12 +555,12 @@ function BranchDetailPage({ branchId, navigate, showToast }) {
   if (!branch) return <EmptyState title="Branch not found" actionLabel="Back" onAction={() => navigate('/admin/branches')} />;
   const branchUsers = USERS.filter(u => u.branch === branch.name);
   return (
-    <div className="page">
+    <div className="relative z-10 grid gap-[22px] w-full">
       <section className="panel dashboard-greeting">
-        <div className="dashboard-greeting-main">
-          <p className="dashboard-eyebrow">{branch.region}</p>
+        <div className="flex flex-col gap-1">
+          <p className="text-[0.82rem] font-bold tracking-widest uppercase text-navy/60 m-0">{branch.region}</p>
           <h2>{branch.name}</h2>
-          <p className="muted">{branch.city} · Manager: {branch.manager}</p>
+          <p className="text-ink/70">{branch.city} · Manager: {branch.manager}</p>
         </div>
       </section>
       <Stats stats={[
@@ -569,17 +569,20 @@ function BranchDetailPage({ branchId, navigate, showToast }) {
         { label: 'Sales Agents',    value: String(branch.salesAgents) },
         { label: 'Warehouse Staff', value: String(branch.warehouseStaff) },
       ]} />
-      <section className="panel content-panel">
-        <div className="panel-section-header"><h3>Branch Users</h3></div>
-        <div className="table-shell">
-          <table className="data-table">
+      <section className="panel content-panel relative overflow-hidden">
+        <div className="flex flex-col md:flex-row justify-between gap-4 items-start md:items-center mb-4"><h3>Branch Users</h3></div>
+        <div className="corvex-table-wrapper">
+          <table className="corvex-table">
             <thead><tr><th>Name</th><th>Role</th><th>Status</th><th>Last Login</th></tr></thead>
             <tbody>{branchUsers.map(u => <tr key={u.id}><td>{u.name}</td><td>{u.role}</td><td><StatusPill status={u.status} /></td><td>{u.lastLogin}</td></tr>)}</tbody>
           </table>
         </div>
+        <div className="flex justify-end gap-2 mt-6">
+          <button className="button ghost" type="button" onClick={() => navigate('/admin/branches')}>Back</button>
+          <button className="button secondary" type="button" onClick={() => showToast('Assign Manager opened.', 'success')}>Assign Manager</button>
+          <button className="button" type="button" onClick={() => showToast('Edit Branch opened.', 'success')}>Edit Branch</button>
+        </div>
       </section>
-      <Toolbar actions={[{ label: 'Edit Branch', action: 'edit' }, { label: 'Assign Manager', action: 'assign', variant: 'secondary' }, { label: 'Back', to: '/admin/branches', variant: 'ghost' }]}
-        onAction={a => { if (a.to) navigate(a.to); else showToast(`${a.label} opened.`, 'success'); }} />
     </div>
   );
 }
@@ -590,18 +593,20 @@ function InventoryPage({ navigate, showToast }) {
   const tabs = [{ key: 'products', label: 'Products' }, { key: 'transfers', label: 'Transfer Requests' }, { key: 'restock', label: 'Restock Requests' }];
 
   return (
-    <div className="page">
-      <div className="segmented-control" style={{ marginBottom: 24 }}>
+    <div className="relative z-10 grid gap-[22px] w-full">
+      <div className="segmented-control">
         {tabs.map(t => <button key={t.key} className={tab === t.key ? 'segment active' : 'segment'} type="button" onClick={() => setTab(t.key)}>{t.label}</button>)}
       </div>
 
       {tab === 'products' && (
         <>
-          <Toolbar actions={[{ label: 'Export Inventory', action: 'export' }]} onAction={() => showToast('Inventory exported.', 'success')} />
-          <section className="panel content-panel">
-            <div className="panel-section-header"><h3>All Products</h3></div>
-            <div className="table-shell">
-              <table className="data-table">
+          <section className="panel content-panel relative overflow-hidden">
+            <div className="flex flex-col md:flex-row justify-between gap-4 items-start md:items-center mb-4">
+              <h3>All Products</h3>
+              <button className="button" type="button" onClick={() => showToast('Inventory exported.', 'success')}>Export Inventory</button>
+            </div>
+            <div className="corvex-table-wrapper">
+              <table className="corvex-table">
                 <thead><tr><th>Product</th><th>SKU</th><th>Branch</th><th>Quantity</th><th>Status</th><th>Last Updated</th><th>Actions</th></tr></thead>
                 <tbody>
                   {ADMIN_INVENTORY.map(p => (
@@ -620,10 +625,10 @@ function InventoryPage({ navigate, showToast }) {
       )}
 
       {tab === 'transfers' && (
-        <section className="panel content-panel">
-          <div className="panel-section-header"><h3>Transfer Requests</h3></div>
-          <div className="table-shell">
-            <table className="data-table">
+        <section className="panel content-panel relative overflow-hidden">
+          <div className="flex flex-col md:flex-row justify-between gap-4 items-start md:items-center mb-4"><h3>Transfer Requests</h3></div>
+          <div className="corvex-table-wrapper">
+            <table className="corvex-table">
               <thead><tr><th>Product</th><th>From</th><th>To</th><th>Qty</th><th>Requested By</th><th>Date</th><th>Status</th><th>Actions</th></tr></thead>
               <tbody>
                 {TRANSFER_REQUESTS.map(t => (
@@ -646,10 +651,10 @@ function InventoryPage({ navigate, showToast }) {
       )}
 
       {tab === 'restock' && (
-        <section className="panel content-panel">
-          <div className="panel-section-header"><h3>Restock Requests</h3></div>
-          <div className="table-shell">
-            <table className="data-table">
+        <section className="panel content-panel relative overflow-hidden">
+          <div className="flex flex-col md:flex-row justify-between gap-4 items-start md:items-center mb-4"><h3>Restock Requests</h3></div>
+          <div className="corvex-table-wrapper">
+            <table className="corvex-table">
               <thead><tr><th>Product</th><th>Branch</th><th>Qty</th><th>Requested By</th><th>Date</th><th>Status</th><th>Actions</th></tr></thead>
               <tbody>
                 {RESTOCK_REQUESTS.map(r => (
@@ -678,11 +683,16 @@ function ReportsPage({ showToast }) {
     { key: 'collections', label: 'Collections' }, { key: 'sales', label: 'Sales' },
     { key: 'branches', label: 'Branch Performance' }, { key: 'employees', label: 'Employee Performance' },
   ];
-  const exportRow = <Toolbar actions={[{ label: 'Export PDF', action: 'pdf' }, { label: 'Export Excel', action: 'excel', variant: 'secondary' }]} onAction={a => showToast(`${a.label} started.`, 'success')} />;
+  const exportRow = (
+    <div className="flex justify-end gap-2 mb-4">
+      <button className="button secondary" type="button" onClick={() => showToast('Export Excel started.', 'success')}>Export Excel</button>
+      <button className="button" type="button" onClick={() => showToast('Export PDF started.', 'success')}>Export PDF</button>
+    </div>
+  );
 
   return (
-    <div className="page">
-      <div className="segmented-control" style={{ marginBottom: 24 }}>
+    <div className="relative z-10 grid gap-[22px] w-full">
+      <div className="segmented-control">
         {tabs.map(t => <button key={t.key} className={tab === t.key ? 'segment active' : 'segment'} type="button" onClick={() => setTab(t.key)}>{t.label}</button>)}
       </div>
 
@@ -694,7 +704,7 @@ function ReportsPage({ showToast }) {
               <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
               <XAxis dataKey="month" tick={{ fontSize: 12 }} /><YAxis tick={{ fontSize: 11 }} tickFormatter={v => `${(v / 1000000).toFixed(1)}M`} />
               <Tooltip formatter={v => `₱${(v / 1000000).toFixed(2)}M`} />
-              <Area type="monotone" dataKey="total" name="Collections" stroke="#2563eb" fill="#2563eb" fillOpacity={0.1} strokeWidth={2} />
+              <Area type="monotone" dataKey="total" name="Collections" stroke="#093850" fill="#093850" fillOpacity={0.1} strokeWidth={2} />
             </AreaChart>
           </ResponsiveContainer>
         </Card>
@@ -723,7 +733,7 @@ function ReportsPage({ showToast }) {
               <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
               <XAxis dataKey="branch" tick={{ fontSize: 12 }} /><YAxis domain={[0, 100]} tick={{ fontSize: 12 }} />
               <Tooltip /><Legend />
-              <Bar dataKey="performance" name="Performance" fill="#2563eb" radius={[4, 4, 0, 0]} />
+              <Bar dataKey="performance" name="Performance" fill="#093850" radius={[4, 4, 0, 0]} />
               <Bar dataKey="risk" name="Risk Score" fill="#ef4444" radius={[4, 4, 0, 0]} />
             </BarChart>
           </ResponsiveContainer>
@@ -733,8 +743,8 @@ function ReportsPage({ showToast }) {
 
       {tab === 'employees' && (<>
         <Card title="Employee Distribution by Role">
-          <div className="table-shell">
-            <table className="data-table">
+          <div className="corvex-table-wrapper">
+            <table className="corvex-table">
               <thead><tr><th>Role</th><th>Count</th><th>Active</th><th>Inactive</th></tr></thead>
               <tbody>
                 {['Operating Manager', 'Branch Manager', 'Collector', 'Sales Agent', 'Warehouse Staff', 'Customer'].map(role => {
@@ -782,9 +792,9 @@ function AuditLogsPage({ showToast }) {
 
   if (loading) {
     return (
-      <div className="page">
-        <section className="panel content-panel">
-          <div className="panel-section-header"><h3>Audit Logs</h3></div>
+      <div className="relative z-10 grid gap-[22px] w-full">
+        <section className="panel content-panel relative overflow-hidden">
+          <div className="flex flex-col md:flex-row justify-between gap-4 items-start md:items-center mb-4"><h3>Audit Logs</h3></div>
           <div style={{ padding: '40px', textAlign: 'center', color: '#64748b' }}>Loading audit logs...</div>
         </section>
       </div>
@@ -793,9 +803,9 @@ function AuditLogsPage({ showToast }) {
 
   if (error) {
     return (
-      <div className="page">
-        <section className="panel content-panel">
-          <div className="panel-section-header"><h3>Audit Logs</h3></div>
+      <div className="relative z-10 grid gap-[22px] w-full">
+        <section className="panel content-panel relative overflow-hidden">
+          <div className="flex flex-col md:flex-row justify-between gap-4 items-start md:items-center mb-4"><h3>Audit Logs</h3></div>
           <div style={{ padding: '40px', textAlign: 'center', color: '#dc2626' }}>{error}</div>
         </section>
       </div>
@@ -803,8 +813,8 @@ function AuditLogsPage({ showToast }) {
   }
 
   return (
-    <div className="page">
-      <section className="panel content-panel">
+    <div className="relative z-10 grid gap-[22px] w-full">
+      <section className="panel content-panel relative overflow-hidden">
         <div className="accounts-filters">
           <input 
             type="text" 
@@ -815,11 +825,13 @@ function AuditLogsPage({ showToast }) {
           />
         </div>
       </section>
-      <Toolbar actions={[{ label: 'Export Logs', action: 'export' }]} onAction={() => showToast('Logs exported.', 'success')} />
-      <section className="panel content-panel">
-        <div className="panel-section-header"><h3>Audit Log <span className="muted" style={{ fontWeight: 400, fontSize: '0.88rem' }}>({filtered.length} entries)</span></h3></div>
-        <div className="table-shell">
-          <table className="data-table">
+      <section className="panel content-panel relative overflow-hidden">
+        <div className="flex flex-col md:flex-row justify-between gap-4 items-start md:items-center mb-4">
+          <h3>Audit Log <span className="text-ink/70" style={{ fontWeight: 400, fontSize: '0.88rem' }}>({filtered.length} entries)</span></h3>
+          <button className="button" type="button" onClick={() => showToast('Logs exported.', 'success')}>Export Logs</button>
+        </div>
+        <div className="corvex-table-wrapper">
+          <table className="corvex-table">
             <thead><tr><th>Log ID</th><th>User ID</th><th>Action</th><th>IP Address</th><th>Status Details</th><th>Created At</th></tr></thead>
             <tbody>
               {filtered.length === 0 ? (
@@ -847,8 +859,8 @@ function AuditLogsPage({ showToast }) {
 // ── Notifications & Profile ───────────────────────────────────────────────────
 function NotificationsPage({ showToast }) {
   return (
-    <div className="page">
-      <section className="panel content-panel">
+    <div className="relative z-10 grid gap-[22px] w-full">
+      <section className="panel content-panel relative overflow-hidden">
         <EmptyState title="No new notifications" description="System notifications will appear here." />
       </section>
     </div>
@@ -857,9 +869,9 @@ function NotificationsPage({ showToast }) {
 
 function ProfilePage({ navigate, showToast }) {
   return (
-    <div className="page">
-      <section className="panel content-panel">
-        <div className="panel-section-header"><h3>Admin Profile</h3></div>
+    <div className="relative z-10 grid gap-[22px] w-full">
+      <section className="panel content-panel relative overflow-hidden">
+        <div className="flex flex-col md:flex-row justify-between gap-4 items-start md:items-center mb-4"><h3>Admin Profile</h3></div>
         <ul className="info-grid">
           <li><span className="info-item-label">Name</span><span className="info-item-value">{ADMIN_PROFILE.name}</span></li>
           <li><span className="info-item-label">Employee ID</span><span className="info-item-value">{ADMIN_PROFILE.employeeId}</span></li>
@@ -867,9 +879,12 @@ function ProfilePage({ navigate, showToast }) {
           <li><span className="info-item-label">Phone</span><span className="info-item-value">{ADMIN_PROFILE.phone}</span></li>
           <li><span className="info-item-label">Role</span><span className="info-item-value">{ADMIN_PROFILE.role}</span></li>
         </ul>
+        <div className="flex justify-end gap-2 mt-6">
+          <button className="button ghost" type="button" onClick={() => {/* requestLogout() */ showToast('Logout clicked.', 'success')}}>Logout</button>
+          <button className="button secondary" type="button" onClick={() => showToast('Change Password opened.', 'success')}>Change Password</button>
+          <button className="button" type="button" onClick={() => showToast('Update Profile opened.', 'success')}>Update Profile</button>
+        </div>
       </section>
-      <Toolbar actions={[{ label: 'Update Profile', action: 'update' }, { label: 'Change Password', action: 'pw', variant: 'secondary' }, { label: 'Logout', action: 'logout', variant: 'ghost' }]}
-        onAction={a => { if (a.action === 'logout') requestLogout(); else showToast(`${a.label} opened.`, 'success'); }} />
     </div>
   );
 }

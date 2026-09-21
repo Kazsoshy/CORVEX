@@ -22,35 +22,14 @@ import {
 } from '../../data/salesMockData';
 import { CustomerCard } from './CustomerCard';
 import { InvoiceDetailsPage } from './InvoiceDetailsPage';
-import { EmptyState } from '../collector/EmptyState';
-import { LoadingState } from '../collector/LoadingState';
+import { EmptyState } from '../shared/EmptyState';
+import { LoadingState } from '../shared/LoadingState';
 import { StatusBadge } from '../StatusBadge';
 import { NavIcon } from '../../navIcons';
 import LeafletMap from '../common/LeafletMap';
 import { CreditHistoryListPage, CreditHistoryDetailPage } from '../shared/CreditHistoryPages';
 
-function actionButtonClass(variant) {
-  if (variant === 'secondary') return 'button secondary';
-  if (variant === 'ghost') return 'button ghost';
-  return 'button';
-}
 
-function PageToolbar({ actions, onAction }) {
-  if (!actions?.length) return null;
-  return (
-    <header className="page-toolbar">
-      <div className="page-toolbar-main">
-        <div className="page-toolbar-actions">
-          {actions.map((action) => (
-            <button key={action.label} className={actionButtonClass(action.variant)} type="button" disabled={action.disabled || false} onClick={() => onAction(action)}>
-              {action.label}
-            </button>
-          ))}
-        </div>
-      </div>
-    </header>
-  );
-}
 
 function StatsGrid({ stats }) {
   if (!stats?.length) return null;
@@ -139,14 +118,11 @@ function DashboardPage({ navigate, showToast }) {
         </section>
       ) : null}
 
-      <PageToolbar
-        actions={[
-          { label: "View Today's Schedule", to: '/sales/schedule' },
-          { label: 'Log a Sale', to: firstPending ? `/sales/visit-log/${firstPending.id}` : '/sales/schedule', variant: 'secondary' },
-          { label: 'Check Inventory', to: '/sales/inventory', variant: 'secondary' },
-        ]}
-        onAction={(a) => navigate(a.to)}
-      />
+      <div className="flex flex-wrap justify-end gap-2 mt-4">
+        <button className="button" type="button" onClick={() => navigate('/sales/schedule')}>View Today's Schedule</button>
+        <button className="button secondary" type="button" onClick={() => navigate(firstPending ? `/sales/visit-log/${firstPending.id}` : '/sales/schedule')}>Log a Sale</button>
+        <button className="button secondary" type="button" onClick={() => navigate('/sales/inventory')}>Check Inventory</button>
+      </div>
 
       <div className="dashboard-widgets grid two-up">
         <section className="panel content-panel">
@@ -169,7 +145,7 @@ function DashboardPage({ navigate, showToast }) {
           <ul className="widget-list">
             {SALES_HISTORY.slice(0, 3).map((sale) => (
               <li key={sale.id}>
-                 <div><strong>{sale.customerName || sale.first_name + ' ' + sale.last_name}</strong><span className="muted">{sale.date}</span></div>
+                <div><strong>{sale.customerName || sale.first_name + ' ' + sale.last_name}</strong><span className="muted">{sale.date}</span></div>
                 <span>{formatCurrency(sale.totalAmount)}</span>
               </li>
             ))}
@@ -254,9 +230,9 @@ function SchedulePage({ pageType, navigate, showToast }) {
   const coordVisits = visits.filter((v) => v.latitude && v.longitude);
   const mapCenter = coordVisits.length
     ? [
-        coordVisits.reduce((s, v) => s + Number(v.latitude), 0) / coordVisits.length,
-        coordVisits.reduce((s, v) => s + Number(v.longitude), 0) / coordVisits.length,
-      ]
+      coordVisits.reduce((s, v) => s + Number(v.latitude), 0) / coordVisits.length,
+      coordVisits.reduce((s, v) => s + Number(v.longitude), 0) / coordVisits.length,
+    ]
     : [7.1907, 125.4553];
 
   const totalDistance = useMemo(() => {
@@ -271,7 +247,7 @@ function SchedulePage({ pageType, navigate, showToast }) {
     return sum;
   }, [coordVisits]);
 
-  const visitColor = (v) => (v.status === 'Completed' ? '#10b981' : v.status === 'Pending' ? '#2563eb' : '#f59e0b');
+  const visitColor = (v) => (v.status === 'Completed' ? '#10b981' : v.status === 'Pending' ? '#093850' : '#f59e0b');
 
   const mapMarkers = filtered.map((v) => ({
     id: v.visit_id,
@@ -281,10 +257,7 @@ function SchedulePage({ pageType, navigate, showToast }) {
     popup: `<strong>Visit #${v.visit_id}</strong> · ${v.visit_type || '—'}<br/>${v.customer_name || `${v.first_name || ''} ${v.last_name || ''}`.trim() || '—'}<br/>${v.agent_name || '—'} · ${v.status}`,
   }));
 
-  const actions = [
-    { label: 'Schedule List', to: '/sales/schedule', variant: pageType === 'scheduleList' && !showMap ? undefined : 'secondary' },
-    { label: 'Territory Map', to: '/sales/schedule/map', variant: pageType === 'scheduleMap' || showMap ? undefined : 'secondary' },
-  ];
+
 
   if (loading) return <LoadingState message="Loading schedule..." />;
 
@@ -302,7 +275,7 @@ function SchedulePage({ pageType, navigate, showToast }) {
   if (pageType === 'scheduleMap' || showMap) {
     return (
       <div className="page">
-        <PageToolbar actions={actions} onAction={(a) => navigate(a.to)} />
+        {/* Removed redundant top Schedule/Map buttons */}
         <StatsGrid stats={[
           { label: 'Visits Scheduled', value: String(visits.length) },
           { label: 'Distance Covered', value: totalDistance ? `${totalDistance.toFixed(1)} km` : '—' },
@@ -330,7 +303,7 @@ function SchedulePage({ pageType, navigate, showToast }) {
                 positions: [...coordVisits]
                   .sort((a, b) => new Date(a.scheduled_date || 0) - new Date(b.scheduled_date || 0))
                   .map((v) => [Number(v.latitude), Number(v.longitude)]),
-                color: '#2563eb',
+                color: '#093850',
               }] : []}
             />
           </div>
@@ -340,7 +313,7 @@ function SchedulePage({ pageType, navigate, showToast }) {
           <section className="panel content-panel">
             <div className="panel-section-header"><h3>Visit List</h3></div>
             <div className="table-shell">
-              <table className="data-table">
+              <table className="corvex-table">
                 <thead>
                   <tr>
                     <th>Visit ID</th>
@@ -379,7 +352,7 @@ function SchedulePage({ pageType, navigate, showToast }) {
 
   return (
     <div className="page">
-      <PageToolbar actions={actions} onAction={(a) => navigate(a.to)} />
+      {/* Removed redundant top Schedule/Map buttons */}
       <StatsGrid stats={[
         { label: 'Visits Scheduled', value: String(visits.length) },
         { label: 'Distance Covered', value: totalDistance ? `${totalDistance.toFixed(1)} km` : '—' },
@@ -399,7 +372,7 @@ function SchedulePage({ pageType, navigate, showToast }) {
         </div>
         {filtered.length ? (
           <div className="table-shell">
-            <table className="data-table">
+            <table className="corvex-table">
               <thead>
                 <tr>
                   <th>Visit ID</th>
@@ -470,9 +443,9 @@ function CustomersPage({ navigate, showToast }) {
     const query = search.trim().toLowerCase();
     if (query) {
       results = results.filter(
-        (c) => (c.first_name + ' ' + c.last_name).toLowerCase().includes(query) || 
-               (c.contact_person_fname + ' ' + c.contact_person_lname).toLowerCase().includes(query) || 
-               (c.contact_phone || '').includes(query)
+        (c) => (c.first_name + ' ' + c.last_name).toLowerCase().includes(query) ||
+          (c.contact_person_fname + ' ' + c.contact_person_lname).toLowerCase().includes(query) ||
+          (c.contact_phone || '').includes(query)
       );
     }
     switch (filter) {
@@ -481,9 +454,9 @@ function CustomersPage({ navigate, showToast }) {
       default: break;
     }
     switch (sortBy) {
-      case 'Name': 
-      default: 
-        results.sort((a, b) => (a.first_name + ' ' + a.last_name).localeCompare(b.first_name + ' ' + b.last_name)); 
+      case 'Name':
+      default:
+        results.sort((a, b) => (a.first_name + ' ' + a.last_name).localeCompare(b.first_name + ' ' + b.last_name));
         break;
     }
     return results;
@@ -493,19 +466,22 @@ function CustomersPage({ navigate, showToast }) {
 
   return (
     <div className="page">
-      <section className="panel content-panel">
-        <div className="panel-section-header"><h3>Customer List</h3></div>
-        <div className="accounts-toolbar">
-          <input className="search-input" type="search" placeholder="Search by customer name, or contact number" value={search} onChange={(e) => setSearch(e.target.value)} />
-          <div className="accounts-filters">
-            <select value={filter} onChange={(e) => setFilter(e.target.value)}>
+      <section className="panel content-panel relative overflow-hidden mb-4">
+        <div className="flex flex-col md:flex-row justify-between gap-4 items-start md:items-center">
+          <div className="flex flex-wrap gap-2 items-center w-full md:w-auto flex-1">
+            <input className="filter-input search" type="search" placeholder="Search by customer name, or contact number" value={search} onChange={(e) => setSearch(e.target.value)} style={{ padding: '8px 12px', borderRadius: '6px', border: '1px solid #e2e8f0', fontSize: '0.9rem', flex: 1, minWidth: '200px' }} />
+            <select className="filter-select" value={filter} onChange={(e) => setFilter(e.target.value)} style={{ padding: '8px 12px', borderRadius: '6px', border: '1px solid #e2e8f0', fontSize: '0.9rem' }}>
               {['Active Customers', 'Inactive Customers', 'All Customers'].map((o) => <option key={o} value={o}>{o}</option>)}
             </select>
-            <select value={sortBy} onChange={(e) => setSortBy(e.target.value)}>
+            <select className="filter-select" value={sortBy} onChange={(e) => setSortBy(e.target.value)} style={{ padding: '8px 12px', borderRadius: '6px', border: '1px solid #e2e8f0', fontSize: '0.9rem' }}>
               {['Name'].map((o) => <option key={o} value={o}>Sort: {o}</option>)}
             </select>
           </div>
+          <button className="button secondary" type="button" onClick={() => showToast('Export initiated.', 'success')}>Export Data</button>
         </div>
+      </section>
+      <section className="panel content-panel">
+        <div className="panel-section-header"><h3>Customer List</h3></div>
       </section>
       {filteredCustomers.length ? (
         <div className="account-card-grid">
@@ -565,12 +541,12 @@ function CustomerDetailPage({ customerId, parentContext, navigate, showToast }) 
   return (
     <div className="page account-detail-page">
       <StatsGrid stats={[
-        { label: 'Customer ID',       value: String(customer.customer_id) },
-        { label: 'Purchase Volume',   value: formatCurrency(purchaseVolume) },
-        { label: 'Outstanding',       value: formatCurrency(outstandingBalance) },
-        { label: 'Last Visit',        value: lastVisit },
-        { label: 'Account Manager',   value: customer.account_manager_name || '—' },
-        { label: 'Customer Since',    value: customerSince },
+        { label: 'Customer ID', value: String(customer.customer_id) },
+        { label: 'Purchase Volume', value: formatCurrency(purchaseVolume) },
+        { label: 'Outstanding', value: formatCurrency(outstandingBalance) },
+        { label: 'Last Visit', value: lastVisit },
+        { label: 'Account Manager', value: customer.account_manager_name || '—' },
+        { label: 'Customer Since', value: customerSince },
       ]} />
 
       <section className="panel content-panel account-detail-panel">
@@ -665,7 +641,7 @@ function CustomerDetailPage({ customerId, parentContext, navigate, showToast }) 
                 position: customer.latitude && customer.longitude ? [Number(customer.latitude), Number(customer.longitude)] : [7.1907, 125.4553],
                 popup: `<strong>${customer.first_name} ${customer.last_name}</strong><br/>${customer.address}`,
                 label: String(customer.customer_id),
-                color: '#2563eb'
+                color: '#093850'
               }
             ]}
           />
@@ -677,7 +653,7 @@ function CustomerDetailPage({ customerId, parentContext, navigate, showToast }) 
           <h3>Recent Payments</h3>
         </div>
         <div className="table-shell">
-          <table className="data-table">
+          <table className="corvex-table">
             <thead>
               <tr>
                 <th>Date</th>
@@ -697,13 +673,7 @@ function CustomerDetailPage({ customerId, parentContext, navigate, showToast }) 
                   <td>{p.payment_method || 'Cash'}</td>
                   <td>{p.collector_name || '—'}</td>
                   <td>
-                    <span style={{
-                      padding: '2px 8px', borderRadius: 999, fontSize: '0.78rem', fontWeight: 600,
-                      background: p.payment_status === 'Completed' ? 'rgba(16,185,129,0.1)' : 'rgba(245,158,11,0.1)',
-                      color: p.payment_status === 'Completed' ? '#059669' : '#d97706',
-                    }}>
-                      {p.payment_status || 'Completed'}
-                    </span>
+                    <StatusBadge status={p.payment_status || 'Completed'} />
                   </td>
                 </tr>
               )) : (
@@ -841,7 +811,7 @@ function VisitLogPage({ visitId, parentContext, navigate, showToast }) {
                       position: [Number(visit.latitude), Number(visit.longitude)],
                       popup: `<strong>${customerName}</strong><br/>${visit.address || ''}`,
                       label: String(visit.visit_id),
-                      color: visit.status === 'Completed' ? '#10b981' : '#2563eb',
+                      color: visit.status === 'Completed' ? '#10b981' : '#093850',
                     },
                   ]}
                 />
@@ -851,16 +821,10 @@ function VisitLogPage({ visitId, parentContext, navigate, showToast }) {
         </div>
       </section>
 
-      <PageToolbar
-        actions={[
-          { label: 'Mark Completed', action: 'complete', variant: visit.status === 'Completed' ? 'secondary' : undefined, disabled: updating || visit.status === 'Completed' },
-          { label: 'Back to Schedule', to: '/sales/schedule', variant: 'secondary' },
-        ]}
-        onAction={(a) => {
-          if (a.action === 'complete') handleMarkCompleted();
-          else if (a.to) navigate(a.to);
-        }}
-      />
+      <div className="flex justify-end gap-2 mt-4">
+        <button className="button secondary" type="button" onClick={() => navigate('/sales/schedule')}>Back to Schedule</button>
+        <button className={visit.status === 'Completed' ? 'button secondary' : 'button'} type="button" onClick={() => handleMarkCompleted()} disabled={updating || visit.status === 'Completed'}>Mark Completed</button>
+      </div>
     </div>
   );
 }
@@ -888,22 +852,16 @@ function CIFormPage({ customerId, parentContext, navigate, showToast }) {
     <div className="page">
       <section className="panel form-panel content-panel">
         <div className="panel-section-header"><h3>Credit Investigation Form</h3><p className="muted">Customer: {customer.first_name} {customer.last_name}</p></div>
-        <div className="form-group"><label>Purpose of CI</label><select value={formData.purpose ?? ''} onChange={(e) => setFormData((p) => ({ ...p, purpose: e.target.value }))}><option value="">Select purpose</option>{['Credit Limit Increase', 'New Account', 'Delinquency Review'].map((o) => <option key={o}>{o}</option>)}</select></div>
+        <div className="form-group"><label>Purpose of CI</label><select className="filter-select" value={formData.purpose ?? ''} onChange={(e) => setFormData((p) => ({ ...p, purpose: e.target.value }))}><option value="">Select purpose</option>{['Credit Limit Increase', 'New Account', 'Delinquency Review'].map((o) => <option key={o}>{o}</option>)}</select></div>
         <div className="form-group"><label>Monthly Income</label><input type="number" placeholder="PHP amount" value={formData.income ?? ''} onChange={(e) => setFormData((p) => ({ ...p, income: e.target.value }))} /></div>
-        <div className="form-group"><label>Business Type</label><select value={formData.businessType ?? ''} onChange={(e) => setFormData((p) => ({ ...p, businessType: e.target.value }))}><option value="">Select type</option>{['Retail', 'Wholesale', 'Convenience Store', 'Service'].map((o) => <option key={o}>{o}</option>)}</select></div>
+        <div className="form-group"><label>Business Type</label><select className="filter-select" value={formData.businessType ?? ''} onChange={(e) => setFormData((p) => ({ ...p, businessType: e.target.value }))}><option value="">Select type</option>{['Retail', 'Wholesale', 'Convenience Store', 'Service'].map((o) => <option key={o}>{o}</option>)}</select></div>
         <div className="form-group"><label>Character References</label><textarea placeholder="Reference names and contacts..." value={formData.references ?? ''} onChange={(e) => setFormData((p) => ({ ...p, references: e.target.value }))} /></div>
         <div className="form-group"><label>Remarks</label><textarea placeholder="Additional notes..." value={formData.remarks ?? ''} onChange={(e) => setFormData((p) => ({ ...p, remarks: e.target.value }))} /></div>
       </section>
-      <PageToolbar
-        actions={[
-          { label: 'Submit to Operating Manager', action: 'submit' },
-          { label: 'Cancel', to: `/sales/customer-detail/${customer.id}${contextQuery}`, variant: 'secondary' },
-        ]}
-        onAction={(a) => {
-          if (a.action === 'submit') { showToast('CI Form sent to Operating Manager.', 'success'); navigate(`/sales/customer-detail/${customer.id}${contextQuery}`); }
-          else navigate(a.to);
-        }}
-      />
+      <div className="flex justify-end gap-2 mt-4">
+        <button className="button secondary" type="button" onClick={() => navigate(`/sales/customer-detail/${customer.id}${contextQuery}`)}>Cancel</button>
+        <button className="button" type="button" onClick={() => { showToast('CI Form sent to Operating Manager.', 'success'); navigate(`/sales/customer-detail/${customer.id}${contextQuery}`); }}>Submit to Operating Manager</button>
+      </div>
     </div>
   );
 }
@@ -949,25 +907,28 @@ function InventoryPage({ navigate, showToast }) {
 
   return (
     <div className="page">
-      <section className="panel content-panel">
-        <div className="panel-section-header"><h3>Inventory Viewer</h3><span className="muted">Read-only access</span></div>
-        <div className="accounts-toolbar">
-          <input className="search-input" type="search" placeholder="Search products by name or category" value={search} onChange={(e) => setSearch(e.target.value)} />
-          <div className="accounts-filters">
-            <select value={category} onChange={(e) => setCategory(e.target.value)}>
+      <section className="panel content-panel relative overflow-hidden mb-4">
+        <div className="flex flex-col md:flex-row justify-between gap-4 items-start md:items-center">
+          <div className="flex flex-wrap gap-2 items-center w-full md:w-auto flex-1">
+            <input className="filter-input search" type="search" placeholder="Search products by name or category" value={search} onChange={(e) => setSearch(e.target.value)} style={{ padding: '8px 12px', borderRadius: '6px', border: '1px solid #e2e8f0', fontSize: '0.9rem', flex: 1, minWidth: '200px' }} />
+            <select className="filter-select" value={category} onChange={(e) => setCategory(e.target.value)} style={{ padding: '8px 12px', borderRadius: '6px', border: '1px solid #e2e8f0', fontSize: '0.9rem' }}>
               <option value="All">All Categories</option>
               {categories.map((c) => <option key={c.category_id} value={c.category_id}>{c.category_name}</option>)}
             </select>
-            <select value={sortBy} onChange={(e) => setSortBy(e.target.value)}>
+            <select className="filter-select" value={sortBy} onChange={(e) => setSortBy(e.target.value)} style={{ padding: '8px 12px', borderRadius: '6px', border: '1px solid #e2e8f0', fontSize: '0.9rem' }}>
               {['Product Name', 'Unit Price'].map((o) => <option key={o} value={o}>Sort: {o}</option>)}
             </select>
           </div>
+          <button className="button secondary" type="button" onClick={() => showToast('Export initiated.', 'success')}>Export Data</button>
         </div>
+      </section>
+      <section className="panel content-panel">
+        <div className="panel-section-header"><h3>Inventory Viewer</h3><span className="muted">Read-only access</span></div>
       </section>
       {filtered.length ? (
         <section className="panel content-panel">
           <div className="table-shell">
-            <table className="data-table">
+            <table className="corvex-table">
               <thead><tr><th>Product ID</th><th>Product Name</th><th>Category</th><th>Unit Price</th><th>Status</th><th>Actions</th></tr></thead>
               <tbody>
                 {filtered.map((product) => (
@@ -1027,7 +988,9 @@ function ProductDetailsPage({ productId, navigate }) {
           <li><span className="info-item-label">Minimum Stock</span><span className="info-item-value">{product.minStock} units</span></li>
         </ul>
       </section>
-      <PageToolbar actions={[{ label: 'Back to Inventory', to: '/sales/inventory', variant: 'ghost' }]} onAction={(a) => navigate(a.to)} />
+      <div className="flex justify-end mt-4">
+        <button className="button ghost" type="button" onClick={() => navigate('/sales/inventory')}>Back to Inventory</button>
+      </div>
     </div>
   );
 }
@@ -1102,23 +1065,28 @@ function SalesHistoryPage({ navigate, showToast }) {
 
   return (
     <div className="page">
-      <section className="panel content-panel">
-        <div className="panel-section-header"><h3>Sales Transactions</h3></div>
-        <div className="accounts-toolbar">
-          <input className="search-input" type="search" placeholder="Search by customer or invoice number" value={search} onChange={(e) => setSearch(e.target.value)} />
-          <div className="accounts-filters">
-            <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}>{['All', 'Confirmed', 'Pending Review', 'Draft'].map((o) => <option key={o}>{o}</option>)}</select>
-            <select value={productFilter} onChange={(e) => setProductFilter(e.target.value)}><option value="All">All Products</option>{productNames.map((name) => <option key={name} value={name}>{name}</option>)}</select>
-            <input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} aria-label="From date" />
-            <input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} aria-label="To date" />
+      <section className="panel content-panel relative overflow-hidden mb-4">
+        <div className="flex flex-col md:flex-row justify-between gap-4 items-start md:items-center">
+          <div className="flex flex-wrap gap-2 items-center w-full md:w-auto flex-1">
+            <input className="filter-input search" type="search" placeholder="Search by customer or invoice number" value={search} onChange={(e) => setSearch(e.target.value)} style={{ padding: '8px 12px', borderRadius: '6px', border: '1px solid #e2e8f0', fontSize: '0.9rem', flex: 1, minWidth: '200px' }} />
+            <select className="filter-select" value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} style={{ padding: '8px 12px', borderRadius: '6px', border: '1px solid #e2e8f0', fontSize: '0.9rem' }}>{['All', 'Confirmed', 'Pending Review', 'Draft'].map((o) => <option key={o}>{o}</option>)}</select>
+            <select className="filter-select" value={productFilter} onChange={(e) => setProductFilter(e.target.value)} style={{ padding: '8px 12px', borderRadius: '6px', border: '1px solid #e2e8f0', fontSize: '0.9rem' }}><option value="All">All Products</option>{productNames.map((name) => <option key={name} value={name}>{name}</option>)}</select>
+            <input className="filter-input" type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} aria-label="From date" style={{ padding: '8px 12px', borderRadius: '6px', border: '1px solid #e2e8f0', fontSize: '0.9rem' }} />
+            <input className="filter-input" type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} aria-label="To date" style={{ padding: '8px 12px', borderRadius: '6px', border: '1px solid #e2e8f0', fontSize: '0.9rem' }} />
           </div>
+          <button className="button secondary" type="button" onClick={() => showToast('Export initiated.', 'success')}>Export Data</button>
         </div>
-        {pagination ? <p className="muted" style={{ marginTop: 12 }}>Showing {filtered.length} of {pagination.total} invoices</p> : null}
+      </section>
+      <section className="panel content-panel">
+        <div className="panel-section-header">
+          <h3>Sales Transactions</h3>
+          {pagination ? <span className="muted" style={{ fontWeight: 'normal', fontSize: '0.85rem' }}>Showing {filtered.length} of {pagination.total} invoices</span> : null}
+        </div>
       </section>
       {filtered.length ? (
         <section className="panel content-panel">
           <div className="table-shell">
-            <table className="data-table">
+            <table className="corvex-table">
               <thead><tr><th>Invoice Number</th><th>Customer Name</th><th>Total Amount</th><th>Date</th><th>Status</th><th>Actions</th></tr></thead>
               <tbody>
                 {filtered.map((item) => (
@@ -1156,7 +1124,9 @@ function NotificationsPage({ navigate, showToast }) {
 
   return (
     <div className="page">
-      <PageToolbar actions={[{ label: 'Mark All as Read', action: 'markAll' }]} onAction={() => { setNotifications((items) => items.map((n) => ({ ...n, read: true }))); showToast('All notifications marked as read.', 'success'); }} />
+      <div className="flex justify-end mt-2 mb-2">
+        <button className="button secondary" type="button" onClick={() => { setNotifications((items) => items.map((n) => ({ ...n, read: true }))); showToast('All notifications marked as read.', 'success'); }}>Mark All as Read</button>
+      </div>
       <section className="panel content-panel">
         <div className="segmented-control">
           {['All', 'Unread', 'Read', 'Stock', 'Schedule', 'Sales', 'Assignments', 'CI'].map((item) => (
@@ -1199,19 +1169,12 @@ function ProfilePage({ navigate, showToast }) {
           <li><span className="info-item-label">Status</span><span className="info-item-value">{profile.status || '—'}</span></li>
         </ul>
       </section>
-      <PageToolbar
-        actions={[
-          { label: 'Update Profile', action: 'update' },
-          { label: 'Change Password', action: 'password', variant: 'secondary' },
-          { label: 'Audit Log', to: '/sales/audit-log', variant: 'ghost' },
-          { label: 'Logout', action: 'logout', variant: 'ghost' },
-        ]}
-        onAction={(a) => {
-          if (a.to) navigate(a.to);
-          else if (a.action === 'logout') { requestLogout(); }
-          else showToast(`${a.label} form would open here.`, 'success');
-        }}
-      />
+      <div className="flex justify-end gap-2 mt-4">
+        <button className="button ghost" type="button" onClick={() => navigate('/sales/audit-log')}>Audit Log</button>
+        <button className="button ghost" type="button" onClick={() => requestLogout()}>Logout</button>
+        <button className="button secondary" type="button" onClick={() => showToast('Change Password form would open here.', 'success')}>Change Password</button>
+        <button className="button" type="button" onClick={() => showToast('Update Profile form would open here.', 'success')}>Update Profile</button>
+      </div>
     </div>
   );
 }
@@ -1227,22 +1190,22 @@ function RouteTrackingPage({ navigate }) {
       <section className="panel content-panel">
         <div className="panel-section-header"><h3>Territory Coverage Map</h3></div>
         <div style={{ marginTop: 16 }}>
-          <LeafletMap 
-            center={[7.1907, 125.4553]} 
-            zoom={13} 
+          <LeafletMap
+            center={[7.1907, 125.4553]}
+            zoom={13}
             height={500}
-            polylines={[{ 
-              id: 'route', 
-              positions: customers.map((stop, i) => [7.1907 + (i * 0.006), 125.4553 + (i * 0.006)]), 
-              color: '#10b981' 
+            polylines={[{
+              id: 'route',
+              positions: customers.map((stop, i) => [7.1907 + (i * 0.006), 125.4553 + (i * 0.006)]),
+              color: '#10b981'
             }]}
-              markers={customers.map((stop, i) => ({
-                id: stop.id,
-                position: [7.1907 + (i * 0.006), 125.4553 + (i * 0.006)],
-                label: stop.id.replace('customer-', ''),
-                color: stop.status === 'Completed' ? '#10b981' : '#f59e0b',
-                popup: `${stop.first_name} ${stop.last_name} - ${stop.status}`
-              }))}
+            markers={customers.map((stop, i) => ({
+              id: stop.id,
+              position: [7.1907 + (i * 0.006), 125.4553 + (i * 0.006)],
+              label: stop.id.replace('customer-', ''),
+              color: stop.status === 'Completed' ? '#10b981' : '#f59e0b',
+              popup: `${stop.first_name} ${stop.last_name} - ${stop.status}`
+            }))}
           />
         </div>
         <p className="muted">Current location: {ROUTE_TRACKING.currentLocation}</p>
@@ -1255,7 +1218,9 @@ function RouteTrackingPage({ navigate }) {
           ))}
         </ul>
       </section>
-      <PageToolbar actions={[{ label: 'Back to Dashboard', to: '/sales/dashboard', variant: 'ghost' }]} onAction={(a) => navigate(a.to)} />
+      <div className="flex justify-end mt-4">
+        <button className="button ghost" type="button" onClick={() => navigate('/sales/dashboard')}>Back to Dashboard</button>
+      </div>
     </div>
   );
 }
@@ -1266,7 +1231,7 @@ function AuditLogPage({ navigate }) {
       <section className="panel content-panel">
         <div className="panel-section-header"><h3>Audit Log</h3><p className="muted">Tracks login, sales, inventory views, CI submissions, and schedule completion.</p></div>
         <div className="table-shell">
-          <table className="data-table">
+          <table className="corvex-table">
             <thead><tr><th>Action</th><th>Detail</th><th>Timestamp</th></tr></thead>
             <tbody>
               {AUDIT_LOGS.map((log) => (
@@ -1276,7 +1241,9 @@ function AuditLogPage({ navigate }) {
           </table>
         </div>
       </section>
-      <PageToolbar actions={[{ label: 'Back to Profile', to: '/sales/profile', variant: 'ghost' }]} onAction={(a) => navigate(a.to)} />
+      <div className="flex justify-end mt-4">
+        <button className="button ghost" type="button" onClick={() => navigate('/sales/profile')}>Back to Profile</button>
+      </div>
     </div>
   );
 }
@@ -1290,7 +1257,9 @@ function SettingsPage({ navigate }) {
         <div className="form-group"><label className="toggle-label"><input type="checkbox" defaultChecked />Auto-sync when online</label></div>
         <div className="form-group"><label className="toggle-label"><input type="checkbox" defaultChecked />Enable GPS route tracking</label></div>
       </section>
-      <PageToolbar actions={[{ label: 'Back to Dashboard', to: '/sales/dashboard', variant: 'ghost' }]} onAction={(a) => navigate(a.to)} />
+      <div className="flex justify-end mt-4">
+        <button className="button ghost" type="button" onClick={() => navigate('/sales/dashboard')}>Back to Dashboard</button>
+      </div>
     </div>
   );
 }

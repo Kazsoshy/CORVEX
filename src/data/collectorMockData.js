@@ -203,9 +203,7 @@ export const DASHBOARD_SUMMARY = {
   routeProgress: Math.round((ROUTE_STOPS.filter((a) => a.status === 'Completed').length / ROUTE_STOPS.length) * 100),
 };
 
-export function formatCurrency(amount) {
-  return `₱${Number(amount).toLocaleString('en-PH')}`;
-}
+export { formatCurrency } from '../utils/formatters.js';
 
 export function getAccountById(id) {
   return ACCOUNTS.find((a) => a.id === String(id)) ?? null;

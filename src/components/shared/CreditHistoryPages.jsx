@@ -1,36 +1,13 @@
 import { useEffect, useMemo, useState } from 'react';
 import { getCreditHistory } from '../../api/reportsService';
 import { NavIcon } from '../../navIcons';
-import { EmptyState } from '../collector/EmptyState';
-import { LoadingState } from '../collector/LoadingState';
+import { EmptyState } from '../shared/EmptyState';
+import { LoadingState } from '../shared/LoadingState';
 import { StatusBadge } from '../StatusBadge';
 
-function actionButtonClass(variant) {
-  if (variant === 'secondary') return 'button secondary';
-  if (variant === 'ghost') return 'button ghost';
-  return 'button';
-}
 
-function PageToolbar({ actions, onAction }) {
-  if (!actions?.length) return null;
-  return (
-    <header className="page-toolbar">
-      <div className="page-toolbar-main">
-        <div className="page-toolbar-actions">
-          {actions.map((action) => (
-            <button key={action.label} className={actionButtonClass(action.variant)} type="button" onClick={() => onAction(action)}>
-              {action.label}
-            </button>
-          ))}
-        </div>
-      </div>
-    </header>
-  );
-}
 
-function formatCurrency(amount) {
-  return `₱${Number(amount).toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-}
+import { formatCurrency } from '../../utils/formatters.js';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // List Page — shows all credit_history rows with every schema column
@@ -92,36 +69,36 @@ export function CreditHistoryListPage({ navigate, basePath = '/warehouse/credit-
   }
 
   return (
-    <div className="page">
-      <section className="panel content-panel">
-        <div className="panel-section-header">
+    <div className="relative z-10 grid gap-[22px] w-full">
+      <section className="panel content-panel relative overflow-hidden">
+        <div className="flex flex-col md:flex-row justify-between gap-4 items-start md:items-center mb-4">
           <h3>Credit History</h3>
-          <p className="muted">{records.length} record{records.length !== 1 ? 's' : ''} in database</p>
+          <p className="text-ink/70">{records.length} record{records.length !== 1 ? 's' : ''} in database</p>
         </div>
         <div className="accounts-toolbar">
           <input
-            className="search-input"
+            className="filter-input search"
             type="search"
             placeholder="Search by customer, invoice #, receipt #, or ID"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
           />
           <div className="accounts-filters">
-            <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}>
+            <select className="filter-select" value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}>
               {['All', 'Paid', 'Partial', 'Overdue'].map((s) => (
                 <option key={s} value={s}>{s === 'All' ? 'All Statuses' : s}</option>
               ))}
             </select>
-            <input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} aria-label="From date" />
-            <input type="date" value={dateTo}   onChange={(e) => setDateTo(e.target.value)}   aria-label="To date" />
+            <input className="filter-input" type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} aria-label="From date" />
+            <input className="filter-input" type="date" value={dateTo}   onChange={(e) => setDateTo(e.target.value)}   aria-label="To date" />
           </div>
         </div>
       </section>
 
       {filtered.length ? (
-        <section className="panel content-panel">
-          <div className="table-shell">
-            <table className="data-table">
+        <section className="panel content-panel relative overflow-hidden">
+          <div className="corvex-table-wrapper">
+            <table className="corvex-table">
               <thead>
                 <tr>
                   <th>Credit ID</th>
@@ -152,7 +129,7 @@ export function CreditHistoryListPage({ navigate, basePath = '/warehouse/credit-
                     <td><span style={{ fontFamily: 'monospace', fontSize: '0.82rem' }}>{r.collection_id ?? '—'}</span></td>
                     <td><span style={{ fontFamily: 'monospace', fontSize: '0.82rem' }}>{r.receipt_number || '—'}</span></td>
                     <td>{formatCurrency(r.previous_balance)}</td>
-                    <td style={{ fontWeight: 600, color: '#2563eb' }}>{formatCurrency(r.payment_amount)}</td>
+                    <td style={{ fontWeight: 600, color: '#093850' }}>{formatCurrency(r.payment_amount)}</td>
                     <td style={{ fontWeight: 600, color: Number(r.remaining_balance) > 0 ? '#dc2626' : '#059669' }}>
                       {formatCurrency(r.remaining_balance)}
                     </td>
@@ -229,15 +206,15 @@ export function CreditHistoryDetailPage({ creditId, navigate, basePath = '/wareh
   }[record.payment_status] ?? { color: '#64748b', bg: '#f1f5f9' };
 
   return (
-    <div className="page">
+    <div className="relative z-10 grid gap-[22px] w-full">
       {/* Header */}
       <section className="panel dashboard-greeting">
-        <div className="dashboard-greeting-main">
-          <p className="dashboard-eyebrow" style={{ color: statusColor.color }}>
+        <div className="flex flex-col gap-1">
+          <p className="text-[0.82rem] font-bold tracking-widest uppercase text-navy/60 m-0" style={{ color: statusColor.color }}>
             {record.payment_status} · Credit ID {record.credit_id}
           </p>
           <h2>{record.customer_name}</h2>
-          <p className="muted">{record.branch_name} · Customer ID {record.customer_id}</p>
+          <p className="text-ink/70">{record.branch_name} · Customer ID {record.customer_id}</p>
         </div>
       </section>
 
@@ -262,8 +239,8 @@ export function CreditHistoryDetailPage({ creditId, navigate, basePath = '/wareh
       </section>
 
       {/* Full record */}
-      <section className="panel content-panel">
-        <div className="panel-section-header"><h3>Credit Record Detail</h3></div>
+      <section className="panel content-panel relative overflow-hidden">
+        <div className="flex flex-col md:flex-row justify-between gap-4 items-start md:items-center mb-4"><h3>Credit Record Detail</h3></div>
         <ul className="info-grid">
           <li><span className="info-item-label">Credit ID</span>
               <span className="info-item-value" style={{ fontFamily: 'monospace' }}>{record.credit_id}</span></li>
@@ -284,7 +261,7 @@ export function CreditHistoryDetailPage({ creditId, navigate, basePath = '/wareh
           <li><span className="info-item-label">Previous Balance</span>
               <span className="info-item-value">{formatCurrency(record.previous_balance)}</span></li>
           <li><span className="info-item-label">Payment Amount</span>
-              <span className="info-item-value" style={{ fontWeight: 700, color: '#2563eb' }}>{formatCurrency(record.payment_amount)}</span></li>
+              <span className="info-item-value" style={{ fontWeight: 700, color: '#093850' }}>{formatCurrency(record.payment_amount)}</span></li>
           <li><span className="info-item-label">Remaining Balance</span>
               <span className="info-item-value" style={{ fontWeight: 700, color: Number(record.remaining_balance) > 0 ? '#dc2626' : '#059669' }}>
                 {formatCurrency(record.remaining_balance)}
@@ -300,10 +277,9 @@ export function CreditHistoryDetailPage({ creditId, navigate, basePath = '/wareh
         </ul>
       </section>
 
-      <PageToolbar
-        actions={[{ label: 'Back to Credit History', to: basePath, variant: 'ghost' }]}
-        onAction={(a) => navigate(a.to)}
-      />
+      <div className="flex justify-end mt-4">
+        <button className="button ghost" type="button" onClick={() => navigate(basePath)}>Back to Credit History</button>
+      </div>
     </div>
   );
 }

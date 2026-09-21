@@ -312,9 +312,7 @@ export const ROUTE_TRACKING = {
   visitsPlanned: SCHEDULE_STOPS.length,
 };
 
-export function formatCurrency(amount) {
-  return `₱${Number(amount).toLocaleString('en-PH')}`;
-}
+export { formatCurrency } from '../utils/formatters.js';
 
 export function getCustomerById(id) { return CUSTOMERS.find((c) => c.id === String(id)) ?? null; }
 export function getProductById(id) { return PRODUCTS.find((p) => p.id === String(id)) ?? null; }

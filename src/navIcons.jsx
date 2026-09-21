@@ -527,12 +527,7 @@ const ICONS = {
   chevronRight: (
     <path d="M10 6l6 6-6 6" />
   ),
-  bell: (
-    <>
-      <path d="M12 4a4 4 0 0 0-4 4v2.5L6 13h12l-2-2.5V8a4 4 0 0 0-4-4Z" />
-      <path d="M10 17a2 2 0 0 0 4 0" />
-    </>
-  ),
+
   accounts: (
     <>
       <path d="M8 6h8M8 10h8M8 14h5" />
@@ -574,13 +569,7 @@ const ICONS = {
       <line x1="6" y1="6" x2="18" y2="18" />
     </>
   ),
-  download: (
-    <>
-      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-      <polyline points="7 10 12 15 17 10" />
-      <line x1="12" y1="15" x2="12" y2="3" />
-    </>
-  ),
+
   count: (
     <>
       <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />

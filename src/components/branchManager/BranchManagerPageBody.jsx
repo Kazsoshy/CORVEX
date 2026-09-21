@@ -9,8 +9,8 @@ import {
   AUDIT_LOGS, ALERTS, BRANCH_ANALYTICS, CI_QUEUE, formatCurrency, getCIById,
   getMapAccountById, MAP_ACCOUNTS, NOTIFICATIONS,
 } from '../../data/branchManagerMockData';
-import { EmptyState } from '../collector/EmptyState';
-import { LoadingState } from '../collector/LoadingState';
+import { EmptyState } from '../shared/EmptyState';
+import { LoadingState } from '../shared/LoadingState';
 import { NavIcon } from '../../navIcons';
 import LeafletMap from '../common/LeafletMap';
 import { StatusBadge } from '../StatusBadge';
@@ -23,7 +23,7 @@ import { TerritoriesPage } from '../territories/TerritoriesPage';
 // Re-export for use in other components
 export { getBranchAnalytics, getBranchStaff, getBranchCustomers, getBranchAlerts };
 
-const C = ['#2563eb','#06b6d4','#10b981','#f59e0b','#ef4444'];
+const C = ['#093850','#06b6d4','#10b981','#f59e0b','#ef4444'];
 
 function cls(v) {
   if (v === 'secondary') return 'button secondary';
@@ -31,20 +31,7 @@ function cls(v) {
   return 'button';
 }
 
-function Toolbar({ actions, onAction }) {
-  if (!actions?.length) return null;
-  return (
-    <header className="page-toolbar">
-      <div className="page-toolbar-main">
-        <div className="page-toolbar-actions">
-          {actions.map((a) => (
-            <button key={a.label} className={cls(a.variant)} type="button" onClick={() => onAction(a)}>{a.label}</button>
-          ))}
-        </div>
-      </div>
-    </header>
-  );
-}
+
 
 function Stats({ stats }) {
   if (!stats?.length) return null;
@@ -68,9 +55,9 @@ function Severity({ severity }) {
 
 function Card({ title, sub, children }) {
   return (
-    <section className="panel content-panel">
-      <div className="panel-section-header">
-        <div><h3>{title}</h3>{sub&&<p className="muted" style={{margin:'2px 0 0',fontSize:'0.85rem'}}>{sub}</p>}</div>
+    <section className="panel content-panel relative overflow-hidden">
+      <div className="flex flex-col md:flex-row justify-between gap-4 items-start md:items-center mb-4">
+        <div><h3>{title}</h3>{sub&&<p className="text-ink/70" style={{margin:'2px 0 0',fontSize:'0.85rem'}}>{sub}</p>}</div>
       </div>
       {children}
     </section>
@@ -139,15 +126,15 @@ function DashboardPage({ navigate, branchName }) {
   if (loading) return <LoadingState />;
 
   return (
-    <div className="page">
+    <div className="relative z-10 grid gap-[22px] w-full">
       <section className="panel dashboard-greeting">
-        <div className="dashboard-greeting-main">
-          <p className="dashboard-eyebrow">{userBranch}</p>
+        <div className="flex flex-col gap-1">
+          <p className="text-[0.82rem] font-bold tracking-widest uppercase text-navy/60 m-0">{userBranch}</p>
           <h2>{userName}</h2>
-          <p className="muted">Branch Health: <strong>{analytics?.healthScore || 0}/100</strong></p>
+          <p className="text-ink/70">Branch Health: <strong>{analytics?.healthScore || 0}/100</strong></p>
         </div>
-        <Link to="/branch-manager/notifications" className="notification-bell" aria-label={`${unread} unread`}>
-          <NavIcon name="bell" />{unread>0&&<span className="notification-badge">{unread}</span>}
+        <Link to="/branch-manager/notifications" className="relative p-2 text-ink/70 hover:text-blue hover:bg-blue/5 rounded-full transition-colors cursor-pointer" aria-label={`${unread} unread`}>
+          <NavIcon name="bell" />{unread>0&&<span className="absolute top-0 right-0 min-w-[18px] h-[18px] px-1 flex justify-center items-center rounded-full bg-red text-white text-[0.7rem] font-bold border-2 border-mint">{unread}</span>}
         </Link>
       </section>
 
@@ -170,7 +157,7 @@ function DashboardPage({ navigate, branchName }) {
               <Tooltip formatter={(v)=>formatCurrency(v)}/>
               <Legend/>
               <Area type="monotone" dataKey="target" name="Target" stroke="#e2e8f0" fill="#f1f5f9" strokeWidth={2} strokeDasharray="5 5"/>
-              <Area type="monotone" dataKey="amount" name="Collected" stroke="#2563eb" fill="#2563eb" fillOpacity={0.12} strokeWidth={2}/>
+              <Area type="monotone" dataKey="amount" name="Collected" stroke="#093850" fill="#093850" fillOpacity={0.12} strokeWidth={2}/>
             </AreaChart>
           </ResponsiveContainer>
         </Card>
@@ -198,26 +185,26 @@ function DashboardPage({ navigate, branchName }) {
             </AreaChart>
           </ResponsiveContainer>
         </Card>
-        <section className="panel content-panel">
-          <div className="panel-section-header">
+        <section className="panel content-panel relative overflow-hidden">
+          <div className="flex flex-col md:flex-row justify-between gap-4 items-start md:items-center mb-4">
             <h3>Critical Alerts</h3>
-            <button className="button ghost" type="button" onClick={()=>navigate('/branch-manager/alerts')}>View All</button>
+            <button className="inline-flex justify-center items-center gap-2 px-5 py-2.5 rounded-md bg-transparent text-blue border-[1.5px] border-blue-30 shadow-none hover:bg-blue-08 transition-all duration-160 cursor-pointer" type="button" onClick={()=>navigate('/branch-manager/alerts')}>View All</button>
           </div>
-          <ul className="widget-list">
+          <ul className="list-none p-0 m-0 flex flex-col gap-3">
             {critical.slice(0,4).map((a)=>(
-              <li key={a.id}><div><strong>{a.title}</strong><span className="muted">{a.category}</span></div><Severity severity={a.severity}/></li>
+              <li key={a.id}><div><strong>{a.title}</strong><span className="text-ink/70">{a.category}</span></div><Severity severity={a.severity}/></li>
             ))}
           </ul>
         </section>
       </div>
 
-      <Toolbar actions={[
-        {label:'Field Operations',to:'/branch-manager/field-operations'},
-        {label:'Customers',to:'/branch-manager/customers',variant:'secondary'},
-        {label:'Approve CIs',to:'/branch-manager/ci-approvals',variant:'secondary'},
-        {label:'Leaflet | OpenStreetMap',to:'/branch-manager/leaflet',variant:'secondary'},
-        {label:'Reports',to:'/branch-manager/reports',variant:'secondary'},
-      ]} onAction={(a)=>navigate(a.to)}/>
+      <div className="flex flex-wrap gap-2 mt-2">
+        <button className="button" type="button" onClick={() => navigate('/branch-manager/field-operations')}>Field Operations</button>
+        <button className="button secondary" type="button" onClick={() => navigate('/branch-manager/customers')}>Customers</button>
+        <button className="button secondary" type="button" onClick={() => navigate('/branch-manager/ci-approvals')}>Approve CIs</button>
+        <button className="button secondary" type="button" onClick={() => navigate('/branch-manager/leaflet')}>Leaflet | OpenStreetMap</button>
+        <button className="button secondary" type="button" onClick={() => navigate('/branch-manager/reports')}>Reports</button>
+      </div>
     </div>
   );
 }
@@ -251,8 +238,8 @@ function FieldOperationsHub({ navigate, showToast }) {
   if (loading) return <LoadingState />;
 
   return (
-    <div className="page">
-      <div className="segmented-control" style={{marginBottom:24,flexWrap:'wrap'}}>
+    <div className="relative z-10 grid gap-[22px] w-full">
+      <div className="segmented-control">
         {tabs.map((t)=><button key={t.key} className={tab===t.key?'segment active':'segment'} type="button" onClick={()=>setTab(t.key)}>{t.label}</button>)}
       </div>
 
@@ -269,7 +256,7 @@ function FieldOperationsHub({ navigate, showToast }) {
               <BarChart data={collectorChart}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9"/>
                 <XAxis dataKey="name" tick={{fontSize:12}}/><YAxis domain={[0,100]} unit="%" tick={{fontSize:12}}/><Tooltip formatter={(v)=>`${v}%`}/><Legend/>
-                <Bar dataKey="compliance" name="Compliance" fill="#2563eb" radius={[4,4,0,0]}/>
+                <Bar dataKey="compliance" name="Compliance" fill="#093850" radius={[4,4,0,0]}/>
                 <Bar dataKey="recovery" name="Recovery" fill="#06b6d4" radius={[4,4,0,0]}/>
               </BarChart>
             </ResponsiveContainer>
@@ -328,10 +315,10 @@ function FieldOperationsHub({ navigate, showToast }) {
       )}
 
       {tab==='performance'&&(
-        <section className="panel content-panel">
-          <div className="panel-section-header"><h3>Route Performance Summary</h3></div>
-          <div className="table-shell">
-            <table className="data-table">
+        <section className="panel content-panel relative overflow-hidden">
+          <div className="flex flex-col md:flex-row justify-between gap-4 items-start md:items-center mb-4"><h3>Route Performance Summary</h3></div>
+          <div className="corvex-table-wrapper">
+            <table className="corvex-table">
               <thead><tr><th>Staff</th><th>Type</th><th>Compliance</th><th>Recovery / Revenue</th><th>Missed</th></tr></thead>
               <tbody>
                 {staff.collectors.map((c)=><tr key={c.id}><td>{c.name}</td><td>Collector</td><td>{c.complianceScore}%</td><td>{c.recoveryRate}%</td><td>{c.missedVisits}</td></tr>)}
@@ -363,17 +350,17 @@ function CollectorDetailPage({ collectorId, navigate }) {
   if (loading) return <LoadingState />;
   if (!c) return <EmptyState title="Collector not found" actionLabel="Back" onAction={()=>navigate('/branch-manager/field-operations')}/>;
   return (
-    <div className="page">
+    <div className="relative z-10 grid gap-[22px] w-full">
       <Stats stats={[{label:'Compliance',value:`${c.complianceScore}%`},{label:'Success Rate',value:`${c.collectionSuccessRate}%`},{label:'Avg Visit',value:c.avgVisitDuration},{label:'Recovery',value:`${c.recoveryRate}%`}]}/>
-      <section className="panel content-panel">
-        <div className="panel-section-header"><h3>Route Timeline</h3><span className="muted">GPS: {c.gpsAttendance?'Active':'Off'}</span></div>
-        {c.route.length?(<div className="table-shell"><table className="data-table"><thead><tr><th>Account</th><th>Status</th><th>Time</th><th>Amount</th></tr></thead><tbody>{c.route.map((r)=><tr key={r.account}><td>{r.account}</td><td>{r.status}</td><td>{r.time}</td><td>{r.amount?formatCurrency(r.amount):'—'}</td></tr>)}</tbody></table></div>):<EmptyState title="No route data"/>}
+      <section className="panel content-panel relative overflow-hidden">
+        <div className="flex flex-col md:flex-row justify-between gap-4 items-start md:items-center mb-4"><h3>Route Timeline</h3><span className="text-ink/70">GPS: {c.gpsAttendance?'Active':'Off'}</span></div>
+        {c.route.length?(<div className="corvex-table-wrapper"><table className="corvex-table"><thead><tr><th>Account</th><th>Status</th><th>Time</th><th>Amount</th></tr></thead><tbody>{c.route.map((r)=><tr key={r.account}><td>{r.account}</td><td>{r.status}</td><td>{r.time}</td><td>{r.amount?formatCurrency(r.amount):'—'}</td></tr>)}</tbody></table></div>):<EmptyState title="No route data"/>}
         <div style={{ marginTop: 16 }}>
           <LeafletMap 
             center={[7.1907, 125.4553]} 
             zoom={13} 
             height={400} 
-            polylines={[{ id: 'route', positions: [[7.1907, 125.4553], [7.1950, 125.4600], [7.2000, 125.4500]], color: '#2563eb' }]}
+            polylines={[{ id: 'route', positions: [[7.1907, 125.4553], [7.1950, 125.4600], [7.2000, 125.4500]], color: '#093850' }]}
             markers={[
               { id: 'start', position: [7.1907, 125.4553], label: 'S', color: '#10b981', popup: 'Start Location' },
               { id: 'end', position: [7.2000, 125.4500], label: 'E', color: '#ef4444', popup: 'End Location' }
@@ -381,7 +368,10 @@ function CollectorDetailPage({ collectorId, navigate }) {
           />
         </div>
       </section>
-      <Toolbar actions={[{label:'View on Map',to:'/branch-manager/leaflet',variant:'secondary'},{label:'Back',to:'/branch-manager/field-operations',variant:'ghost'}]} onAction={(a)=>navigate(a.to)}/>
+      <div className="flex justify-end gap-2 mt-4">
+        <button className="button ghost" type="button" onClick={() => navigate('/branch-manager/field-operations')}>Back</button>
+        <button className="button secondary" type="button" onClick={() => navigate('/branch-manager/leaflet')}>View on Map</button>
+      </div>
     </div>
   );
 }
@@ -404,13 +394,15 @@ function SalesAgentDetailPage({ agentId, navigate }) {
   if (loading) return <LoadingState />;
   if (!a) return <EmptyState title="Agent not found" actionLabel="Back" onAction={()=>navigate('/branch-manager/field-operations')}/>;
   return (
-    <div className="page">
+    <div className="relative z-10 grid gap-[22px] w-full">
       <Stats stats={[{label:'Visit Completion',value:`${a.visitCompletionRate}%`},{label:'Conversion',value:`${a.conversionRate}%`},{label:'Avg Sale',value:formatCurrency(a.avgSaleValue)},{label:'New Customers',value:String(a.newCustomersAcquired)}]}/>
-      <section className="panel content-panel">
+      <section className="panel content-panel relative overflow-hidden">
         {a.customers.length?(<><h4 className="subsection-title">Customers</h4><div style={{display:'flex',flexWrap:'wrap',gap:8,marginTop:8}}>{a.customers.map((c)=><span key={c} style={{padding:'5px 12px',borderRadius:999,background:'var(--surface)',border:'1px solid var(--surface-3)',fontSize:'0.88rem',fontWeight:500}}>{c}</span>)}</div></>):null}
-        {a.productPerformance.length?(<><h4 className="subsection-title" style={{marginTop:16}}>Product Performance</h4><ul className="widget-list">{a.productPerformance.map((p)=><li key={p.product}><div><strong>{p.product}</strong></div><span>{p.units} units</span></li>)}</ul></>):null}
+        {a.productPerformance.length?(<><h4 className="subsection-title" style={{marginTop:16}}>Product Performance</h4><ul className="list-none p-0 m-0 flex flex-col gap-3">{a.productPerformance.map((p)=><li key={p.product}><div><strong>{p.product}</strong></div><span>{p.units} units</span></li>)}</ul></>):null}
       </section>
-      <Toolbar actions={[{label:'Back',to:'/branch-manager/field-operations',variant:'ghost'}]} onAction={(a)=>navigate(a.to)}/>
+      <div className="flex justify-end gap-2 mt-4">
+        <button className="button ghost" type="button" onClick={() => navigate('/branch-manager/field-operations')}>Back</button>
+      </div>
     </div>
   );
 }
@@ -467,15 +459,15 @@ function ReportsHubPage({ navigate, showToast }) {
   if (loading) return <LoadingState message="Loading reports..." />;
 
   return (
-    <div className="page">
-      <div className="segmented-control" style={{ marginBottom: 16, flexWrap: 'wrap' }}>
+    <div className="relative z-10 grid gap-[22px] w-full">
+      <div className="segmented-control">
         {tabs.map((t) => (
           <button key={t.key} className={tab === t.key ? 'segment active' : 'segment'} type="button" onClick={() => setTab(t.key)}>{t.label}</button>
         ))}
       </div>
       <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginBottom: 20 }}>
-        <button className="button secondary" type="button" onClick={() => showToast('Export PDF initiated.', 'success')}>Export PDF</button>
-        <button className="button secondary" type="button" onClick={() => showToast('Export Excel initiated.', 'success')}>Export Excel</button>
+        <button className="inline-flex justify-center items-center gap-2 px-5 py-2.5 rounded-md bg-mint text-ink border-[1.5px] border-surface-3 shadow-none hover:border-blue hover:text-blue transition-all duration-160 cursor-pointer" type="button" onClick={() => showToast('Export PDF initiated.', 'success')}>Export PDF</button>
+        <button className="inline-flex justify-center items-center gap-2 px-5 py-2.5 rounded-md bg-mint text-ink border-[1.5px] border-surface-3 shadow-none hover:border-blue hover:text-blue transition-all duration-160 cursor-pointer" type="button" onClick={() => showToast('Export Excel initiated.', 'success')}>Export Excel</button>
       </div>
 
       {tab === 'collection' && (
@@ -496,7 +488,7 @@ function ReportsHubPage({ navigate, showToast }) {
                   <Tooltip formatter={(v) => formatCurrency(v)} />
                   <Legend />
                   <Area type="monotone" dataKey="target" name="Target" stroke="#e2e8f0" fill="#f1f5f9" strokeWidth={2} strokeDasharray="5 5" />
-                  <Area type="monotone" dataKey="amount" name="Collected" stroke="#2563eb" fill="#2563eb" fillOpacity={0.12} strokeWidth={2} />
+                  <Area type="monotone" dataKey="amount" name="Collected" stroke="#093850" fill="#093850" fillOpacity={0.12} strokeWidth={2} />
                 </AreaChart>
               </ResponsiveContainer>
             </Card>
@@ -508,7 +500,7 @@ function ReportsHubPage({ navigate, showToast }) {
                   <YAxis tick={{ fontSize: 11 }} tickFormatter={(v) => `${(v / 1000).toFixed(0)}k`} />
                   <Tooltip />
                   <Legend />
-                  <Bar dataKey="amount" name="Collected (PHP)" fill="#2563eb" radius={[4, 4, 0, 0]} />
+                  <Bar dataKey="amount" name="Collected (PHP)" fill="#093850" radius={[4, 4, 0, 0]} />
                   <Bar dataKey="compliance" name="Compliance %" fill="#06b6d4" radius={[4, 4, 0, 0]} />
                 </BarChart>
               </ResponsiveContainer>
@@ -596,8 +588,8 @@ function ReportsHubPage({ navigate, showToast }) {
               </ResponsiveContainer>
             </Card>
             <Card title="Items Requiring Attention">
-              <div className="table-shell">
-                <table className="data-table">
+              <div className="corvex-table-wrapper">
+                <table className="corvex-table">
                   <thead><tr><th>Product</th><th>SKU</th><th>Stock</th><th>Status</th></tr></thead>
                   <tbody>
                     {(inventoryData?.lowStockItems || []).length ? inventoryData.lowStockItems.map((item) => (
@@ -653,7 +645,7 @@ function ReportsHubPage({ navigate, showToast }) {
                   <Tooltip formatter={(v) => `${v}%`} />
                   <Legend />
                   {complianceData?.compliance?.map((c, i) => (
-                    <Line key={c.name} type="monotone" dataKey={c.name} stroke={['#2563eb', '#06b6d4', '#10b981', '#f59e0b', '#ef4444'][i % 5]} strokeWidth={2} dot={false} />
+                    <Line key={c.name} type="monotone" dataKey={c.name} stroke={['#093850', '#06b6d4', '#10b981', '#f59e0b', '#ef4444'][i % 5]} strokeWidth={2} dot={false} />
                   ))}
                 </LineChart>
               </ResponsiveContainer>
@@ -663,8 +655,8 @@ function ReportsHubPage({ navigate, showToast }) {
       )}
 
       {tab === 'invoices' && (
-        <section className="panel content-panel">
-          <div className="panel-section-header" style={{ marginBottom: 8 }}>
+        <section className="panel content-panel relative overflow-hidden">
+          <div className="flex flex-col md:flex-row justify-between gap-4 items-start md:items-center mb-4" style={{ marginBottom: 8 }}>
             <h3>Sales Invoices</h3>
           </div>
 
@@ -684,8 +676,8 @@ function ReportsHubPage({ navigate, showToast }) {
                 ))}
               </div>
 
-              <div className="table-shell">
-                <table className="data-table">
+              <div className="corvex-table-wrapper">
+                <table className="corvex-table">
                   <thead>
                     <tr>
                       <th>Invoice #</th>
@@ -711,13 +703,7 @@ function ReportsHubPage({ navigate, showToast }) {
                           <td style={{ fontWeight: 600 }}>{formatCurrency(Number(inv.total_amount))}</td>
                           <td>{inv.payment_method || '—'}</td>
                           <td>
-                            <span style={{
-                              padding: '2px 10px', borderRadius: 999, fontSize: '0.78rem', fontWeight: 600,
-                              background: inv.status === 'Confirmed' ? 'rgba(16,185,129,0.1)' : inv.status === 'Cancelled' ? 'rgba(239,68,68,0.1)' : inv.status === 'Pending Review' ? 'rgba(245,158,11,0.1)' : 'rgba(100,116,139,0.1)',
-                              color: inv.status === 'Confirmed' ? '#059669' : inv.status === 'Cancelled' ? '#dc2626' : inv.status === 'Pending Review' ? '#d97706' : '#475569',
-                            }}>
-                              {inv.status}
-                            </span>
+                            <StatusBadge status={inv.status} />
                           </td>
                           <td>{inv.invoices_date ? new Date(inv.invoices_date).toLocaleDateString('en-PH') : '—'}</td>
                           <td style={{ color: isOverdue ? '#dc2626' : 'inherit', fontWeight: isOverdue ? 700 : 400 }}>
@@ -740,13 +726,13 @@ function ReportsHubPage({ navigate, showToast }) {
         <div style={{ marginTop: 24 }}>
           <Card title="Overall KPI Summary">
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '24px 20px', padding: '16px 0' }}>
-              <div><strong>Health Score</strong><div style={{ fontSize: '1.5rem', color: '#2563eb' }}>{kpi?.healthScore || 0}/100</div></div>
+              <div><strong>Health Score</strong><div style={{ fontSize: '1.5rem', color: '#093850' }}>{kpi?.healthScore || 0}/100</div></div>
               <div><strong>Active Collectors</strong><div style={{ fontSize: '1.5rem', color: '#10b981' }}>{kpi?.activeCollectors || 0}</div></div>
               <div><strong>Active Sales Agents</strong><div style={{ fontSize: '1.5rem', color: '#8b5cf6' }}>{kpi?.activeSalesAgents || 0}</div></div>
               <div><strong>Total Customers</strong><div style={{ fontSize: '1.5rem' }}>{kpi?.totalCustomers || 0}</div></div>
               <div><strong>Outstanding Balance</strong><div style={{ fontSize: '1.5rem', color: '#ef4444' }}>{formatCurrency(kpi?.totalOutstanding || 0)}</div></div>
               <div><strong>Collections (7d)</strong><div style={{ fontSize: '1.5rem', color: '#059669' }}>{formatCurrency(kpi?.totalCollectionsAmount || 0)}</div></div>
-              <div><strong>Sales (7d)</strong><div style={{ fontSize: '1.5rem', color: '#2563eb' }}>{formatCurrency(kpi?.totalSalesAmount || 0)}</div></div>
+              <div><strong>Sales (7d)</strong><div style={{ fontSize: '1.5rem', color: '#093850' }}>{formatCurrency(kpi?.totalSalesAmount || 0)}</div></div>
               <div><strong>Inventory Health</strong><div style={{ fontSize: '1.5rem' }}>{kpi?.inventoryHealth || 0}%</div></div>
             </div>
           </Card>
@@ -793,8 +779,8 @@ function StaffPerformancePage({ navigate }) {
   }) || [];
 
   return (
-    <div className="page">
-      <div className="segmented-control" style={{marginBottom:24,flexWrap:'wrap'}}>
+    <div className="relative z-10 grid gap-[22px] w-full">
+      <div className="segmented-control">
         {tabs.map((t)=><button key={t.key} className={tab===t.key?'segment active':'segment'} type="button" onClick={()=>setTab(t.key)}>{t.label}</button>)}
       </div>
 
@@ -810,7 +796,7 @@ function StaffPerformancePage({ navigate }) {
             <ResponsiveContainer width="100%" height={220}>
               <BarChart data={collectorBar}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9"/><XAxis dataKey="name" tick={{fontSize:12}}/><YAxis domain={[0,100]} unit="%" tick={{fontSize:12}}/><Tooltip formatter={(v)=>`${v}%`}/><Legend/>
-                <Bar dataKey="score" name="Compliance" fill="#2563eb" radius={[4,4,0,0]}/>
+                <Bar dataKey="score" name="Compliance" fill="#093850" radius={[4,4,0,0]}/>
                 <Bar dataKey="recovery" name="Recovery" fill="#06b6d4" radius={[4,4,0,0]}/>
               </BarChart>
             </ResponsiveContainer>
@@ -829,22 +815,22 @@ function StaffPerformancePage({ navigate }) {
           <ResponsiveContainer width="100%" height={200}>
             <LineChart data={complianceChartData}>
               <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9"/><XAxis dataKey="week" tick={{fontSize:12}}/><YAxis domain={[80,100]} unit="%" tick={{fontSize:12}}/><Tooltip formatter={(v)=>`${v}%`}/><Legend/>
-              {complianceData?.compliance?.map((c, i) => <Line key={c.name} type="monotone" dataKey={c.name} stroke={['#2563eb','#06b6d4','#10b981','#f59e0b','#ef4444'][i % 5]} strokeWidth={2} dot={false}/>)}
+              {complianceData?.compliance?.map((c, i) => <Line key={c.name} type="monotone" dataKey={c.name} stroke={['#093850','#06b6d4','#10b981','#f59e0b','#ef4444'][i % 5]} strokeWidth={2} dot={false}/>)}
             </LineChart>
           </ResponsiveContainer>
         </Card>
       </>)}
 
       {tab==='collectors'&&(
-        <section className="panel content-panel">
-          <div className="panel-section-header">
+        <section className="panel content-panel relative overflow-hidden">
+          <div className="flex flex-col md:flex-row justify-between gap-4 items-start md:items-center mb-4">
             <h3>Collector Rankings</h3>
             <div className="segmented-control">
               {['Daily','Weekly','Monthly'].map((p)=><button key={p} className={period===p?'segment active':'segment'} type="button" onClick={()=>setPeriod(p)}>{p}</button>)}
             </div>
           </div>
-          <div className="table-shell">
-            <table className="data-table">
+          <div className="corvex-table-wrapper">
+            <table className="corvex-table">
               <thead><tr><th>#</th><th>Collector</th><th>Compliance</th><th>Collections</th><th>Recovery</th><th>Missed</th></tr></thead>
               <tbody>
                 {[...staff.collectors].sort((a,b)=>b.complianceScore-a.complianceScore).map((c,i)=>(
@@ -857,15 +843,15 @@ function StaffPerformancePage({ navigate }) {
       )}
 
       {tab==='sales'&&(
-        <section className="panel content-panel">
-          <div className="panel-section-header">
+        <section className="panel content-panel relative overflow-hidden">
+          <div className="flex flex-col md:flex-row justify-between gap-4 items-start md:items-center mb-4">
             <h3>Sales Agent Rankings</h3>
             <div className="segmented-control">
               {['Daily','Weekly','Monthly'].map((p)=><button key={p} className={period===p?'segment active':'segment'} type="button" onClick={()=>setPeriod(p)}>{p}</button>)}
             </div>
           </div>
-          <div className="table-shell">
-            <table className="data-table">
+          <div className="corvex-table-wrapper">
+            <table className="corvex-table">
               <thead><tr><th>#</th><th>Agent</th><th>Visit Completion</th><th>Revenue</th><th>New Customers</th><th>Sales</th></tr></thead>
               <tbody>
                 {[...staff.salesAgents].sort((a,b)=>b.totalSalesAmount-a.totalSalesAmount).map((a,i)=>(
@@ -878,18 +864,18 @@ function StaffPerformancePage({ navigate }) {
       )}
 
       {tab==='scorecards'&&(
-        <section className="panel content-panel">
-          <div className="panel-section-header"><h3>Overall Rankings</h3></div>
-          <ul className="widget-list">
+        <section className="panel content-panel relative overflow-hidden">
+          <div className="flex flex-col md:flex-row justify-between gap-4 items-start md:items-center mb-4"><h3>Overall Rankings</h3></div>
+          <ul className="list-none p-0 m-0 flex flex-col gap-3">
             {combined.map((s,i)=>(
               <li key={s.name}>
                 <div style={{display:'flex',alignItems:'center',gap:12}}>
-                  <span style={{width:28,height:28,borderRadius:'50%',background:'#2563eb',color:'#fff',display:'grid',placeItems:'center',fontSize:'0.75rem',fontWeight:700,flexShrink:0}}>#{i+1}</span>
-                  <div><strong>{s.name}</strong><span className="muted" style={{display:'block',fontSize:'0.82rem'}}>{s.role}</span></div>
+                  <span style={{width:28,height:28,borderRadius:'50%',background:'#093850',color:'#fff',display:'grid',placeItems:'center',fontSize:'0.75rem',fontWeight:700,flexShrink:0}}>#{i+1}</span>
+                  <div><strong>{s.name}</strong><span className="text-ink/70" style={{display:'block',fontSize:'0.82rem'}}>{s.role}</span></div>
                 </div>
                 <div style={{textAlign:'right'}}>
                   <strong>{s.score}%</strong>
-                  <span className="muted" style={{display:'block',fontSize:'0.82rem'}}>{s.metric}</span>
+                  <span className="text-ink/70" style={{display:'block',fontSize:'0.82rem'}}>{s.metric}</span>
                 </div>
               </li>
             ))}
@@ -905,15 +891,15 @@ function CIQueuePage({ navigate, showToast }) {
   const [filter, setFilter] = useState('Pending');
   const filtered = useMemo(()=>CI_QUEUE.filter((c)=>filter==='All'||c.status===filter),[filter]);
   return (
-    <div className="page">
-      <section className="panel content-panel">
+    <div className="relative z-10 grid gap-[22px] w-full">
+      <section className="panel content-panel relative overflow-hidden">
         <div className="segmented-control">
           {['Pending','Approved','Rejected','All'].map((f)=><button key={f} className={filter===f?'segment active':'segment'} type="button" onClick={()=>setFilter(f)}>{f}</button>)}
         </div>
       </section>
       {filtered.length?(
-        <section className="panel content-panel">
-          <div className="table-shell"><table className="data-table">
+        <section className="panel content-panel relative overflow-hidden">
+          <div className="corvex-table-wrapper"><table className="corvex-table">
             <thead><tr><th>Customer</th><th>Submitted By</th><th>Date</th><th>Delinquency</th><th>Status</th><th>Actions</th></tr></thead>
             <tbody>{filtered.map((ci)=>(<tr key={ci.id}><td>{ci.customerName}</td><td>{ci.submittedBy}</td><td>{ci.submissionDate}</td><td>{ci.delinquencyStatus}</td><td>{ci.status}</td><td className="table-actions">
               <button className="icon-action-button" type="button" title="Open" onClick={()=>navigate(`/branch-manager/ci-approvals/${ci.id}`)}><NavIcon name="view" /></button>
@@ -932,23 +918,31 @@ function CIDetailPage({ ciId, navigate, showToast }) {
   const [showReject, setShowReject] = useState(false);
   if (!ci) return <EmptyState title="CI not found" actionLabel="Back" onAction={()=>navigate('/branch-manager/ci-approvals')}/>;
   return (
-    <div className="page">
+    <div className="relative z-10 grid gap-[22px] w-full">
       <Stats stats={[{label:'Customer',value:ci.customerName},{label:'Risk Score',value:String(ci.riskScore)},{label:'Delinquency',value:ci.delinquencyStatus},{label:'Map Zone',value:ci.leafletClassification}]}/>
-      <section className="panel content-panel">
+      <section className="panel content-panel relative overflow-hidden">
         <ul className="info-grid"><li><span className="info-item-label">Purpose</span><span className="info-item-value">{ci.purpose}</span></li><li><span className="info-item-label">Monthly Income</span><span className="info-item-value">{formatCurrency(ci.monthlyIncome)}</span></li><li><span className="info-item-label">Business Type</span><span className="info-item-value">{ci.businessType}</span></li><li><span className="info-item-label">References</span><span className="info-item-value">{ci.references}</span></li><li><span className="info-item-label">Remarks</span><span className="info-item-value">{ci.formRemarks}</span></li></ul>
         {ci.delinquencyFlags.length?(<div style={{marginTop:16,padding:12,background:'rgba(220,38,38,0.06)',borderRadius:12}}><strong>Delinquency Flags:</strong><ul className="flag-list" style={{marginTop:8}}>{ci.delinquencyFlags.map((f)=><li key={f}>{f}</li>)}</ul></div>):null}
-        {ci.paymentHistory.length?(<><h4 className="subsection-title">Payment History</h4><div className="table-shell"><table className="data-table"><thead><tr><th>Date</th><th>Amount</th><th>Status</th></tr></thead><tbody>{ci.paymentHistory.map((p)=><tr key={p.date}><td>{p.date}</td><td>{formatCurrency(p.amount)}</td><td>{p.status}</td></tr>)}</tbody></table></div></>):null}
+        {ci.paymentHistory.length?(<><h4 className="subsection-title">Payment History</h4><div className="corvex-table-wrapper"><table className="corvex-table"><thead><tr><th>Date</th><th>Amount</th><th>Status</th></tr></thead><tbody>{ci.paymentHistory.map((p)=><tr key={p.date}><td>{p.date}</td><td>{formatCurrency(p.amount)}</td><td>{p.status}</td></tr>)}</tbody></table></div></>):null}
       </section>
       {showReject&&<section className="panel form-panel content-panel"><div className="form-group"><label>Rejection Reason<span className="required">*</span></label><textarea value={rejectReason} onChange={(e)=>setRejectReason(e.target.value)} placeholder="Mandatory reason..."/></div></section>}
       {ci.status==='Pending'?(
-        <Toolbar actions={[{label:'Approve',action:'approve'},{label:showReject?'Confirm Reject':'Reject',action:'reject',variant:'secondary'},{label:'Request Revision',action:'revision',variant:'secondary'},{label:'Back',to:'/branch-manager/ci-approvals',variant:'ghost'}]}
-          onAction={(a)=>{
-            if(a.action==='approve'){showToast('CI approved.','success');navigate('/branch-manager/ci-approvals');}
-            else if(a.action==='reject'){if(showReject){if(!rejectReason.trim()){showToast('Reason required.','error');return;}showToast(`CI rejected.`,'error');navigate('/branch-manager/ci-approvals');}else setShowReject(true);}
-            else if(a.action==='revision'){showToast('Revision requested.','success');navigate('/branch-manager/ci-approvals');}
-            else navigate(a.to);
-          }}/>
-      ):<Toolbar actions={[{label:'Back',to:'/branch-manager/ci-approvals',variant:'ghost'}]} onAction={(a)=>navigate(a.to)}/>}
+        <div className="flex justify-end gap-2 mt-4">
+          <button className="button ghost" type="button" onClick={() => navigate('/branch-manager/ci-approvals')}>Back</button>
+          <button className="button secondary" type="button" onClick={() => { showToast('Revision requested.', 'success'); navigate('/branch-manager/ci-approvals'); }}>Request Revision</button>
+          <button className="button secondary" type="button" onClick={() => {
+            if (showReject) {
+              if (!rejectReason.trim()) { showToast('Reason required.', 'error'); return; }
+              showToast(`CI rejected.`, 'error'); navigate('/branch-manager/ci-approvals');
+            } else setShowReject(true);
+          }}>{showReject ? 'Confirm Reject' : 'Reject'}</button>
+          <button className="button" type="button" onClick={() => { showToast('CI approved.', 'success'); navigate('/branch-manager/ci-approvals'); }}>Approve</button>
+        </div>
+      ):(
+        <div className="flex justify-end gap-2 mt-4">
+          <button className="button ghost" type="button" onClick={() => navigate('/branch-manager/ci-approvals')}>Back</button>
+        </div>
+      )}
     </div>
   );
 }
@@ -989,7 +983,7 @@ function CustomersPage({ navigate, branchName }) {
   if (loading) return <LoadingState message="Loading customers..." />;
 
   return (
-    <div className="page">
+    <div className="relative z-10 grid gap-[22px] w-full">
       <Stats stats={[
         { label: 'Total Customers', value: String(customers.length) },
         { label: 'Active', value: String(customers.filter((c) => c.status === 'Active').length) },
@@ -997,38 +991,40 @@ function CustomersPage({ navigate, branchName }) {
         { label: 'Total Outstanding', value: formatCurrency(totalOutstanding) },
       ]} />
 
-      <section className="panel content-panel">
-        <div className="panel-section-header">
-          <h3>Branch Customers</h3>
-          <span className="muted">{branchName}</span>
-        </div>
-        <div className="accounts-toolbar">
-          <input
-            className="search-input"
-            type="search"
-            placeholder="Search by customer name, address, or phone"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-          />
-          <div className="accounts-filters">
-            <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}>
+      <section className="panel content-panel relative overflow-hidden mb-4">
+        <div className="flex flex-col md:flex-row justify-between gap-4 items-start md:items-center">
+          <div className="flex flex-wrap gap-2 items-center w-full md:w-auto flex-1">
+            <input
+              className="filter-input search"
+              type="search"
+              placeholder="Search by customer name, address, or phone"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              style={{ padding: '8px 12px', borderRadius: '6px', border: '1px solid #e2e8f0', fontSize: '0.9rem', flex: 1, minWidth: '200px' }}
+            />
+            <select className="filter-select" value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} style={{ padding: '8px 12px', borderRadius: '6px', border: '1px solid #e2e8f0', fontSize: '0.9rem' }}>
               {['All', 'Active', 'Inactive'].map((s) => (
                 <option key={s} value={s}>{s === 'All' ? 'All Statuses' : s}</option>
               ))}
             </select>
-            <select value={paymentFilter} onChange={(e) => setPaymentFilter(e.target.value)}>
+            <select className="filter-select" value={paymentFilter} onChange={(e) => setPaymentFilter(e.target.value)} style={{ padding: '8px 12px', borderRadius: '6px', border: '1px solid #e2e8f0', fontSize: '0.9rem' }}>
               {['All', 'Current', 'Overdue'].map((s) => (
                 <option key={s} value={s}>{s === 'All' ? 'All Payment Status' : s}</option>
               ))}
             </select>
           </div>
+          <button className="button secondary" type="button" onClick={() => {}}>Export Data</button>
         </div>
       </section>
 
       {filtered.length ? (
-        <section className="panel content-panel">
-          <div className="table-shell">
-            <table className="data-table">
+        <section className="panel content-panel relative overflow-hidden">
+          <div className="flex flex-col md:flex-row justify-between gap-4 items-start md:items-center mb-4">
+            <h3>Branch Customers</h3>
+            <span className="text-ink/70">{branchName}</span>
+          </div>
+          <div className="corvex-table-wrapper">
+            <table className="corvex-table">
               <thead>
                 <tr>
                   <th>Customer</th>
@@ -1100,12 +1096,12 @@ function CustomerDetailPage({ customerId, navigate, branchName }) {
     : '—';
 
   return (
-    <div className="page">
+    <div className="relative z-10 grid gap-[22px] w-full">
       <section className="panel dashboard-greeting">
-        <div className="dashboard-greeting-main">
-          <p className="dashboard-eyebrow">{customer.branch_name || branchName}</p>
+        <div className="flex flex-col gap-1">
+          <p className="text-[0.82rem] font-bold tracking-widest uppercase text-navy/60 m-0">{customer.branch_name || branchName}</p>
           <h2>{name}</h2>
-          <p className="muted">{customer.address || 'No address on file'}</p>
+          <p className="text-ink/70">{customer.address || 'No address on file'}</p>
         </div>
       </section>
 
@@ -1119,8 +1115,8 @@ function CustomerDetailPage({ customerId, navigate, branchName }) {
       ]} />
 
       <div className="grid two-up">
-        <section className="panel content-panel">
-          <div className="panel-section-header"><h3>Contact Information</h3></div>
+        <section className="panel content-panel relative overflow-hidden">
+          <div className="flex flex-col md:flex-row justify-between gap-4 items-start md:items-center mb-4"><h3>Contact Information</h3></div>
           <ul className="info-grid">
             <li><span className="info-item-label">Customer Name</span><span className="info-item-value">{name}</span></li>
             <li><span className="info-item-label">Branch</span><span className="info-item-value">{customer.branch_name || branchName}</span></li>
@@ -1133,8 +1129,8 @@ function CustomerDetailPage({ customerId, navigate, branchName }) {
           </ul>
         </section>
 
-        <section className="panel content-panel">
-          <div className="panel-section-header"><h3>Account Activity</h3></div>
+        <section className="panel content-panel relative overflow-hidden">
+          <div className="flex flex-col md:flex-row justify-between gap-4 items-start md:items-center mb-4"><h3>Account Activity</h3></div>
           <ul className="info-grid">
             <li><span className="info-item-label">Outstanding Balance</span><span className="info-item-value">{formatCurrency(Number(customer.activity?.outstanding_balance || 0))}</span></li>
             <li><span className="info-item-label">Purchase Volume</span><span className="info-item-value">{formatCurrency(Number(customer.activity?.purchase_volume || 0))}</span></li>
@@ -1145,8 +1141,8 @@ function CustomerDetailPage({ customerId, navigate, branchName }) {
       </div>
 
       {customer.creditInfo ? (
-        <section className="panel content-panel">
-          <div className="panel-section-header"><h3>Credit Information</h3></div>
+        <section className="panel content-panel relative overflow-hidden">
+          <div className="flex flex-col md:flex-row justify-between gap-4 items-start md:items-center mb-4"><h3>Credit Information</h3></div>
           <ul className="info-grid">
             <li><span className="info-item-label">Credit Limit</span><span className="info-item-value">{formatCurrency(Number(customer.creditInfo.credit_limit || 0))}</span></li>
             <li><span className="info-item-label">Monthly Income</span><span className="info-item-value">{formatCurrency(Number(customer.creditInfo.monthly_income || 0))}</span></li>
@@ -1159,8 +1155,8 @@ function CustomerDetailPage({ customerId, navigate, branchName }) {
       ) : null}
 
       {(customer.latitude && customer.longitude) ? (
-        <section className="panel content-panel">
-          <div className="panel-section-header"><h3>Location</h3></div>
+        <section className="panel content-panel relative overflow-hidden">
+          <div className="flex flex-col md:flex-row justify-between gap-4 items-start md:items-center mb-4"><h3>Location</h3></div>
           <div style={{ minHeight: 220, borderRadius: 8, overflow: 'hidden' }}>
             <LeafletMap
               center={[Number(customer.latitude), Number(customer.longitude)]}
@@ -1170,7 +1166,7 @@ function CustomerDetailPage({ customerId, navigate, branchName }) {
                 id: customer.customer_id,
                 position: [Number(customer.latitude), Number(customer.longitude)],
                 label: name.substring(0, 2).toUpperCase(),
-                color: paymentStatus === 'Overdue' ? '#ef4444' : '#2563eb',
+                color: paymentStatus === 'Overdue' ? '#ef4444' : '#093850',
                 popup: name,
               }]}
             />
@@ -1178,10 +1174,10 @@ function CustomerDetailPage({ customerId, navigate, branchName }) {
         </section>
       ) : null}
 
-      <Toolbar actions={[
-        { label: 'View on Map', to: '/branch-manager/leaflet', variant: 'secondary' },
-        { label: 'Back to Customers', to: '/branch-manager/customers', variant: 'ghost' },
-      ]} onAction={(a) => navigate(a.to)} />
+      <div className="flex justify-end gap-2 mt-4">
+        <button className="button ghost" type="button" onClick={() => navigate('/branch-manager/customers')}>Back to Customers</button>
+        <button className="button secondary" type="button" onClick={() => navigate('/branch-manager/leaflet')}>View on Map</button>
+      </div>
     </div>
   );
 }
@@ -1216,12 +1212,12 @@ function LeafletPage({ pageType, navigate, showToast }) {
   if (loading) return <LoadingState message="Loading map data..." />;
 
   return (
-    <div className="page">
-      <section className="panel content-panel">
-        <div className="panel-section-header"><h3>Leaflet | OpenStreetMap</h3></div>
+    <div className="relative z-10 grid gap-[22px] w-full">
+      <section className="panel content-panel relative overflow-hidden">
+        <div className="flex flex-col md:flex-row justify-between gap-4 items-start md:items-center mb-4"><h3>Leaflet | OpenStreetMap</h3></div>
         <div className="accounts-filters">
-          <select><option>Today</option><option>This Week</option><option>This Month</option></select>
-          <select><option>All Staff</option>{staff.collectors.map((c)=><option key={c.id}>{c.name}</option>)}{staff.salesAgents.map((a)=><option key={a.id}>{a.name}</option>)}</select>
+          <select className="filter-select"><option>Today</option><option>This Week</option><option>This Month</option></select>
+          <select className="filter-select"><option>All Staff</option>{staff.collectors.map((c)=><option key={c.id}>{c.name}</option>)}{staff.salesAgents.map((a)=><option key={a.id}>{a.name}</option>)}</select>
         </div>
         <div className="layer-toggles">{layerOptions.map((l)=><label key={l} className="toggle-label"><input type="checkbox" checked={layers.includes(l)} onChange={()=>toggle(l)}/>{l}</label>)}</div>
         <div style={{ marginTop: 16 }}>
@@ -1239,10 +1235,10 @@ function LeafletPage({ pageType, navigate, showToast }) {
           />
         </div>
       </section>
-      <section className="panel content-panel">
-        <div className="panel-section-header"><h3>Customer Pins</h3></div>
+      <section className="panel content-panel relative overflow-hidden">
+        <div className="flex flex-col md:flex-row justify-between gap-4 items-start md:items-center mb-4"><h3>Customer Pins</h3></div>
         {mapAccounts.length ? (
-          <div className="table-shell"><table className="data-table">
+          <div className="corvex-table-wrapper"><table className="corvex-table">
             <thead><tr><th>Customer</th><th>Balance</th><th>Status</th><th>Last Visit</th><th>Staff</th><th>Actions</th></tr></thead>
             <tbody>{mapAccounts.map((a)=><tr key={a.id}><td>{a.customerName}</td><td>{formatCurrency(a.balance)}</td><td>{a.paymentStatus}</td><td>{a.lastVisit}</td><td>{a.assignedStaff}</td><td className="table-actions"><button className="icon-action-button" type="button" title="View" onClick={()=>navigate(`/branch-manager/customers/${a.id}`)}><NavIcon name="view" /></button></td></tr>)}</tbody>
           </table></div>
@@ -1250,7 +1246,10 @@ function LeafletPage({ pageType, navigate, showToast }) {
           <EmptyState title="No customers on map" description="Customers for your branch will appear here once they have location data." />
         )}
       </section>
-      <Toolbar actions={[{label:'Delinquency Heatmap',to:'/branch-manager/leaflet/delinquency',variant:'secondary'},{label:'Profitability Zones',to:'/branch-manager/leaflet/profitability',variant:'secondary'}]} onAction={(a)=>navigate(a.to)}/>
+      <div className="flex justify-end gap-2 mt-4">
+        <button className="button secondary" type="button" onClick={() => navigate('/branch-manager/leaflet/delinquency')}>Delinquency Heatmap</button>
+        <button className="button secondary" type="button" onClick={() => navigate('/branch-manager/leaflet/profitability')}>Profitability Zones</button>
+      </div>
     </div>
   );
 }
@@ -1259,8 +1258,8 @@ function AlertsPage({ navigate, showToast }) {
   const [filter, setFilter] = useState('All');
   const filtered = useMemo(()=>filter==='All'?ALERTS:ALERTS.filter((a)=>a.category.includes(filter)),[filter]);
   return (
-    <div className="page">
-      <section className="panel content-panel">
+    <div className="relative z-10 grid gap-[22px] w-full">
+      <section className="panel content-panel relative overflow-hidden">
         <div className="segmented-control">
           {['All','Collection','Sales','Inventory','Route'].map((f)=><button key={f} className={filter===f?'segment active':'segment'} type="button" onClick={()=>setFilter(f)}>{f}</button>)}
         </div>
@@ -1268,8 +1267,8 @@ function AlertsPage({ navigate, showToast }) {
       <div className="notification-list">
         {filtered.map((a)=>(
           <article key={a.id} className="notification-item">
-            <div><h4>{a.title}</h4><p className="muted">{a.message}</p><span className="notification-time">{a.category} · {a.time}</span></div>
-            <div className="notification-actions"><Severity severity={a.severity}/><button className="button ghost" type="button" onClick={()=>showToast('Follow-up assigned.','success')}>Assign</button><button className="button" type="button" onClick={()=>showToast('Resolved.','success')}>Resolve</button></div>
+            <div><h4>{a.title}</h4><p className="text-ink/70">{a.message}</p><span className="notification-time">{a.category} · {a.time}</span></div>
+            <div className="notification-actions"><Severity severity={a.severity}/><button className="inline-flex justify-center items-center gap-2 px-5 py-2.5 rounded-md bg-transparent text-blue border-[1.5px] border-blue-30 shadow-none hover:bg-blue-08 transition-all duration-160 cursor-pointer" type="button" onClick={()=>showToast('Follow-up assigned.','success')}>Assign</button><button className="inline-flex justify-center items-center gap-2 px-5 py-2.5 rounded-md border-0 bg-blue text-white font-semibold cursor-pointer transition-all duration-160 hover:-translate-y-[1px] hover:shadow-[0_4px_16px_rgba(37,99,235,0.35)] hover:brightness-105 active:translate-y-0" type="button" onClick={()=>showToast('Resolved.','success')}>Resolve</button></div>
           </article>
         ))}
       </div>
@@ -1286,19 +1285,21 @@ function NotificationsPage({ navigate, showToast }) {
     return items.filter((n)=>n.type===filter.toLowerCase());
   },[items,filter]);
   return (
-    <div className="page">
-      <Toolbar actions={[{label:'Mark All as Read',action:'markAll'}]} onAction={()=>{setItems((n)=>n.map((i)=>({...i,read:true})));showToast('All marked read.','success');}}/>
-      <section className="panel content-panel">
-        <div className="segmented-control">{['All','Unread','CI','Route','Delinquency','Inventory','Staff'].map((f)=><button key={f} className={filter===f?'segment active':'segment'} type="button" onClick={()=>setFilter(f)}>{f}</button>)}</div>
+    <div className="relative z-10 grid gap-[22px] w-full">
+      <section className="panel content-panel relative overflow-hidden">
+        <div className="flex flex-col md:flex-row justify-between gap-4 items-start md:items-center">
+          <div className="segmented-control">{['All','Unread','CI','Route','Delinquency','Inventory','Staff'].map((f)=><button key={f} className={filter===f?'segment active':'segment'} type="button" onClick={()=>setFilter(f)}>{f}</button>)}</div>
+          <button className="button" type="button" onClick={() => { setItems((n) => n.map((i) => ({ ...i, read: true }))); showToast('All marked read.', 'success'); }}>Mark All as Read</button>
+        </div>
       </section>
       {filtered.length?(
         <div className="notification-list">
           {filtered.map((item)=>(
             <article key={item.id} className={`notification-item${item.read?'':' unread'}`}>
-              <div><h4>{item.title}</h4><p className="muted">{item.message}</p><span className="notification-time">{item.time}</span></div>
+              <div><h4>{item.title}</h4><p className="text-ink/70">{item.message}</p><span className="notification-time">{item.time}</span></div>
               <div className="notification-actions">
-                {!item.read&&<button className="button ghost" type="button" onClick={()=>setItems((ns)=>ns.map((n)=>n.id===item.id?{...n,read:true}:n))}>Mark Read</button>}
-                <button className="button secondary" type="button" onClick={()=>navigate(item.relatedTo)}>Open</button>
+                {!item.read&&<button className="inline-flex justify-center items-center gap-2 px-5 py-2.5 rounded-md bg-transparent text-blue border-[1.5px] border-blue-30 shadow-none hover:bg-blue-08 transition-all duration-160 cursor-pointer" type="button" onClick={()=>setItems((ns)=>ns.map((n)=>n.id===item.id?{...n,read:true}:n))}>Mark Read</button>}
+                <button className="inline-flex justify-center items-center gap-2 px-5 py-2.5 rounded-md bg-mint text-ink border-[1.5px] border-surface-3 shadow-none hover:border-blue hover:text-blue transition-all duration-160 cursor-pointer" type="button" onClick={()=>navigate(item.relatedTo)}>Open</button>
               </div>
             </article>
           ))}
@@ -1316,16 +1317,21 @@ function ProfilePage({ navigate, showToast, branchName }) {
   const userInitials = userName.split(' ').map(n => n[0]).join('').toUpperCase();
   
   return (
-    <div className="page">
-      <section className="panel content-panel">
+    <div className="relative z-10 grid gap-[22px] w-full">
+      <section className="panel content-panel relative overflow-hidden">
         <div className="profile-header">
           <div className="profile-avatar">{userInitials}</div>
-          <div><h3>{userName}</h3><p className="muted">Branch Manager</p></div>
+          <div><h3>{userName}</h3><p className="text-ink/70">Branch Manager</p></div>
         </div>
         <ul className="info-grid"><li><span className="info-item-label">Branch</span><span className="info-item-value">{userBranch}</span></li><li><span className="info-item-label">Email</span><span className="info-item-value">{userEmail}</span></li><li><span className="info-item-label">Phone</span><span className="info-item-value">N/A</span></li></ul>
       </section>
-      <Toolbar actions={[{label:'Update Profile',action:'update'},{label:'Change Password',action:'password',variant:'secondary'},{label:'Approval Center',to:'/branch-manager/approval-center',variant:'ghost'},{label:'Audit Log',to:'/branch-manager/audit-log',variant:'ghost'},{label:'Logout',action:'logout',variant:'ghost'}]}
-        onAction={(a)=>{if(a.to)navigate(a.to);else if (a.action === 'logout') { requestLogout(); }else showToast(`${a.label} opened.`,'success');}}/>
+      <div className="flex justify-end gap-2 mt-4">
+        <button className="button ghost" type="button" onClick={() => requestLogout()}>Logout</button>
+        <button className="button ghost" type="button" onClick={() => navigate('/branch-manager/audit-log')}>Audit Log</button>
+        <button className="button ghost" type="button" onClick={() => navigate('/branch-manager/approval-center')}>Approval Center</button>
+        <button className="button secondary" type="button" onClick={() => showToast('Change Password opened.', 'success')}>Change Password</button>
+        <button className="button" type="button" onClick={() => showToast('Update Profile opened.', 'success')}>Update Profile</button>
+      </div>
     </div>
   );
 }
@@ -1379,7 +1385,7 @@ function ApprovalCenterPage({ navigate, showToast }) {
   };
 
   return (
-    <div className="page">
+    <div className="relative z-10 grid gap-[22px] w-full">
       {/* Summary bar */}
       <section className="stats-grid">
         {[
@@ -1397,7 +1403,7 @@ function ApprovalCenterPage({ navigate, showToast }) {
       </section>
 
       {/* Tab navigation */}
-      <div className="segmented-control" style={{ marginBottom: 0, flexWrap: 'wrap' }}>
+      <div className="segmented-control">
         {tabs.map(t => (
           <button key={t.key} className={tab === t.key ? 'segment active' : 'segment'} type="button" onClick={() => setTab(t.key)}>{t.label}</button>
         ))}
@@ -1405,22 +1411,22 @@ function ApprovalCenterPage({ navigate, showToast }) {
 
       {/* ── CI Approvals ── */}
       {tab === 'ci' && (
-        <section className="panel content-panel">
-          <div className="panel-section-header">
+        <section className="panel content-panel relative overflow-hidden">
+          <div className="flex flex-col md:flex-row justify-between gap-4 items-start md:items-center mb-4">
             <h3>Credit Investigation Queue</h3>
-            <button className="button ghost" type="button" onClick={() => navigate('/branch-manager/ci-approvals')}>Open Full CI Queue</button>
+            <button className="inline-flex justify-center items-center gap-2 px-5 py-2.5 rounded-md bg-transparent text-blue border-[1.5px] border-blue-30 shadow-none hover:bg-blue-08 transition-all duration-160 cursor-pointer" type="button" onClick={() => navigate('/branch-manager/ci-approvals')}>Open Full CI Queue</button>
           </div>
           {ciList.length ? (
-            <div className="table-shell">
-              <table className="data-table">
+            <div className="corvex-table-wrapper">
+              <table className="corvex-table">
                 <thead>
                   <tr><th>Customer</th><th>Submitted By</th><th>Purpose</th><th>Income</th><th>Risk Score</th><th>Delinquency</th><th>Status</th><th>Actions</th></tr>
                 </thead>
                 <tbody>
                   {ciList.map(ci => (
                     <tr key={ci.id}>
-                      <td><strong>{ci.customerName}</strong><span className="muted" style={{ display: 'block', fontSize: '0.8rem' }}>{ci.id}</span></td>
-                      <td>{ci.submittedBy}<span className="muted" style={{ display: 'block', fontSize: '0.8rem' }}>{ci.submissionDate}</span></td>
+                      <td><strong>{ci.customerName}</strong><span className="text-ink/70" style={{ display: 'block', fontSize: '0.8rem' }}>{ci.id}</span></td>
+                      <td>{ci.submittedBy}<span className="text-ink/70" style={{ display: 'block', fontSize: '0.8rem' }}>{ci.submissionDate}</span></td>
                       <td>{ci.purpose}</td>
                       <td>{formatCurrency(ci.monthlyIncome)}</td>
                       <td><RiskBadge score={ci.riskScore} /></td>
@@ -1444,14 +1450,14 @@ function ApprovalCenterPage({ navigate, showToast }) {
 
       {/* ── Inventory Transfers ── */}
       {tab === 'transfers' && (
-        <section className="panel content-panel">
-          <div className="panel-section-header">
+        <section className="panel content-panel relative overflow-hidden">
+          <div className="flex flex-col md:flex-row justify-between gap-4 items-start md:items-center mb-4">
             <h3>Inventory Transfer Requests</h3>
-            <p className="muted" style={{ margin: 0, fontSize: '0.85rem' }}>Review and approve cross-branch stock movements.</p>
+            <p className="text-ink/70" style={{ margin: 0, fontSize: '0.85rem' }}>Review and approve cross-branch stock movements.</p>
           </div>
           {transferList.length ? (
-            <div className="table-shell">
-              <table className="data-table">
+            <div className="corvex-table-wrapper">
+              <table className="corvex-table">
                 <thead>
                   <tr><th>Transfer ID</th><th>Product</th><th>Qty</th><th>From</th><th>To</th><th>Value</th><th>Requested By</th><th>Date</th><th>Status</th><th>Actions</th></tr>
                 </thead>
@@ -1484,19 +1490,19 @@ function ApprovalCenterPage({ navigate, showToast }) {
 
       {/* ── Special Collections ── */}
       {tab === 'special' && (
-        <section className="panel content-panel">
-          <div className="panel-section-header">
+        <section className="panel content-panel relative overflow-hidden">
+          <div className="flex flex-col md:flex-row justify-between gap-4 items-start md:items-center mb-4">
             <h3>Special Collection Requests</h3>
-            <p className="muted" style={{ margin: 0, fontSize: '0.85rem' }}>Extended terms and partial collection approvals submitted by field collectors.</p>
+            <p className="text-ink/70" style={{ margin: 0, fontSize: '0.85rem' }}>Extended terms and partial collection approvals submitted by field collectors.</p>
           </div>
           {specialList.length ? (
             <div className="grid" style={{ gap: 16 }}>
               {specialList.map(s => (
-                <article key={s.id} className="panel content-panel" style={{ padding: 20 }}>
+                <article key={s.id} className="panel content-panel relative overflow-hidden" style={{ padding: 20 }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 16, marginBottom: 12 }}>
                     <div>
                       <h4 style={{ margin: 0, fontSize: '1rem' }}>{s.customerName}</h4>
-                      <span className="muted" style={{ fontSize: '0.82rem' }}>{s.accountNumber} · submitted by {s.requestedBy} on {s.date}</span>
+                      <span className="text-ink/70" style={{ fontSize: '0.82rem' }}>{s.accountNumber} · submitted by {s.requestedBy} on {s.date}</span>
                     </div>
                     <StatusBadge status={s.status} />
                   </div>
@@ -1507,8 +1513,8 @@ function ApprovalCenterPage({ navigate, showToast }) {
                   <p style={{ margin: '0 0 14px', fontSize: '0.88rem', color: '#475569', padding: '10px 14px', background: '#f8fafc', borderRadius: 8, border: '1px solid #e2e8f0' }}>{s.notes}</p>
                   {s.status === 'Pending' && (
                     <div style={{ display: 'flex', gap: 10 }}>
-                      <button className="button" type="button" onClick={() => approveSpecial(s.id)}>Approve Request</button>
-                      <button className="button secondary" type="button" onClick={() => rejectSpecial(s.id)}>Reject</button>
+                      <button className="inline-flex justify-center items-center gap-2 px-5 py-2.5 rounded-md border-0 bg-blue text-white font-semibold cursor-pointer transition-all duration-160 hover:-translate-y-[1px] hover:shadow-[0_4px_16px_rgba(37,99,235,0.35)] hover:brightness-105 active:translate-y-0" type="button" onClick={() => approveSpecial(s.id)}>Approve Request</button>
+                      <button className="inline-flex justify-center items-center gap-2 px-5 py-2.5 rounded-md bg-mint text-ink border-[1.5px] border-surface-3 shadow-none hover:border-blue hover:text-blue transition-all duration-160 cursor-pointer" type="button" onClick={() => rejectSpecial(s.id)}>Reject</button>
                     </div>
                   )}
                 </article>
@@ -1523,12 +1529,14 @@ function ApprovalCenterPage({ navigate, showToast }) {
 
 function AuditLogPage({ navigate }) {
   return (
-    <div className="page">
-      <section className="panel content-panel">
-        <div className="panel-section-header"><h3>Audit Log</h3></div>
-        <div className="table-shell"><table className="data-table"><thead><tr><th>Action</th><th>Detail</th><th>Timestamp</th></tr></thead><tbody>{AUDIT_LOGS.map((l)=><tr key={l.id}><td>{l.action}</td><td>{l.detail}</td><td>{l.timestamp}</td></tr>)}</tbody></table></div>
+    <div className="relative z-10 grid gap-[22px] w-full">
+      <section className="panel content-panel relative overflow-hidden">
+        <div className="flex flex-col md:flex-row justify-between gap-4 items-start md:items-center mb-4"><h3>Audit Log</h3></div>
+        <div className="corvex-table-wrapper"><table className="corvex-table"><thead><tr><th>Action</th><th>Detail</th><th>Timestamp</th></tr></thead><tbody>{AUDIT_LOGS.map((l)=><tr key={l.id}><td>{l.action}</td><td>{l.detail}</td><td>{l.timestamp}</td></tr>)}</tbody></table></div>
       </section>
-      <Toolbar actions={[{label:'Back to Profile',to:'/branch-manager/profile',variant:'ghost'}]} onAction={(a)=>navigate(a.to)}/>
+      <div className="flex justify-end gap-2 mt-4">
+        <button className="button ghost" type="button" onClick={() => navigate('/branch-manager/profile')}>Back to Profile</button>
+      </div>
     </div>
   );
 }
@@ -1540,7 +1548,7 @@ export function BranchManagerPageBody({ page, navigate, showToast, currentUser }
     return (
       <section className="panel empty-state">
         <h3>Branch not assigned</h3>
-        <p className="muted">Your account is not linked to a branch. Please contact an administrator.</p>
+        <p className="text-ink/70">Your account is not linked to a branch. Please contact an administrator.</p>
       </section>
     );
   }

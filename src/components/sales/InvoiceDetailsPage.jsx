@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { fetchInvoiceById, fetchInvoiceItems } from '../../api/salesService';
-import { EmptyState } from '../collector/EmptyState';
-import { LoadingState } from '../collector/LoadingState';
+import { EmptyState } from '../shared/EmptyState';
+import { LoadingState } from '../shared/LoadingState';
 import { StatusBadge } from '../StatusBadge';
 import { formatCurrency } from '../../data/salesMockData';
 import { NavIcon } from '../../navIcons';
@@ -61,11 +61,11 @@ export function InvoiceDetailsPage({ invoiceId, navigate, showToast }) {
   const customerName = invoice?.customer_name || `${invoice?.first_name || ''} ${invoice?.last_name || ''}`.trim() || '—';
 
   return (
-    <div className="page">
-      <section className="panel content-panel">
-        <div className="panel-section-header">
+    <div className="relative z-10 grid gap-[22px] w-full">
+      <section className="panel content-panel relative overflow-hidden">
+        <div className="flex flex-col md:flex-row justify-between gap-4 items-start md:items-center mb-4">
           <h3>{invoice?.invoice_number ? `Invoice #${invoice.invoice_number}` : 'Invoice Details'}</h3>
-          <p className="muted">Invoice ID: {invoice?.sales_invoices_id ?? invoiceId}</p>
+          <p className="text-ink/70">Invoice ID: {invoice?.sales_invoices_id ?? invoiceId}</p>
         </div>
 
         {invoice ? (
@@ -134,8 +134,8 @@ export function InvoiceDetailsPage({ invoiceId, navigate, showToast }) {
               </div>
             </div>
 
-            <div className="table-shell">
-              <table className="data-table">
+            <div className="corvex-table-wrapper">
+              <table className="corvex-table">
                 <thead>
                   <tr>
                     <th>Item ID</th>
@@ -171,33 +171,10 @@ export function InvoiceDetailsPage({ invoiceId, navigate, showToast }) {
           <EmptyState title="No invoice items found" description="This invoice has no line items." />
         )}
       </section>
-      <PageToolbar
-        actions={[{ label: 'Back to History', to: '/sales/history', variant: 'ghost' }]}
-        onAction={(a) => navigate(a.to)}
-      />
+      <div className="flex justify-end mt-4">
+        <button className="button ghost" type="button" onClick={() => navigate('/sales/history')}>Back to History</button>
+      </div>
     </div>
   );
 }
 
-function PageToolbar({ actions, onAction }) {
-  if (!actions?.length) return null;
-  return (
-    <footer className="page-toolbar">
-      <div className="page-toolbar-main">
-        <div className="page-toolbar-actions">
-          {actions.map((action) => (
-            <button key={action.label} className={actionVariantClass(action.variant)} type="button" onClick={() => onAction(action)}>
-              {action.label}
-            </button>
-          ))}
-        </div>
-      </div>
-    </footer>
-  );
-}
-
-function actionVariantClass(variant) {
-  if (variant === 'secondary') return 'button secondary';
-  if (variant === 'ghost') return 'button ghost';
-  return 'button';
-}

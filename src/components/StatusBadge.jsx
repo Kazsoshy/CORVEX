@@ -21,8 +21,8 @@ export function StatusBadge({ status }) {
   };
 
   return (
-    <span className={`modern-badge ${stateColors[state]}`}>
-      <span className="badge-dot" aria-hidden="true" />
+    <span className={`spatial-badge ${stateColors[state]}`}>
+      <span className="badge-dot" aria-hidden="true" style={{ width: '6px', height: '6px', borderRadius: '50%', backgroundColor: 'currentColor' }} />
       {status}
     </span>
   );

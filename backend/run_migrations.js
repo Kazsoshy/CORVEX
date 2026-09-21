@@ -18,8 +18,8 @@ const MIGRATIONS_DIR = path.join(process.cwd(), 'backend', 'migrations');
 
 const MIGRATIONS = [
   { file: '001_initial_schema.sql',                  label: '001_initial_schema.sql' },
-  { file: '000_prepare_existing_tables.sql',         label: '000_prepare_existing_tables.sql' },
   { file: '002_seed_data.sql',                       label: '002_seed_data.sql' },
+  { file: '000_prepare_existing_tables.sql',         label: '000_prepare_existing_tables.sql' },
   { file: '004_fix_password_hash.sql',               label: '004_fix_password_hash.sql' },
   { file: '008_seed_customers.sql',                  label: '008_seed_customers.sql' },
   { file: '009_seed_customer_activity.sql',          label: '009_seed_customer_activity.sql' },

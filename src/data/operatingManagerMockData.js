@@ -172,7 +172,7 @@ export const NOTIFICATIONS = [
   { id: 'n4', type: 'Report Ready',               message: 'Executive Summary report for June 2026 ready for download.',      read: false, relatedTo: '/operating-manager/reports/executive-summary' },
 ];
 
-export function formatCurrency(amount) { return `₱${Number(amount).toLocaleString('en-PH')}`; }
+export { formatCurrency } from '../utils/formatters.js';
 export function getBranchById(id)       { return BRANCHES.find((b) => b.id === id) ?? null; }
 export function getAlertById(id)        { return ALERTS.find((a) => a.id === id) ?? null; }
 export function getHighestPerformingBranch() { return [...BRANCHES].sort((a, b) => b.performanceScore - a.performanceScore)[0]; }

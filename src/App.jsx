@@ -1,6 +1,5 @@
 import { useMemo, useState, useCallback, useEffect } from 'react';
 import { Link, Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
-import { Breadcrumbs } from './components/collector/Breadcrumbs';
 import { CollectorPageBody } from './components/collector/CollectorPageBody';
 import { SalesPageBody } from './components/sales/SalesPageBody';
 import { WarehousePageBody } from './components/warehouse/WarehousePageBody';
@@ -8,7 +7,7 @@ import { OperatingManagerPageBody } from './components/operatingManager/Operatin
 import { BranchManagerPageBody } from './components/branchManager/BranchManagerPageBody';
 import { CustomerPageBody } from './components/customer/CustomerPageBody';
 import { SuperAdminPageBody } from './components/superAdmin/SuperAdminPageBody';
-import { Toast, useToast } from './components/collector/Toast';
+import { Toast, useToast } from './components/shared/Toast';
 import { quickFacts } from './pageData';
 import { login as apiLogin, getEntryPathForRole, logout, getCurrentUser } from './api/authService.js';
 import { LoginPage } from './components/auth/LoginPage';
@@ -63,6 +62,7 @@ function PrototypeShell() {
   const isBranchManager = currentRole?.key === 'branchManager';
   const isCustomer = currentRole?.key === 'customer';
   const isSuperAdmin = currentRole?.key === 'superAdmin';
+  const currentUser = getCurrentUser();
   const isRoleModule = isCollector || isSales || isWarehouse || isOperatingManager || isBranchManager || isCustomer || isSuperAdmin;
   const isCustomerLogin = isCustomerAuthPath(location.pathname);
   const fullPath = location.pathname + location.search;
@@ -128,16 +128,16 @@ function PrototypeShell() {
 
   return (
     <div className={`app-shell ${isSidebarCollapsed ? 'collapsed' : ''} ${isMobileSidebarOpen ? 'mobile-open' : ''}`}>
-      <LogoutConfirmDialog 
-        isOpen={showLogoutConfirm} 
-        onConfirm={handleLogoutConfirm} 
-        onCancel={() => setShowLogoutConfirm(false)} 
+      <LogoutConfirmDialog
+        isOpen={showLogoutConfirm}
+        onConfirm={handleLogoutConfirm}
+        onCancel={() => setShowLogoutConfirm(false)}
       />
       {isMobileSidebarOpen && (
         <div className="sidebar-overlay" onClick={() => setIsMobileSidebarOpen(false)} aria-hidden="true" />
       )}
       <aside className="sidebar">
-        <button 
+        <button
           className="sidebar-toggle-btn"
           onClick={() => setIsSidebarCollapsed(!isSidebarCollapsed)}
           aria-label={isSidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
@@ -146,35 +146,34 @@ function PrototypeShell() {
         </button>
         <div className="sidebar-inner">
           <div className="sidebar-header">
-          <div className="brand-card">
-            <img src="/src/assets/corvex-logo.png" alt="CORVEX logo" className="brand-logo" />
-            <div className="brand-copy">
-              <div className="brand-title">CORVEX</div>
-              {currentRole ? <div className="brand-subtitle">{currentRole.label}</div> : null}
+            <div className="brand-card">
+              <img src="/src/assets/corvex-logo.png" alt="CORVEX logo" className="brand-logo" />
+              <div className="brand-copy">
+                <div className="brand-title">CORVEX</div>
+              </div>
             </div>
           </div>
-        </div>
 
-        {currentRole && !isAuthPath(location.pathname) && !isCustomerLogin ? (
-          <>
-            <nav className="nav-links">
-              {currentRole?.navSections?.length ? (
-                currentRole.navSections.map((section) => (
-                  <details key={section.title} className="nav-group" open>
-                    <summary className="nav-group-summary">
-                      <span>{section.title}</span>
-                      <span className="nav-group-chevron" aria-hidden="true">
-                        <NavIcon name="chevronRight" />
-                      </span>
-                    </summary>
-                    <div className="nav-group-items">
-                      {section.items.map((link) => (
-                        <Link
-                          key={link.to}
-                          to={link.to}
-                          className={
-                            isRoleModule
-                              ? (isCollector
+          {currentRole && !isAuthPath(location.pathname) && !isCustomerLogin ? (
+            <>
+              <nav className="nav-links">
+                {currentRole?.navSections?.length ? (
+                  currentRole.navSections.map((section) => (
+                    <details key={section.title} className="nav-group" open>
+                      <summary className="nav-group-summary">
+                        <span>{section.title}</span>
+                        <span className="nav-group-chevron" aria-hidden="true">
+                          <NavIcon name="chevronRight" />
+                        </span>
+                      </summary>
+                      <div className="nav-group-items">
+                        {section.items.map((link) => (
+                          <Link
+                            key={link.to}
+                            to={link.to}
+                            className={
+                              isRoleModule
+                                ? (isCollector
                                   ? isCollectorNavActive(fullPath, link.to)
                                   : isSales
                                     ? isSalesNavActive(fullPath, link.to)
@@ -185,33 +184,33 @@ function PrototypeShell() {
                                         : isBranchManager
                                           ? isBranchManagerNavActive(fullPath, link.to)
                                           : isSuperAdmin
-                                              ? isSuperAdminNavActive(fullPath, link.to)
-                                              : isCustomerNavActive(fullPath, link.to))
-                                ? 'nav-link active'
-                                : 'nav-link'
-                              : location.pathname === link.to
-                                ? 'nav-link active'
-                                : 'nav-link'
-                          }
-                          data-tooltip={link.label}
-                        >
-                          <span className="nav-link-icon">
-                            <NavIcon label={link.label} />
-                          </span>
-                          <span className="nav-link-text">{link.label}</span>
-                        </Link>
-                      ))}
-                    </div>
-                  </details>
-                ))
-              ) : (
-                topLinks.map((link) => (
-                  <Link
-                    key={link.to}
-                    to={link.to}
-                    className={
-                      isRoleModule
-                        ? (isCollector
+                                            ? isSuperAdminNavActive(fullPath, link.to)
+                                            : isCustomerNavActive(fullPath, link.to))
+                                  ? 'nav-link active'
+                                  : 'nav-link'
+                                : location.pathname === link.to
+                                  ? 'nav-link active'
+                                  : 'nav-link'
+                            }
+                            data-tooltip={link.label}
+                          >
+                            <span className="nav-link-icon">
+                              <NavIcon label={link.label} />
+                            </span>
+                            <span className="nav-link-text">{link.label}</span>
+                          </Link>
+                        ))}
+                      </div>
+                    </details>
+                  ))
+                ) : (
+                  topLinks.map((link) => (
+                    <Link
+                      key={link.to}
+                      to={link.to}
+                      className={
+                        isRoleModule
+                          ? (isCollector
                             ? isCollectorNavActive(fullPath, link.to)
                             : isSales
                               ? isSalesNavActive(fullPath, link.to)
@@ -222,90 +221,80 @@ function PrototypeShell() {
                                   : isBranchManager
                                     ? isBranchManagerNavActive(fullPath, link.to)
                                     : isSuperAdmin
-                                        ? isSuperAdminNavActive(fullPath, link.to)
-                                        : isCustomerNavActive(fullPath, link.to))
-                          ? 'nav-link active'
-                          : 'nav-link'
-                        : location.pathname === link.to
-                          ? 'nav-link active'
-                          : 'nav-link'
-                    }
-                    data-tooltip={link.label}
-                  >
-                    <span className="nav-link-icon">
-                      <NavIcon label={link.label} />
-                    </span>
-                    <span className="nav-link-text">{link.label}</span>
-                  </Link>
-                ))
-              )}
+                                      ? isSuperAdminNavActive(fullPath, link.to)
+                                      : isCustomerNavActive(fullPath, link.to))
+                            ? 'nav-link active'
+                            : 'nav-link'
+                          : location.pathname === link.to
+                            ? 'nav-link active'
+                            : 'nav-link'
+                      }
+                      data-tooltip={link.label}
+                    >
+                      <span className="nav-link-icon">
+                        <NavIcon label={link.label} />
+                      </span>
+                      <span className="nav-link-text">{link.label}</span>
+                    </Link>
+                  ))
+                )}
+              </nav>
+            </>
+          ) : (
+            <nav className="nav-links nav-links-auth">
+              {topLinks.map((link) => (
+                <Link
+                  key={link.to}
+                  to={link.to}
+                  className={location.pathname === link.to ? 'nav-link active' : 'nav-link'}
+                  data-tooltip={link.label}
+                >
+                  <span className="nav-link-icon">
+                    <NavIcon label={link.label} />
+                  </span>
+                  <span className="nav-link-text">{link.label}</span>
+                </Link>
+              ))}
             </nav>
-            <div className="sidebar-footer">
-              <button
-                className="button ghost sidebar-switch"
-                type="button"
-                onClick={() => setShowLogoutConfirm(true)}
-              >
-                <span className="sidebar-switch-icon">
-                  <NavIcon name="login" />
-                </span>
-                <span className="sidebar-switch-text">Logout</span>
-              </button>
-            </div>
-          </>
-        ) : (
-          <nav className="nav-links nav-links-auth">
-            {topLinks.map((link) => (
-              <Link
-                key={link.to}
-                to={link.to}
-                className={location.pathname === link.to ? 'nav-link active' : 'nav-link'}
-                data-tooltip={link.label}
-              >
-                <span className="nav-link-icon">
-                  <NavIcon label={link.label} />
-                </span>
-                <span className="nav-link-text">{link.label}</span>
-              </Link>
-            ))}
-          </nav>
-        )}
+          )}
         </div>
+        {currentRole && !isAuthPath(location.pathname) && !isCustomerLogin && (
+          <div className="sidebar-footer">
+            <div
+              className="sidebar-profile"
+              onClick={() => {
+                const prefix = currentRole.entryPath.split('/')[1];
+                navigate(`/${prefix}/profile`);
+              }}
+              role="button"
+              tabIndex={0}
+            >
+              <div className="sidebar-profile-avatar">
+                <NavIcon name="accounts" />
+              </div>
+              <div className="sidebar-profile-info">
+                <div className="sidebar-profile-name">{currentUser?.fullName || currentUser?.name || 'User'}</div>
+                <div className="sidebar-profile-role">{currentRole.label}</div>
+              </div>
+            </div>
+            <button
+              className="button sidebar-logout"
+              type="button"
+              onClick={() => setShowLogoutConfirm(true)}
+              style={{ display: 'flex', width: '100%', opacity: 1, visibility: 'visible', marginTop: '8px' }}
+            >
+              <span className="sidebar-switch-icon">
+                <NavIcon name="login" />
+              </span>
+              <span className="sidebar-switch-text">Logout</span>
+            </button>
+          </div>
+        )}
       </aside>
 
       <main className="content">
         <div className="content-ambient" aria-hidden="true" />
-        <header className="topbar">
-          <div className="topbar-main">
-            <div className="mobile-header-actions">
-              <button className="mobile-menu-btn" type="button" onClick={() => setIsMobileSidebarOpen(true)} aria-label="Open menu">
-                <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <line x1="3" y1="12" x2="21" y2="12"></line>
-                  <line x1="3" y1="6" x2="21" y2="6"></line>
-                  <line x1="3" y1="18" x2="21" y2="18"></line>
-                </svg>
-              </button>
-            </div>
-            {currentRole && page ? (
-              isRoleModule && page.breadcrumbs?.length ? (
-                <Breadcrumbs items={page.breadcrumbs} />
-              ) : (
-                <p className="breadcrumb">
-                  {currentRole.label}
-                  <span aria-hidden="true">/</span>
-                  {page.title}
-                </p>
-              )
-            ) : null}
-            <div className="topbar-title-row">
-              <h1>{pageTitle}</h1>
-            </div>
-            {page?.description ? <p className="topbar-subtitle">{page.description}</p> : null}
-            {!page?.description && currentRole && isDashboardPath(location.pathname, currentRole) ? (
-              <p className="topbar-subtitle">{currentRole.accent}</p>
-            ) : null}
-          </div>
-        </header>
+
 
         {location.pathname === '/password-reset' && (
           <section className="panel form-panel narrow">
@@ -314,7 +303,7 @@ function PrototypeShell() {
               Email
               <input placeholder="name@example.com" />
             </label>
-            <button className="button" type="button" onClick={() => navigate('/login')}>
+            <button className="inline-flex justify-center items-center gap-2 px-5 py-2.5 rounded-md border-0 bg-blue text-white font-semibold cursor-pointer transition-all duration-160 hover:-translate-y-[1px] hover:shadow-[0_4px_16px_rgba(37,99,235,0.35)] hover:brightness-105 active:translate-y-0" type="button" onClick={() => navigate('/login')}>
               Send reset link
             </button>
           </section>
@@ -450,7 +439,7 @@ function PageBody({ showMap, setShowMap, filter, setFilter, page, currentRole, n
     return (
       <section className="panel empty-state">
         <h3>Page not found</h3>
-        <p className="muted">This route is not available yet. Use the sidebar to open a supported screen.</p>
+        <p className="text-ink/70">This route is not available yet. Use the sidebar to open a supported screen.</p>
       </section>
     );
   }
@@ -460,7 +449,7 @@ function PageBody({ showMap, setShowMap, filter, setFilter, page, currentRole, n
   };
 
   return (
-    <div className="page">
+    <div className="relative z-10 grid gap-[22px] w-full">
       {page.stats?.length ? (
         <section className="stats-grid">
           {page.stats.map((stat, index) => (
@@ -477,18 +466,16 @@ function PageBody({ showMap, setShowMap, filter, setFilter, page, currentRole, n
       ) : null}
 
       {page.actions?.length ? (
-        <header className="page-toolbar">
-          <div className="page-toolbar-main">
-            <PageActions actions={page.actions} navigate={navigate} className="page-toolbar-actions" />
-          </div>
-        </header>
+        <div className="flex justify-end gap-2 mt-4 mb-4">
+          <PageActions actions={page.actions} navigate={navigate} className="flex flex-wrap gap-2" />
+        </div>
       ) : null}
 
       {isDashboard && quickLinks.length ? (
-        <section className="panel dashboard-panel">
-          <div className="panel-section-header">
+        <section className="bg-mint rounded-xl p-[28px] shadow-card border border-surface-2 relative overflow-hidden">
+          <div className="flex flex-col md:flex-row justify-between gap-4 items-start md:items-center mb-4">
             <h3>Quick access</h3>
-            <p className="muted">Jump to the screens you use most.</p>
+            <p className="text-ink/70">Jump to the screens you use most.</p>
           </div>
           <div className="quick-link-grid">
             {quickLinks.map((link) => (
@@ -498,7 +485,7 @@ function PageBody({ showMap, setShowMap, filter, setFilter, page, currentRole, n
                 </span>
                 <span className="quick-link-copy">
                   <strong>{link.label}</strong>
-                  <span className="muted">Open screen</span>
+                  <span className="text-ink/70">Open screen</span>
                 </span>
                 <span className="quick-link-arrow" aria-hidden="true">→</span>
               </Link>
@@ -508,10 +495,10 @@ function PageBody({ showMap, setShowMap, filter, setFilter, page, currentRole, n
       ) : null}
 
       {page.showMap && (
-        <section className="panel content-panel">
-          <div className="panel-section-header">
+        <section className="bg-mint rounded-xl p-[28px] shadow-card border border-surface-2 relative overflow-hidden">
+          <div className="flex flex-col md:flex-row justify-between gap-4 items-start md:items-center mb-4">
             <h3>Map overview</h3>
-            <div className="inline-toolbar">
+            <div className="flex flex-wrap items-center gap-2 mt-2">
               <div className="segmented-control">
                 {['All', 'Pending', 'Completed'].map((item) => (
                   <button key={item} className={filter === item ? 'segment active' : 'segment'} type="button" onClick={() => setFilter(item)}>
@@ -526,12 +513,12 @@ function PageBody({ showMap, setShowMap, filter, setFilter, page, currentRole, n
           </div>
           {showMap ? (
             <div style={{ marginTop: 16 }}>
-              <LeafletMap 
-                center={[7.1907, 125.4553]} 
-                zoom={12} 
+              <LeafletMap
+                center={[7.1907, 125.4553]}
+                zoom={12}
                 height={500}
                 markers={[
-                  { id: '1', position: [7.1907, 125.4553], label: 'A', color: '#2563eb', popup: 'Marker A' },
+                  { id: '1', position: [7.1907, 125.4553], label: 'A', color: '#093850', popup: 'Marker A' },
                   { id: '2', position: [7.2000, 125.4500], label: 'B', color: '#10b981', popup: 'Marker B' }
                 ]}
               />
@@ -543,10 +530,10 @@ function PageBody({ showMap, setShowMap, filter, setFilter, page, currentRole, n
       )}
 
       {page.table && (
-        <section className="panel content-panel">
+        <section className="bg-mint rounded-xl p-[28px] shadow-card border border-surface-2 relative overflow-hidden">
           {(page.table.hasFilter || page.table.hasMap) && (
             <div className="panel-section-header panel-section-header-compact">
-              <div className="inline-toolbar">
+              <div className="flex flex-wrap items-center justify-end gap-2 mt-2 mb-2">
                 {page.table.hasFilter && (
                   <div className="segmented-control">
                     {['All', 'Pending', 'Completed'].map((item) => (
@@ -567,19 +554,19 @@ function PageBody({ showMap, setShowMap, filter, setFilter, page, currentRole, n
 
           {showMap && page.table.hasMap ? (
             <div style={{ marginTop: 16 }}>
-              <LeafletMap 
-                center={[7.1907, 125.4553]} 
-                zoom={12} 
+              <LeafletMap
+                center={[7.1907, 125.4553]}
+                zoom={12}
                 height={500}
                 markers={[
-                  { id: '1', position: [7.1907, 125.4553], label: 'P1', color: '#2563eb', popup: 'Location 1' },
+                  { id: '1', position: [7.1907, 125.4553], label: 'P1', color: '#093850', popup: 'Location 1' },
                   { id: '2', position: [7.2000, 125.4500], label: 'P2', color: '#10b981', popup: 'Location 2' }
                 ]}
               />
             </div>
           ) : (
-            <div className="table-shell">
-              <table className="data-table">
+            <div className="corvex-table-wrapper">
+              <table className="corvex-table">
                 <thead>
                   <tr>
                     {page.table.columns.map((col) => (
@@ -605,7 +592,7 @@ function PageBody({ showMap, setShowMap, filter, setFilter, page, currentRole, n
       {/* Form rendering */}
       {page.form && (
         <section className="panel form-panel content-panel">
-          <div className="panel-section-header">
+          <div className="flex flex-col md:flex-row justify-between gap-4 items-start md:items-center mb-4">
             <h3>{page.form.title}</h3>
           </div>
           {page.form.fields.map((field) => (
@@ -667,8 +654,8 @@ function PageBody({ showMap, setShowMap, filter, setFilter, page, currentRole, n
 
       {/* Custom content sections */}
       {page.sections?.map((section) => (
-        <section key={section.title} className="panel content-panel">
-          <div className="panel-section-header">
+        <section key={section.title} className="bg-mint rounded-xl p-[28px] shadow-card border border-surface-2 relative overflow-hidden">
+          <div className="flex flex-col md:flex-row justify-between gap-4 items-start md:items-center mb-4">
             <h3>{section.title}</h3>
           </div>
           {section.type === 'bullet-list' && (

@@ -1,3 +1,4 @@
+import { StatusBadge } from '../../components/StatusBadge';
 import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import {
@@ -20,8 +21,8 @@ import {
 import { getExecutiveDashboard, getOperatingManagerAnalytics, getPerformanceHistory } from '../../api/reportsService';
 import apiClient from '../../api/apiClient';
 import { fetchCustomers, fetchCustomerById } from '../../api/salesService';
-import { EmptyState } from '../collector/EmptyState';
-import { LoadingState } from '../collector/LoadingState';
+import { EmptyState } from '../shared/EmptyState';
+import { LoadingState } from '../shared/LoadingState';
 import { NavIcon } from '../../navIcons';
 import { getCurrentUser } from '../../api/authService';
 import { TerritoriesPage } from '../territories/TerritoriesPage';
@@ -134,8 +135,8 @@ function DashboardPage({ navigate }) {
         display: 'inline-flex', alignItems: 'center', gap: 4,
         fontSize: '0.8rem', fontWeight: 700,
         color: up ? '#059669' : '#dc2626',
-        background: up ? 'rgba(5,150,105,0.08)' : 'rgba(220,38,38,0.08)',
-        borderRadius: 999, padding: '2px 8px',
+        
+        padding: '2px 8px',
       }}>
         {up ? '▲' : '▼'} {Math.abs(rate)}% {label}
       </span>
@@ -326,7 +327,7 @@ function DashboardPage({ navigate }) {
           </div>
         </div>
         <div className="table-shell">
-          <table className="data-table">
+          <table className="corvex-table">
             <thead>
               <tr>
                 <th>Branch</th>
@@ -482,7 +483,7 @@ function PerformanceHistoryPanel() {
         </LineChart>
       </ResponsiveContainer>
       <div className="table-shell" style={{ marginTop: 16 }}>
-        <table className="data-table">
+        <table className="corvex-table">
           <thead><tr><th>Branch</th><th>Latest Sales</th><th>Latest Collections</th><th>Inventory Accuracy</th></tr></thead>
           <tbody>
             {perfData.byBranch.map((branch) => {
@@ -542,7 +543,7 @@ function BranchPerformanceHub({ navigate }) {
 
   return (
     <div className="page">
-      <div className="segmented-control" style={{ marginBottom: 24 }}>
+      <div className="segmented-control">
         {tabs.map((t) => (
           <button key={t.key} className={activeTab === t.key ? 'segment active' : 'segment'} type="button" onClick={() => setActiveTab(t.key)}>
             {t.label}
@@ -577,7 +578,7 @@ function BranchPerformanceHub({ navigate }) {
               <p className="muted" style={{ margin: 0, fontSize: '0.82rem' }}>Source: branches table — phone, email, region, manager_id</p>
             </div>
             <div className="table-shell">
-              <table className="data-table">
+              <table className="corvex-table">
                 <thead>
                   <tr>
                     <th>Branch</th>
@@ -606,13 +607,7 @@ function BranchPerformanceHub({ navigate }) {
                       <td>{b.active_staff || 0}</td>
                       <td>{b.customer_count || 0}</td>
                       <td>
-                        <span style={{
-                          padding: '2px 8px', borderRadius: 999, fontSize: '0.78rem', fontWeight: 600,
-                          background: b.status === 'Active' ? 'rgba(16,185,129,0.1)' : 'rgba(239,68,68,0.1)',
-                          color: b.status === 'Active' ? '#059669' : '#dc2626',
-                        }}>
-                          {b.status}
-                        </span>
+                        <StatusBadge status={b.status} />
                       </td>
                     </tr>
                   ))}
@@ -666,7 +661,7 @@ function BranchComparisonPage({ navigate, showToast }) {
 
       <ChartCard title="KPI Comparison Matrix">
         <div className="table-shell">
-          <table className="data-table">
+          <table className="corvex-table">
             <thead><tr><th>Metric</th>{BRANCHES.map((b) => <th key={b.id}>{b.name}</th>)}</tr></thead>
             <tbody>
               {[
@@ -829,7 +824,7 @@ function ReportsHubPage({ navigate, showToast }) {
 
   return (
     <div className="page">
-      <div className="segmented-control" style={{ marginBottom: 24, flexWrap: 'wrap' }}>
+      <div className="segmented-control">
         {tabDefs.map((t) => (
           <button key={t.key} className={activeTab === t.key ? 'segment active' : 'segment'} type="button" onClick={() => setActiveTab(t.key)}>
             {t.label}
@@ -869,7 +864,7 @@ function ReportsHubPage({ navigate, showToast }) {
 
           <ChartCard title="Branch Collection Summary">
             <div className="table-shell">
-              <table className="data-table">
+              <table className="corvex-table">
                 <thead><tr><th>Branch</th><th>Collections</th><th>Rate</th><th>Overdue</th><th>Compliance</th></tr></thead>
                 <tbody>
                   {BRANCHES.map((b) => <tr key={b.id}><td>{b.name}</td><td>{formatCurrency(b.collections)}</td><td>{b.collectionRate}%</td><td>{b.overdueAccounts}</td><td>{b.routeCompliance}%</td></tr>)}
@@ -919,7 +914,7 @@ function ReportsHubPage({ navigate, showToast }) {
 
           <ChartCard title="Top-Selling Products">
             <div className="table-shell">
-              <table className="data-table">
+              <table className="corvex-table">
                 <thead><tr><th>Product Name</th><th>Category</th><th>Qty Sold</th><th>Revenue</th></tr></thead>
                 <tbody>
                   {SALES_ANALYTICS.topSellingProducts.map((p) => (
@@ -934,7 +929,7 @@ function ReportsHubPage({ navigate, showToast }) {
 
           <ChartCard title="Sales Summary">
             <div className="table-shell">
-              <table className="data-table">
+              <table className="corvex-table">
                 <thead><tr><th>Branch</th><th>Sales Volume</th><th>Revenue</th><th>Completion Rate</th><th>Agents</th></tr></thead>
                 <tbody>
                   {BRANCHES.map((b) => <tr key={b.id}><td>{b.name}</td><td>{formatCurrency(b.sales)}</td><td>{formatCurrency(b.revenue)}</td><td>{b.salesCompletionRate}%</td><td>{b.salesAgents}</td></tr>)}
@@ -973,7 +968,7 @@ function ReportsHubPage({ navigate, showToast }) {
 
             <ChartCard title="Low Stock Items" subtitle="Requires immediate attention">
               <div className="table-shell">
-                <table className="data-table">
+                <table className="corvex-table">
                   <thead><tr><th>Product Name</th><th>Branch</th><th>Current Stock</th><th>Status</th></tr></thead>
                   <tbody>
                     {INVENTORY_ANALYTICS.lowStockItems.map((item) => (
@@ -1084,13 +1079,13 @@ function LeafletPage({ navigate, subPage }) {
       <section className="panel content-panel">
         <div className="panel-section-header"><h3>Map Filters</h3></div>
         <div className="accounts-filters">
-          <select value={filters.branch} onChange={(e) => setFilters((f) => ({ ...f, branch: e.target.value }))}>
+          <select className="filter-select" value={filters.branch} onChange={(e) => setFilters((f) => ({ ...f, branch: e.target.value }))}>
             <option>All Branches</option>{BRANCHES.map((b) => <option key={b.id}>{b.name}</option>)}
           </select>
-          <select value={filters.dateRange} onChange={(e) => setFilters((f) => ({ ...f, dateRange: e.target.value }))}>
+          <select className="filter-select" value={filters.dateRange} onChange={(e) => setFilters((f) => ({ ...f, dateRange: e.target.value }))}>
             {['This Month', 'Last Month', 'Q2 2026', 'YTD'].map((d) => <option key={d}>{d}</option>)}
           </select>
-          <select value={filters.staffType} onChange={(e) => setFilters((f) => ({ ...f, staffType: e.target.value }))}>
+          <select className="filter-select" value={filters.staffType} onChange={(e) => setFilters((f) => ({ ...f, staffType: e.target.value }))}>
             {['All Staff', 'Collectors', 'Sales Agents'].map((s) => <option key={s}>{s}</option>)}
           </select>
         </div>
@@ -1138,7 +1133,7 @@ function AlertsPage({ navigate, showToast }) {
         : (
           <section className="panel content-panel">
             <div className="table-shell">
-              <table className="data-table">
+              <table className="corvex-table">
                 <thead><tr><th>Type</th><th>Branch</th><th>Message</th><th>Severity</th><th>Date</th><th>Status</th><th>Actions</th></tr></thead>
                 <tbody>
                   {filtered.map((a) => (
@@ -1226,13 +1221,13 @@ function CustomerRecordsPage({ navigate }) {
       <section className="panel content-panel">
         <div className="panel-section-header"><h3>All Customer Accounts</h3></div>
         <div className="accounts-toolbar">
-          <input className="search-input" type="search" placeholder="Search by customer name, address, or contact phone" value={search} onChange={e => setSearch(e.target.value)} />
+          <input className="filter-input search" type="search" placeholder="Search by customer name, address, or contact phone" value={search} onChange={e => setSearch(e.target.value)} />
           <div className="accounts-filters">
-            <select value={branchFilter} onChange={e => setBranchFilter(e.target.value)}>
+            <select className="filter-select" value={branchFilter} onChange={e => setBranchFilter(e.target.value)}>
               <option value="All">All Branches</option>
               {BRANCHES.map(b => <option key={b.id} value={b.name}>{b.name}</option>)}
             </select>
-            <select value={statusFilter} onChange={e => setStatusFilter(e.target.value)}>
+            <select className="filter-select" value={statusFilter} onChange={e => setStatusFilter(e.target.value)}>
               {['All', 'Active', 'Inactive'].map(s => <option key={s} value={s}>{s === 'All' ? 'All Statuses' : s}</option>)}
             </select>
           </div>
@@ -1242,7 +1237,7 @@ function CustomerRecordsPage({ navigate }) {
       {filtered.length ? (
         <section className="panel content-panel">
           <div className="table-shell">
-            <table className="data-table">
+            <table className="corvex-table">
               <thead>
                 <tr><th>Name</th><th>Branch</th><th>Address</th><th>Contact Phone</th><th>Status</th><th>Actions</th></tr>
               </thead>
@@ -1411,12 +1406,12 @@ function AnalyticsFilterBar({ filters, setFilters, branchOptions = [] }) {
       </div>
       <div className="accounts-toolbar" style={{ alignItems: 'flex-end' }}>
         <div className="accounts-filters" style={{ flex: 1, minWidth: 0 }}>
-          <select value={filters.preset} onChange={(e) => setFilters((current) => ({ ...current, preset: e.target.value }))}>
+          <select className="filter-select" value={filters.preset} onChange={(e) => setFilters((current) => ({ ...current, preset: e.target.value }))}>
             {ANALYTIC_RANGE_OPTIONS.map((option) => (
               <option key={option.value} value={option.value}>{option.label}</option>
             ))}
           </select>
-          <select value={filters.branchId} onChange={(e) => setFilters((current) => ({ ...current, branchId: e.target.value }))}>
+          <select className="filter-select" value={filters.branchId} onChange={(e) => setFilters((current) => ({ ...current, branchId: e.target.value }))}>
             <option value="all">All Branches</option>
             {branchOptions.map((branch) => (
               <option key={branch.branchId} value={String(branch.branchId)}>{branch.branchName}</option>
@@ -1424,8 +1419,8 @@ function AnalyticsFilterBar({ filters, setFilters, branchOptions = [] }) {
           </select>
           {showCustom ? (
             <>
-              <input type="date" value={filters.startDate} onChange={(e) => setFilters((current) => ({ ...current, startDate: e.target.value }))} />
-              <input type="date" value={filters.endDate} onChange={(e) => setFilters((current) => ({ ...current, endDate: e.target.value }))} />
+              <input className="filter-input" type="date" value={filters.startDate} onChange={(e) => setFilters((current) => ({ ...current, startDate: e.target.value }))} />
+              <input className="filter-input" type="date" value={filters.endDate} onChange={(e) => setFilters((current) => ({ ...current, endDate: e.target.value }))} />
             </>
           ) : null}
         </div>
@@ -1946,7 +1941,9 @@ function LiveOperationsDashboardPage({ navigate }) {
             let deltaLabel = '—';
             if (delta !== null && !Number.isNaN(delta) && Math.abs(delta) > 0.05) {
               const isUp = delta > 0;
-              deltaLabel = k.deltaType === 'pts' ? `${isUp ? '+' : ''}${delta.toFixed(1)} pts` : `${isUp ? '+' : ''}${delta.toFixed(1)}%`;
+              const absDelta = Math.abs(delta);
+              const formattedDelta = absDelta > 999 ? '>999' : absDelta.toLocaleString('en-US', { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+              deltaLabel = k.deltaType === 'pts' ? `${isUp ? '+' : (delta < 0 ? '-' : '')}${formattedDelta} pts` : `${isUp ? '+' : (delta < 0 ? '-' : '')}${formattedDelta}%`;
               if (k.good === null) deltaClass = 'neutral';
               else deltaClass = (isUp && k.good === 'up') || (!isUp && k.good === 'down') ? 'good' : 'bad';
             }
@@ -2216,7 +2213,7 @@ function LiveOperationsDashboardPage({ navigate }) {
             </div>
           </div>
           <div className="table-shell">
-            <table className="data-table">
+            <table className="corvex-table">
               <thead>
                 <tr>
                   <th>Branch</th>
@@ -2269,7 +2266,7 @@ function LiveOperationsDashboardPage({ navigate }) {
             </div>
           </div>
           <div className="table-shell">
-            <table className="data-table">
+            <table className="corvex-table">
               <thead>
                 <tr><th>Type</th><th>Branch</th><th>Details</th></tr>
               </thead>
@@ -2322,7 +2319,7 @@ function LiveOperationsDashboardPage({ navigate }) {
             </div>
           </div>
           <div className="table-shell">
-            <table className="data-table">
+            <table className="corvex-table">
               <thead>
                 <tr><th>Customer</th><th>Branch</th><th>Outstanding</th><th>Days Since Collection</th></tr>
               </thead>
@@ -2364,7 +2361,7 @@ function LiveOperationsDashboardPage({ navigate }) {
             </div>
           </div>
           <div className="table-shell">
-            <table className="data-table">
+            <table className="corvex-table">
               <thead>
                 <tr><th>Product</th><th>Category</th><th>Qty Sold</th><th>Revenue</th></tr>
               </thead>
@@ -2501,7 +2498,7 @@ function LiveBranchComparisonPage({ navigate }) {
       <section className="panel content-panel">
         <div className="panel-section-header"><h3>Branch Scorecard</h3></div>
         <div className="table-shell">
-          <table className="data-table">
+          <table className="corvex-table">
             <thead><tr><th>Branch</th><th>Collections</th><th>Sales</th><th>Balance</th><th>Compliance</th><th>Inventory</th></tr></thead>
             <tbody>
               {(data.branchSummary || []).map((branch) => (
@@ -2534,7 +2531,7 @@ function LiveReportsPage({ navigate, showToast }) {
   return (
     <div className="page">
       <AnalyticsFilterBar filters={filters} setFilters={setFilters} branchOptions={data.branchSummary || []} />
-      <div className="segmented-control" style={{ marginBottom: 24, flexWrap: 'wrap' }}>
+      <div className="segmented-control">
         {[
           { key: 'collections', label: 'Collections' },
           { key: 'sales', label: 'Sales' },
@@ -2551,7 +2548,7 @@ function LiveReportsPage({ navigate, showToast }) {
       {activeTab === 'collections' && (
         <ChartCard title="Collections Summary" subtitle="Branch summary and collection trend">
           <div className="table-shell">
-            <table className="data-table">
+            <table className="corvex-table">
               <thead><tr><th>Branch</th><th>Collections</th><th>Growth</th><th>Compliance</th></tr></thead>
               <tbody>
                 {(data.branchSummary || []).map((branch) => (
@@ -2572,7 +2569,7 @@ function LiveReportsPage({ navigate, showToast }) {
         <div className="grid two-up">
           <ChartCard title="Top Products" subtitle="Revenue by product">
             <div className="table-shell">
-              <table className="data-table">
+              <table className="corvex-table">
                 <thead><tr><th>Product</th><th>Category</th><th>Qty Sold</th><th>Revenue</th></tr></thead>
                 <tbody>
                   {data.topProducts.map((product) => (
@@ -2586,7 +2583,7 @@ function LiveReportsPage({ navigate, showToast }) {
           </ChartCard>
           <ChartCard title="Top Categories" subtitle="Revenue by category">
             <div className="table-shell">
-              <table className="data-table">
+              <table className="corvex-table">
                 <thead><tr><th>Category</th><th>Qty Sold</th><th>Revenue</th></tr></thead>
                 <tbody>
                   {data.topCategories.map((category) => (
@@ -2605,7 +2602,7 @@ function LiveReportsPage({ navigate, showToast }) {
         <div className="grid two-up">
           <ChartCard title="Low Stock Items" subtitle="Items at or below reorder level">
             <div className="table-shell">
-              <table className="data-table">
+              <table className="corvex-table">
                 <thead><tr><th>Product</th><th>Branch</th><th>Available</th><th>Status</th></tr></thead>
                 <tbody>
                   {data.lowStockItems.map((item) => (
@@ -2619,7 +2616,7 @@ function LiveReportsPage({ navigate, showToast }) {
           </ChartCard>
           <ChartCard title="Inventory by Branch" subtitle="Current stock availability">
             <div className="table-shell">
-              <table className="data-table">
+              <table className="corvex-table">
                 <thead><tr><th>Branch</th><th>Available</th><th>Products</th><th>Low Stock</th><th>Out of Stock</th></tr></thead>
                 <tbody>
                   {(data.inventoryByBranch || []).map((branch) => (
@@ -2649,7 +2646,7 @@ function LiveReportsPage({ navigate, showToast }) {
           </ChartCard>
           <ChartCard title="Overdue Customers" subtitle="Highest outstanding balances">
             <div className="table-shell">
-              <table className="data-table">
+              <table className="corvex-table">
                 <thead><tr><th>Customer</th><th>Branch</th><th>Outstanding</th><th>Days Since Collection</th></tr></thead>
                 <tbody>
                   {data.topCustomers.map((customer) => (
@@ -2676,7 +2673,7 @@ function LiveReportsPage({ navigate, showToast }) {
           </ChartCard>
           <ChartCard title="Branch Performance" subtitle="Comparative summary">
             <div className="table-shell">
-              <table className="data-table">
+              <table className="corvex-table">
                 <thead><tr><th>Branch</th><th>Collections</th><th>Sales</th><th>Compliance</th></tr></thead>
                 <tbody>
                   {(data.branchSummary || []).map((branch) => (
@@ -2757,7 +2754,7 @@ function LiveHistoricalTrendsPage() {
         <section className="panel content-panel">
           <div className="panel-section-header"><h3>Historical Performance Summary</h3></div>
           <div className="table-shell">
-            <table className="data-table">
+            <table className="corvex-table">
               <thead><tr><th>Branch</th><th>Latest Sales</th><th>Latest Collections</th><th>Inventory Accuracy</th></tr></thead>
               <tbody>
                 {history.byBranch.map((branch) => {
@@ -2817,14 +2814,14 @@ function LiveLeafletPage({ navigate, subPage }) {
       <section className="panel content-panel">
         <div className="panel-section-header"><h3>Map Filters</h3></div>
         <div className="accounts-filters">
-          <select value={filters.branch} onChange={(e) => setFilters((current) => ({ ...current, branch: e.target.value }))}>
+          <select className="filter-select" value={filters.branch} onChange={(e) => setFilters((current) => ({ ...current, branch: e.target.value }))}>
             <option>All Branches</option>
             {branches.map((branch) => <option key={branch.id}>{branch.branch_name || branch.name}</option>)}
           </select>
-          <select value={filters.dateRange} onChange={(e) => setFilters((current) => ({ ...current, dateRange: e.target.value }))}>
+          <select className="filter-select" value={filters.dateRange} onChange={(e) => setFilters((current) => ({ ...current, dateRange: e.target.value }))}>
             {['Today', 'This Week', 'This Month', 'This Quarter', 'This Year'].map((value) => <option key={value}>{value}</option>)}
           </select>
-          <select value={filters.staffType} onChange={(e) => setFilters((current) => ({ ...current, staffType: e.target.value }))}>
+          <select className="filter-select" value={filters.staffType} onChange={(e) => setFilters((current) => ({ ...current, staffType: e.target.value }))}>
             {['All Staff', 'Collectors', 'Sales Agents'].map((value) => <option key={value}>{value}</option>)}
           </select>
         </div>

@@ -9,39 +9,14 @@ import {
 import { fetchAccounts, fetchAccountById, fetchCollectionPayments, fetchDigitalReceipts, fetchDigitalReceiptById } from '../../api/collectorService';
 import { getCurrentUser } from '../../api/authService.js';
 import { AccountCard } from './AccountCard';
-import { EmptyState } from './EmptyState';
-import { LoadingState } from './LoadingState';
+import { EmptyState } from '../shared/EmptyState';
+import { LoadingState } from '../shared/LoadingState';
+import { Toast } from '../shared/Toast';
 import { NavIcon } from '../../navIcons';
 import LeafletMap from '../common/LeafletMap';
 import { StatusBadge } from '../StatusBadge';
 
-function actionButtonClass(variant) {
-  if (variant === 'secondary') return 'button secondary';
-  if (variant === 'ghost') return 'button ghost';
-  return 'button';
-}
 
-function PageToolbar({ actions, onAction }) {
-  if (!actions?.length) return null;
-  return (
-    <header className="page-toolbar">
-      <div className="page-toolbar-main">
-        <div className="page-toolbar-actions">
-          {actions.map((action) => (
-            <button
-              key={action.label}
-              className={actionButtonClass(action.variant)}
-              type="button"
-              onClick={() => onAction(action)}
-            >
-              {action.label}
-            </button>
-          ))}
-        </div>
-      </div>
-    </header>
-  );
-}
 
 function StatsGrid({ stats }) {
   if (!stats?.length) return null;
@@ -64,7 +39,7 @@ function StatsGrid({ stats }) {
 function FormPanel({ title, fields, formData, onChange, errors = {} }) {
   return (
     <section className="panel form-panel content-panel">
-      <div className="panel-section-header">
+      <div className="flex flex-col md:flex-row justify-between gap-4 items-start md:items-center mb-4">
         <h3>{title}</h3>
       </div>
       {fields.map((field) => (
@@ -103,7 +78,7 @@ function FormPanel({ title, fields, formData, onChange, errors = {} }) {
             />
           )}
           {field.type === 'select' && (
-            <select value={formData[field.name] ?? ''} onChange={(e) => onChange(field.name, e.target.value)}>
+            <select className="filter-select" value={formData[field.name] ?? ''} onChange={(e) => onChange(field.name, e.target.value)}>
               <option value="">{field.placeholder}</option>
               {field.options?.map((opt) => (
                 <option key={opt} value={opt}>
@@ -143,16 +118,16 @@ function DashboardPage({ navigate, showToast }) {
   const recentIncidents = NOTIFICATIONS.filter((n) => n.type === 'incident').slice(0, 3);
 
   return (
-    <div className="page">
+    <div className="relative z-10 grid gap-[22px] w-full">
       <section className="panel dashboard-greeting">
-        <div className="dashboard-greeting-main">
-          <p className="dashboard-eyebrow">Good morning</p>
+        <div className="flex flex-col gap-1">
+          <p className="text-[0.82rem] font-bold tracking-widest uppercase text-navy/60 m-0">Good morning</p>
           <h2>{agentName}</h2>
-          <p className="muted">{today}</p>
+          <p className="text-ink/70">{today}</p>
         </div>
-        <Link to="/collector/notifications" className="notification-bell" aria-label={`${unreadCount} unread notifications`}>
+        <Link to="/collector/notifications" className="relative p-2 text-ink/70 hover:text-blue hover:bg-blue/5 rounded-full transition-colors cursor-pointer" aria-label={`${unreadCount} unread notifications`}>
           <NavIcon name="bell" />
-          {unreadCount > 0 ? <span className="notification-badge">{unreadCount}</span> : null}
+          {unreadCount > 0 ? <span className="absolute top-0 right-0 min-w-[18px] h-[18px] px-1 flex justify-center items-center rounded-full bg-red text-white text-[0.7rem] font-bold border-2 border-mint">{unreadCount}</span> : null}
         </Link>
       </section>
 
@@ -164,27 +139,24 @@ function DashboardPage({ navigate, showToast }) {
         ]}
       />
 
-      <PageToolbar
-        actions={[
-          { label: "Start Today's Route", to: '/collector/route' },
-          { label: 'Report Incident', to: '/collector/incident/1?from=accounts', variant: 'secondary' },
-          { label: 'View Accounts', to: '/collector/accounts', variant: 'secondary' },
-        ]}
-        onAction={(action) => navigate(action.to)}
-      />
+      <div className="flex flex-wrap gap-2 justify-end mt-2 mb-2">
+        <button className="button secondary" type="button" onClick={() => navigate('/collector/accounts')}>View Accounts</button>
+        <button className="button secondary" type="button" onClick={() => navigate('/collector/incident/1?from=accounts')}>Report Incident</button>
+        <button className="button" type="button" onClick={() => navigate('/collector/route')}>Start Today's Route</button>
+      </div>
 
       <div className="dashboard-widgets grid two-up">
-        <section className="panel content-panel">
-          <div className="panel-section-header">
+        <section className="panel content-panel relative overflow-hidden">
+          <div className="flex flex-col md:flex-row justify-between gap-4 items-start md:items-center mb-4">
             <h3>Recent Collections</h3>
           </div>
           {recentCollections.length ? (
-            <ul className="widget-list">
+            <ul className="list-none p-0 m-0 flex flex-col gap-3">
               {recentCollections.map((item) => (
                 <li key={item.id}>
                   <div>
                     <strong>{item.customerName}</strong>
-                    <span className="muted">{item.date}</span>
+                    <span className="text-ink/70">{item.date}</span>
                   </div>
                   <span>{formatCurrency(item.amount)}</span>
                 </li>
@@ -195,17 +167,17 @@ function DashboardPage({ navigate, showToast }) {
           )}
         </section>
 
-        <section className="panel content-panel">
-          <div className="panel-section-header">
+        <section className="panel content-panel relative overflow-hidden">
+          <div className="flex flex-col md:flex-row justify-between gap-4 items-start md:items-center mb-4">
             <h3>Recent Incident Reports</h3>
           </div>
           {recentIncidents.length ? (
-            <ul className="widget-list">
+            <ul className="list-none p-0 m-0 flex flex-col gap-3">
               {recentIncidents.map((item) => (
                 <li key={item.id}>
                   <div>
                     <strong>{item.title}</strong>
-                    <span className="muted">{item.time}</span>
+                    <span className="text-ink/70">{item.time}</span>
                   </div>
                 </li>
               ))}
@@ -216,10 +188,10 @@ function DashboardPage({ navigate, showToast }) {
         </section>
       </div>
 
-      <section className="panel content-panel">
-        <div className="panel-section-header">
+      <section className="panel content-panel relative overflow-hidden">
+        <div className="flex flex-col md:flex-row justify-between gap-4 items-start md:items-center mb-4">
           <h3>Today&apos;s Route Progress</h3>
-          <span className="muted">View route for updates</span>
+          <span className="text-ink/70">View route for updates</span>
         </div>
         <div className="progress-bar" role="progressbar" aria-valuenow={0} aria-valuemin={0} aria-valuemax={100}>
           <div className="progress-fill" style={{ width: `0%` }} />
@@ -270,8 +242,12 @@ function RoutePage({ pageType, navigate, showToast }) {
 
   if (pageType === 'routeSummary') {
     return (
-      <div className="page">
-        <PageToolbar actions={actions} onAction={(a) => navigate(a.to)} />
+      <div className="relative z-10 grid gap-[22px] w-full">
+        <div className="flex flex-wrap gap-2 justify-end mt-2 mb-2">
+          {actions.map((a) => (
+            <button key={a.label} className={a.variant === 'secondary' ? 'button secondary' : 'button'} type="button" onClick={() => navigate(a.to)}>{a.label}</button>
+          ))}
+        </div>
         <StatsGrid
           stats={[
             { label: "Today's Stops", value: String(customers.length) },
@@ -280,8 +256,8 @@ function RoutePage({ pageType, navigate, showToast }) {
             { label: 'Estimated Time', value: '—' },
           ]}
         />
-        <section className="panel content-panel">
-          <div className="panel-section-header">
+        <section className="panel content-panel relative overflow-hidden">
+          <div className="flex flex-col md:flex-row justify-between gap-4 items-start md:items-center mb-4">
             <h3>Route Summary</h3>
           </div>
           <ul className="info-grid">
@@ -295,8 +271,12 @@ function RoutePage({ pageType, navigate, showToast }) {
   }
 
   return (
-    <div className="page">
-      <PageToolbar actions={actions} onAction={(a) => navigate(a.to)} />
+    <div className="relative z-10 grid gap-[22px] w-full">
+      <div className="flex flex-wrap gap-2 justify-end mt-2 mb-2">
+        {actions.map((a) => (
+          <button key={a.label} className={a.variant === 'secondary' ? 'button secondary' : 'button'} type="button" onClick={() => navigate(a.to)}>{a.label}</button>
+        ))}
+      </div>
       <StatsGrid
         stats={[
           { label: "Today's Stops", value: String(customers.length) },
@@ -304,13 +284,13 @@ function RoutePage({ pageType, navigate, showToast }) {
           { label: 'Distance Planned', value: '—' },
         ]}
       />
-      <section className="panel content-panel" style={{ padding: '14px 20px' }}>
+      <section className="panel content-panel relative overflow-hidden" style={{ padding: '14px 20px' }}>
         <p style={{ margin: 0, fontSize: '0.85rem', color: '#64748b' }}>
           <strong style={{ color: '#1e293b' }}>Customer Priority List</strong> — Customers are ordered by outstanding balance and urgency.
         </p>
       </section>
-      <section className="panel content-panel">
-        <div className="panel-section-header">
+      <section className="panel content-panel relative overflow-hidden">
+        <div className="flex flex-col md:flex-row justify-between gap-4 items-start md:items-center mb-4">
           <h3>{showMap || pageType === 'routeMap' ? 'Route Map View' : 'Customer Priority List'}</h3>
           <div className="inline-toolbar">
             <div className="segmented-control">
@@ -321,7 +301,7 @@ function RoutePage({ pageType, navigate, showToast }) {
               ))}
             </div>
             {pageType !== 'routeMap' ? (
-              <button className="button secondary" type="button" onClick={() => setShowMap(!showMap)}>
+              <button className="inline-flex justify-center items-center gap-2 px-5 py-2.5 rounded-md bg-mint text-ink border-[1.5px] border-surface-3 shadow-none hover:border-blue hover:text-blue transition-all duration-160 cursor-pointer" type="button" onClick={() => setShowMap(!showMap)}>
                 {showMap ? 'Show List View' : 'Show Map View'}
               </button>
             ) : null}
@@ -337,19 +317,19 @@ function RoutePage({ pageType, navigate, showToast }) {
                 id: stop.id,
                 position: [7.1907 + (i * 0.005), 125.4553 + (i * 0.005)],
                 label: stop.customerName.substring(0, 2).toUpperCase(),
-                color: stop.status === 'Completed' ? '#10b981' : '#2563eb',
+                color: stop.status === 'Completed' ? '#10b981' : '#093850',
                 popup: `${stop.customerName} - ${stop.status}`
               }))}
               polylines={[{ 
                 id: 'route', 
                 positions: customers.map((stop, i) => [7.1907 + (i * 0.005), 125.4553 + (i * 0.005)]), 
-                color: '#2563eb' 
+                color: '#093850' 
               }]}
             />
           </div>
         ) : filteredStops.length ? (
-          <div className="table-shell">
-            <table className="data-table">
+          <div className="corvex-table-wrapper">
+            <table className="corvex-table">
               <thead>
                 <tr>
                   <th>Rank</th>
@@ -455,35 +435,34 @@ function AccountsPage({ navigate, showToast }) {
   if (loading) return <LoadingState message="Loading customers..." />;
 
   return (
-    <div className="page">
-      <section className="panel content-panel">
-        <div className="panel-section-header">
-          <h3>Customer List</h3>
-        </div>
-        <div className="accounts-toolbar">
-          <input
-            className="search-input"
-            type="search"
-            placeholder="Search by customer name, account number, or phone"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-          />
-          <div className="accounts-filters">
-            <select value={filter} onChange={(e) => setFilter(e.target.value)}>
+    <div className="relative z-10 grid gap-[22px] w-full">
+      <section className="panel content-panel relative overflow-hidden mb-4">
+        <div className="flex flex-col md:flex-row justify-between gap-4 items-start md:items-center">
+          <div className="flex flex-wrap gap-2 items-center w-full md:w-auto flex-1">
+            <input
+              className="filter-input search"
+              type="search"
+              placeholder="Search by customer name, account number, or phone"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              style={{ padding: '8px 12px', borderRadius: '6px', border: '1px solid #e2e8f0', fontSize: '0.9rem', flex: 1, minWidth: '200px' }}
+            />
+            <select className="filter-select" value={filter} onChange={(e) => setFilter(e.target.value)} style={{ padding: '8px 12px', borderRadius: '6px', border: '1px solid #e2e8f0', fontSize: '0.9rem' }}>
               {['All Customers', 'Assigned Today', 'Pending', 'Completed', 'Overdue', 'Blacklisted'].map((option) => (
-                <option key={option} value={option}>
-                  {option}
-                </option>
+                <option key={option} value={option}>{option}</option>
               ))}
             </select>
-            <select value={sortBy} onChange={(e) => setSortBy(e.target.value)}>
+            <select className="filter-select" value={sortBy} onChange={(e) => setSortBy(e.target.value)} style={{ padding: '8px 12px', borderRadius: '6px', border: '1px solid #e2e8f0', fontSize: '0.9rem' }}>
               {['Name', 'Outstanding Balance', 'Days Overdue', 'Distance'].map((option) => (
-                <option key={option} value={option}>
-                  Sort: {option}
-                </option>
+                <option key={option} value={option}>Sort: {option}</option>
               ))}
             </select>
           </div>
+        </div>
+      </section>
+      <section className="panel content-panel relative overflow-hidden">
+        <div className="flex flex-col md:flex-row justify-between gap-4 items-start md:items-center mb-4">
+          <h3>Customer List</h3>
         </div>
       </section>
 
@@ -537,7 +516,7 @@ function AccountDetailPage({ accountId, parentContext, navigate, showToast }) {
   const contextQuery = `?from=${parentContext}`;
 
   return (
-    <div className="page">
+    <div className="relative z-10 grid gap-[22px] w-full">
       <StatsGrid
         stats={[
           { label: 'Outstanding Balance', value: formatCurrency(account.outstandingBalance || 0) },
@@ -550,9 +529,9 @@ function AccountDetailPage({ accountId, parentContext, navigate, showToast }) {
       />
 
       <section className="panel content-panel account-detail-panel">
-        <div className="panel-section-header">
+        <div className="flex flex-col md:flex-row justify-between gap-4 items-start md:items-center mb-4">
           <h3>{account.customerName}</h3>
-          <p className="muted">{account.accountNumber}</p>
+          <p className="text-ink/70">{account.accountNumber}</p>
         </div>
         <div className="account-detail-grid two-up">
           <div>
@@ -571,7 +550,7 @@ function AccountDetailPage({ accountId, parentContext, navigate, showToast }) {
                 id: account.id,
                 position: account.latitude && account.longitude ? [account.latitude, account.longitude] : [7.1907, 125.4553],
                 label: (account.customerName || 'CU').substring(0, 2).toUpperCase(),
-                color: '#2563eb',
+                color: '#093850',
                 popup: account.customerName,
               }]}
             />
@@ -579,13 +558,13 @@ function AccountDetailPage({ accountId, parentContext, navigate, showToast }) {
         </div>
       </section>
 
-      <section className="panel content-panel">
-        <div className="panel-section-header">
+      <section className="panel content-panel relative overflow-hidden">
+        <div className="flex flex-col md:flex-row justify-between gap-4 items-start md:items-center mb-4">
           <h3>Payment History</h3>
         </div>
         {account.paymentHistory && account.paymentHistory.length ? (
-          <div className="table-shell">
-            <table className="data-table">
+          <div className="corvex-table-wrapper">
+            <table className="corvex-table">
               <thead>
                 <tr>
                   <th>Date</th>
@@ -605,13 +584,7 @@ function AccountDetailPage({ accountId, parentContext, navigate, showToast }) {
                     <td>{row.method || 'Cash'}</td>
                     <td>{row.collector}</td>
                     <td>
-                      <span style={{
-                        padding: '2px 8px', borderRadius: 999, fontSize: '0.78rem', fontWeight: 600,
-                        background: row.status === 'Completed' ? 'rgba(16,185,129,0.1)' : 'rgba(245,158,11,0.1)',
-                        color: row.status === 'Completed' ? '#059669' : '#d97706',
-                      }}>
-                        {row.status || 'Completed'}
-                      </span>
+                      <StatusBadge status={row.status || 'Completed'} />
                     </td>
                   </tr>
                 ))}
@@ -623,21 +596,14 @@ function AccountDetailPage({ accountId, parentContext, navigate, showToast }) {
         )}
       </section>
 
-      <PageToolbar
-        actions={[
-          { label: 'Log Collection', to: `/collector/collection-log/${account.id}${contextQuery}` },
-          { label: 'Submit CI Form', to: `/collector/ci-form/${account.id}${contextQuery}`, variant: 'secondary' },
-          { label: 'Report Incident', to: `/collector/incident/${account.id}${contextQuery}`, variant: 'secondary' },
-          { label: 'Call Customer', action: 'call', variant: 'secondary' },
-          { label: 'Open Navigation', action: 'navigate', variant: 'secondary' },
-          { label: 'Back', to: backTo, variant: 'ghost' },
-        ]}
-        onAction={(action) => {
-          if (action.action === 'call') showToast(`Calling ${account.customerName}...`, 'success');
-          else if (action.action === 'navigate') showToast(`Opening navigation to ${account.address}`, 'success');
-          else if (action.to) navigate(action.to);
-        }}
-      />
+      <div className="flex flex-wrap justify-end gap-2 mt-4">
+        <button className="button ghost" type="button" onClick={() => navigate(backTo)}>Back</button>
+        <button className="button secondary" type="button" onClick={() => showToast(`Opening navigation to ${account.address}`, 'success')}>Open Navigation</button>
+        <button className="button secondary" type="button" onClick={() => showToast(`Calling ${account.customerName}...`, 'success')}>Call Customer</button>
+        <button className="button secondary" type="button" onClick={() => navigate(`/collector/incident/${account.id}${contextQuery}`)}>Report Incident</button>
+        <button className="button secondary" type="button" onClick={() => navigate(`/collector/ci-form/${account.id}${contextQuery}`)}>Submit CI Form</button>
+        <button className="button" type="button" onClick={() => navigate(`/collector/collection-log/${account.id}${contextQuery}`)}>Log Collection</button>
+      </div>
     </div>
   );
 }
@@ -704,7 +670,7 @@ function CollectionLogPage({ accountId, parentContext, navigate, showToast }) {
   };
 
   return (
-    <div className="page">
+    <div className="relative z-10 grid gap-[22px] w-full">
       <FormPanel
         title="Log Payment Collection"
         formData={formData}
@@ -721,13 +687,10 @@ function CollectionLogPage({ accountId, parentContext, navigate, showToast }) {
           { name: 'generateReceipt', label: 'Generate Digital Receipt', type: 'toggle', toggleLabel: 'Generate receipt after submission' },
         ]}
       />
-      <PageToolbar
-        actions={[
-          { label: 'Submit & Generate Receipt', action: 'submit' },
-          { label: 'Cancel', to: `/collector/account-detail/${account.id}${contextQuery}`, variant: 'secondary' },
-        ]}
-        onAction={(action) => (action.action === 'submit' ? handleSubmit() : navigate(action.to))}
-      />
+      <div className="flex flex-wrap gap-2 justify-end mt-4 mb-2">
+        <button className="button secondary" type="button" onClick={() => navigate(`/collector/account-detail/${account.id}${contextQuery}`)}>Cancel</button>
+        <button className="button" type="button" onClick={handleSubmit}>Submit & Generate Receipt</button>
+      </div>
     </div>
   );
 }
@@ -785,31 +748,35 @@ function ReceiptsListPage({ navigate, showToast }) {
   }
 
   return (
-    <div className="page">
-      <section className="panel content-panel">
-        <div className="panel-section-header">
-          <h3>Digital Receipts</h3>
-          <p className="muted">{receipts.length} record{receipts.length !== 1 ? 's' : ''} in database</p>
-        </div>
-        <div className="accounts-toolbar">
-          <input
-            className="search-input"
-            type="search"
-            placeholder="Search by receipt number, customer, or ID"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-          />
-          <div className="accounts-filters">
-            <input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} aria-label="From date" />
-            <input type="date" value={dateTo}   onChange={(e) => setDateTo(e.target.value)}   aria-label="To date" />
+    <div className="relative z-10 grid gap-[22px] w-full">
+      <section className="panel content-panel relative overflow-hidden mb-4">
+        <div className="flex flex-col md:flex-row justify-between gap-4 items-start md:items-center">
+          <div className="flex flex-wrap gap-2 items-center w-full md:w-auto flex-1">
+            <input
+              className="filter-input search"
+              type="search"
+              placeholder="Search by receipt number, customer, or ID"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              style={{ padding: '8px 12px', borderRadius: '6px', border: '1px solid #e2e8f0', fontSize: '0.9rem', flex: 1, minWidth: '200px' }}
+            />
+            <input className="filter-input" type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} aria-label="From date" style={{ padding: '8px 12px', borderRadius: '6px', border: '1px solid #e2e8f0', fontSize: '0.9rem' }} />
+            <input className="filter-input" type="date" value={dateTo}   onChange={(e) => setDateTo(e.target.value)}   aria-label="To date" style={{ padding: '8px 12px', borderRadius: '6px', border: '1px solid #e2e8f0', fontSize: '0.9rem' }} />
           </div>
+          <button className="button secondary whitespace-nowrap" type="button" onClick={() => window.alert('Exporting Digital Receipts...')}>Generate Report</button>
+        </div>
+      </section>
+      <section className="panel content-panel relative overflow-hidden">
+        <div className="flex flex-col md:flex-row justify-between gap-4 items-start md:items-center mb-4">
+          <h3>Digital Receipts</h3>
+          <p className="text-ink/70">{receipts.length} record{receipts.length !== 1 ? 's' : ''} in database</p>
         </div>
       </section>
 
       {filtered.length ? (
-        <section className="panel content-panel">
-          <div className="table-shell">
-            <table className="data-table">
+        <section className="panel content-panel relative overflow-hidden">
+          <div className="corvex-table-wrapper">
+            <table className="corvex-table">
               <thead>
                 <tr>
                   <th>Receipt ID</th>
@@ -899,13 +866,13 @@ function DigitalReceiptPage({ receiptId, navigate, showToast }) {
   }
 
   return (
-    <div className="page">
+    <div className="relative z-10 grid gap-[22px] w-full">
       {/* Header */}
       <section className="panel dashboard-greeting">
-        <div className="dashboard-greeting-main">
-          <p className="dashboard-eyebrow">Digital Receipt · ID {receipt.receipts_id}</p>
+        <div className="flex flex-col gap-1">
+          <p className="text-[0.82rem] font-bold tracking-widest uppercase text-navy/60 m-0">Digital Receipt · ID {receipt.receipts_id}</p>
           <h2>{receipt.receipt_number}</h2>
-          <p className="muted">{receipt.branch_name} · {receipt.customer_name}</p>
+          <p className="text-ink/70">{receipt.branch_name} · {receipt.customer_name}</p>
         </div>
       </section>
 
@@ -918,8 +885,8 @@ function DigitalReceiptPage({ receiptId, navigate, showToast }) {
       ]} />
 
       {/* Full detail */}
-      <section className="panel content-panel">
-        <div className="panel-section-header"><h3>Receipt Detail</h3></div>
+      <section className="panel content-panel relative overflow-hidden">
+        <div className="flex flex-col md:flex-row justify-between gap-4 items-start md:items-center mb-4"><h3>Receipt Detail</h3></div>
         <ul className="info-grid">
           <li><span className="info-item-label">Receipt ID</span>
               <span className="info-item-value" style={{ fontFamily: 'monospace' }}>{receipt.receipts_id}</span></li>
@@ -944,7 +911,7 @@ function DigitalReceiptPage({ receiptId, navigate, showToast }) {
           <li><span className="info-item-label">Branch</span>
               <span className="info-item-value">{receipt.branch_name || '—'}</span></li>
           <li><span className="info-item-label">Amount</span>
-              <span className="info-item-value" style={{ fontWeight: 700, color: '#2563eb' }}>{formatCurrency(Number(receipt.amount))}</span></li>
+              <span className="info-item-value" style={{ fontWeight: 700, color: '#093850' }}>{formatCurrency(Number(receipt.amount))}</span></li>
           <li><span className="info-item-label">Payment Method</span>
               <span className="info-item-value">{receipt.payment_method || '—'}</span></li>
           <li><span className="info-item-label">Payment Date</span>
@@ -960,17 +927,11 @@ function DigitalReceiptPage({ receiptId, navigate, showToast }) {
         </ul>
       </section>
 
-      <PageToolbar
-        actions={[
-          { label: 'Download PDF', action: 'pdf' },
-          { label: 'Print Receipt', action: 'print', variant: 'secondary' },
-          { label: 'Back to Receipts', to: '/collector/receipts', variant: 'ghost' },
-        ]}
-        onAction={(action) => {
-          if (action.to) navigate(action.to);
-          else if (showToast) showToast(`${action.label} initiated.`, 'success');
-        }}
-      />
+      <div className="flex flex-wrap justify-end gap-2 mt-4">
+        <button className="button ghost" type="button" onClick={() => navigate('/collector/receipts')}>Back to Receipts</button>
+        <button className="button secondary" type="button" onClick={() => showToast('Print Receipt initiated.', 'success')}>Print Receipt</button>
+        <button className="button" type="button" onClick={() => showToast('Download PDF initiated.', 'success')}>Download PDF</button>
+      </div>
     </div>
   );
 }
@@ -1000,7 +961,7 @@ function CIFormPage({ accountId, parentContext, navigate, showToast }) {
   }
 
   return (
-    <div className="page">
+    <div className="relative z-10 grid gap-[22px] w-full">
       <FormPanel
         title="Credit Investigation Form"
         formData={formData}
@@ -1015,23 +976,10 @@ function CIFormPage({ accountId, parentContext, navigate, showToast }) {
           { name: 'remarks', label: 'Remarks', type: 'textarea', placeholder: 'Additional notes for the operating manager...' },
         ]}
       />
-      <PageToolbar
-        actions={[
-          {
-            label: 'Submit to Operating Manager',
-            action: 'submit',
-          },
-          { label: 'Cancel', to: `/collector/account-detail/${account.id}${contextQuery}`, variant: 'secondary' },
-        ]}
-        onAction={(action) => {
-          if (action.action === 'submit') {
-            showToast('CI Form sent to Operating Manager.', 'success');
-            navigate(`/collector/account-detail/${account.id}${contextQuery}`);
-          } else {
-            navigate(action.to);
-          }
-        }}
-      />
+      <div className="flex flex-wrap gap-2 justify-end mt-4 mb-2">
+        <button className="button secondary" type="button" onClick={() => navigate(`/collector/account-detail/${account.id}${contextQuery}`)}>Cancel</button>
+        <button className="button" type="button" onClick={() => { showToast('CI Form sent to Operating Manager.', 'success'); navigate(`/collector/account-detail/${account.id}${contextQuery}`); }}>Submit to Operating Manager</button>
+      </div>
     </div>
   );
 }
@@ -1057,10 +1005,10 @@ function IncidentReportPage({ accountId, parentContext, navigate, showToast }) {
   if (loading) return <LoadingState message="Loading customer..." />;
 
   return (
-    <div className="page">
+    <div className="relative z-10 grid gap-[22px] w-full">
       {account ? (
-        <section className="panel content-panel">
-          <p className="muted">Reporting incident for <strong>{account.customerName}</strong> ({account.accountNumber})</p>
+        <section className="panel content-panel relative overflow-hidden">
+          <p className="text-ink/70">Reporting incident for <strong>{account.customerName}</strong> ({account.accountNumber})</p>
         </section>
       ) : null}
       <FormPanel
@@ -1076,23 +1024,10 @@ function IncidentReportPage({ accountId, parentContext, navigate, showToast }) {
           { name: 'severity', label: 'Severity Level', type: 'select', required: true, placeholder: 'Select severity', options: ['Low', 'Medium', 'High', 'Critical'] },
         ]}
       />
-      <PageToolbar
-        actions={[
-          {
-            label: 'Submit to Operating Manager',
-            action: 'submit',
-          },
-          { label: 'Cancel', to: backTo, variant: 'secondary' },
-        ]}
-        onAction={(action) => {
-          if (action.action === 'submit') {
-            showToast('Incident report sent to Operating Manager.', 'success');
-            navigate(backTo);
-          } else {
-            navigate(action.to);
-          }
-        }}
-      />
+      <div className="flex flex-wrap gap-2 justify-end mt-4 mb-2">
+        <button className="button secondary" type="button" onClick={() => navigate(backTo)}>Cancel</button>
+        <button className="button" type="button" onClick={() => { showToast('Incident report sent to Operating Manager.', 'success'); navigate(backTo); }}>Submit to Operating Manager</button>
+      </div>
     </div>
   );
 }
@@ -1151,38 +1086,40 @@ function CollectionHistoryPage({ navigate, showToast }) {
   }
 
   return (
-    <div className="page">
-      <section className="panel content-panel">
-        <div className="panel-section-header">
-          <h3>Collection Payments</h3>
-          <p className="muted">{payments.length} record{payments.length !== 1 ? 's' : ''} in database</p>
-        </div>
-        <div className="accounts-toolbar">
-          <input
-            className="search-input"
-            type="search"
-            placeholder="Search by customer, receipt number, or ID"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-          />
-          <div className="accounts-filters">
-            <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}>
+    <div className="relative z-10 grid gap-[22px] w-full">
+      <section className="panel content-panel relative overflow-hidden mb-4">
+        <div className="flex flex-col md:flex-row justify-between gap-4 items-start md:items-center">
+          <div className="flex flex-wrap gap-2 items-center w-full md:w-auto flex-1">
+            <input
+              className="filter-input search"
+              type="search"
+              placeholder="Search by customer, receipt number, or ID"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              style={{ padding: '8px 12px', borderRadius: '6px', border: '1px solid #e2e8f0', fontSize: '0.9rem', flex: 1, minWidth: '200px' }}
+            />
+            <select className="filter-select" value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} style={{ padding: '8px 12px', borderRadius: '6px', border: '1px solid #e2e8f0', fontSize: '0.9rem' }}>
               {['All', 'Pending', 'Completed', 'Cancelled'].map((option) => (
-                <option key={option} value={option}>
-                  Status: {option}
-                </option>
+                <option key={option} value={option}>Status: {option}</option>
               ))}
             </select>
-            <input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} aria-label="From date" />
-            <input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} aria-label="To date" />
+            <input className="filter-input" type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} aria-label="From date" style={{ padding: '8px 12px', borderRadius: '6px', border: '1px solid #e2e8f0', fontSize: '0.9rem' }} />
+            <input className="filter-input" type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} aria-label="To date" style={{ padding: '8px 12px', borderRadius: '6px', border: '1px solid #e2e8f0', fontSize: '0.9rem' }} />
           </div>
+          <button className="button secondary whitespace-nowrap" type="button" onClick={() => window.alert('Exporting Payments...')}>Export Data</button>
+        </div>
+      </section>
+      <section className="panel content-panel relative overflow-hidden">
+        <div className="flex flex-col md:flex-row justify-between gap-4 items-start md:items-center mb-4">
+          <h3>Collection Payments</h3>
+          <p className="text-ink/70">{payments.length} record{payments.length !== 1 ? 's' : ''} in database</p>
         </div>
       </section>
 
       {filtered.length ? (
-        <section className="panel content-panel">
-          <div className="table-shell">
-            <table className="data-table">
+        <section className="panel content-panel relative overflow-hidden">
+          <div className="corvex-table-wrapper">
+            <table className="corvex-table">
               <thead>
                 <tr>
                   <th>Payment ID</th>
@@ -1245,7 +1182,7 @@ function ReceiptDetailsPage({ receiptId, navigate, showToast }) {
   }
 
   return (
-    <div className="page">
+    <div className="relative z-10 grid gap-[22px] w-full">
       <StatsGrid
         stats={[
           { label: 'Receipt Number', value: receipt.receiptNumber },
@@ -1253,8 +1190,8 @@ function ReceiptDetailsPage({ receiptId, navigate, showToast }) {
           { label: 'Status', value: receipt.status },
         ]}
       />
-      <section className="panel content-panel">
-        <div className="panel-section-header">
+      <section className="panel content-panel relative overflow-hidden">
+        <div className="flex flex-col md:flex-row justify-between gap-4 items-start md:items-center mb-4">
           <h3>Receipt Details</h3>
         </div>
         <ul className="info-grid">
@@ -1266,17 +1203,11 @@ function ReceiptDetailsPage({ receiptId, navigate, showToast }) {
           <li><span className="info-item-label">Date & Time</span><span className="info-item-value">{receipt.date} at {receipt.time}</span></li>
         </ul>
       </section>
-      <PageToolbar
-        actions={[
-          { label: 'Download PDF', action: 'pdf' },
-          { label: 'Print Receipt', action: 'print', variant: 'secondary' },
-          { label: 'Back to History', to: '/collector/history', variant: 'ghost' },
-        ]}
-        onAction={(action) => {
-          if (action.to) navigate(action.to);
-          else showToast(`${action.label} initiated.`, 'success');
-        }}
-      />
+      <div className="flex flex-wrap justify-end gap-2 mt-4">
+        <button className="button ghost" type="button" onClick={() => navigate('/collector/history')}>Back to History</button>
+        <button className="button secondary" type="button" onClick={() => showToast('Print Receipt initiated.', 'success')}>Print Receipt</button>
+        <button className="button" type="button" onClick={() => showToast('Download PDF initiated.', 'success')}>Download PDF</button>
+      </div>
     </div>
   );
 }
@@ -1301,12 +1232,11 @@ function NotificationsPage({ navigate, showToast }) {
   };
 
   return (
-    <div className="page">
-      <PageToolbar
-        actions={[{ label: 'Mark All as Read', action: 'markAll' }]}
-        onAction={() => markAllRead()}
-      />
-      <section className="panel content-panel">
+    <div className="relative z-10 grid gap-[22px] w-full">
+      <div className="flex justify-end mt-2 mb-2">
+        <button className="button secondary" type="button" onClick={() => markAllRead()}>Mark All as Read</button>
+      </div>
+      <section className="panel content-panel relative overflow-hidden">
         <div className="inline-toolbar">
           <div className="segmented-control">
             {['All', 'Unread', 'Read', 'Assignments', 'Incidents', 'Routes', 'Collections'].map((item) => (
@@ -1323,13 +1253,13 @@ function NotificationsPage({ navigate, showToast }) {
             <article key={item.id} className={`notification-item${item.read ? '' : ' unread'}`}>
               <div>
                 <h4>{item.title}</h4>
-                <p className="muted">{item.message}</p>
+                <p className="text-ink/70">{item.message}</p>
                 <span className="notification-time">{item.time}</span>
               </div>
               <div className="notification-actions">
                 {!item.read ? (
                   <button
-                    className="button ghost"
+                    className="inline-flex justify-center items-center gap-2 px-5 py-2.5 rounded-md bg-transparent text-blue border-[1.5px] border-blue-30 shadow-none hover:bg-blue-08 transition-all duration-160 cursor-pointer"
                     type="button"
                     onClick={() => {
                       setNotifications((items) => items.map((n) => (n.id === item.id ? { ...n, read: true } : n)));
@@ -1339,7 +1269,7 @@ function NotificationsPage({ navigate, showToast }) {
                     Mark as Read
                   </button>
                 ) : null}
-                <button className="button secondary" type="button" onClick={() => navigate(item.relatedTo)}>
+                <button className="inline-flex justify-center items-center gap-2 px-5 py-2.5 rounded-md bg-mint text-ink border-[1.5px] border-surface-3 shadow-none hover:border-blue hover:text-blue transition-all duration-160 cursor-pointer" type="button" onClick={() => navigate(item.relatedTo)}>
                   Open Related Record
                 </button>
               </div>
@@ -1358,13 +1288,13 @@ function ProfilePage({ navigate, showToast }) {
   const profile = currentUser || {};
 
   return (
-    <div className="page">
+    <div className="relative z-10 grid gap-[22px] w-full">
       <section className="panel content-panel profile-panel">
         <div className="profile-header">
           <div className="profile-avatar">{(profile.fullName || 'CO').split(' ').map((n) => n[0]).join('').slice(0, 2).toUpperCase()}</div>
           <div>
             <h3>{profile.fullName || 'Collector'}</h3>
-            <p className="muted">{profile.email || ''}</p>
+            <p className="text-ink/70">{profile.email || ''}</p>
           </div>
         </div>
         <ul className="info-grid">
@@ -1373,31 +1303,25 @@ function ProfilePage({ navigate, showToast }) {
           <li><span className="info-item-label">Status</span><span className="info-item-value">{profile.status || '—'}</span></li>
         </ul>
       </section>
-      <PageToolbar
-        actions={[
-          { label: 'Update Profile', action: 'update' },
-          { label: 'Change Password', action: 'password', variant: 'secondary' },
-          { label: 'Settings', to: '/collector/settings', variant: 'ghost' },
-        ]}
-        onAction={(action) => {
-          if (action.to) navigate(action.to);
-          else showToast(`${action.label} form would open here.`, 'success');
-        }}
-      />
+      <div className="flex flex-wrap gap-2 justify-end mt-4 mb-2">
+        <button className="button ghost" type="button" onClick={() => navigate('/collector/settings')}>Settings</button>
+        <button className="button secondary" type="button" onClick={() => showToast('Change Password form would open here.', 'success')}>Change Password</button>
+        <button className="button" type="button" onClick={() => showToast('Update Profile form would open here.', 'success')}>Update Profile</button>
+      </div>
     </div>
   );
 }
 
 function SettingsPage({ navigate }) {
   return (
-    <div className="page">
+    <div className="relative z-10 grid gap-[22px] w-full">
       <section className="panel form-panel content-panel">
-        <div className="panel-section-header">
+        <div className="flex flex-col md:flex-row justify-between gap-4 items-start md:items-center mb-4">
           <h3>Settings</h3>
         </div>
         <div className="form-group">
           <label>Language</label>
-          <select defaultValue="English">
+          <select className="filter-select" defaultValue="English">
             <option>English</option>
             <option>Filipino</option>
           </select>
@@ -1415,7 +1339,9 @@ function SettingsPage({ navigate }) {
           </label>
         </div>
       </section>
-      <PageToolbar actions={[{ label: 'Back to Dashboard', to: '/collector/dashboard', variant: 'ghost' }]} onAction={(a) => navigate(a.to)} />
+      <div className="flex justify-end mt-4">
+        <button className="button ghost" type="button" onClick={() => navigate('/collector/dashboard')}>Back to Dashboard</button>
+      </div>
     </div>
   );
 }

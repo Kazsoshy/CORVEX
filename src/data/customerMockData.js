@@ -55,7 +55,7 @@ export const UPCOMING_DUE_DATES = [
   { date: '2026-08-05', amount: 12000, label: 'Following payment' },
 ];
 
-export function formatCurrency(amount) { return `₱${Number(amount).toLocaleString('en-PH')}`; }
+export { formatCurrency } from '../utils/formatters.js';
 export function getPaymentById(id)   { return PAYMENTS.find((p) => p.id === id) ?? null; }
 export function getReceiptById(id)   { return RECEIPTS.find((r) => r.id === id || r.receiptNumber === id) ?? null; }
 export function getStatementById(id) { return STATEMENTS.find((s) => s.id === id) ?? null; }
