@@ -7,82 +7,6 @@ import logo from '../../assets/corvex-logo.png';
 import bgImage from '../../assets/corvex-bg.png';
 import './LoginPage.css';
 
-// ── Offline demo accounts ─────────────────────────────────────────────────────
-// Used when the backend is unreachable. Mirrors reset_passwords.js credentials.
-const OFFLINE_CREDENTIALS = {
-  'marcus.santos@corvex.ph':      'Corvex@2026',
-  'corazon.v@corvex.ph':          'Corvex@2026',
-  'elena.mercado@corvex.ph':      'Corvex@2026',
-  'roberto.villanueva@corvex.ph': 'Corvex@2026',
-  'miguel.f@corvex.ph':           'Corvex@2026',
-  'grace.t@corvex.ph':            'Corvex@2026',
-  'ana.r@corvex.ph':              'Corvex@2026',
-  'florencia.r@corvex.ph':        'Corvex@2026',
-  'carlos.m@corvex.ph':           'Corvex@2026',
-  'jane.s@corvex.ph':             'Corvex@2026',
-  'maria.dc@corvex.ph':           'Corvex@2026',
-  'luntiang.tahanan@email.com':   'Corvex@2026',
-};
-
-// IDs must match the live database (see backend/migrations/002_seed_data.sql)
-// so offline sessions still work once the API is reachable again.
-const OFFLINE_USERS = [
-  {
-    id: 1, fullName: 'Corazon Villanueva', username: 'corazon.v',
-    email: 'corazon.v@corvex.ph', employeeId: 'SA-0002', avatarInitials: 'CV', status: 'Active',
-    role: { id: 1, name: 'Super Admin', slug: 'super_admin' }, branch: null,
-  },
-  {
-    id: 2, fullName: 'Elena Mercado', username: 'elena.mercado',
-    email: 'elena.mercado@corvex.ph', employeeId: 'OM-2001', avatarInitials: 'EM', status: 'Active',
-    role: { id: 2, name: 'Operating Manager', slug: 'operating_manager' }, branch: null,
-  },
-  {
-    id: 3, fullName: 'Roberto Villanueva', username: 'roberto.v',
-    email: 'roberto.villanueva@corvex.ph', employeeId: 'BM-0001', avatarInitials: 'RV', status: 'Active',
-    role: { id: 7, name: 'Branch Manager', slug: 'branch_manager' },
-    branch: { id: 1, name: 'Davao City Branch' },
-  },
-  {
-    id: 4, fullName: 'Miguel Flores', username: 'miguel.flores',
-    email: 'miguel.f@corvex.ph', employeeId: 'BM-0002', avatarInitials: 'MF', status: 'Active',
-    role: { id: 7, name: 'Branch Manager', slug: 'branch_manager' },
-    branch: { id: 2, name: 'General Santos Branch' },
-  },
-  {
-    id: 5, fullName: 'Grace Tan', username: 'grace.tan',
-    email: 'grace.t@corvex.ph', employeeId: 'BM-0003', avatarInitials: 'GT', status: 'Active',
-    role: { id: 7, name: 'Branch Manager', slug: 'branch_manager' },
-    branch: { id: 3, name: 'Davao Oriental Branch' },
-  },
-  {
-    id: 6, fullName: 'Ana Reyes', username: 'ana.reyes',
-    email: 'ana.r@corvex.ph', employeeId: 'WH-3051', avatarInitials: 'AR', status: 'Active',
-    role: { id: 3, name: 'Inventory Staff', slug: 'inventory_staff' },
-    branch: { id: 3, name: 'Davao Oriental Branch' },
-  },
-  {
-    id: 7, fullName: 'Jane Smith', username: 'jane.smith',
-    email: 'jane.s@corvex.ph', employeeId: 'SA-1088', avatarInitials: 'JS', status: 'Active',
-    role: { id: 4, name: 'Sales Staff', slug: 'sales_staff' },
-    branch: { id: 1, name: 'Davao City Branch' },
-  },
-  {
-    id: 10, fullName: 'Maria Dela Cruz', username: 'maria.delacruz',
-    email: 'maria.dc@corvex.ph', employeeId: 'COL-2048', avatarInitials: 'MD', status: 'Active',
-    role: { id: 5, name: 'Collector', slug: 'collector' },
-    branch: { id: 1, name: 'Davao City Branch' },
-  },
-];
-
-function resolveOfflineUser(email, password) {
-  const lowerEmail = email.toLowerCase();
-  const expectedPassword = OFFLINE_CREDENTIALS[lowerEmail];
-  if (!expectedPassword || password !== expectedPassword) return null;
-  return OFFLINE_USERS.find((u) => u.email.toLowerCase() === lowerEmail) ?? null;
-}
-// ─────────────────────────────────────────────────────────────────────────────
-
 export function LoginPage() {
   const navigate = useNavigate();
   const [email, setEmail] = useState('');
@@ -110,7 +34,7 @@ export function LoginPage() {
 
     try {
       const data = await apiLogin(email.trim(), password);
-      if (data.success && data.user) {
+      if (data.success && data.user && data.token) {
         const entryPath = getEntryPathForRole(data.user.role?.slug);
         navigate(entryPath);
       } else {
@@ -121,14 +45,7 @@ export function LoginPage() {
       if (err?.response?.status === 401 || err?.response?.status === 403) {
         setApiError(msg || 'Invalid email or password.');
       } else if (!err?.response) {
-        // Server unreachable — attempt offline demo login
-        const offlineUser = resolveOfflineUser(email.trim(), password);
-        if (offlineUser) {
-          localStorage.setItem('corvex_user', JSON.stringify(offlineUser));
-          navigate(getEntryPathForRole(offlineUser.role.slug));
-        } else {
-          setApiError('Cannot connect to server. Use a demo account (e.g. roberto.villanueva@corvex.ph / Corvex@2026).');
-        }
+        setApiError('Cannot connect to the server.');
       } else {
         setApiError(msg || 'An error occurred. Please try again.');
       }

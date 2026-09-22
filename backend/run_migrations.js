@@ -6,11 +6,16 @@ import path from 'path';
 dotenv.config();
 const { Pool } = pkg;
 
+if (!process.env.DB_PASSWORD) {
+  console.error('DB_PASSWORD is not set. Refusing to start.');
+  process.exit(1);
+}
+
 const pool = new Pool({
   user:     process.env.DB_USER     || 'postgres',
   host:     process.env.DB_HOST     || 'localhost',
   database: process.env.DB_NAME     || 'corvex',
-  password: process.env.DB_PASSWORD || '100802',
+  password: process.env.DB_PASSWORD,
   port:     Number(process.env.DB_PORT) || 5432,
 });
 
@@ -39,6 +44,9 @@ const MIGRATIONS = [
   { file: '023_seed_stock_movements.sql',            label: '023_seed_stock_movements.sql' },
   { file: '024_product_images_notification_category.sql', label: '024_product_images_notification_category.sql' },
   { file: '025_saw_results_drop_engine_type.sql',       label: '025_saw_results_drop_engine_type.sql' },
+  { file: '026_territory_assignments.sql',              label: '026_territory_assignments.sql' },
+  { file: '027_users_middle_name.sql',                  label: '027_users_middle_name.sql' },
+  { file: '028_permissions_updated_at.sql',             label: '028_permissions_updated_at.sql' },
 ];
 
 async function ensureMigrationsTable() {

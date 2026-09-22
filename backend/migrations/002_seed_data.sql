@@ -69,7 +69,7 @@ INSERT INTO branches (branch_name, address, latitude, longitude, phone, email, s
 -- ============================================================
 -- USERS
 -- ============================================================
--- Default password hash for all users: Corvex@2026
+-- Shared development password hash for seeded accounts.
 -- Hash: $2b$12$B67sR9t9LbsT8ig/8RcpL.X0kll/Rta9tqJOJHC.9btNekutqMlRm
 
 -- Super Admin (no branch — org-level role)

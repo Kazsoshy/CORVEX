@@ -1,6 +1,8 @@
 import express from 'express';
+import { allow, ROLE_SETS } from '../middleware/auth.js';
 
 const router = express.Router();
+router.use(allow(ROLE_SETS.userAdmin, ROLE_SETS.roleAdmin));
 
 // ──────────────────────────────────────────────────────────────────────────────
 // GET /api/roles  — List roles with their permission sets

@@ -1,10 +1,6 @@
 import { formatCustomerDisplayId, formatPurchaseVolumeUnits } from '../../utils/customerDisplay';
 import { formatDisplayDateTime } from '../../utils/formatters';
-
-const STATUS_CLASS = {
-  Active: 'status-completed',
-  Inactive: 'status-inactive',
-};
+import { StatusBadge } from '../StatusBadge';
 
 function resolvePurchaseVolumeUnits(customer) {
   return Number(
@@ -28,11 +24,7 @@ export function CustomerCard({ customer, onViewDetails, onLogVisit, onNavigate, 
           <h4>{customer.first_name} {customer.last_name}</h4>
           <p className="muted account-meta">{displayId} · {customer.branch_name || customer.branch_id}</p>
         </div>
-        {customer.status !== 'Inactive' ? (
-          <span className={`status-badge ${STATUS_CLASS[customer.status] ?? ''}`}>{customer.status}</span>
-        ) : (
-          <span className="status-badge status-inactive">Inactive</span>
-        )}
+        <StatusBadge status={customer.status || 'Inactive'} />
       </div>
 
       <div className="account-card-body">

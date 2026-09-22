@@ -1,7 +1,8 @@
 import express from 'express';
-import { requireAuth } from '../middleware/auth.js';
+import { requireAuth, requireRole, requireAssignedBranch, assertSameBranch, isUnscoped, ROLE_SETS } from '../middleware/auth.js';
 
 const router = express.Router();
+router.use(requireRole(ROLE_SETS.branches), requireAssignedBranch);
 
 // ──────────────────────────────────────────────────────────────────────────────
 // GET /api/branches
@@ -14,7 +15,9 @@ router.get('/', requireAuth, async (req, res) => {
     const user = req.currentUser;
 
     // Branch managers only see their own branch
-    const branchWhere = user.branchId ? `WHERE b.id = ${user.branchId}` : '';
+    const scopedBranchId = isUnscoped(user) ? null : user.branchId;
+    const branchWhere = scopedBranchId ? 'WHERE b.id = $1' : '';
+    const params = scopedBranchId ? [scopedBranchId] : [];
 
     const result = await pool.query(
       `SELECT
@@ -35,8 +38,8 @@ router.get('/', requireAuth, async (req, res) => {
          COUNT(DISTINCT u.id)                                      AS total_staff,
          COUNT(DISTINCT c.customer_id)                             AS customer_count,
          COUNT(DISTINCT c.customer_id) FILTER (WHERE c.status = 'Active') AS active_customers,
-         COALESCE(SUM(DISTINCT bi.available_stock), 0)             AS total_inventory,
-         COUNT(DISTINCT bi.inventory_id) FILTER (WHERE bi.available_stock <= bi.reorder_level) AS low_stock_count
+         COUNT(DISTINCT bi.inventory_id) FILTER (WHERE bi.available_stock <= bi.reorder_level) AS low_stock_count,
+         COALESCE((SELECT SUM(bi2.available_stock) FROM branch_inventory bi2 WHERE bi2.branch_id = b.id), 0) AS total_inventory
        FROM branches b
        LEFT JOIN users mgr ON mgr.id = b.manager_id
        LEFT JOIN users u   ON u.branch_id = b.id
@@ -46,7 +49,8 @@ router.get('/', requireAuth, async (req, res) => {
        GROUP BY b.id, b.name, b.address, b.latitude, b.longitude, b.phone, b.email,
                 b.status, b.created_at, b.updated_at,
                 mgr.id, mgr.full_name, mgr.email
-       ORDER BY b.name`
+       ORDER BY b.name`,
+      params
     );
 
     return res.status(200).json({ success: true, data: result.rows });
@@ -63,6 +67,7 @@ router.get('/:id', requireAuth, async (req, res) => {
   try {
     const pool = req.app.locals.pool;
     const bid = Number(req.params.id);
+    if (!assertSameBranch(res, req.currentUser, bid)) return;
 
     const branchResult = await pool.query(
       `SELECT

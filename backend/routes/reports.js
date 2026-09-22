@@ -1,7 +1,13 @@
 import express from 'express';
-import { requireAuth, requireBranchScope } from '../middleware/auth.js';
+import { requireAuth, requireRole, requireAssignedBranch, ROLE_SETS } from '../middleware/auth.js';
 
 const router = express.Router();
+const ORG_REPORT_PATHS = new Set(['/executive', '/operating-manager', '/performance-history']);
+router.use((req, res, next) => {
+  const allowed = ORG_REPORT_PATHS.has(req.path) ? ROLE_SETS.reportsOrg : ROLE_SETS.reportsBranch;
+  return requireRole(allowed)(req, res, next);
+});
+router.use(requireAssignedBranch);
 
 const MANILA_TIME_ZONE = 'Asia/Manila';
 
@@ -1396,81 +1402,6 @@ router.get('/operating-manager', requireAuth, async (req, res) => {
   } catch (err) {
     console.error('[Reports] GET /operating-manager error:', err.message);
     return res.status(500).json({ success: false, message: 'Failed to fetch operating manager analytics.' });
-  }
-});
-
-// ──────────────────────────────────────────────────────────────────────────────
-// GET /api/reports/invoices
-// Paginated invoices for branch or executive review.
-// ──────────────────────────────────────────────────────────────────────────────
-router.get('/invoices', requireAuth, async (req, res) => {
-  try {
-    const pool = req.app.locals.pool;
-    const user = req.currentUser;
-    const isBranchScoped = user.branchId !== null;
-    const bid = isBranchScoped ? user.branchId : (req.query.branch_id ? Number(req.query.branch_id) : null);
-    const { status, page = 1, limit = 50 } = req.query;
-
-    const conditions = [];
-    const params = [];
-    let pIdx = 1;
-
-    if (isBranchScoped) {
-      conditions.push(`si.branch_id = $${pIdx++}`);
-      params.push(bid);
-    }
-    if (status && status !== 'All') {
-      conditions.push(`si.status = $${pIdx++}`);
-      params.push(status);
-    }
-
-    const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
-    const offset = (Number(page) - 1) * Number(limit);
-
-    const result = await pool.query(
-      `SELECT
-         si.sales_invoices_id,
-         si.invoice_number,
-         si.total_amount,
-         si.status,
-         si.invoices_date,
-         si.due_date,
-         si.notes,
-         si.created_at,
-         si.updated_at,
-         c.first_name || ' ' || c.last_name AS customer_name,
-         agent.full_name                      AS sales_agent_name,
-         b.name                               AS branch_name,
-         pm.method_name                       AS payment_method
-       FROM sales_invoices si
-       LEFT JOIN customers c ON c.customer_id = si.customer_id
-       LEFT JOIN users agent ON agent.id = si.sales_agent_id
-       LEFT JOIN branches b ON b.id = si.branch_id
-       LEFT JOIN payment_methods pm ON pm.payment_method_id = si.payment_method_id
-       ${where}
-       ORDER BY si.invoices_date DESC
-       LIMIT $${pIdx++} OFFSET $${pIdx++}`,
-      [...params, Number(limit), offset]
-    );
-
-    const countResult = await pool.query(
-      `SELECT COUNT(*) FROM sales_invoices si ${where}`,
-      params
-    );
-
-    return res.status(200).json({
-      success: true,
-      data: result.rows,
-      pagination: {
-        total: Number(countResult.rows[0].count),
-        page: Number(page),
-        limit: Number(limit),
-        totalPages: Math.ceil(Number(countResult.rows[0].count) / Number(limit)),
-      },
-    });
-  } catch (err) {
-    console.error('[Reports] GET /invoices error:', err.message);
-    return res.status(500).json({ success: false, message: 'Failed to fetch invoices.' });
   }
 });
 

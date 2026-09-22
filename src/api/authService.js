@@ -11,8 +11,9 @@ export async function login(email, password) {
   const response = await apiClient.post('/auth/login', { email, password });
   const data = response.data;
 
-  if (data.success && data.user) {
+  if (data.success && data.user && data.token) {
     localStorage.setItem('corvex_user', JSON.stringify(data.user));
+    localStorage.setItem('corvex_token', data.token);
   }
 
   return data;

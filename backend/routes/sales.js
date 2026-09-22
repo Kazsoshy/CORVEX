@@ -212,7 +212,6 @@ router.get('/invoices', async (req, res) => {
     return res.status(500).json({
       success: false,
       message: 'Failed to fetch invoices',
-      error: error.message,
     });
   }
 });
@@ -243,7 +242,6 @@ router.get('/invoices/:invoiceId/items', async (req, res) => {
     return res.status(500).json({
       success: false,
       message: 'Failed to fetch invoice items',
-      error: error.message,
     });
   }
 });
@@ -270,7 +268,6 @@ router.get('/invoices/:invoiceId', async (req, res) => {
     return res.status(500).json({
       success: false,
       message: 'Failed to fetch invoice',
-      error: error.message,
     });
   }
 });
@@ -295,7 +292,6 @@ router.get('/payment-methods', async (req, res) => {
     return res.status(500).json({
       success: false,
       message: 'Failed to fetch payment methods',
-      error: error.message,
     });
   }
 });
@@ -383,6 +379,7 @@ router.post('/invoices', async (req, res) => {
 
   try {
     await client.query('BEGIN');
+    await client.query('SELECT pg_advisory_xact_lock($1)', [748392001]);
 
     const customerResult = await client.query(
       `SELECT customer_id, branch_id
@@ -433,15 +430,31 @@ router.post('/invoices', async (req, res) => {
         });
       }
 
-      const unitPrice = item.unitPrice !== null && Number.isFinite(item.unitPrice) && item.unitPrice > 0
-        ? item.unitPrice
-        : Number(productResult.rows[0].unit_price);
+      const unitPrice = Number(productResult.rows[0].unit_price);
 
       if (!Number.isFinite(unitPrice) || unitPrice <= 0) {
         await client.query('ROLLBACK');
         return res.status(400).json({
           success: false,
           message: `Product ${item.productId} has an invalid unit price.`,
+        });
+      }
+
+      const stockResult = await client.query(
+        `UPDATE branch_inventory
+         SET available_stock = available_stock - $1,
+             quantity = CASE WHEN quantity IS NULL THEN NULL ELSE quantity - $1 END
+         WHERE product_id = $2
+           AND branch_id = $3
+           AND available_stock >= $1
+         RETURNING available_stock`,
+        [item.quantity, item.productId, user.branchId]
+      );
+      if (stockResult.rows.length === 0) {
+        await client.query('ROLLBACK');
+        return res.status(400).json({
+          success: false,
+          message: `Not enough stock for product ${item.productId} at your branch.`,
         });
       }
 
@@ -488,21 +501,27 @@ router.post('/invoices', async (req, res) => {
 
     await client.query('COMMIT');
 
-    const invoiceUser = { ...user, pool };
-    const invoice = await getInvoice(invoiceNumber, invoiceUser);
-
-    return res.status(201).json({
-      success: true,
-      data: invoice,
-      message: 'Sale logged successfully.',
-    });
+    try {
+      const invoice = await getInvoice(invoiceNumber, { ...user, pool });
+      return res.status(201).json({
+        success: true,
+        data: invoice,
+        message: 'Sale logged successfully.',
+      });
+    } catch (lookupError) {
+      console.error('[Sales] invoice lookup after commit:', lookupError.message);
+      return res.status(201).json({
+        success: true,
+        data: { invoice_number: invoiceNumber, sales_invoices_id: invoiceId },
+        message: 'Sale logged successfully.',
+      });
+    }
   } catch (error) {
-    await client.query('ROLLBACK');
+    try { await client.query('ROLLBACK'); } catch { /* transaction already finished */ }
     console.error('[Sales] POST /invoices error:', error);
     return res.status(500).json({
       success: false,
       message: 'Failed to log sale',
-      error: error.message,
     });
   } finally {
     client.release();
@@ -556,7 +575,6 @@ router.get('/visits', async (req, res) => {
     return res.status(500).json({
       success: false,
       message: 'Failed to fetch field visits',
-      error: error.message,
     });
   }
 });
@@ -584,7 +602,6 @@ router.get('/visits/:id', async (req, res) => {
     return res.status(500).json({
       success: false,
       message: 'Failed to fetch field visit',
-      error: error.message,
     });
   }
 });
@@ -653,7 +670,6 @@ router.post('/visits', async (req, res) => {
     return res.status(500).json({
       success: false,
       message: 'Failed to create field visit',
-      error: error.message,
     });
   }
 });
@@ -748,7 +764,6 @@ router.put('/visits/:id', async (req, res) => {
     return res.status(500).json({
       success: false,
       message: 'Failed to update field visit',
-      error: error.message,
     });
   }
 });
@@ -801,7 +816,6 @@ router.get('/payments', async (req, res) => {
     return res.status(500).json({
       success: false,
       message: 'Failed to fetch collection payments',
-      error: error.message,
     });
   }
 });

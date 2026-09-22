@@ -25,6 +25,7 @@ const ROUTE_DEFINITIONS = [
   { pattern: /^\/warehouse\/reports$/, pageType: 'reports' },
   { pattern: /^\/warehouse\/suppliers$/, pageType: 'suppliers' },
   { pattern: /^\/warehouse\/suppliers\/([^/]+)$/, pageType: 'supplierDetail', params: ['supplierId'] },
+  { pattern: /^\/warehouse\/product-categories$/, pageType: 'productCategories' },
 ];
 
 export function matchWarehouseRoute(pathname) {

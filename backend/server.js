@@ -17,6 +17,9 @@ import reportsRouter  from './routes/reports.js';
 import inventoryRouter from './routes/inventory.js';
 import adminRouter     from './routes/admin.js';
 import permissionsRouter from './routes/permissions.js';
+import productCategoriesRouter from './routes/productCategories.js';
+import digitalReceiptsRouter from './routes/digitalReceipts.js';
+import sawResultsRouter from './routes/sawResults.js';
 import salesRouter     from './routes/sales.js';
 import collectorRouter from './routes/collector.js';
 import notificationsRouter from './routes/notifications.js';
@@ -33,7 +36,7 @@ const app = express();
 app.use(cors({
   origin: ['http://localhost:5173', 'http://localhost:5174', 'http://127.0.0.1:5173'],
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'X-User-Id'],
+  allowedHeaders: ['Content-Type', 'Authorization'],
   credentials: true,
 }));
 app.use(express.json({ limit: '1mb' }));
@@ -42,11 +45,16 @@ app.use(express.urlencoded({ extended: true }));
 // ──────────────────────────────────────────────────────────────────────────────
 // DATABASE CONNECTION
 // ──────────────────────────────────────────────────────────────────────────────
+if (!process.env.DB_PASSWORD) {
+  console.error('DB_PASSWORD is not set. Refusing to start.');
+  process.exit(1);
+}
+
 const pool = new Pool({
   user:     process.env.DB_USER     || 'postgres',
   host:     process.env.DB_HOST     || 'localhost',
   database: process.env.DB_NAME     || 'corvex',
-  password: process.env.DB_PASSWORD || '100802',
+  password: process.env.DB_PASSWORD,
   port:     Number(process.env.DB_PORT) || 5432,
   max:      10,          // max connections in pool
   idleTimeoutMillis:    30000,
@@ -89,6 +97,9 @@ app.use('/api/products',  requireAuth, productsRouter);
 app.use('/api/branches',  requireAuth, branchesRouter);
 app.use('/api/suppliers', requireAuth, suppliersRouter);
 app.use('/api/territories', requireAuth, territoriesRouter);
+app.use('/api/product-categories', requireAuth, productCategoriesRouter);
+app.use('/api/digital-receipts', requireAuth, digitalReceiptsRouter);
+app.use('/api/saw-results', requireAuth, sawResultsRouter);
 
 // Branch-scoped routes — identify + branch enforcement
 app.use('/api/customers', requireAuth, requireBranchScope, customersRouter);
@@ -159,7 +170,7 @@ app.use((req, res) => {
 // ──────────────────────────────────────────────────────────────────────────────
 app.use((err, req, res, _next) => {
   console.error('[Server Error]', err.message);
-  res.status(500).json({ success: false, message: 'An unexpected error occurred.', error: err.message });
+  res.status(500).json({ success: false, message: 'An unexpected error occurred.' });
 });
 
 // ──────────────────────────────────────────────────────────────────────────────

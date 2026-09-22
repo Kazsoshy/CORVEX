@@ -60,7 +60,6 @@ router.get('/payments', async (req, res) => {
     return res.status(500).json({
       success: false,
       message: 'Failed to fetch collection payments',
-      error: error.message,
     });
   }
 });
@@ -94,7 +93,6 @@ router.get('/payments/:id', async (req, res) => {
     return res.status(500).json({
       success: false,
       message: 'Failed to fetch collection payment',
-      error: error.message,
     });
   }
 });
@@ -129,7 +127,7 @@ router.get('/field-visits/today', async (req, res) => {
     return res.status(200).json({ success: true, data: result.rows, count: result.rows.length });
   } catch (error) {
     console.error('[Collector] GET /field-visits/today error:', error);
-    return res.status(500).json({ success: false, message: 'Failed to fetch today\'s visits.', error: error.message });
+    return res.status(500).json({ success: false, message: 'Failed to fetch today\'s visits.' });
   }
 });
 
@@ -165,7 +163,7 @@ router.get('/field-reports', async (req, res) => {
     return res.status(200).json({ success: true, data: result.rows, count: result.rows.length });
   } catch (error) {
     console.error('[Collector] GET /field-reports error:', error);
-    return res.status(500).json({ success: false, message: 'Failed to fetch field activity reports.', error: error.message });
+    return res.status(500).json({ success: false, message: 'Failed to fetch field activity reports.' });
   }
 });
 
@@ -208,7 +206,7 @@ router.post('/field-reports', async (req, res) => {
     });
   } catch (error) {
     console.error('[Collector] POST /field-reports error:', error);
-    return res.status(500).json({ success: false, message: 'Failed to submit field activity report.', error: error.message });
+    return res.status(500).json({ success: false, message: 'Failed to submit field activity report.' });
   }
 });
 
@@ -259,7 +257,6 @@ router.get('/receipts', async (req, res) => {
     return res.status(500).json({
       success: false,
       message: 'Failed to fetch digital receipts',
-      error: error.message,
     });
   }
 });
@@ -319,7 +316,6 @@ router.get('/receipts/:id', async (req, res) => {
     return res.status(500).json({
       success: false,
       message: 'Failed to fetch receipt',
-      error: error.message,
     });
   }
 });

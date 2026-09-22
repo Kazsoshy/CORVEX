@@ -24,6 +24,9 @@ const ROUTE_DEFINITIONS = [
   { pattern: /^\/operating-manager\/customers$/, pageType: 'customers' },
   { pattern: /^\/operating-manager\/customers\/([^/]+)$/, pageType: 'customerDetail', params: ['customerId'] },
   { pattern: /^\/operating-manager\/territories$/, pageType: 'territories' },
+  { pattern: /^\/operating-manager\/digital-receipts$/, pageType: 'digitalReceipts' },
+  { pattern: /^\/operating-manager\/saw-results$/, pageType: 'sawResults' },
+  { pattern: /^\/operating-manager\/performance-summary$/, pageType: 'performanceSummary' },
   // Legacy redirects support
   { pattern: /^\/operating-manager\/leaflet-map$/, pageType: 'leafletMap' },
   { pattern: /^\/operating-manager\/compare$/, pageType: 'branchComparison' },
@@ -92,6 +95,12 @@ export function buildOperatingManagerBreadcrumbs(pageType, params = {}) {
       return [...crumbs, { label: 'Customer Records', to: '/operating-manager/customers' }, { label: 'Customer Detail', to: `/operating-manager/customers/${params.customerId}` }];
     case 'territories':
       return [...crumbs, { label: 'Territories', to: '/operating-manager/territories' }];
+    case 'digitalReceipts':
+      return [...crumbs, { label: 'Digital Receipts', to: '/operating-manager/digital-receipts' }];
+    case 'sawResults':
+      return [...crumbs, { label: 'SAW Results', to: '/operating-manager/saw-results' }];
+    case 'performanceSummary':
+      return [...crumbs, { label: 'Performance Summary', to: '/operating-manager/performance-summary' }];
     default:
       return crumbs;
   }
@@ -150,6 +159,9 @@ export function resolveOperatingManagerPage(pathname) {
     profile: 'Profile',
     customers: 'Customer Records',
     customerDetail: 'Customer Detail',
+    digitalReceipts: 'Digital Receipts',
+    sawResults: 'SAW Results',
+    performanceSummary: 'Performance Summary',
   };
 
   return {

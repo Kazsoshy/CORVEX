@@ -1,6 +1,8 @@
 import express from 'express';
+import { allow, ROLE_SETS } from '../middleware/auth.js';
 
 const router = express.Router();
+router.use(allow(ROLE_SETS.audit));
 
 // ──────────────────────────────────────────────────────────────────────────────
 // GET /api/admin/audit-logs
@@ -11,9 +13,10 @@ router.get('/audit-logs', async (req, res) => {
     const pool = req.app.locals.pool;
 
     const result = await pool.query(
-      `SELECT log_id, user_id, action, ip_address, status_details, created_at
-       FROM audit_logs
-       ORDER BY created_at DESC`
+      `SELECT a.log_id, a.user_id, TRIM(CONCAT(u.first_name, ' ', u.last_name)) AS user_name, a.action, a.ip_address, a.status_details, a.created_at
+       FROM audit_logs a
+       LEFT JOIN users u ON a.user_id = u.id
+       ORDER BY a.created_at DESC`
     );
 
     return res.status(200).json({ success: true, data: result.rows });

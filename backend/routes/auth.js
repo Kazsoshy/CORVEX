@@ -1,11 +1,30 @@
 import express from 'express';
 import bcrypt from 'bcryptjs';
-import pkg from 'pg';
+import { issueSessionToken } from '../middleware/auth.js';
 
-const { Pool } = pkg;
 const router = express.Router();
 
-// Pool is passed from server.js via app.locals
+const loginAttempts = new Map();
+const LOGIN_WINDOW_MS = 15 * 60 * 1000;
+const LOGIN_MAX_ATTEMPTS = 10;
+
+function clientAddress(req) {
+  return req.ip || req.socket?.remoteAddress || 'unknown';
+}
+
+function tooManyAttempts(address) {
+  const now = Date.now();
+  const recent = (loginAttempts.get(address) || []).filter((stamp) => now - stamp < LOGIN_WINDOW_MS);
+  loginAttempts.set(address, recent);
+  return recent.length >= LOGIN_MAX_ATTEMPTS;
+}
+
+function recordAttempt(address) {
+  const recent = loginAttempts.get(address) || [];
+  recent.push(Date.now());
+  loginAttempts.set(address, recent);
+}
+
 // POST /api/auth/login
 router.post('/login', async (req, res) => {
   const { email, password } = req.body;
@@ -14,6 +33,14 @@ router.post('/login', async (req, res) => {
     return res.status(400).json({
       success: false,
       message: 'Email and password are required.',
+    });
+  }
+
+  const address = clientAddress(req);
+  if (tooManyAttempts(address)) {
+    return res.status(429).json({
+      success: false,
+      message: 'Too many login attempts. Try again later.',
     });
   }
 
@@ -44,19 +71,21 @@ router.post('/login', async (req, res) => {
     );
 
     if (result.rows.length === 0) {
-      // Do not log to audit_logs here — user_id is NOT NULL and we have no valid ID
+      recordAttempt(address);
       return res.status(401).json({ success: false, message: 'Invalid email or password.' });
     }
 
     const user = result.rows[0];
 
-    if (user.status === 'Inactive') {
-      return res.status(403).json({ success: false, message: 'Your account has been deactivated. Please contact an administrator.' });
+    if (user.status !== 'Active') {
+      recordAttempt(address);
+      return res.status(401).json({ success: false, message: 'Invalid email or password.' });
     }
 
     // Verify password
     const isValid = await bcrypt.compare(password, user.password_hash);
     if (!isValid) {
+      recordAttempt(address);
       await pool.query(
         `INSERT INTO audit_logs (user_id, user_name, action, ip_address, status_details)
          VALUES ($1, $2, 'Login Failed', $3, 'Invalid password')`,
@@ -76,6 +105,7 @@ router.post('/login', async (req, res) => {
     return res.status(200).json({
       success: true,
       message: 'Login successful.',
+      token: issueSessionToken(user.id),
       user: {
         id:             user.id,
         fullName:       user.full_name,

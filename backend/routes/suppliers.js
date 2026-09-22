@@ -1,6 +1,8 @@
 import express from 'express';
+import { allow, ROLE_SETS } from '../middleware/auth.js';
 
 const router = express.Router();
+router.use(allow(ROLE_SETS.suppliers));
 
 // ──────────────────────────────────────────────────────────────────────────────
 // GET /api/suppliers
@@ -63,7 +65,7 @@ router.get('/', async (req, res) => {
     });
   } catch (err) {
     console.error('[Suppliers] GET / error:', err.message);
-    return res.status(500).json({ success: false, message: 'Failed to fetch suppliers.', error: err.message });
+    return res.status(500).json({ success: false, message: 'Failed to fetch suppliers.' });
   }
 });
 
@@ -99,7 +101,7 @@ router.get('/:id', async (req, res) => {
     });
   } catch (err) {
     console.error('[Suppliers] GET /:id error:', err.message);
-    return res.status(500).json({ success: false, message: 'Failed to fetch supplier.', error: err.message });
+    return res.status(500).json({ success: false, message: 'Failed to fetch supplier.' });
   }
 });
 
@@ -135,7 +137,7 @@ router.post('/', async (req, res) => {
     });
   } catch (err) {
     console.error('[Suppliers] POST / error:', err.message);
-    return res.status(500).json({ success: false, message: 'Failed to create supplier.', error: err.message });
+    return res.status(500).json({ success: false, message: 'Failed to create supplier.' });
   }
 });
 
@@ -179,7 +181,7 @@ router.put('/:id', async (req, res) => {
     });
   } catch (err) {
     console.error('[Suppliers] PUT /:id error:', err.message);
-    return res.status(500).json({ success: false, message: 'Failed to update supplier.', error: err.message });
+    return res.status(500).json({ success: false, message: 'Failed to update supplier.' });
   }
 });
 
@@ -203,7 +205,7 @@ router.delete('/:id', async (req, res) => {
     });
   } catch (err) {
     console.error('[Suppliers] DELETE /:id error:', err.message);
-    return res.status(500).json({ success: false, message: 'Failed to delete supplier.', error: err.message });
+    return res.status(500).json({ success: false, message: 'Failed to delete supplier.' });
   }
 });
 

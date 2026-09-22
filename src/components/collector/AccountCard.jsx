@@ -1,11 +1,5 @@
 import { formatCurrency } from '../../data/collectorMockData';
-
-const STATUS_CLASS = {
-  Overdue:   'status-overdue',
-  Pending:   'status-pending',
-  Completed: 'status-completed',
-  Current:   'status-completed',
-};
+import { StatusBadge } from '../StatusBadge';
 
 export function AccountCard({ account, onViewDetails, onCall, onNavigate }) {
   return (
@@ -15,7 +9,7 @@ export function AccountCard({ account, onViewDetails, onCall, onNavigate }) {
           <h4>{account.customerName}</h4>
           <p className="muted account-meta">{account.accountNumber}</p>
         </div>
-        <span className={`status-badge ${STATUS_CLASS[account.status] ?? ''}`}>{account.status}</span>
+        <StatusBadge status={account.status} />
       </div>
 
       <div className="account-card-body">

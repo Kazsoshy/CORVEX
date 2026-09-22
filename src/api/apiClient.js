@@ -18,18 +18,6 @@ apiClient.interceptors.request.use(
     if (token) {
       config.headers.Authorization = `Bearer ${token}`;
     }
-    // Send user identity header so the backend can enforce role/branch middleware
-    try {
-      const raw = localStorage.getItem('corvex_user');
-      if (raw) {
-        const user = JSON.parse(raw);
-        if (user?.id) {
-          config.headers['X-User-Id'] = String(user.id);
-        }
-      }
-    } catch {
-      // malformed localStorage entry — ignore
-    }
     return config;
   },
   (error) => Promise.reject(error)

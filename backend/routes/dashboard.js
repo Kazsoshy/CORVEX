@@ -1,5 +1,6 @@
 import express from 'express';
-import { requireAuth } from '../middleware/auth.js';
+import os from 'os';
+import { requireAuth, requireRole, requireAssignedBranch, isUnscoped, ROLE_SETS } from '../middleware/auth.js';
 
 const router = express.Router();
 
@@ -7,7 +8,7 @@ const router = express.Router();
 // GET /api/dashboard/system-health
 // Returns live system metrics for the Super Admin dashboard
 // ──────────────────────────────────────────────────────────────────────────────
-router.get('/system-health', requireAuth, async (req, res) => {
+router.get('/system-health', requireAuth, requireRole(ROLE_SETS.dashboardOrg), async (req, res) => {
   try {
     const pool = req.app.locals.pool;
 
@@ -38,11 +39,8 @@ router.get('/system-health', requireAuth, async (req, res) => {
         totalBranches,
         apiResponseMs,
         errorCount,
-        serverCpu:      Math.floor(Math.random() * 30) + 25,   // simulated — replace with real metrics in production
-        memoryUsage:    Math.floor(Math.random() * 20) + 50,
-        storageUsage:   Math.floor(Math.random() * 15) + 35,
-        uptime:         '99.96%',
-        lastBackup:     '2026-06-30 02:00 AM',
+        memoryUsage: Math.round(((os.totalmem() - os.freemem()) / os.totalmem()) * 100),
+        processUptimeSeconds: Math.round(process.uptime()),
         timestamp:      new Date().toISOString(),
       },
     });
@@ -51,7 +49,7 @@ router.get('/system-health', requireAuth, async (req, res) => {
     return res.status(500).json({
       success: false,
       message: 'Failed to fetch system health.',
-      data: { dbStatus: 'Offline', error: err.message },
+      data: { dbStatus: 'Offline' },
     });
   }
 });
@@ -59,7 +57,7 @@ router.get('/system-health', requireAuth, async (req, res) => {
 // ──────────────────────────────────────────────────────────────────────────────
 // GET /api/dashboard/user-stats  — User count breakdown by role
 // ──────────────────────────────────────────────────────────────────────────────
-router.get('/user-stats', requireAuth, async (req, res) => {
+router.get('/user-stats', requireAuth, requireRole(ROLE_SETS.dashboardOrg), async (req, res) => {
   try {
     const pool = req.app.locals.pool;
 
@@ -93,7 +91,7 @@ router.get('/user-stats', requireAuth, async (req, res) => {
 // ──────────────────────────────────────────────────────────────────────────────
 // GET /api/dashboard/inventory-health  — Inventory health across branches
 // ──────────────────────────────────────────────────────────────────────────────
-router.get('/inventory-health', requireAuth, async (req, res) => {
+router.get('/inventory-health', requireAuth, requireRole(ROLE_SETS.dashboardBranch), requireAssignedBranch, async (req, res) => {
   try {
     const pool = req.app.locals.pool;
 
@@ -110,9 +108,11 @@ router.get('/inventory-health', requireAuth, async (req, res) => {
     );
 
     const user = req.currentUser;
+    const params = [];
     let branchCondition = '';
-    if (user && user.branchId) {
-      branchCondition = `AND b.id = ${user.branchId}`;
+    if (user && !isUnscoped(user)) {
+      params.push(user.branchId);
+      branchCondition = 'AND b.id = $1';
     }
 
     const alerts = await pool.query(
@@ -122,7 +122,8 @@ router.get('/inventory-health', requireAuth, async (req, res) => {
        JOIN branches b ON b.id = bi.branch_id
        WHERE bi.available_stock <= bi.reorder_level
          ${branchCondition}
-       ORDER BY bi.available_stock ASC`
+       ORDER BY bi.available_stock ASC`,
+      params
     );
 
     return res.status(200).json({
@@ -141,14 +142,16 @@ router.get('/inventory-health', requireAuth, async (req, res) => {
 // ──────────────────────────────────────────────────────────────────────────────
 // GET /api/dashboard/recent-audit  — Recent audit log entries (last 10)
 // ──────────────────────────────────────────────────────────────────────────────
-router.get('/recent-audit', requireAuth, async (req, res) => {
+router.get('/recent-audit', requireAuth, requireRole(ROLE_SETS.dashboardOrg), async (req, res) => {
   try {
     const pool = req.app.locals.pool;
 
     const user = req.currentUser;
+    const params = [];
     let userFilter = '';
-    if (user && user.branchId) {
-      userFilter = `WHERE user_id = ${user.id}`;
+    if (user && !isUnscoped(user)) {
+      params.push(user.id);
+      userFilter = 'WHERE user_id = $1';
     }
 
     const result = await pool.query(
@@ -156,7 +159,8 @@ router.get('/recent-audit', requireAuth, async (req, res) => {
        FROM audit_logs
        ${userFilter}
        ORDER BY created_at DESC
-       LIMIT 10`
+       LIMIT 10`,
+      params
     );
 
     return res.status(200).json({ success: true, data: result.rows });
@@ -169,14 +173,16 @@ router.get('/recent-audit', requireAuth, async (req, res) => {
 // ──────────────────────────────────────────────────────────────────────────────
 // GET /api/dashboard/branches  — Branch summary stats
 // ──────────────────────────────────────────────────────────────────────────────
-router.get('/branches', requireAuth, async (req, res) => {
+router.get('/branches', requireAuth, requireRole(ROLE_SETS.dashboardBranches), async (req, res) => {
   try {
     const pool = req.app.locals.pool;
 
     const user = req.currentUser;
+    const params = [];
     let branchFilter = '';
-    if (user && user.branchId) {
-      branchFilter = `WHERE b.id = ${user.branchId}`;
+    if (user && !isUnscoped(user)) {
+      params.push(user.branchId);
+      branchFilter = 'WHERE b.id = $1';
     }
 
     const result = await pool.query(
@@ -193,8 +199,9 @@ router.get('/branches', requireAuth, async (req, res) => {
        LEFT JOIN customers c ON c.branch_id = b.id
        LEFT JOIN users mgr ON mgr.id = b.manager_id
        ${branchFilter}
-       GROUP BY b.id, b.name, b.address, b.phone, b.email, b.region, b.status, mgr.full_name, mgr.id
-       ORDER BY b.name`
+       GROUP BY b.id, b.name, b.address, b.phone, b.email, b.latitude, b.longitude, b.region, b.status, mgr.full_name, mgr.id
+       ORDER BY b.name`,
+      params
     );
 
     return res.status(200).json({ success: true, data: result.rows });
@@ -213,16 +220,13 @@ router.get('/branches', requireAuth, async (req, res) => {
 // Returns: staff counts, customer counts, overdue stats, inventory health,
 // recent collection/sales totals, and pending CI requests for the branch.
 // ──────────────────────────────────────────────────────────────────────────────
-router.get('/branch-summary', requireAuth, async (req, res) => {
+router.get('/branch-summary', requireAuth, requireRole(ROLE_SETS.dashboardBranch), requireAssignedBranch, async (req, res) => {
   try {
     const pool = req.app.locals.pool;
     const user = req.currentUser;
 
-    const isBranchScoped = user.branchId !== null;
-    let branch_id = req.query.branch_id;
-    if (!branch_id && isBranchScoped) {
-      branch_id = String(user.branchId);
-    }
+    const isBranchScoped = !isUnscoped(user);
+    const branch_id = isBranchScoped ? String(user.branchId) : req.query.branch_id;
 
     if (!branch_id || isNaN(Number(branch_id))) {
       if (!isBranchScoped) {

@@ -8,10 +8,11 @@ import { BranchManagerPageBody } from './components/branchManager/BranchManagerP
 import { CustomerPageBody } from './components/customer/CustomerPageBody';
 import { SuperAdminPageBody } from './components/superAdmin/SuperAdminPageBody';
 import { Toast, useToast } from './components/shared/Toast';
-import { quickFacts } from './pageData';
-import { login as apiLogin, getEntryPathForRole, logout, getCurrentUser } from './api/authService.js';
+import { getEntryPathForRole, logout, getCurrentUser } from './api/authService.js';
+import logo from './assets/corvex-logo.png';
 import { LoginPage } from './components/auth/LoginPage';
 import { NavIcon } from './navIcons';
+import { StatusBadge } from './components/StatusBadge';
 import LeafletMap from './components/common/LeafletMap';
 import { LogoutConfirmDialog } from './components/LogoutConfirmDialog';
 import { collectorRole } from './rolePages/collector';
@@ -102,6 +103,22 @@ function PrototypeShell() {
   }, []);
 
   useEffect(() => {
+    if (location.pathname === '/password-reset') return;
+    if (!currentRole) return;
+    const user = getCurrentUser();
+    const token = localStorage.getItem('corvex_token');
+    if (!user?.role?.slug || !token) {
+      navigate('/login', { replace: true });
+      return;
+    }
+    const home = getEntryPathForRole(user.role.slug);
+    const prefix = `/${home.split('/')[1]}`;
+    const onOwnArea = location.pathname.startsWith(prefix)
+      || (user.role.slug === 'operating_manager' && location.pathname.startsWith('/admin'));
+    if (!onOwnArea) navigate(home, { replace: true });
+  }, [location.pathname, navigate, currentRole]);
+
+  useEffect(() => {
     const handleRequestLogout = () => setShowLogoutConfirm(true);
     window.addEventListener('request-logout', handleRequestLogout);
     return () => window.removeEventListener('request-logout', handleRequestLogout);
@@ -147,7 +164,7 @@ function PrototypeShell() {
         <div className="sidebar-inner">
           <div className="sidebar-header">
             <div className="brand-card">
-              <img src="/src/assets/corvex-logo.png" alt="CORVEX logo" className="brand-logo" />
+              <img src={logo} alt="CORVEX logo" className="brand-logo" />
               <div className="brand-copy">
                 <div className="brand-title">CORVEX</div>
               </div>
@@ -296,21 +313,8 @@ function PrototypeShell() {
         <div className="content-ambient" aria-hidden="true" />
 
 
-        {location.pathname === '/password-reset' && (
-          <section className="panel form-panel narrow">
-            <h3>Password Reset</h3>
-            <label>
-              Email
-              <input placeholder="name@example.com" />
-            </label>
-            <button className="inline-flex justify-center items-center gap-2 px-5 py-2.5 rounded-md border-0 bg-blue text-white font-semibold cursor-pointer transition-all duration-160 hover:-translate-y-[1px] hover:shadow-[0_4px_16px_rgba(37,99,235,0.35)] hover:brightness-105 active:translate-y-0" type="button" onClick={() => navigate('/login')}>
-              Send reset link
-            </button>
-          </section>
-        )}
-
         <Routes>
-          <Route path="/password-reset" element={<PrototypeLanding quickFacts={quickFacts} />} />
+          <Route path="/password-reset" element={<PasswordResetNotice navigate={navigate} />} />
           <Route
             path="*"
             element={
@@ -417,14 +421,12 @@ function PageActions({ actions, navigate, className }) {
 
 
 
-function PrototypeLanding({ quickFacts }) {
+function PasswordResetNotice({ navigate }) {
   return (
-    <section className="grid three-up">
-      {quickFacts.map((fact) => (
-        <article key={fact} className="panel fact-card">
-          <p>{fact}</p>
-        </article>
-      ))}
+    <section className="panel form-panel narrow">
+      <h3>Password reset</h3>
+      <p className="text-ink/70">An administrator resets account passwords. Return to sign in after they update yours.</p>
+      <button className="button" type="button" onClick={() => navigate('/login')}>Back to sign in</button>
     </section>
   );
 }
@@ -578,7 +580,11 @@ function PageBody({ showMap, setShowMap, filter, setFilter, page, currentRole, n
                   {page.table.rows.map((row, idx) => (
                     <tr key={idx}>
                       {Object.values(row).map((cell, cIdx) => (
-                        <td key={cIdx}>{cell}</td>
+                        <td key={cIdx}>
+                          {/status|severity|availability/i.test(page.table.columns[cIdx] || '')
+                            ? <StatusBadge status={cell} />
+                            : cell}
+                        </td>
                       ))}
                     </tr>
                   ))}

@@ -10,6 +10,8 @@ const ROUTES = [
   { pattern: /^\/admin\/audit-logs$/,       pageType: 'auditLogs' },
   { pattern: /^\/admin\/notifications$/,    pageType: 'notifications' },
   { pattern: /^\/admin\/profile$/,          pageType: 'profile' },
+  { pattern: /^\/admin\/product-categories$/, pageType: 'productCategories' },
+  { pattern: /^\/admin\/suppliers$/,        pageType: 'suppliers' },
 ];
 
 const TITLES = {
@@ -23,6 +25,8 @@ const TITLES = {
   auditLogs:   'Audit Logs',
   notifications:'Notifications',
   profile:     'Profile',
+  productCategories: 'Product Categories',
+  suppliers:   'Suppliers',
 };
 
 export function resolveAdminPage(pathname) {
@@ -53,6 +57,8 @@ function buildCrumbs(pageType, params) {
     case 'inventory':    return [...base, { label: 'Inventory Management', to: '/admin/inventory' }];
     case 'reports':      return [...base, { label: 'System Reports', to: '/admin/reports' }];
     case 'auditLogs':    return [...base, { label: 'Audit Logs', to: '/admin/audit-logs' }];
+    case 'productCategories': return [...base, { label: 'Product Categories', to: '/admin/product-categories' }];
+    case 'suppliers':    return [...base, { label: 'Suppliers', to: '/admin/suppliers' }];
     default:             return base;
   }
 }

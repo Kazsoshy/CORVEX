@@ -1,6 +1,8 @@
 import express from 'express';
+import { allow, ROLE_SETS } from '../middleware/auth.js';
 
 const router = express.Router();
+router.use(allow(ROLE_SETS.roleAdmin));
 
 // ──────────────────────────────────────────────────────────────────────────────
 // GET /api/permissions  — List all permissions
@@ -9,7 +11,7 @@ router.get('/', async (req, res) => {
   try {
     const pool = req.app.locals.pool;
     const result = await pool.query(
-      `SELECT permission_id, label, description, created_at FROM permissions ORDER BY permission_id`
+      `SELECT permission_id, label, description, created_at, updated_at FROM permissions ORDER BY permission_id`
     );
     return res.status(200).json({ success: true, data: result.rows });
   } catch (err) {

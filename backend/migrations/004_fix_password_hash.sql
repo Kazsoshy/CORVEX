@@ -1,8 +1,7 @@
 -- ============================================================
 -- CORVEX — Migration 004: Fix Password Hash
 -- The hash used in 002 and 003 was invalid (never matched any
--- password). This migration resets ALL users to the correct
--- bcrypt hash for: Corvex@2026
+-- password). This migration resets ALL users to a known bcrypt hash.
 -- Scope: ALL users — safest blanket fix.
 -- ============================================================
 UPDATE users
@@ -14,5 +13,5 @@ DO $$
 DECLARE total INT;
 BEGIN
     SELECT COUNT(*) INTO total FROM users;
-    RAISE NOTICE 'Password hash fixed for % user(s). New password: Corvex@2026', total;
+    RAISE NOTICE 'Password hash fixed for % user(s).', total;
 END $$;

@@ -1,7 +1,22 @@
 import express from 'express';
 import bcrypt from 'bcryptjs';
+import { allow, ROLE_SETS } from '../middleware/auth.js';
 
 const router = express.Router();
+router.use(allow(ROLE_SETS.userAdmin));
+
+async function roleSlug(pool, roleId) {
+  const result = await pool.query(`SELECT slug FROM roles WHERE role_id = $1`, [Number(roleId)]);
+  return result.rows[0]?.slug ?? null;
+}
+
+async function userRoleSlug(pool, userId) {
+  const result = await pool.query(
+    `SELECT r.slug FROM users u JOIN roles r ON r.role_id = u.role_id WHERE u.id = $1`,
+    [Number(userId)]
+  );
+  return result.rows[0]?.slug ?? null;
+}
 
 // ──────────────────────────────────────────────────────────────────────────────
 // GET /api/users
@@ -52,6 +67,7 @@ router.get('/', async (req, res) => {
          u.branch_id,
          u.role_id,
          u.first_name,
+         u.middle_name,
          u.last_name,
          u.email,
          u.status,
@@ -128,7 +144,7 @@ router.post('/', async (req, res) => {
   try {
     const pool = req.app.locals.pool;
     const {
-      first_name, last_name, email, password, role_id,
+      first_name, middle_name, last_name, email, password, role_id,
       branch_id, status = 'Active',
     } = req.body;
 
@@ -147,6 +163,14 @@ router.post('/', async (req, res) => {
       return res.status(400).json({ success: false, message: 'Password must be at least 8 characters.' });
     }
 
+    const assignedSlug = await roleSlug(pool, role_id);
+    if (!assignedSlug) {
+      return res.status(400).json({ success: false, message: 'Role not found.' });
+    }
+    if (assignedSlug === 'super_admin' && req.currentUser.roleSlug !== 'super_admin') {
+      return res.status(403).json({ success: false, message: 'Access denied.' });
+    }
+
     // Check uniqueness
     const dupCheck = await pool.query(
       `SELECT id AS user_id FROM users WHERE email = $1`,
@@ -160,11 +184,12 @@ router.post('/', async (req, res) => {
 
     const result = await pool.query(
       `INSERT INTO users
-         (first_name, last_name, email, password_hash, role_id, branch_id, status)
-       VALUES ($1,$2,$3,$4,$5,$6,$7)
+         (first_name, middle_name, last_name, email, password_hash, role_id, branch_id, status)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
        RETURNING id AS user_id`,
       [
         first_name.trim(),
+        middle_name ? middle_name.trim() : null,
         last_name.trim(),
         email.toLowerCase().trim(),
         passwordHash,
@@ -214,7 +239,7 @@ router.put('/:id', async (req, res) => {
     const pool = req.app.locals.pool;
     const userId = Number(req.params.id);
     const {
-      first_name, last_name, email, password, role_id,
+      first_name, middle_name, last_name, email, password, role_id,
       branch_id, status,
     } = req.body;
 
@@ -224,12 +249,27 @@ router.put('/:id', async (req, res) => {
       return res.status(404).json({ success: false, message: 'User not found.' });
     }
 
+    const targetSlug = await userRoleSlug(pool, userId);
+    if (targetSlug === 'super_admin' && req.currentUser.roleSlug !== 'super_admin') {
+      return res.status(403).json({ success: false, message: 'Access denied.' });
+    }
+    if (role_id) {
+      const assignedSlug = await roleSlug(pool, role_id);
+      if (!assignedSlug) {
+        return res.status(400).json({ success: false, message: 'Role not found.' });
+      }
+      if (assignedSlug === 'super_admin' && req.currentUser.roleSlug !== 'super_admin') {
+        return res.status(403).json({ success: false, message: 'Access denied.' });
+      }
+    }
+
     // Build update fields dynamically
     const updates = [];
     const params = [];
     let pIdx = 1;
 
     if (first_name)       { updates.push(`first_name = $${pIdx++}`);       params.push(first_name.trim()); }
+    if (middle_name !== undefined) { updates.push(`middle_name = $${pIdx++}`); params.push(middle_name ? middle_name.trim() : null); }
     if (last_name)        { updates.push(`last_name = $${pIdx++}`);        params.push(last_name.trim()); }
     if (email)           { updates.push(`email = $${pIdx++}`);           params.push(email.toLowerCase().trim()); }
     if (role_id)         { updates.push(`role_id = $${pIdx++}`);         params.push(Number(role_id)); }
@@ -294,6 +334,13 @@ router.delete('/:id', async (req, res) => {
   try {
     const pool = req.app.locals.pool;
     const userId = Number(req.params.id);
+    const targetSlug = await userRoleSlug(pool, userId);
+    if (!targetSlug) {
+      return res.status(404).json({ success: false, message: 'User not found.' });
+    }
+    if (targetSlug === 'super_admin' && req.currentUser.roleSlug !== 'super_admin') {
+      return res.status(403).json({ success: false, message: 'Access denied.' });
+    }
 
     const result = await pool.query(
       `UPDATE users SET status = 'Inactive', updated_at = NOW() WHERE id = $1 RETURNING id AS user_id`,
@@ -319,6 +366,7 @@ function formatUser(row) {
     branch_id:     row.branch_id,
     role_id:       row.role_id,
     first_name:    row.first_name,
+    middle_name:   row.middle_name || null,
     last_name:     row.last_name,
     email:         row.email,
     status:        row.status,

@@ -13,6 +13,7 @@ export const warehouseRole = {
     { label: 'Transfers',               to: '/warehouse/transfers' },
     { label: 'Restock History',         to: '/warehouse/restock-history' },
     { label: 'Suppliers',               to: '/warehouse/suppliers' },
+    { label: 'Product Categories',      to: '/warehouse/product-categories' },
     { label: 'Customer Credit History', to: '/warehouse/credit-history' },
     { label: 'Notifications',           to: '/warehouse/notifications' },
     { label: 'Profile',                 to: '/warehouse/profile' },

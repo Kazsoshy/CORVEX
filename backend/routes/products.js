@@ -1,6 +1,8 @@
 import express from 'express';
+import { allow, ROLE_SETS } from '../middleware/auth.js';
 
 const router = express.Router();
+router.use(allow(ROLE_SETS.catalogRead, ROLE_SETS.catalogWrite));
 
 // ──────────────────────────────────────────────────────────────────────────────
 // GET /api/products
@@ -100,7 +102,7 @@ router.get('/', async (req, res) => {
     });
   } catch (err) {
     console.error('[Products] GET / error:', err.message);
-    return res.status(500).json({ success: false, message: 'Failed to fetch products.', error: err.message, stack: err.stack });
+    return res.status(500).json({ success: false, message: 'Failed to fetch products.' });
   }
 });
 

@@ -1,6 +1,8 @@
 import express from 'express';
+import { allow, assertSameBranch, ROLE_SETS } from '../middleware/auth.js';
 
 const router = express.Router();
+router.use(allow(ROLE_SETS.customerRead, ROLE_SETS.customerWrite));
 
 const PURCHASE_VOLUME_UNITS_SQL = `
   COALESCE((
@@ -55,8 +57,8 @@ router.get('/', async (req, res) => {
     if (status)    { conditions.push(`c.status = $${pIdx++}`);    params.push(status); }
     if (search) {
       conditions.push(`(c.first_name ILIKE $${pIdx} OR c.last_name ILIKE $${pIdx} OR c.address ILIKE $${pIdx} OR c.contact_phone ILIKE $${pIdx})`);
-      params.push(`%${search}%`, `%${search}%`, `%${search}%`, `%${search}%`);
-      pIdx += 4;
+      params.push(`%${search}%`);
+      pIdx += 1;
     }
 
     const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
@@ -110,7 +112,7 @@ router.get('/', async (req, res) => {
     });
   } catch (err) {
     console.error('[Customers] GET / error:', err.message);
-    return res.status(500).json({ success: false, message: 'Failed to fetch customers.', error: err.message });
+    return res.status(500).json({ success: false, message: 'Failed to fetch customers.' });
   }
 });
 
@@ -131,6 +133,7 @@ router.get('/:id', async (req, res) => {
     if (customerResult.rows.length === 0) {
       return res.status(404).json({ success: false, message: 'Customer not found.' });
     }
+    if (!assertSameBranch(res, req.currentUser, customerResult.rows[0].branch_id)) return;
 
     let activityResult = { rows: [] };
     let creditResult = { rows: [] };
@@ -197,7 +200,7 @@ router.get('/:id', async (req, res) => {
   } catch (err) {
     console.error('[Customers] GET /:id error:', err.message);
     console.error('[Customers] GET /:id stack:', err.stack);
-    return res.status(500).json({ success: false, message: 'Failed to fetch customer.', error: err.message });
+    return res.status(500).json({ success: false, message: 'Failed to fetch customer.' });
   }
 });
 
@@ -313,6 +316,11 @@ router.post('/', async (req, res) => {
 router.put('/:id', async (req, res) => {
   try {
     const pool = req.app.locals.pool;
+    const existing = await pool.query(`SELECT branch_id FROM customers WHERE customer_id = $1`, [Number(req.params.id)]);
+    if (existing.rows.length === 0) {
+      return res.status(404).json({ success: false, message: 'Customer not found.' });
+    }
+    if (!assertSameBranch(res, req.currentUser, existing.rows[0].branch_id)) return;
     const {
       first_name, last_name, address, latitude, longitude,
       contact_phone, contact_person_fname, contact_person_lname,

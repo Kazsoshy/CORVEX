@@ -1,7 +1,8 @@
 import express from 'express';
-import { requireAuth } from '../middleware/auth.js';
+import { requireAuth, requireRole, requireAssignedBranch, isUnscoped, ROLE_SETS } from '../middleware/auth.js';
 
 const router = express.Router();
+router.use(requireRole(ROLE_SETS.inventory), requireAssignedBranch);
 
 // ──────────────────────────────────────────────────────────────────────────────
 // GET /api/inventory-transfers
@@ -78,8 +79,9 @@ router.get('/transfers/:id', requireAuth, async (req, res) => {
        JOIN branches db ON db.id = it.destination_branch_id
        LEFT JOIN users sub ON sub.id = it.submitted_by
        LEFT JOIN users apv ON apv.id = it.approved_by
-       WHERE it.transfer_id = $1`,
-      [req.params.id]
+       WHERE it.transfer_id = $1
+         AND ($2::int IS NULL OR it.source_branch_id = $2 OR it.destination_branch_id = $2)`,
+      [req.params.id, isUnscoped(req.currentUser) ? null : req.currentUser.branchId]
     );
 
     if (result.rows.length === 0) {
@@ -100,7 +102,9 @@ router.get('/restocks', requireAuth, async (req, res) => {
     const pool = req.app.locals.pool;
     const user = req.currentUser;
 
-    const branchWhere = user.branchId ? `WHERE r.branch_id = ${user.branchId}` : '';
+    const scopedBranchId = isUnscoped(user) ? null : user.branchId;
+    const branchWhere = scopedBranchId ? 'WHERE r.branch_id = $1' : '';
+    const params = scopedBranchId ? [scopedBranchId] : [];
 
     const result = await pool.query(
       `SELECT
@@ -113,7 +117,8 @@ router.get('/restocks', requireAuth, async (req, res) => {
        JOIN branches b ON b.id = r.branch_id
        JOIN suppliers s ON s.suppliers_id = r.supplier_id
        ${branchWhere}
-       ORDER BY r.received_date DESC`
+       ORDER BY r.received_date DESC`,
+      params
     );
 
     return res.status(200).json({ success: true, data: result.rows });

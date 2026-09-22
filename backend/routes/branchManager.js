@@ -1,7 +1,8 @@
 import express from 'express';
-import { requireAuth, requireBranchScope } from '../middleware/auth.js';
+import { requireAuth, requireRole, requireAssignedBranch, ROLE_SETS } from '../middleware/auth.js';
 
 const router = express.Router();
+router.use(requireRole(ROLE_SETS.branchOps), requireAssignedBranch);
 
 // ──────────────────────────────────────────────────────────────────────────────
 // GET /api/branch-manager/analytics
