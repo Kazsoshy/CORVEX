@@ -39,3 +39,23 @@ export async function fetchBranchInventory(params = {}) {
     return { success: false, data: [], count: 0 };
   }
 }
+
+export async function fetchStockMovements(params = {}) {
+  try {
+    const response = await apiClient.get('/inventory/movements', { params });
+    return response.data;
+  } catch (err) {
+    console.error('Failed to fetch stock movements:', err);
+    return { success: false, data: [], count: 0 };
+  }
+}
+
+export async function fetchStockMovementById(id) {
+  try {
+    const response = await apiClient.get(`/inventory/movements/${id}`);
+    return response.data;
+  } catch (err) {
+    console.error('Failed to fetch stock movement:', err);
+    return { success: false, data: null };
+  }
+}

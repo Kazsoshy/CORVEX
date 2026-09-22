@@ -8,6 +8,7 @@ export const salesRole = {
   navPages: [
     { label: 'Dashboard', to: '/sales/dashboard' },
     { label: "Today's Schedule", to: '/sales/schedule' },
+    { label: 'Log a Sale', to: '/sales/log-sale' },
     { label: 'Customers', to: '/sales/customers' },
     { label: 'Customer Credit History', to: '/sales/credit-history' },
     { label: 'Sales History', to: '/sales/history' },

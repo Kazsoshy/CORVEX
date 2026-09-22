@@ -94,7 +94,7 @@ export const COLLECTOR_PERFORMANCE_CHART = [];
 export const DELINQUENCY_TREND = [];
 export const COMPLIANCE_TREND = [];
 
-export { formatCurrency } from '../utils/formatters.js';
+export { formatCurrency, formatDisplayDate, formatDisplayDateTime } from '../utils/formatters.js';
 export function getCollectorById(id)   { return COLLECTORS.find((c) => c.id === String(id)) ?? null; }
 export function getSalesAgentById(id)  { return SALES_AGENTS.find((a) => a.id === String(id)) ?? null; }
 export function getCIById(id)          { return CI_QUEUE.find((c) => c.id === String(id)) ?? null; }

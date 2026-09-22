@@ -7,7 +7,7 @@ import { StatusBadge } from '../StatusBadge';
 
 
 
-import { formatCurrency } from '../../utils/formatters.js';
+import { formatCurrency, formatDisplayDate } from '../../utils/formatters.js';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // List Page — shows all credit_history rows with every schema column
@@ -103,11 +103,8 @@ export function CreditHistoryListPage({ navigate, basePath = '/warehouse/credit-
                 <tr>
                   <th>Credit ID</th>
                   <th>Customer</th>
-                  <th>Customer ID</th>
                   <th>Branch</th>
-                  <th>Sales ID</th>
                   <th>Invoice #</th>
-                  <th>Collection ID</th>
                   <th>Receipt #</th>
                   <th>Previous Balance</th>
                   <th>Payment Amount</th>
@@ -122,11 +119,8 @@ export function CreditHistoryListPage({ navigate, basePath = '/warehouse/credit-
                   <tr key={r.credit_id}>
                     <td><span style={{ fontFamily: 'monospace', fontSize: '0.82rem' }}>{r.credit_id}</span></td>
                     <td><strong>{r.customer_name}</strong></td>
-                    <td><span style={{ fontFamily: 'monospace', fontSize: '0.82rem' }}>{r.customer_id}</span></td>
                     <td>{r.branch_name || '—'}</td>
-                    <td><span style={{ fontFamily: 'monospace', fontSize: '0.82rem' }}>{r.sales_id ?? '—'}</span></td>
                     <td><span style={{ fontFamily: 'monospace', fontSize: '0.82rem' }}>{r.invoice_number || '—'}</span></td>
-                    <td><span style={{ fontFamily: 'monospace', fontSize: '0.82rem' }}>{r.collection_id ?? '—'}</span></td>
                     <td><span style={{ fontFamily: 'monospace', fontSize: '0.82rem' }}>{r.receipt_number || '—'}</span></td>
                     <td>{formatCurrency(r.previous_balance)}</td>
                     <td style={{ fontWeight: 600, color: '#093850' }}>{formatCurrency(r.payment_amount)}</td>
@@ -134,7 +128,7 @@ export function CreditHistoryListPage({ navigate, basePath = '/warehouse/credit-
                       {formatCurrency(r.remaining_balance)}
                     </td>
                     <td><StatusBadge status={r.payment_status} /></td>
-                    <td>{r.transaction_date ? new Date(r.transaction_date).toLocaleDateString('en-PH') : '—'}</td>
+                    <td>{formatDisplayDate(r.transaction_date)}</td>
                     <td>
                       <button
                         className="icon-action-button"
@@ -225,7 +219,7 @@ export function CreditHistoryDetailPage({ creditId, navigate, basePath = '/wareh
           { label: 'Payment Amount',    value: formatCurrency(record.payment_amount) },
           { label: 'Remaining Balance', value: formatCurrency(record.remaining_balance) },
           { label: 'Payment Status',    value: record.payment_status },
-          { label: 'Transaction Date',  value: record.transaction_date ? new Date(record.transaction_date).toLocaleDateString('en-PH') : '—' },
+          { label: 'Transaction Date',  value: formatDisplayDate(record.transaction_date) },
         ].map((s, i) => (
           <article key={s.label} className="stat-card" style={{ '--stat-index': i }}>
             <div className="stat-card-top">
@@ -273,7 +267,7 @@ export function CreditHistoryDetailPage({ creditId, navigate, basePath = '/wareh
                 </span>
               </span></li>
           <li><span className="info-item-label">Transaction Date</span>
-              <span className="info-item-value">{record.transaction_date ? new Date(record.transaction_date).toLocaleDateString('en-PH', { year: 'numeric', month: 'long', day: 'numeric' }) : '—'}</span></li>
+              <span className="info-item-value">{formatDisplayDate(record.transaction_date)}</span></li>
         </ul>
       </section>
 

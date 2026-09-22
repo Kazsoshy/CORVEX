@@ -6,7 +6,7 @@ import {
   ResponsiveContainer, PieChart, Pie, Cell,
 } from 'recharts';
 import {
-  AUDIT_LOGS, ALERTS, BRANCH_ANALYTICS, CI_QUEUE, formatCurrency, getCIById,
+  AUDIT_LOGS, ALERTS, BRANCH_ANALYTICS, CI_QUEUE, formatCurrency, formatDisplayDate, formatDisplayDateTime, getCIById,
   getMapAccountById, MAP_ACCOUNTS, NOTIFICATIONS,
 } from '../../data/branchManagerMockData';
 import { EmptyState } from '../shared/EmptyState';
@@ -689,6 +689,9 @@ function ReportsHubPage({ navigate, showToast }) {
                       <th>Status</th>
                       <th>Invoice Date</th>
                       <th>Due Date</th>
+                      <th>Notes</th>
+                      <th>Created At</th>
+                      <th>Updated At</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -705,10 +708,15 @@ function ReportsHubPage({ navigate, showToast }) {
                           <td>
                             <StatusBadge status={inv.status} />
                           </td>
-                          <td>{inv.invoices_date ? new Date(inv.invoices_date).toLocaleDateString('en-PH') : '—'}</td>
+                          <td>{formatDisplayDate(inv.invoices_date)}</td>
                           <td style={{ color: isOverdue ? '#dc2626' : 'inherit', fontWeight: isOverdue ? 700 : 400 }}>
-                            {inv.due_date ? new Date(inv.due_date).toLocaleDateString('en-PH') : '—'}
+                            {formatDisplayDate(inv.due_date)}
                           </td>
+                          <td style={{ maxWidth: 200, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }} title={inv.notes || ''}>
+                            {inv.notes || '—'}
+                          </td>
+                          <td>{formatDisplayDateTime(inv.created_at)}</td>
+                          <td>{formatDisplayDateTime(inv.updated_at)}</td>
                         </tr>
                       );
                     })}
@@ -1092,7 +1100,7 @@ function CustomerDetailPage({ customerId, navigate, branchName }) {
   const name = `${customer.first_name} ${customer.last_name}`;
   const paymentStatus = Number(customer.activity?.outstanding_balance || 0) > 0 ? 'Overdue' : 'Current';
   const customerSince = customer.created_at
-    ? new Date(customer.created_at).toLocaleDateString('en-PH', { year: 'numeric', month: 'long', day: 'numeric' })
+    ? formatDisplayDate(customer.created_at)
     : '—';
 
   return (

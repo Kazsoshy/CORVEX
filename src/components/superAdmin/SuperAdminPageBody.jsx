@@ -12,6 +12,7 @@ import { EmptyState } from '../shared/EmptyState';
 import { LoadingState } from '../shared/LoadingState';
 import { NavIcon } from '../../navIcons';
 import { StatusBadge } from '../StatusBadge';
+import { formatDisplayDateTime } from '../../utils/formatters.js';
 
 function btn(v) {
   if (v === 'secondary') return 'button secondary';
@@ -181,7 +182,7 @@ function DashboardPage({ navigate }) {
                     <td>{b.contact_no}</td>
                     <td>{b.email}</td>
                     <td><StatusBadge status={b.status} /></td>
-                    <td>{new Date(b.created_at).toLocaleString()}</td>
+                    <td>{formatDisplayDateTime(b.created_at)}</td>
                   </tr>
                 ))}
               </tbody>
@@ -213,7 +214,7 @@ function DashboardPage({ navigate }) {
                     <td>{l.action}</td>
                     <td><span style={{ fontFamily: 'monospace', fontSize: '0.8rem' }}>{l.ip_address}</span></td>
                     <td>{l.status_details}</td>
-                    <td className="text-ink/70" style={{ fontSize: '0.8rem' }}>{new Date(l.created_at).toLocaleString('en-PH')}</td>
+                    <td className="text-ink/70" style={{ fontSize: '0.8rem' }}>{formatDisplayDateTime(l.created_at)}</td>
                   </tr>
                 ))}
               </tbody>
@@ -447,8 +448,8 @@ function RolesPage({ showToast }) {
                           <td>{r.id}</td>
                           <td><strong>{r.name}</strong></td>
                           <td><code>{r.slug}</code></td>
-                          <td>{new Date(r.created_at).toLocaleString()}</td>
-                          <td>{new Date(r.updated_at).toLocaleString()}</td>
+                          <td>{formatDisplayDateTime(r.created_at)}</td>
+                          <td>{formatDisplayDateTime(r.updated_at)}</td>
                           <td className="table-actions">
                             <button className="icon-action-button" title="Edit" onClick={() => openRoleModal(r)}><NavIcon name="edit" /></button>
                             <button className="icon-action-button danger" title="Delete" disabled={r.slug==='super_admin'} onClick={() => deleteRole(r)}><NavIcon name="trash" /></button>
@@ -478,7 +479,7 @@ function RolesPage({ showToast }) {
                           <td>{p.permission_id}</td>
                           <td><strong>{p.label}</strong></td>
                           <td>{p.description}</td>
-                          <td>{new Date(p.created_at).toLocaleString()}</td>
+                          <td>{formatDisplayDateTime(p.created_at)}</td>
                           <td className="table-actions">
                             <button className="icon-action-button" title="Edit" onClick={() => openPermModal(p)}><NavIcon name="edit" /></button>
                             <button className="icon-action-button danger" title="Delete" onClick={() => deletePerm(p)}><NavIcon name="trash" /></button>
@@ -853,7 +854,7 @@ function UsersPage({ showToast }) {
                     <td>{u.role?.name}</td>
                     <td>{u.branch?.name || "—"}</td>
                     <td className="text-ink/70" style={{ fontSize: "0.82rem" }}>
-                      {u.lastLogin ? new Date(u.lastLogin).toLocaleString("en-PH", { dateStyle: "medium", timeStyle: "short" }) : "Never"}
+                      {u.lastLogin ? formatDisplayDateTime(u.lastLogin) : "Never"}
                     </td>
                     <td><StatusBadge status={u.status} /></td>
                     <td className="table-actions">

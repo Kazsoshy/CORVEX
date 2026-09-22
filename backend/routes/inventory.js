@@ -32,6 +32,7 @@ router.get('/transfers', requireAuth, async (req, res) => {
       `SELECT
          it.transfer_id, it.transfer_ref, it.quantity, it.status,
          it.submitted_date, it.completed_date, it.approval_info,
+         it.created_at, it.updated_at,
          p.name AS product_name, p.sku,
          sb.name AS source_branch,
          db.name AS destination_branch,
@@ -66,7 +67,7 @@ router.get('/transfers/:id', requireAuth, async (req, res) => {
       `SELECT
          it.transfer_id, it.transfer_ref, it.quantity, it.status,
          it.submitted_date, it.completed_date, it.approval_info, it.created_at, it.updated_at,
-         p.name AS product_name, p.sku, p.unit_type,
+         p.name AS product_name, p.sku,
          sb.name AS source_branch,
          db.name AS destination_branch,
          sub.full_name AS submitted_by_name,
@@ -165,8 +166,8 @@ router.get('/branch-inventory', requireAuth, async (req, res) => {
          bi.available_stock,
          bi.reorder_level,
          bi.stock_status,
-          bi.last_updated,
-          bi.updated_at
+         bi.created_at,
+         bi.updated_at
        FROM branch_inventory bi
        JOIN branches b          ON b.id               = bi.branch_id
        JOIN products p          ON p.id               = bi.product_id
@@ -184,6 +185,124 @@ router.get('/branch-inventory', requireAuth, async (req, res) => {
   } catch (err) {
     console.error('[Inventory] GET /branch-inventory error:', err.message);
     return res.status(500).json({ success: false, message: 'Failed to fetch branch inventory.' });
+  }
+});
+
+const STOCK_MOVEMENT_SELECT = `
+  SELECT
+    sm.id AS movement_id,
+    sm.movement_ref,
+    sm.product_id,
+    p.name AS product_name,
+    p.sku,
+    sm.quantity,
+    sm.type,
+    sm.movement_date,
+    sm.created_at,
+    sm.branch_id,
+    b.name AS branch_name,
+    sm.performed_by,
+    u.full_name AS performed_by_name
+  FROM stock_movements sm
+  JOIN products p ON p.id = sm.product_id
+  LEFT JOIN branches b ON b.id = sm.branch_id
+  LEFT JOIN users u ON u.id = sm.performed_by
+`;
+
+// ──────────────────────────────────────────────────────────────────────────────
+// GET /api/inventory/movements
+// Query: type, product_id, branch_id, date_from, date_to
+// ──────────────────────────────────────────────────────────────────────────────
+router.get('/movements', requireAuth, async (req, res) => {
+  try {
+    const pool = req.app.locals.pool;
+    const user = req.currentUser;
+    const { type, product_id, branch_id, date_from, date_to } = req.query;
+
+    const conditions = [];
+    const params = [];
+    let pIdx = 1;
+
+    const scopeBranchId = user.branchId !== null && user.branchId !== undefined
+      ? user.branchId
+      : (branch_id ? Number(branch_id) : null);
+
+    if (scopeBranchId !== null && Number.isFinite(Number(scopeBranchId))) {
+      conditions.push(`sm.branch_id = $${pIdx++}`);
+      params.push(Number(scopeBranchId));
+    }
+
+    if (type && type !== 'All') {
+      conditions.push(`sm.type = $${pIdx++}`);
+      params.push(type);
+    }
+
+    if (product_id && Number.isFinite(Number(product_id))) {
+      conditions.push(`sm.product_id = $${pIdx++}`);
+      params.push(Number(product_id));
+    }
+
+    if (date_from) {
+      conditions.push(`sm.movement_date >= $${pIdx++}`);
+      params.push(date_from);
+    }
+
+    if (date_to) {
+      conditions.push(`sm.movement_date <= $${pIdx++}`);
+      params.push(date_to);
+    }
+
+    const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
+
+    const result = await pool.query(
+      `${STOCK_MOVEMENT_SELECT}
+       ${where}
+       ORDER BY sm.movement_date DESC, sm.id DESC`,
+      params
+    );
+
+    return res.status(200).json({ success: true, data: result.rows, count: result.rows.length });
+  } catch (err) {
+    console.error('[Inventory] GET /movements error:', err.message);
+    return res.status(500).json({ success: false, message: 'Failed to fetch stock movements.' });
+  }
+});
+
+// ──────────────────────────────────────────────────────────────────────────────
+// GET /api/inventory/movements/:id
+// ──────────────────────────────────────────────────────────────────────────────
+router.get('/movements/:id', requireAuth, async (req, res) => {
+  try {
+    const pool = req.app.locals.pool;
+    const user = req.currentUser;
+    const movementId = Number(req.params.id);
+
+    if (!Number.isFinite(movementId)) {
+      return res.status(400).json({ success: false, message: 'Invalid movement id.' });
+    }
+
+    const params = [movementId];
+    let branchClause = '';
+
+    if (user.branchId !== null && user.branchId !== undefined) {
+      branchClause = ' AND sm.branch_id = $2';
+      params.push(user.branchId);
+    }
+
+    const result = await pool.query(
+      `${STOCK_MOVEMENT_SELECT}
+       WHERE sm.id = $1${branchClause}`,
+      params
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ success: false, message: 'Movement not found.' });
+    }
+
+    return res.status(200).json({ success: true, data: result.rows[0] });
+  } catch (err) {
+    console.error('[Inventory] GET /movements/:id error:', err.message);
+    return res.status(500).json({ success: false, message: 'Failed to fetch stock movement.' });
   }
 });
 

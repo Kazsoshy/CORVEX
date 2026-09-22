@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { fetchCustomerById, fetchCustomers, fetchFieldVisits, fetchFieldVisitById, fetchInvoices, updateFieldVisit } from '../../api/salesService';
+import { createCustomer, createSalesInvoice, fetchCustomerById, fetchCustomers, fetchFieldVisits, fetchFieldVisitById, fetchInvoices, fetchPaymentMethods, fetchTerritories, updateFieldVisit } from '../../api/salesService';
+import { formatCustomerDisplayId, formatPurchaseVolumeUnits } from '../../utils/customerDisplay';
 import { getCurrentUser } from '../../api/authService.js';
 import {
   AUDIT_LOGS,
@@ -16,6 +17,8 @@ import {
   SCHEDULE_STOPS,
 
   formatCurrency,
+  formatDisplayDate,
+  formatDisplayDateTime,
 
   getCustomerById,
   getProductById,
@@ -69,7 +72,7 @@ function OfflineBanner() {
 
 function DashboardPage({ navigate, showToast }) {
   const currentUser = getCurrentUser();
-  const today = new Date().toLocaleDateString('en-PH', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
+  const today = formatDisplayDate(new Date());
   const unreadCount = NOTIFICATIONS.filter((n) => !n.read).length;
   const firstPending = SCHEDULE_STOPS.find((c) => c.status !== 'Completed');
   const agentName = currentUser?.fullName || 'Sales Agent';
@@ -120,7 +123,7 @@ function DashboardPage({ navigate, showToast }) {
 
       <div className="flex flex-wrap justify-end gap-2 mt-4">
         <button className="button" type="button" onClick={() => navigate('/sales/schedule')}>View Today's Schedule</button>
-        <button className="button secondary" type="button" onClick={() => navigate(firstPending ? `/sales/visit-log/${firstPending.id}` : '/sales/schedule')}>Log a Sale</button>
+        <button className="button secondary" type="button" onClick={() => navigate('/sales/log-sale')}>Log a Sale</button>
         <button className="button secondary" type="button" onClick={() => navigate('/sales/inventory')}>Check Inventory</button>
       </div>
 
@@ -145,7 +148,7 @@ function DashboardPage({ navigate, showToast }) {
           <ul className="widget-list">
             {SALES_HISTORY.slice(0, 3).map((sale) => (
               <li key={sale.id}>
-                <div><strong>{sale.customerName || sale.first_name + ' ' + sale.last_name}</strong><span className="muted">{sale.date}</span></div>
+                <div><strong>{sale.customerName || sale.first_name + ' ' + sale.last_name}</strong><span className="muted">{formatDisplayDate(sale.date)}</span></div>
                 <span>{formatCurrency(sale.totalAmount)}</span>
               </li>
             ))}
@@ -331,7 +334,7 @@ function SchedulePage({ pageType, navigate, showToast }) {
                       <td><span style={{ fontFamily: 'monospace', fontSize: '0.82rem' }}>{v.visit_id}</span></td>
                       <td>{v.customer_name || `${v.first_name || ''} ${v.last_name || ''}`.trim() || '—'}</td>
                       <td>{v.visit_type || '—'}</td>
-                      <td>{v.scheduled_date ? new Date(v.scheduled_date).toLocaleDateString('en-PH') : '—'}</td>
+                      <td>{v.scheduled_date ? formatDisplayDate(v.scheduled_date) : '—'}</td>
                       <td><StatusBadge status={v.status} /></td>
                       <td>{v.agent_name || '—'}</td>
                       <td>
@@ -394,13 +397,13 @@ function SchedulePage({ pageType, navigate, showToast }) {
                     <td><span style={{ fontFamily: 'monospace', fontSize: '0.82rem' }}>{v.visit_id}</span></td>
                     <td>{v.user_id ?? '—'}</td>
                     <td>{v.visit_type || '—'}</td>
-                    <td>{v.scheduled_date ? new Date(v.scheduled_date).toLocaleDateString('en-PH') : '—'}</td>
+                    <td>{v.scheduled_date ? formatDisplayDate(v.scheduled_date) : '—'}</td>
                     <td><StatusBadge status={v.status} /></td>
                     <td>{v.customer_name || `${v.first_name || ''} ${v.last_name || ''}`.trim() || '—'}</td>
                     <td>{v.customer_id ?? '—'}</td>
                     <td>{v.agent_name || '—'}</td>
-                    <td>{v.created_at ? new Date(v.created_at).toLocaleString() : '—'}</td>
-                    <td>{v.updated_at ? new Date(v.updated_at).toLocaleString() : '—'}</td>
+                    <td>{formatDisplayDateTime(v.created_at)}</td>
+                    <td>{formatDisplayDateTime(v.updated_at)}</td>
                     <td>
                       <button className="icon-action-button" type="button" title="View" onClick={() => navigate(`/sales/visit-log/${v.visit_id}`)}>
                         <NavIcon name="view" />
@@ -419,17 +422,26 @@ function SchedulePage({ pageType, navigate, showToast }) {
   );
 }
 
+function resolvePurchaseVolumeUnits(customer) {
+  return Number(
+    customer?.purchaseVolumeUnits
+    ?? customer?.purchasevolumeunits
+    ?? 0,
+  );
+}
+
 function CustomersPage({ navigate, showToast }) {
   const [search, setSearch] = useState('');
   const [filter, setFilter] = useState('Active Customers');
   const [sortBy, setSortBy] = useState('Name');
+  const [viewMode, setViewMode] = useState('cards');
   const [loading, setLoading] = useState(true);
   const [customersData, setCustomersData] = useState([]);
 
   useEffect(() => {
     async function load() {
       setLoading(true);
-      const res = await fetchCustomers();
+      const res = await fetchCustomers({ limit: 200 });
       if (res.success) {
         setCustomersData(res.data);
       }
@@ -443,9 +455,12 @@ function CustomersPage({ navigate, showToast }) {
     const query = search.trim().toLowerCase();
     if (query) {
       results = results.filter(
-        (c) => (c.first_name + ' ' + c.last_name).toLowerCase().includes(query) ||
-          (c.contact_person_fname + ' ' + c.contact_person_lname).toLowerCase().includes(query) ||
-          (c.contact_phone || '').includes(query)
+        (c) => formatCustomerDisplayId(c).toLowerCase().includes(query)
+          || (c.first_name + ' ' + c.last_name).toLowerCase().includes(query)
+          || (c.contact_person_fname + ' ' + c.contact_person_lname).toLowerCase().includes(query)
+          || (c.secondary_contact_fname + ' ' + c.secondary_contact_lname).toLowerCase().includes(query)
+          || (c.contact_phone || '').includes(query)
+          || (c.territory_name || '').toLowerCase().includes(query),
       );
     }
     switch (filter) {
@@ -469,41 +484,299 @@ function CustomersPage({ navigate, showToast }) {
       <section className="panel content-panel relative overflow-hidden mb-4">
         <div className="flex flex-col md:flex-row justify-between gap-4 items-start md:items-center">
           <div className="flex flex-wrap gap-2 items-center w-full md:w-auto flex-1">
-            <input className="filter-input search" type="search" placeholder="Search by customer name, or contact number" value={search} onChange={(e) => setSearch(e.target.value)} style={{ padding: '8px 12px', borderRadius: '6px', border: '1px solid #e2e8f0', fontSize: '0.9rem', flex: 1, minWidth: '200px' }} />
+            <input className="filter-input search" type="search" placeholder="Search by ID, name, territory, or contact" value={search} onChange={(e) => setSearch(e.target.value)} style={{ padding: '8px 12px', borderRadius: '6px', border: '1px solid #e2e8f0', fontSize: '0.9rem', flex: 1, minWidth: '200px' }} />
             <select className="filter-select" value={filter} onChange={(e) => setFilter(e.target.value)} style={{ padding: '8px 12px', borderRadius: '6px', border: '1px solid #e2e8f0', fontSize: '0.9rem' }}>
               {['Active Customers', 'Inactive Customers', 'All Customers'].map((o) => <option key={o} value={o}>{o}</option>)}
             </select>
             <select className="filter-select" value={sortBy} onChange={(e) => setSortBy(e.target.value)} style={{ padding: '8px 12px', borderRadius: '6px', border: '1px solid #e2e8f0', fontSize: '0.9rem' }}>
               {['Name'].map((o) => <option key={o} value={o}>Sort: {o}</option>)}
             </select>
+            <div className="segmented-control">
+              <button type="button" className={viewMode === 'cards' ? 'segment active' : 'segment'} onClick={() => setViewMode('cards')}>Cards</button>
+              <button type="button" className={viewMode === 'table' ? 'segment active' : 'segment'} onClick={() => setViewMode('table')}>Table</button>
+            </div>
           </div>
-          <button className="button secondary" type="button" onClick={() => showToast('Export initiated.', 'success')}>Export Data</button>
+          <div className="flex flex-wrap gap-2">
+            <button className="button" type="button" onClick={() => navigate('/sales/customers/new')}>Add Customer</button>
+            <button className="button secondary" type="button" onClick={() => showToast('Export initiated.', 'success')}>Export Data</button>
+          </div>
         </div>
       </section>
       <section className="panel content-panel">
         <div className="panel-section-header"><h3>Customer List</h3></div>
       </section>
       {filteredCustomers.length ? (
-        <div className="account-card-grid">
-          {filteredCustomers.map((customer) => (
-            <CustomerCard
-              key={customer.customer_id}
-              customer={{
-                ...customer,
-                id: String(customer.customer_id),
-                // Handle both quoted (camelCase) and unquoted (lowercase) pg aliases
-                lastVisitDate: customer.lastVisitDate || customer.lastvisitdate || 'N/A',
-                totalPurchaseVolume: Number(customer.totalPurchaseVolume || customer.totalpurchasevolume || 0),
-                phone: customer.contact_phone || customer.phone || '—',
-              }}
-              onViewDetails={(c) => navigate(`/sales/customer-detail/${c.id}?from=customers`)}
-              onNavigate={() => showToast(`Opening navigation to ${customer.address}`, 'success')}
-            />
-          ))}
-        </div>
+        viewMode === 'cards' ? (
+          <div className="account-card-grid">
+            {filteredCustomers.map((customer) => (
+              <CustomerCard
+                key={customer.customer_id}
+                customer={{
+                  ...customer,
+                  id: String(customer.customer_id),
+                  lastVisitDate: customer.lastVisitDate || customer.lastvisitdate || 'N/A',
+                  purchaseVolumeUnits: resolvePurchaseVolumeUnits(customer),
+                  activityUpdatedAt: customer.activityUpdatedAt || customer.activityupdatedat,
+                  phone: customer.contact_phone || customer.phone || '—',
+                }}
+                onViewDetails={(c) => navigate(`/sales/customer-detail/${c.id || c.customer_id}?from=customers`)}
+                onNavigate={() => showToast(`Opening navigation to ${customer.address}`, 'success')}
+              />
+            ))}
+          </div>
+        ) : (
+          <section className="panel content-panel">
+            <div className="table-shell">
+              <table className="corvex-table">
+                <thead>
+                  <tr>
+                    <th>Customer ID</th>
+                    <th>Customer Name</th>
+                    <th>Territory</th>
+                    <th>Primary Contact</th>
+                    <th>Relationship</th>
+                    <th>Secondary Contact</th>
+                    <th>Relationship</th>
+                    <th>Purchase Volume</th>
+                    <th>Activity Updated</th>
+                    <th>Status</th>
+                    <th>Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filteredCustomers.map((customer) => {
+                    const primaryName = `${customer.contact_person_fname || ''} ${customer.contact_person_lname || ''}`.trim() || '—';
+                    const secondaryName = `${customer.secondary_contact_fname || ''} ${customer.secondary_contact_lname || ''}`.trim() || '—';
+                    const activityUpdated = customer.activityUpdatedAt || customer.activityupdatedat || customer.activity?.updated_at;
+                    return (
+                      <tr key={customer.customer_id}>
+                        <td><span style={{ fontFamily: 'monospace', fontSize: '0.82rem' }}>{formatCustomerDisplayId(customer)}</span></td>
+                        <td>{customer.first_name} {customer.last_name}</td>
+                        <td>{customer.territory_name || '—'}</td>
+                        <td>{primaryName}</td>
+                        <td>{customer.contact_person_relationship || '—'}</td>
+                        <td>{secondaryName}</td>
+                        <td>{customer.secondary_contact_relationship || '—'}</td>
+                        <td>{formatPurchaseVolumeUnits(resolvePurchaseVolumeUnits(customer))}</td>
+                        <td>{activityUpdated ? formatDisplayDateTime(activityUpdated) : '—'}</td>
+                        <td><StatusBadge status={customer.status} /></td>
+                        <td>
+                          <button className="icon-action-button" type="button" title="View" onClick={() => navigate(`/sales/customer-detail/${customer.customer_id}?from=customers`)}>
+                            <NavIcon name="view" />
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </section>
+        )
       ) : (
         <EmptyState title="No customers found" description="Adjust your search or filters." actionLabel="Clear filters" onAction={() => { setSearch(''); setFilter('Active Customers'); }} />
       )}
+    </div>
+  );
+}
+
+function CustomerFormPage({ navigate, showToast }) {
+  const currentUser = getCurrentUser();
+  const [territories, setTerritories] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [submitting, setSubmitting] = useState(false);
+  const [errors, setErrors] = useState({});
+  const [form, setForm] = useState({
+    first_name: '',
+    last_name: '',
+    address: '',
+    latitude: '',
+    longitude: '',
+    contact_phone: '',
+    contact_person_fname: '',
+    contact_person_lname: '',
+    contact_person_phone: '',
+    contact_person_relationship: '',
+    secondary_contact_fname: '',
+    secondary_contact_lname: '',
+    secondary_contact_phone: '',
+    secondary_contact_relationship: '',
+    territory_id: '',
+    status: 'Active',
+  });
+
+  useEffect(() => {
+    async function load() {
+      setLoading(true);
+      const res = await fetchTerritories();
+      if (res.success) setTerritories(res.data || []);
+      setLoading(false);
+    }
+    load();
+  }, []);
+
+  const updateField = (name, value) => {
+    setForm((prev) => ({ ...prev, [name]: value }));
+    setErrors((prev) => ({ ...prev, [name]: undefined }));
+  };
+
+  const handleSubmit = async () => {
+    const nextErrors = {};
+    const required = [
+      'first_name', 'last_name', 'address', 'contact_phone',
+      'contact_person_fname', 'contact_person_lname', 'contact_person_phone',
+      'contact_person_relationship',
+    ];
+    required.forEach((field) => {
+      if (!String(form[field] || '').trim()) nextErrors[field] = 'Required';
+    });
+
+    const primaryKey = `${form.contact_person_fname}|${form.contact_person_phone}`.toLowerCase();
+    const secondaryKey = `${form.secondary_contact_fname}|${form.secondary_contact_phone}`.toLowerCase();
+    if (form.secondary_contact_fname && form.secondary_contact_phone && primaryKey === secondaryKey) {
+      nextErrors.secondary_contact_phone = 'Secondary contact must be different from the primary contact.';
+    }
+
+    setErrors(nextErrors);
+    if (Object.keys(nextErrors).length) {
+      showToast('Please complete all required fields.', 'error');
+      return;
+    }
+
+    setSubmitting(true);
+    const result = await createCustomer({
+      ...form,
+      territory_id: form.territory_id ? Number(form.territory_id) : undefined,
+      latitude: form.latitude !== '' ? Number(form.latitude) : undefined,
+      longitude: form.longitude !== '' ? Number(form.longitude) : undefined,
+      branch_id: currentUser?.branchId ?? undefined,
+      account_manager_id: currentUser?.id ?? undefined,
+    });
+    setSubmitting(false);
+
+    if (!result.success || !result.data) {
+      showToast(result.message || 'Failed to create customer.', 'error');
+      return;
+    }
+
+    showToast('Customer created successfully.', 'success');
+    navigate(`/sales/customer-detail/${result.data.customer_id}?from=customers`);
+  };
+
+  if (loading) return <LoadingState message="Loading customer form..." />;
+
+  return (
+    <div className="page">
+      <section className="panel form-panel content-panel">
+        <div className="panel-section-header">
+          <h3>Add Customer</h3>
+          <p className="muted">Register a customer for your branch. The system assigns a numeric record ID in the database and a display code such as C-001-2026 automatically.</p>
+        </div>
+        <div className="account-detail-grid two-up">
+          <div className="form-group">
+            <label htmlFor="cust-first">First Name *</label>
+            <input id="cust-first" value={form.first_name} onChange={(e) => updateField('first_name', e.target.value)} />
+            {errors.first_name ? <p className="form-error">{errors.first_name}</p> : null}
+          </div>
+          <div className="form-group">
+            <label htmlFor="cust-last">Last Name *</label>
+            <input id="cust-last" value={form.last_name} onChange={(e) => updateField('last_name', e.target.value)} />
+            {errors.last_name ? <p className="form-error">{errors.last_name}</p> : null}
+          </div>
+        </div>
+        <div className="form-group">
+          <label htmlFor="cust-address">Address *</label>
+          <input id="cust-address" value={form.address} onChange={(e) => updateField('address', e.target.value)} />
+          {errors.address ? <p className="form-error">{errors.address}</p> : null}
+        </div>
+        <div className="account-detail-grid two-up">
+          <div className="form-group">
+            <label htmlFor="cust-lat">Latitude</label>
+            <input id="cust-lat" type="number" step="any" value={form.latitude} onChange={(e) => updateField('latitude', e.target.value)} />
+          </div>
+          <div className="form-group">
+            <label htmlFor="cust-lng">Longitude</label>
+            <input id="cust-lng" type="number" step="any" value={form.longitude} onChange={(e) => updateField('longitude', e.target.value)} />
+          </div>
+        </div>
+        <div className="form-group">
+          <label htmlFor="cust-phone">Business Phone *</label>
+          <input id="cust-phone" value={form.contact_phone} onChange={(e) => updateField('contact_phone', e.target.value)} />
+          {errors.contact_phone ? <p className="form-error">{errors.contact_phone}</p> : null}
+        </div>
+        <div className="form-group">
+          <label htmlFor="cust-territory">Territory</label>
+          <select id="cust-territory" className="filter-select" value={form.territory_id} onChange={(e) => updateField('territory_id', e.target.value)}>
+            <option value="">Select territory</option>
+            {territories.map((t) => (
+              <option key={t.territory_id} value={t.territory_id}>{t.territory_name}</option>
+            ))}
+          </select>
+        </div>
+      </section>
+
+      <section className="panel form-panel content-panel">
+        <div className="panel-section-header"><h3>Primary Contact Person</h3></div>
+        <div className="account-detail-grid two-up">
+          <div className="form-group">
+            <label htmlFor="pc-fname">First Name *</label>
+            <input id="pc-fname" value={form.contact_person_fname} onChange={(e) => updateField('contact_person_fname', e.target.value)} />
+          </div>
+          <div className="form-group">
+            <label htmlFor="pc-lname">Last Name *</label>
+            <input id="pc-lname" value={form.contact_person_lname} onChange={(e) => updateField('contact_person_lname', e.target.value)} />
+          </div>
+        </div>
+        <div className="account-detail-grid two-up">
+          <div className="form-group">
+            <label htmlFor="pc-phone">Phone *</label>
+            <input id="pc-phone" value={form.contact_person_phone} onChange={(e) => updateField('contact_person_phone', e.target.value)} />
+          </div>
+          <div className="form-group">
+            <label htmlFor="pc-rel">Relationship *</label>
+            <input id="pc-rel" placeholder="e.g. Owner, Store Manager" value={form.contact_person_relationship} onChange={(e) => updateField('contact_person_relationship', e.target.value)} />
+          </div>
+        </div>
+      </section>
+
+      <section className="panel form-panel content-panel">
+        <div className="panel-section-header">
+          <h3>Secondary Contact Person</h3>
+          <p className="muted">Optional backup contact — must not be the same person as the primary contact.</p>
+        </div>
+        <div className="account-detail-grid two-up">
+          <div className="form-group">
+            <label htmlFor="sc-fname">First Name</label>
+            <input id="sc-fname" value={form.secondary_contact_fname} onChange={(e) => updateField('secondary_contact_fname', e.target.value)} />
+          </div>
+          <div className="form-group">
+            <label htmlFor="sc-lname">Last Name</label>
+            <input id="sc-lname" value={form.secondary_contact_lname} onChange={(e) => updateField('secondary_contact_lname', e.target.value)} />
+          </div>
+        </div>
+        <div className="account-detail-grid two-up">
+          <div className="form-group">
+            <label htmlFor="sc-phone">Phone</label>
+            <input id="sc-phone" value={form.secondary_contact_phone} onChange={(e) => updateField('secondary_contact_phone', e.target.value)} />
+            {errors.secondary_contact_phone ? <p className="form-error">{errors.secondary_contact_phone}</p> : null}
+          </div>
+          <div className="form-group">
+            <label htmlFor="sc-rel">Relationship</label>
+            <input id="sc-rel" placeholder="e.g. Assistant, Spouse" value={form.secondary_contact_relationship} onChange={(e) => updateField('secondary_contact_relationship', e.target.value)} />
+          </div>
+        </div>
+        <div className="form-group">
+          <label htmlFor="cust-status">Status</label>
+          <select id="cust-status" className="filter-select" value={form.status} onChange={(e) => updateField('status', e.target.value)}>
+            {['Active', 'Inactive'].map((s) => <option key={s} value={s}>{s}</option>)}
+          </select>
+        </div>
+      </section>
+
+      <div className="flex flex-wrap justify-end gap-2 mt-4">
+        <button className="button secondary" type="button" onClick={() => navigate('/sales/customers')}>Cancel</button>
+        <button className="button" type="button" onClick={handleSubmit} disabled={submitting}>{submitting ? 'Saving...' : 'Save Customer'}</button>
+      </div>
     </div>
   );
 }
@@ -527,22 +800,20 @@ function CustomerDetailPage({ customerId, parentContext, navigate, showToast }) 
   if (loading) return <LoadingState message="Loading customer details..." />;
   if (!customer) return <EmptyState title="Customer not found" actionLabel="Back to Customers" onAction={() => navigate('/sales/customers')} />;
 
-  const purchaseVolume = customer.activity?.purchase_volume || 0;
+  const purchaseVolumeUnits = resolvePurchaseVolumeUnits(customer);
   const outstandingBalance = customer.activity?.outstanding_balance || 0;
-  const lastVisit = customer.activity?.last_sales_visit ? new Date(customer.activity.last_sales_visit).toLocaleDateString('en-PH') : 'N/A';
+  const lastVisit = customer.activity?.last_sales_visit ? formatDisplayDate(customer.activity.last_sales_visit) : 'N/A';
   const creditLimit = customer.creditInfo?.credit_limit || 10000;
-  const avgOrder = customer.paymentHistory && customer.paymentHistory.length
-    ? Math.round(purchaseVolume / customer.paymentHistory.length)
-    : purchaseVolume;
-  const customerSince = customer.created_at
-    ? new Date(customer.created_at).toLocaleDateString('en-PH', { year: 'numeric', month: 'long', day: 'numeric' })
-    : 'N/A';
+  const activityUpdatedAt = customer.activity?.updated_at;
+  const customerSince = customer.created_at ? formatDisplayDate(customer.created_at) : 'N/A';
+  const displayId = formatCustomerDisplayId(customer);
+  const secondaryName = `${customer.secondary_contact_fname || ''} ${customer.secondary_contact_lname || ''}`.trim();
 
   return (
     <div className="page account-detail-page">
       <StatsGrid stats={[
-        { label: 'Customer ID', value: String(customer.customer_id) },
-        { label: 'Purchase Volume', value: formatCurrency(purchaseVolume) },
+        { label: 'Customer ID', value: displayId },
+        { label: 'Purchase Volume', value: formatPurchaseVolumeUnits(purchaseVolumeUnits) },
         { label: 'Outstanding', value: formatCurrency(outstandingBalance) },
         { label: 'Last Visit', value: lastVisit },
         { label: 'Account Manager', value: customer.account_manager_name || '—' },
@@ -552,30 +823,35 @@ function CustomerDetailPage({ customerId, parentContext, navigate, showToast }) 
       <section className="panel content-panel account-detail-panel">
         <div className="panel-section-header">
           <h3>{customer.first_name} {customer.last_name}</h3>
-          <p className="muted">Customer ID: {customer.customer_id} · Status: {customer.status}</p>
+          <p className="muted">{displayId} · {customer.branch_name || '—'} · Status: {customer.status}</p>
         </div>
         <div className="account-detail-grid two-up">
           <div>
-            <p><strong>Customer ID:</strong> {customer.customer_id}</p>
-            <p><strong>User ID:</strong> {customer.user_id || '—'}</p>
-            <p><strong>Branch ID:</strong> {customer.branch_id}</p>
-            <p><strong>Branch Name:</strong> {customer.branch_name || '—'}</p>
-            <p><strong>Account Manager ID:</strong> {customer.account_manager_id || '—'}</p>
+            <p><strong>Customer ID:</strong> {displayId}</p>
+            <p><strong>Branch:</strong> {customer.branch_name || '—'}</p>
             <p><strong>Account Manager:</strong> {customer.account_manager_name || '—'}</p>
-            <p><strong>Territory ID:</strong> {customer.territory_id || '—'}</p>
+            <p><strong>Territory:</strong> {customer.territory_name || '—'}</p>
+            <p><strong>Business Phone:</strong> {customer.contact_phone}</p>
+            <p><strong>Status:</strong> {customer.status}</p>
+            <p><strong>Created At:</strong> {customer.created_at ? formatDisplayDateTime(customer.created_at) : 'N/A'}</p>
+            <p><strong>Updated At:</strong> {customer.updated_at ? formatDisplayDateTime(customer.updated_at) : 'N/A'}</p>
           </div>
           <div>
-            <p><strong>First Name:</strong> {customer.first_name}</p>
-            <p><strong>Last Name:</strong> {customer.last_name}</p>
             <p><strong>Address:</strong> {customer.address}</p>
             <p><strong>Latitude:</strong> {customer.latitude}</p>
             <p><strong>Longitude:</strong> {customer.longitude}</p>
-            <p><strong>Contact Phone:</strong> {customer.contact_phone}</p>
-            <p><strong>Contact Person:</strong> {customer.contact_person_fname} {customer.contact_person_lname}</p>
-            <p><strong>Contact Person Phone:</strong> {customer.contact_person_phone}</p>
-            <p><strong>Status:</strong> {customer.status}</p>
-            <p><strong>Created At:</strong> {customer.created_at ? new Date(customer.created_at).toLocaleString() : 'N/A'}</p>
-            <p><strong>Updated At:</strong> {customer.updated_at ? new Date(customer.updated_at).toLocaleString() : 'N/A'}</p>
+            <h4 className="subsection-title">Primary Contact</h4>
+            <p>{customer.contact_person_fname} {customer.contact_person_lname}</p>
+            <p>{customer.contact_person_phone}</p>
+            <p><strong>Relationship:</strong> {customer.contact_person_relationship || '—'}</p>
+            {secondaryName ? (
+              <>
+                <h4 className="subsection-title" style={{ marginTop: 12 }}>Secondary Contact</h4>
+                <p>{secondaryName}</p>
+                <p>{customer.secondary_contact_phone || '—'}</p>
+                <p><strong>Relationship:</strong> {customer.secondary_contact_relationship || '—'}</p>
+              </>
+            ) : null}
           </div>
         </div>
       </section>
@@ -586,10 +862,11 @@ function CustomerDetailPage({ customerId, parentContext, navigate, showToast }) 
         </div>
         <div className="account-detail-grid two-up">
           <div>
-            <p><strong>Purchase Volume:</strong> {formatCurrency(purchaseVolume)}</p>
+            <p><strong>Purchase Volume (units):</strong> {formatPurchaseVolumeUnits(purchaseVolumeUnits)}</p>
             <p><strong>Outstanding Balance:</strong> {formatCurrency(outstandingBalance)}</p>
             <p><strong>Last Sales Visit:</strong> {lastVisit}</p>
-            <p><strong>Last Collection Date:</strong> {customer.activity?.last_collection_date ? new Date(customer.activity.last_collection_date).toLocaleDateString('en-PH') : 'N/A'}</p>
+            <p><strong>Last Collection Date:</strong> {customer.activity?.last_collection_date ? formatDisplayDate(customer.activity.last_collection_date) : 'N/A'}</p>
+            <p><strong>Activity Updated At:</strong> {activityUpdatedAt ? formatDisplayDateTime(activityUpdatedAt) : '—'}</p>
           </div>
           <div>
             <h4 className="subsection-title">Credit Performance</h4>
@@ -616,10 +893,10 @@ function CustomerDetailPage({ customerId, parentContext, navigate, showToast }) 
             </div>
             <div>
               <p><strong>Approved By:</strong> {customer.creditInfo.approved_by_name || '—'}</p>
-              <p><strong>Approved Date:</strong> {customer.creditInfo.approved_date ? new Date(customer.creditInfo.approved_date).toLocaleDateString('en-PH') : '—'}</p>
+              <p><strong>Approved Date:</strong> {formatDisplayDate(customer.creditInfo.approved_date)}</p>
               <p><strong>Credit Info ID:</strong> {customer.creditInfo.credit_info_id || '—'}</p>
-              <p><strong>Created At:</strong> {customer.creditInfo.created_at ? new Date(customer.creditInfo.created_at).toLocaleString() : '—'}</p>
-              <p><strong>Updated At:</strong> {customer.creditInfo.updated_at ? new Date(customer.creditInfo.updated_at).toLocaleString() : '—'}</p>
+              <p><strong>Created At:</strong> {formatDisplayDateTime(customer.creditInfo.created_at)}</p>
+              <p><strong>Updated At:</strong> {formatDisplayDateTime(customer.creditInfo.updated_at)}</p>
             </div>
           </div>
         </section>
@@ -667,7 +944,7 @@ function CustomerDetailPage({ customerId, parentContext, navigate, showToast }) 
             <tbody>
               {customer.paymentHistory && customer.paymentHistory.length ? customer.paymentHistory.map((p) => (
                 <tr key={p.payment_id || p.receipt_number}>
-                  <td>{new Date(p.payment_date).toLocaleDateString('en-PH')}</td>
+                  <td>{formatDisplayDate(p.payment_date)}</td>
                   <td><span style={{ fontFamily: 'monospace', fontSize: '0.82rem' }}>{p.receipt_number || '—'}</span></td>
                   <td>{formatCurrency(Number(p.amount))}</td>
                   <td>{p.payment_method || 'Cash'}</td>
@@ -683,6 +960,285 @@ function CustomerDetailPage({ customerId, parentContext, navigate, showToast }) 
           </table>
         </div>
       </section>
+
+      <div className="flex flex-wrap justify-end gap-2 mt-4">
+        <button className="button secondary" type="button" onClick={() => navigate(parentContext === 'schedule' ? '/sales/schedule' : '/sales/customers')}>Back</button>
+        <button className="button" type="button" onClick={() => navigate(`/sales/log-sale/${customer.customer_id}`)}>Log a Sale</button>
+      </div>
+    </div>
+  );
+}
+
+function LogSalePage({ customerId, navigate, showToast }) {
+  const currentUser = getCurrentUser();
+  const today = new Date().toISOString().slice(0, 10);
+  const [customers, setCustomers] = useState([]);
+  const [products, setProducts] = useState([]);
+  const [paymentMethods, setPaymentMethods] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [submitting, setSubmitting] = useState(false);
+  const [form, setForm] = useState({
+    customerId: customerId ? String(customerId) : '',
+    paymentMethodId: '',
+    invoicesDate: today,
+    dueDate: '',
+    notes: '',
+  });
+  const [lineItems, setLineItems] = useState([{ productId: '', quantity: 1 }]);
+  const [errors, setErrors] = useState({});
+
+  useEffect(() => {
+    if (customerId) {
+      setForm((prev) => ({ ...prev, customerId: String(customerId) }));
+    }
+  }, [customerId]);
+
+  useEffect(() => {
+    async function load() {
+      setLoading(true);
+      const [customerResult, paymentResult] = await Promise.all([
+        fetchCustomers({ limit: 200 }),
+        fetchPaymentMethods(),
+      ]);
+
+      if (customerResult.success) setCustomers(customerResult.data || []);
+      if (paymentResult.success) setPaymentMethods(paymentResult.data || []);
+
+      try {
+        const apiClient = (await import('../../api/apiClient.js')).default;
+        const params = { limit: 100 };
+        if (currentUser?.branchId) params.branch_id = currentUser.branchId;
+        const productResponse = await apiClient.get('/products', { params });
+        if (productResponse.data?.success) {
+          setProducts(productResponse.data.data || []);
+        }
+      } catch (err) {
+        console.error('[LogSale] product load error:', err.message);
+      }
+
+      setLoading(false);
+    }
+    load();
+  }, [currentUser?.branchId]);
+
+  const totalAmount = useMemo(() => lineItems.reduce((sum, line) => {
+    const product = products.find((p) => String(p.product_id) === String(line.productId));
+    const quantity = Number(line.quantity) || 0;
+    const unitPrice = product ? Number(product.unit_price) : 0;
+    return sum + unitPrice * quantity;
+  }, 0), [lineItems, products]);
+
+  const updateLineItem = (index, field, value) => {
+    setLineItems((prev) => prev.map((line, i) => (i === index ? { ...line, [field]: value } : line)));
+    setErrors((prev) => ({ ...prev, items: undefined }));
+  };
+
+  const addLineItem = () => {
+    setLineItems((prev) => [...prev, { productId: '', quantity: 1 }]);
+  };
+
+  const removeLineItem = (index) => {
+    setLineItems((prev) => (prev.length <= 1 ? prev : prev.filter((_, i) => i !== index)));
+  };
+
+  const handleSubmit = async () => {
+    const nextErrors = {};
+    if (!form.customerId) nextErrors.customerId = 'Select a customer.';
+    if (!form.paymentMethodId) nextErrors.paymentMethodId = 'Select a payment method.';
+    if (!form.invoicesDate) nextErrors.invoicesDate = 'Invoice date is required.';
+
+    const items = lineItems
+      .filter((line) => line.productId)
+      .map((line) => ({
+        product_id: Number(line.productId),
+        quantity: Number(line.quantity),
+      }));
+
+    if (!items.length) nextErrors.items = 'Add at least one product line.';
+    items.forEach((item) => {
+      if (!Number.isInteger(item.quantity) || item.quantity <= 0) {
+        nextErrors.items = 'Each line must have a quantity greater than zero.';
+      }
+    });
+
+    setErrors(nextErrors);
+    if (Object.keys(nextErrors).length) {
+      showToast('Please fix the errors before submitting.', 'error');
+      return;
+    }
+
+    setSubmitting(true);
+    const result = await createSalesInvoice({
+      customer_id: Number(form.customerId),
+      payment_method_id: Number(form.paymentMethodId),
+      invoices_date: form.invoicesDate,
+      due_date: form.dueDate || undefined,
+      notes: form.notes,
+      items,
+    });
+    setSubmitting(false);
+
+    if (!result.success || !result.data) {
+      showToast(result.message || 'Failed to log sale.', 'error');
+      return;
+    }
+
+    showToast(result.message || 'Sale logged successfully.', 'success');
+    navigate(`/sales/invoices/${encodeURIComponent(result.data.invoice_number)}`);
+  };
+
+  if (loading) return <LoadingState message="Loading log a sale form..." />;
+
+  return (
+    <div className="page">
+      <section className="panel form-panel content-panel">
+        <div className="panel-section-header">
+          <h3>Log a Sale</h3>
+          <p className="muted">Record a customer sales invoice and line items for branch review.</p>
+        </div>
+
+        <div className="form-group">
+          <label htmlFor="log-sale-customer">Customer *</label>
+          <select
+            id="log-sale-customer"
+            className="filter-select"
+            value={form.customerId}
+            onChange={(e) => {
+              setForm((prev) => ({ ...prev, customerId: e.target.value }));
+              setErrors((prev) => ({ ...prev, customerId: undefined }));
+            }}
+          >
+            <option value="">Select customer</option>
+            {customers.map((c) => (
+              <option key={c.customer_id} value={c.customer_id}>
+                {c.first_name} {c.last_name} (ID {c.customer_id})
+              </option>
+            ))}
+          </select>
+          {errors.customerId ? <p className="form-error">{errors.customerId}</p> : null}
+        </div>
+
+        <div className="form-group">
+          <label htmlFor="log-sale-payment">Payment Method *</label>
+          <select
+            id="log-sale-payment"
+            className="filter-select"
+            value={form.paymentMethodId}
+            onChange={(e) => {
+              setForm((prev) => ({ ...prev, paymentMethodId: e.target.value }));
+              setErrors((prev) => ({ ...prev, paymentMethodId: undefined }));
+            }}
+          >
+            <option value="">Select payment method</option>
+            {paymentMethods.map((method) => (
+              <option key={method.payment_method_id} value={method.payment_method_id}>
+                {method.method_name}
+              </option>
+            ))}
+          </select>
+          {errors.paymentMethodId ? <p className="form-error">{errors.paymentMethodId}</p> : null}
+        </div>
+
+        <div className="account-detail-grid two-up">
+          <div className="form-group">
+            <label htmlFor="log-sale-date">Invoice Date *</label>
+            <input
+              id="log-sale-date"
+              type="date"
+              value={form.invoicesDate}
+              onChange={(e) => setForm((prev) => ({ ...prev, invoicesDate: e.target.value }))}
+            />
+            {errors.invoicesDate ? <p className="form-error">{errors.invoicesDate}</p> : null}
+          </div>
+          <div className="form-group">
+            <label htmlFor="log-sale-due">Due Date</label>
+            <input
+              id="log-sale-due"
+              type="date"
+              value={form.dueDate}
+              onChange={(e) => setForm((prev) => ({ ...prev, dueDate: e.target.value }))}
+            />
+          </div>
+        </div>
+
+        <div className="form-group">
+          <label htmlFor="log-sale-notes">Notes</label>
+          <textarea
+            id="log-sale-notes"
+            placeholder="Product details, delivery notes, or payment terms..."
+            value={form.notes}
+            onChange={(e) => setForm((prev) => ({ ...prev, notes: e.target.value }))}
+          />
+        </div>
+      </section>
+
+      <section className="panel content-panel">
+        <div className="panel-section-header">
+          <h3>Line Items</h3>
+          <button className="button secondary" type="button" onClick={addLineItem}>Add Product</button>
+        </div>
+        {errors.items ? <p className="form-error">{errors.items}</p> : null}
+        <div className="table-shell">
+          <table className="corvex-table">
+            <thead>
+              <tr>
+                <th>Product</th>
+                <th>Unit Price</th>
+                <th>Quantity</th>
+                <th>Line Total</th>
+                <th />
+              </tr>
+            </thead>
+            <tbody>
+              {lineItems.map((line, index) => {
+                const product = products.find((p) => String(p.product_id) === String(line.productId));
+                const unitPrice = product ? Number(product.unit_price) : 0;
+                const quantity = Number(line.quantity) || 0;
+                const lineTotal = unitPrice * quantity;
+                return (
+                  <tr key={`line-${index}`}>
+                    <td>
+                      <select
+                        className="filter-select"
+                        value={line.productId}
+                        onChange={(e) => updateLineItem(index, 'productId', e.target.value)}
+                      >
+                        <option value="">Select product</option>
+                        {products.map((p) => (
+                          <option key={p.product_id} value={p.product_id}>{p.product_name}</option>
+                        ))}
+                      </select>
+                    </td>
+                    <td>{product ? formatCurrency(unitPrice) : '—'}</td>
+                    <td>
+                      <input
+                        type="number"
+                        min={1}
+                        value={line.quantity}
+                        onChange={(e) => updateLineItem(index, 'quantity', e.target.value)}
+                      />
+                    </td>
+                    <td>{product ? formatCurrency(lineTotal) : '—'}</td>
+                    <td>
+                      <button className="button ghost" type="button" onClick={() => removeLineItem(index)} disabled={lineItems.length <= 1}>
+                        Remove
+                      </button>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+        <p className="muted" style={{ marginTop: 12 }}>Invoice total: <strong>{formatCurrency(totalAmount)}</strong></p>
+      </section>
+
+      <div className="flex flex-wrap justify-end gap-2 mt-4">
+        <button className="button secondary" type="button" onClick={() => navigate('/sales/dashboard')}>Cancel</button>
+        <button className="button" type="button" onClick={handleSubmit} disabled={submitting}>
+          {submitting ? 'Submitting...' : 'Submit Sale'}
+        </button>
+      </div>
     </div>
   );
 }
@@ -753,7 +1309,7 @@ function VisitLogPage({ visitId, parentContext, navigate, showToast }) {
           { label: 'Visit ID', value: String(visit.visit_id) },
           { label: 'User ID', value: String(visit.user_id ?? '—') },
           { label: 'Visit Type', value: visit.visit_type || '—' },
-          { label: 'Scheduled Date', value: visit.scheduled_date ? new Date(visit.scheduled_date).toLocaleDateString('en-PH') : '—' },
+          { label: 'Scheduled Date', value: formatDisplayDate(visit.scheduled_date) },
           { label: 'Status', value: <StatusBadge status={visit.status} /> },
           { label: 'Customer', value: customerName },
         ]} />
@@ -768,10 +1324,10 @@ function VisitLogPage({ visitId, parentContext, navigate, showToast }) {
             <p><strong>Visit ID:</strong> {visit.visit_id}</p>
             <p><strong>User ID:</strong> {visit.user_id ?? '—'}</p>
             <p><strong>Visit Type:</strong> {visit.visit_type || '—'}</p>
-            <p><strong>Scheduled Date:</strong> {visit.scheduled_date ? new Date(visit.scheduled_date).toLocaleDateString('en-PH') : '—'}</p>
+            <p><strong>Scheduled Date:</strong> {formatDisplayDate(visit.scheduled_date)}</p>
             <p><strong>Status:</strong> <StatusBadge status={visit.status} /></p>
-            <p><strong>Created At:</strong> {visit.created_at ? new Date(visit.created_at).toLocaleString() : '—'}</p>
-            <p><strong>Updated At:</strong> {visit.updated_at ? new Date(visit.updated_at).toLocaleString() : '—'}</p>
+            <p><strong>Created At:</strong> {formatDisplayDateTime(visit.created_at)}</p>
+            <p><strong>Updated At:</strong> {formatDisplayDateTime(visit.updated_at)}</p>
           </div>
           <div>
             <h4 className="subsection-title">Agent</h4>
@@ -1094,7 +1650,7 @@ function SalesHistoryPage({ navigate, showToast }) {
                     <td>{item.invoice_number}</td>
                     <td>{item.customer_name || item.first_name + ' ' + item.last_name}</td>
                     <td>{formatCurrency(item.total_amount)}</td>
-                    <td>{String(item.invoices_date || '').slice(0, 10)}</td>
+                    <td>{formatDisplayDate(item.invoices_date)}</td>
                     <td>{item.status}</td>
                     <td><button className="icon-action-button" type="button" title="View" onClick={() => navigate(`/sales/invoices/${encodeURIComponent(item.invoice_number)}`)}><NavIcon name="view" /></button></td>
                   </tr>
@@ -1273,10 +1829,12 @@ export function SalesPageBody({ page, navigate, showToast }) {
     case 'scheduleList':
     case 'scheduleMap': return <SchedulePage pageType={page.pageType} {...props} />;
     case 'customers': return <CustomersPage {...props} />;
+    case 'customerForm': return <CustomerFormPage {...props} />;
     case 'clients': return <CustomersPage {...props} />;
     case 'customerDetail': return <CustomerDetailPage {...props} />;
     case 'clientDetail': return <CustomerDetailPage {...props} />;
     case 'visitLog': return <VisitLogPage {...props} />;
+    case 'logSale': return <LogSalePage {...props} />;
     case 'ciForm': return <CIFormPage {...props} />;
     case 'inventory': return <InventoryPage {...props} />;
     case 'productDetails': return <ProductDetailsPage {...props} />;

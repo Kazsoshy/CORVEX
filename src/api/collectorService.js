@@ -1,6 +1,7 @@
 import { fetchCustomers, fetchCustomerById } from './salesService.js';
 import { getCurrentUser } from './authService.js';
 import apiClient from './apiClient.js';
+import { formatDisplayDate } from '../utils/formatters.js';
 
 function transformCustomerToAccount(customer) {
   // The list endpoint (GET /customers) returns activity fields FLAT at top level:
@@ -33,7 +34,7 @@ function transformCustomerToAccount(customer) {
     null;
 
   const lastVisitDate = rawLastVisit && rawLastVisit !== ''
-    ? (() => { try { return new Date(rawLastVisit).toLocaleDateString('en-PH'); } catch { return rawLastVisit; } })()
+    ? (() => { try { const formatted = formatDisplayDate(rawLastVisit); return formatted === '—' ? rawLastVisit : formatted; } catch { return rawLastVisit; } })()
     : 'N/A';
 
   // Calculate days overdue from last collection date
@@ -86,9 +87,7 @@ function transformCustomerToAccount(customer) {
     branch_id: customer.branch_id,
     branch_name: customer.branch_name,
     account_manager_name: customer.account_manager_name || '—',
-    customer_since: customer.created_at
-      ? new Date(customer.created_at).toLocaleDateString('en-PH', { year: 'numeric', month: 'long', day: 'numeric' })
-      : 'N/A',
+    customer_since: customer.created_at ? formatDisplayDate(customer.created_at) : 'N/A',
     credit_limit: Number(creditInfo.credit_limit || 0),
     monthly_income: Number(creditInfo.monthly_income || 0),
     employment_status: creditInfo.employment_status || '—',
@@ -161,5 +160,48 @@ export async function fetchDigitalReceiptById(id) {
   } catch (error) {
     console.error('Failed to fetch digital receipt:', error);
     return { success: false, data: null };
+  }
+}
+
+export async function fetchCollectionPaymentById(id) {
+  try {
+    const response = await apiClient.get(`/collector/payments/${id}`);
+    return response.data;
+  } catch (error) {
+    console.error('Failed to fetch collection payment:', error);
+    return { success: false, data: null };
+  }
+}
+
+export async function fetchTodayFieldVisits() {
+  try {
+    const response = await apiClient.get('/collector/field-visits/today');
+    return response.data;
+  } catch (error) {
+    console.error('Failed to fetch today field visits:', error);
+    return { success: false, data: [], count: 0 };
+  }
+}
+
+export async function fetchFieldActivityReports() {
+  try {
+    const response = await apiClient.get('/collector/field-reports');
+    return response.data;
+  } catch (error) {
+    console.error('Failed to fetch field activity reports:', error);
+    return { success: false, data: [], count: 0 };
+  }
+}
+
+export async function submitFieldActivityReport(payload) {
+  try {
+    const response = await apiClient.post('/collector/field-reports', payload);
+    return response.data;
+  } catch (error) {
+    console.error('Failed to submit field activity report:', error);
+    return {
+      success: false,
+      message: error.response?.data?.message || 'Failed to submit report.',
+    };
   }
 }

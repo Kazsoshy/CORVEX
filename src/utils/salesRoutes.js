@@ -6,8 +6,11 @@ const ROUTE_DEFINITIONS = [
   { pattern: /^\/sales\/schedule\/map$/, pageType: 'scheduleMap' },
   { pattern: /^\/sales\/schedule$/, pageType: 'scheduleList' },
   { pattern: /^\/sales\/customers$/, pageType: 'customers' },
+  { pattern: /^\/sales\/customers\/new$/, pageType: 'customerForm' },
   { pattern: /^\/sales\/customer-detail\/([^/]+)$/, pageType: 'customerDetail', params: ['customerId'] },
   { pattern: /^\/sales\/visit-log\/(\d+)$/, pageType: 'visitLog', params: ['visitId'] },
+  { pattern: /^\/sales\/log-sale\/(\d+)$/, pageType: 'logSale', params: ['customerId'] },
+  { pattern: /^\/sales\/log-sale$/, pageType: 'logSale' },
   { pattern: /^\/sales\/ci-form\/(\d+)$/, pageType: 'ciForm', params: ['customerId'] },
   { pattern: /^\/sales\/history$/, pageType: 'history' },
   { pattern: /^\/sales\/invoices\/([^/]+)$/, pageType: 'invoiceDetails', params: ['invoiceId'] },
@@ -71,6 +74,9 @@ export function buildSalesBreadcrumbs(pageType, params = {}, parentContext = 'cu
     case 'customers':
       return [...crumbs, { label: 'Customers', to: '/sales/customers' }];
 
+    case 'customerForm':
+      return [...crumbs, { label: 'Customers', to: '/sales/customers' }, { label: 'Add Customer', to: '/sales/customers/new' }];
+
     case 'customerDetail': {
       const parentCrumb =
         parentContext === 'schedule'
@@ -84,6 +90,15 @@ export function buildSalesBreadcrumbs(pageType, params = {}, parentContext = 'cu
         ...crumbs,
         { label: "Today's Schedule", to: '/sales/schedule' },
         { label: 'Field Visit Log', to: `/sales/visit-log/${params.visitId}` },
+      ];
+
+    case 'logSale':
+      return [
+        ...crumbs,
+        {
+          label: 'Log a Sale',
+          to: params.customerId ? `/sales/log-sale/${params.customerId}` : '/sales/log-sale',
+        },
       ];
 
     case 'ciForm':
@@ -149,8 +164,10 @@ export function resolveSalesPage(pathname, search = '') {
     scheduleList: "Today's Schedule",
     scheduleMap: 'Territory Map',
     customers: 'Customers',
+    customerForm: 'Add Customer',
     customerDetail: 'Customer Detail',
     visitLog: 'Field Visit Log',
+    logSale: 'Log a Sale',
     ciForm: 'Credit Investigation Form',
     history: 'Sales History',
     invoiceDetails: 'Invoice Details',
@@ -177,8 +194,13 @@ export function resolveSalesPage(pathname, search = '') {
 export function isSalesNavActive(fullPath, navTo) {
   const pathname = fullPath.split('?')[0];
   if (navTo === '/sales/dashboard') return pathname === '/sales/dashboard' || pathname === '/sales/settings' || pathname === '/sales/route-tracking' || pathname === '/sales/audit-log';
+  if (navTo === '/sales/log-sale') return pathname.startsWith('/sales/log-sale');
   if (navTo === '/sales/schedule') return pathname.startsWith('/sales/schedule') || pathname.startsWith('/sales/visit-log') || fullPath.includes('from=schedule');
-  if (navTo === '/sales/customers') return pathname === '/sales/customers' || fullPath.includes('from=customers');
+  if (navTo === '/sales/customers') {
+    return pathname === '/sales/customers'
+      || pathname === '/sales/customers/new'
+      || fullPath.includes('from=customers');
+  }
   if (navTo === '/sales/history') return pathname.startsWith('/sales/history') || pathname.startsWith('/sales/invoices');
   if (navTo === '/sales/inventory') return pathname.startsWith('/sales/inventory');
   if (navTo === '/sales/notifications') return pathname === '/sales/notifications';

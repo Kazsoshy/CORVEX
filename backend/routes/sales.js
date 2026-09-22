@@ -275,6 +275,240 @@ router.get('/invoices/:invoiceId', async (req, res) => {
   }
 });
 
+router.get('/payment-methods', async (req, res) => {
+  const pool = req.app.locals.pool;
+
+  try {
+    const result = await pool.query(
+      `SELECT payment_method_id, method_name
+       FROM payment_methods
+       WHERE status = 'Active'
+       ORDER BY method_name`
+    );
+
+    return res.status(200).json({
+      success: true,
+      data: result.rows,
+    });
+  } catch (error) {
+    console.error('[Sales] GET /payment-methods error:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to fetch payment methods',
+      error: error.message,
+    });
+  }
+});
+
+async function generateInvoiceNumber(pool) {
+  const year = new Date().getFullYear();
+  const prefix = `INV-${year}-`;
+  const result = await pool.query(
+    `SELECT invoice_number
+     FROM sales_invoices
+     WHERE invoice_number LIKE $1
+     ORDER BY sales_invoices_id DESC
+     LIMIT 1`,
+    [`${prefix}%`]
+  );
+
+  let nextSeq = 1;
+  if (result.rows[0]?.invoice_number) {
+    const suffix = result.rows[0].invoice_number.slice(prefix.length);
+    const parsed = Number.parseInt(suffix, 10);
+    if (Number.isFinite(parsed)) nextSeq = parsed + 1;
+  }
+
+  return `${prefix}${String(nextSeq).padStart(6, '0')}`;
+}
+
+router.post('/invoices', async (req, res) => {
+  const pool = req.app.locals.pool;
+  const user = req.currentUser;
+  const customerId = positiveInteger(req.body.customer_id);
+  const paymentMethodId = positiveInteger(req.body.payment_method_id);
+  const invoicesDate = req.body.invoices_date;
+  const dueDate = req.body.due_date;
+  const notes = typeof req.body.notes === 'string' ? req.body.notes.trim() : '';
+  const items = Array.isArray(req.body.items) ? req.body.items : [];
+
+  if (!customerId || !paymentMethodId || !isValidDate(invoicesDate)) {
+    return res.status(400).json({
+      success: false,
+      message: 'Valid customer_id, payment_method_id, and invoices_date are required.',
+    });
+  }
+
+  if (dueDate !== undefined && dueDate !== null && dueDate !== '' && !isValidDate(dueDate)) {
+    return res.status(400).json({
+      success: false,
+      message: 'due_date must be a valid YYYY-MM-DD date when provided.',
+    });
+  }
+
+  if (!items.length) {
+    return res.status(400).json({
+      success: false,
+      message: 'At least one line item is required.',
+    });
+  }
+
+  if (user.branchId === null) {
+    return res.status(400).json({
+      success: false,
+      message: 'Sales invoices must be logged by a branch-assigned sales agent.',
+    });
+  }
+
+  const normalizedItems = [];
+  for (const rawItem of items) {
+    const productId = positiveInteger(rawItem.product_id);
+    const quantity = positiveInteger(rawItem.quantity);
+    if (!productId || !quantity) {
+      return res.status(400).json({
+        success: false,
+        message: 'Each line item requires a valid product_id and quantity.',
+      });
+    }
+    normalizedItems.push({
+      productId,
+      quantity,
+      unitPrice: rawItem.unit_price !== undefined && rawItem.unit_price !== null
+        ? Number(rawItem.unit_price)
+        : null,
+    });
+  }
+
+  const client = await pool.connect();
+
+  try {
+    await client.query('BEGIN');
+
+    const customerResult = await client.query(
+      `SELECT customer_id, branch_id
+       FROM customers
+       WHERE customer_id = $1`,
+      [customerId]
+    );
+
+    if (customerResult.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ success: false, message: 'Customer not found' });
+    }
+
+    if (customerResult.rows[0].branch_id !== user.branchId) {
+      await client.query('ROLLBACK');
+      return res.status(403).json({
+        success: false,
+        message: 'Access denied: customer is not in your assigned branch.',
+      });
+    }
+
+    const paymentResult = await client.query(
+      `SELECT payment_method_id
+       FROM payment_methods
+       WHERE payment_method_id = $1 AND status = 'Active'`,
+      [paymentMethodId]
+    );
+
+    if (paymentResult.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ success: false, message: 'Invalid payment method.' });
+    }
+
+    const lineItems = [];
+    for (const item of normalizedItems) {
+      const productResult = await client.query(
+        `SELECT id, unit_price
+         FROM products
+         WHERE id = $1 AND status = 'Active'`,
+        [item.productId]
+      );
+
+      if (productResult.rows.length === 0) {
+        await client.query('ROLLBACK');
+        return res.status(400).json({
+          success: false,
+          message: `Product ${item.productId} was not found or is inactive.`,
+        });
+      }
+
+      const unitPrice = item.unitPrice !== null && Number.isFinite(item.unitPrice) && item.unitPrice > 0
+        ? item.unitPrice
+        : Number(productResult.rows[0].unit_price);
+
+      if (!Number.isFinite(unitPrice) || unitPrice <= 0) {
+        await client.query('ROLLBACK');
+        return res.status(400).json({
+          success: false,
+          message: `Product ${item.productId} has an invalid unit price.`,
+        });
+      }
+
+      lineItems.push({
+        productId: item.productId,
+        quantity: item.quantity,
+        unitPrice,
+        lineTotal: Math.round(unitPrice * item.quantity * 100) / 100,
+      });
+    }
+
+    const totalAmount = lineItems.reduce((sum, item) => sum + item.lineTotal, 0);
+    const invoiceNumber = await generateInvoiceNumber(client);
+
+    const invoiceInsert = await client.query(
+      `INSERT INTO sales_invoices
+         (invoice_number, customer_id, sales_agent_id, branch_id, total_amount,
+          payment_method_id, status, invoices_date, due_date, notes)
+       VALUES ($1, $2, $3, $4, $5, $6, 'Pending Review', $7, $8, $9)
+       RETURNING sales_invoices_id`,
+      [
+        invoiceNumber,
+        customerId,
+        user.id,
+        user.branchId,
+        totalAmount,
+        paymentMethodId,
+        invoicesDate,
+        dueDate && isValidDate(dueDate) ? dueDate : null,
+        notes || null,
+      ]
+    );
+
+    const invoiceId = invoiceInsert.rows[0].sales_invoices_id;
+
+    for (const item of lineItems) {
+      await client.query(
+        `INSERT INTO sales_invoice_items
+           (invoices_id, product_id, quantity, unit_price, line_total)
+         VALUES ($1, $2, $3, $4, $5)`,
+        [invoiceId, item.productId, item.quantity, item.unitPrice, item.lineTotal]
+      );
+    }
+
+    await client.query('COMMIT');
+
+    const invoiceUser = { ...user, pool };
+    const invoice = await getInvoice(invoiceNumber, invoiceUser);
+
+    return res.status(201).json({
+      success: true,
+      data: invoice,
+      message: 'Sale logged successfully.',
+    });
+  } catch (error) {
+    await client.query('ROLLBACK');
+    console.error('[Sales] POST /invoices error:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to log sale',
+      error: error.message,
+    });
+  } finally {
+    client.release();
+  }
+});
+
 router.get('/visits', async (req, res) => {
   const pool = req.app.locals.pool;
   const userId = req.currentUser.id;

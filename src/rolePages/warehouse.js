@@ -7,8 +7,8 @@ export const warehouseRole = {
   accent: 'Stock counts, restocks, transfers, and credit history',
   navPages: [
     { label: 'Dashboard',               to: '/warehouse/dashboard' },
-    { label: 'Inventory',               to: '/warehouse/inventory' },
     { label: 'Branch Inventory',        to: '/warehouse/branch-inventory' },
+    { label: 'Products',                  to: '/warehouse/products' },
     { label: 'Stock Movements',         to: '/warehouse/movements' },
     { label: 'Transfers',               to: '/warehouse/transfers' },
     { label: 'Restock History',         to: '/warehouse/restock-history' },

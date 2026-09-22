@@ -100,31 +100,17 @@ INSERT INTO collection_payment (receipt_number, customer_id, collector_id, branc
 -- ============================================================
 -- SAW RESULTS
 -- ============================================================
+-- Collector/collection SAW priority only (no engine_type column after migration 025)
 INSERT INTO saw_results (customer_id, engine_type, score, ranking) VALUES
--- Collection priority for Davao City
 (4, 'Collection', 0.8920, 1),
 (1, 'Collection', 0.7650, 2),
 (5, 'Collection', 0.6540, 3),
 (3, 'Collection', 0.5430, 4),
--- Collection priority for General Santos
 (2, 'Collection', 0.9120, 1),
 (8, 'Collection', 0.7210, 2),
 (7, 'Collection', 0.6340, 3),
--- Collection priority for Davao Oriental
 (11, 'Collection', 0.8780, 1),
-(9, 'Collection', 0.7560, 2),
--- Sales priority for Davao City
-(1, 'Sales', 0.8500, 1),
-(3, 'Sales', 0.7200, 2),
-(4, 'Sales', 0.6800, 3),
-(5, 'Sales', 0.5900, 4),
--- Sales priority for General Santos
-(2, 'Sales', 0.9100, 1),
-(7, 'Sales', 0.7500, 2),
-(8, 'Sales', 0.6900, 3),
--- Sales priority for Davao Oriental
-(9, 'Sales', 0.8800, 1),
-(11, 'Sales', 0.7700, 2);
+(9, 'Collection', 0.7560, 2);
 
 -- ============================================================
 -- PERFORMANCE SUMMARY

@@ -50,6 +50,7 @@ router.get('/', async (req, res) => {
           pc.category_name,
           p.unit_price,
           p.status,
+          p.image_url,
           i.quantity, i.stock_status, i.last_updated,
           b.name AS branch_name
         FROM products p
@@ -69,6 +70,7 @@ router.get('/', async (req, res) => {
           pc.category_name,
           p.unit_price,
           p.status,
+          p.image_url,
           COALESCE(SUM(i.quantity), 0) AS total_quantity,
           CASE
             WHEN COALESCE(SUM(i.quantity), 0) = 0 THEN 'Out of Stock'
@@ -79,7 +81,7 @@ router.get('/', async (req, res) => {
         LEFT JOIN product_categories pc ON pc.category_id = p.category_id
         LEFT JOIN branch_inventory i ON i.product_id = p.id
         ${where}
-        GROUP BY p.id, p.category_id, pc.category_name, p.unit_price, p.status
+        GROUP BY p.id, p.category_id, pc.category_name, p.unit_price, p.status, p.image_url
         ORDER BY p.name
         LIMIT $${limitIdx} OFFSET $${offsetIdx}
       `;
@@ -115,7 +117,8 @@ router.get('/:id', async (req, res) => {
               p.category_id,
               pc.category_name,
               p.unit_price,
-              p.status
+              p.status,
+              p.image_url
        FROM products p
        LEFT JOIN product_categories pc ON pc.category_id = p.category_id
        WHERE p.id = $1`,

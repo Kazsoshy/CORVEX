@@ -14,6 +14,7 @@ import {
 import { fetchAuditLogs } from '../../api/adminService';
 import { EmptyState } from '../shared/EmptyState';
 import { NavIcon } from '../../navIcons';
+import { formatDisplayDate, formatDisplayDateTime } from '../../utils/formatters.js';
 
 function btn(v) {
   if (v === 'secondary') return 'button secondary';
@@ -284,8 +285,8 @@ function UserListPage({ navigate, showToast }) {
                     <td>{u.role?.name || '—'}</td>
                     <td>{u.branch?.name || '—'}</td>
                     <td><StatusPill status={u.status} /></td>
-                    <td>{u.created_at ? new Date(u.created_at).toLocaleDateString('en-PH') : '—'}</td>
-                    <td>{u.updated_at ? new Date(u.updated_at).toLocaleDateString('en-PH') : '—'}</td>
+                    <td>{formatDisplayDate(u.created_at)}</td>
+                    <td>{formatDisplayDate(u.updated_at)}</td>
                     <td className="table-actions">
                       <button className="icon-action-button" type="button" title="Edit" onClick={() => navigate(`/operating-manager/admin/users/${u.user_id}`)}><NavIcon name="edit" /></button>
                       <button className="icon-action-button danger" type="button" title="Disable" onClick={() => setConfirmDisable(u)}><NavIcon name="trash" /></button>
@@ -524,7 +525,7 @@ function BranchListPage({ navigate, showToast }) {
                     <td>{b.contact_no}</td>
                     <td>{b.email}</td>
                     <td><StatusPill status={b.status} /></td>
-                    <td>{new Date(b.created_at).toLocaleString()}</td>
+                    <td>{formatDisplayDateTime(b.created_at)}</td>
                     <td className="table-actions">
                       <button className="icon-action-button" type="button" title="View" onClick={() => navigate(`/admin/branches/${b.branch_id}`)}><NavIcon name="view" /></button>
                       <button className="icon-action-button" type="button" title="Edit" onClick={() => showToast(`Editing ${b.branch_name}.`, 'success')}><NavIcon name="edit" /></button>
@@ -844,7 +845,7 @@ function AuditLogsPage({ showToast }) {
                     <td>{l.action}</td>
                     <td>{l.ip_address}</td>
                     <td>{l.status_details}</td>
-                    <td>{new Date(l.created_at).toLocaleString()}</td>
+                    <td>{formatDisplayDateTime(l.created_at)}</td>
                   </tr>
                 ))
               )}

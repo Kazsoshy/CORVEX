@@ -18,6 +18,7 @@ import {
   SALES_ANALYTICS, INVENTORY_ANALYTICS, PAYMENT_ANALYTICS,
   formatCurrency, getBranchById, getHighestPerformingBranch, getLowestPerformingBranch,
 } from '../../data/operatingManagerMockData';
+import { formatDisplayDate, formatDisplayDateTime } from '../../utils/formatters.js';
 import { getExecutiveDashboard, getOperatingManagerAnalytics, getPerformanceHistory } from '../../api/reportsService';
 import apiClient from '../../api/apiClient';
 import { fetchCustomers, fetchCustomerById } from '../../api/salesService';
@@ -160,7 +161,7 @@ function DashboardPage({ navigate }) {
         <div className="dashboard-greeting-main">
           <p className="dashboard-eyebrow">Executive Dashboard</p>
           <h2>{currentUser?.fullName || 'Operating Manager'}</h2>
-          <p className="muted">{new Date().toLocaleDateString('en-PH', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}</p>
+          <p className="muted">{formatDisplayDate(new Date())}</p>
         </div>
         <Link to="/operating-manager/notifications" className="notification-bell" aria-label="Notifications" style={{ flexShrink: 0, alignSelf: 'flex-start' }}>
           <NavIcon name="bell" />
@@ -1904,7 +1905,7 @@ function LiveOperationsDashboardPage({ navigate }) {
         <div className="dashboard-greeting-main">
           <p className="dashboard-eyebrow">Operations Analytics</p>
           <h2>{currentUser?.fullName || 'Operating Manager'}</h2>
-          <p className="muted">{data.filters.label} · {data.scope} · Updated {new Date(data.generatedAt).toLocaleString()}</p>
+          <p className="muted">{data.filters.label} · {data.scope} · Updated {formatDisplayDateTime(data.generatedAt)}</p>
         </div>
         <div style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
           <Link to="/operating-manager/notifications" className="notification-bell" aria-label="Notifications">

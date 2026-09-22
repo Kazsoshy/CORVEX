@@ -33,6 +33,12 @@ const MIGRATIONS = [
   { file: '017_fix_unscoped_roles.sql',              label: '017_fix_unscoped_roles.sql' },
   { file: '018_seed_credit_history.sql',             label: '018_seed_credit_history.sql' },
   { file: '019_seed_digital_receipts.sql',           label: '019_seed_digital_receipts.sql' },
+  { file: '020_customer_contact_fields.sql',         label: '020_customer_contact_fields.sql' },
+  { file: '021_seed_customer_contacts.sql',          label: '021_seed_customer_contacts.sql' },
+  { file: '022_branch_inventory_created_at.sql',     label: '022_branch_inventory_created_at.sql' },
+  { file: '023_seed_stock_movements.sql',            label: '023_seed_stock_movements.sql' },
+  { file: '024_product_images_notification_category.sql', label: '024_product_images_notification_category.sql' },
+  { file: '025_saw_results_drop_engine_type.sql',       label: '025_saw_results_drop_engine_type.sql' },
 ];
 
 async function ensureMigrationsTable() {

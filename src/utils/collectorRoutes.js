@@ -1,4 +1,4 @@
-import { getAccountById, getReceiptById } from '../data/collectorMockData';
+import { getAccountById } from '../data/collectorMockData';
 
 const ROUTE_DEFINITIONS = [
   { pattern: /^\/collector\/dashboard$/, pageType: 'dashboard' },
@@ -6,9 +6,10 @@ const ROUTE_DEFINITIONS = [
   { pattern: /^\/collector\/route\/map$/, pageType: 'routeMap' },
   { pattern: /^\/collector\/route\/summary$/, pageType: 'routeSummary' },
   { pattern: /^\/collector\/route$/, pageType: 'routeList' },
+  { pattern: /^\/collector\/field-reports$/, pageType: 'fieldActivityReports' },
   { pattern: /^\/collector\/accounts$/, pageType: 'accounts' },
   { pattern: /^\/collector\/history$/, pageType: 'history' },
-  { pattern: /^\/collector\/history\/([^/]+)$/, pageType: 'receiptDetails', params: ['receiptId'] },
+  { pattern: /^\/collector\/history\/([^/]+)$/, pageType: 'collectionPaymentDetail', params: ['paymentId'] },
   { pattern: /^\/collector\/receipts$/, pageType: 'receiptsList' },
   { pattern: /^\/collector\/receipts\/(\d+)$/, pageType: 'digitalReceipt', params: ['receiptId'] },
   { pattern: /^\/collector\/notifications$/, pageType: 'notifications' },
@@ -70,6 +71,9 @@ export function buildCollectorBreadcrumbs(pageType, params = {}, parentContext =
         ...(pageType === 'routeSummary' ? [{ label: 'Route Summary', to: '/collector/route/summary' }] : []),
       ];
 
+    case 'fieldActivityReports':
+      return [...crumbs, { label: 'Field Activity Reports', to: '/collector/field-reports' }];
+
     case 'accounts':
       return [...crumbs, { label: 'Customers', to: '/collector/accounts' }];
 
@@ -115,6 +119,13 @@ export function buildCollectorBreadcrumbs(pageType, params = {}, parentContext =
     case 'history':
       return [...crumbs, { label: 'Collection History', to: '/collector/history' }];
 
+    case 'collectionPaymentDetail':
+      return [
+        ...crumbs,
+        { label: 'Collection History', to: '/collector/history' },
+        { label: params.paymentId ? `Payment #${params.paymentId}` : 'Payment Detail', to: `/collector/history/${params.paymentId}` },
+      ];
+
     case 'receiptsList':
       return [...crumbs, { label: 'Digital Receipts', to: '/collector/receipts' }];
 
@@ -149,6 +160,7 @@ export function resolveCollectorPage(pathname, search = '') {
     routeList: "Today's Route",
     routeMap: 'Route Map View',
     routeSummary: 'Route Summary',
+    fieldActivityReports: 'Field Activity Reports',
     accounts: 'Customers',
     accountDetail: 'Customer Detail',
     collectionLog: 'Collection Log',
@@ -158,7 +170,7 @@ export function resolveCollectorPage(pathname, search = '') {
     incidentReport: 'Incident Report',
     incidentReportStandalone: 'Incident Report',
     history: 'Collection History',
-    receiptDetails: 'Receipt Details',
+    collectionPaymentDetail: 'Collection Payment',
     notifications: 'Notifications',
     profile: 'Profile',
   };
@@ -177,6 +189,7 @@ export function isCollectorNavActive(fullPath, navTo) {
   const pathname = fullPath.split('?')[0];
   if (navTo === '/collector/dashboard') return pathname === '/collector/dashboard' || pathname === '/collector/settings';
   if (navTo === '/collector/route') return pathname.startsWith('/collector/route') || fullPath.includes('from=route');
+  if (navTo === '/collector/field-reports') return pathname === '/collector/field-reports';
   if (navTo === '/collector/accounts') return pathname === '/collector/accounts' || fullPath.includes('from=accounts');
   if (navTo === '/collector/history') return pathname.startsWith('/collector/history');
   if (navTo === '/collector/receipts') return pathname.startsWith('/collector/receipts') || pathname.startsWith('/collector/receipt/');

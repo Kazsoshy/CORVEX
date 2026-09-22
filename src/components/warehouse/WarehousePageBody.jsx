@@ -10,23 +10,29 @@ import {
   NOTIFICATIONS,
   PRODUCTS,
   RESTOCKS,
-  STOCK_MOVEMENTS,
   TOP_MOVING_PRODUCTS,
   INVENTORY_TRANSFERS,
   WAREHOUSE_STAFF_PROFILE,
-  getMovementById,
   getProductById,
   getRestockById,
   getTransferById,
 } from '../../data/warehouseMockData';
-import { fetchInventoryTransfers, fetchInventoryTransferById, fetchRestocks, fetchBranchInventory } from '../../api/inventoryService';
+import {
+  fetchInventoryTransfers,
+  fetchInventoryTransferById,
+  fetchRestocks,
+  fetchBranchInventory,
+  fetchStockMovements,
+  fetchStockMovementById,
+} from '../../api/inventoryService';
+import { fetchNotifications, markNotificationRead } from '../../api/notificationService';
 import { EmptyState } from '../shared/EmptyState';
 import { LoadingState } from '../shared/LoadingState';
 import { NavIcon } from '../../navIcons';
 import { StatusBadge } from '../StatusBadge';
 import { CreditHistoryListPage, CreditHistoryDetailPage } from '../shared/CreditHistoryPages';
 
-import { formatCurrency } from '../../utils/formatters.js';
+import { formatCurrency, formatDisplayDate, formatDisplayDateTime } from '../../utils/formatters.js';
 
 
 function StatsGrid({ stats }) {
@@ -97,7 +103,7 @@ function DashboardPage({ navigate, showToast }) {
       ]} />
 
       <div className="flex flex-wrap gap-2 justify-end mt-2 mb-2">
-        <button className="button secondary" type="button" onClick={() => navigate('/warehouse/inventory')}>View Inventory</button>
+        <button className="button secondary" type="button" onClick={() => navigate('/warehouse/branch-inventory')}>View Branch Inventory</button>
         <button className="button secondary" type="button" onClick={() => navigate(`/warehouse/product/${firstProduct.id}/transfer`)}>Transfer Stock</button>
         <button className="button secondary" type="button" onClick={() => navigate(`/warehouse/product/${firstProduct.id}/restock`)}>Record Restock</button>
         <button className="button" type="button" onClick={() => navigate(`/warehouse/product/${firstProduct.id}/stock-count`)}>Log Stock Count</button>
@@ -238,11 +244,24 @@ function InventoryPage({ navigate, showToast }) {
           <div className="corvex-table-wrapper">
             <table className="corvex-table">
               <thead>
-                <tr><th>Product ID</th><th>Product Name</th><th>Category</th><th>Unit Price</th><th>Status</th><th>Actions</th></tr>
+                <tr><th>Image</th><th>Product ID</th><th>Product Name</th><th>Category</th><th>Unit Price</th><th>Status</th><th>Actions</th></tr>
               </thead>
               <tbody>
                 {paginated.map((product) => (
                   <tr key={product.product_id}>
+                    <td>
+                      {product.image_url ? (
+                        <img
+                          src={product.image_url}
+                          alt=""
+                          width={48}
+                          height={48}
+                          style={{ objectFit: 'cover', borderRadius: 6, border: '1px solid #e2e8f0' }}
+                        />
+                      ) : (
+                        <span className="text-ink/50" style={{ fontSize: '0.75rem' }}>—</span>
+                      )}
+                    </td>
                     <td>{product.product_id}</td>
                     <td>{product.product_name}</td>
                     <td>{product.category_name || product.category_id}</td>
@@ -290,7 +309,7 @@ function ProductDetailPage({ productId, navigate, showToast }) {
   // Fall back to mock data if API returns nothing (mock product IDs are strings like 'p1')
   const mockProduct = getProductById(productId);
   const product = productData || mockProduct;
-  if (!product) return <EmptyState title="Product not found" actionLabel="Back to Inventory" onAction={() => navigate('/warehouse/inventory')} />;
+  if (!product) return <EmptyState title="Product not found" actionLabel="Back to Branch Inventory" onAction={() => navigate('/warehouse/branch-inventory')} />;
 
   const product_id = product.product_id || product.id || '—';
   const product_name = product.product_name || product.name || '—';
@@ -316,8 +335,21 @@ function ProductDetailPage({ productId, navigate, showToast }) {
 
       <section className="panel content-panel relative overflow-hidden">
         <div className="flex flex-col md:flex-row justify-between gap-4 items-start md:items-center mb-4">
-          <h3>{product_name}</h3>
-          <p className="text-ink/70">Product ID: {product_id}</p>
+          <div className="flex gap-4 items-start">
+            {product.image_url ? (
+              <img
+                src={product.image_url}
+                alt={product_name}
+                width={96}
+                height={96}
+                style={{ objectFit: 'cover', borderRadius: 8, border: '1px solid #e2e8f0' }}
+              />
+            ) : null}
+            <div>
+              <h3 style={{ margin: 0 }}>{product_name}</h3>
+              <p className="text-ink/70" style={{ margin: '4px 0 0' }}>Product ID: {product_id}</p>
+            </div>
+          </div>
         </div>
         <ul className="info-grid">
           <li><span className="info-item-label">Product ID</span><span className="info-item-value">{product_id}</span></li>
@@ -347,7 +379,6 @@ function ProductDetailPage({ productId, navigate, showToast }) {
                   <th>Available Stock</th>
                   <th>Reorder Level</th>
                   <th>Status</th>
-                  <th>Last Updated</th>
                   <th>Created At</th>
                   <th>Updated At</th>
                 </tr>
@@ -364,9 +395,8 @@ function ProductDetailPage({ productId, navigate, showToast }) {
                     <td>
                       <StatusBadge status={b.stock_status || '—'} />
                     </td>
-                    <td style={{ fontSize: '0.82rem' }}>{b.last_updated ? new Date(b.last_updated).toLocaleDateString('en-PH') : '—'}</td>
-                    <td style={{ fontFamily: 'monospace', fontSize: '0.78rem' }}>{b.created_at ? new Date(b.created_at).toLocaleString() : '—'}</td>
-                    <td style={{ fontFamily: 'monospace', fontSize: '0.78rem' }}>{b.updated_at ? new Date(b.updated_at).toLocaleString() : '—'}</td>
+                    <td style={{ fontFamily: 'monospace', fontSize: '0.78rem' }}>{formatDisplayDateTime(b.created_at)}</td>
+                    <td style={{ fontFamily: 'monospace', fontSize: '0.78rem' }}>{formatDisplayDateTime(b.updated_at)}</td>
                   </tr>
                 ))}
               </tbody>
@@ -397,7 +427,7 @@ function ProductDetailPage({ productId, navigate, showToast }) {
               <tbody>
                 {movements.map((m, i) => (
                   <tr key={m.id || m.stock_movements_id || i}>
-                    <td>{m.movement_date ? new Date(m.movement_date).toLocaleDateString('en-PH') : (m.date || '—')}</td>
+                    <td>{m.movement_date ? formatDisplayDate(m.movement_date) : (m.date ? formatDisplayDate(m.date) : '—')}</td>
                     <td>
                       <StatusBadge status={m.type} />
                     </td>
@@ -416,7 +446,7 @@ function ProductDetailPage({ productId, navigate, showToast }) {
       </section>
 
       <div className="flex flex-wrap justify-end gap-2 mt-4">
-        <button className="button ghost" type="button" onClick={() => navigate('/warehouse/inventory')}>Back to Inventory</button>
+        <button className="button ghost" type="button" onClick={() => navigate('/warehouse/branch-inventory')}>Back to Branch Inventory</button>
         <button className="button secondary" type="button" onClick={() => navigate(`/warehouse/product/${productId}/transfer`)}>Transfer Stock</button>
         <button className="button secondary" type="button" onClick={() => navigate(`/warehouse/product/${productId}/restock`)}>Record Restock</button>
         <button className="button" type="button" onClick={() => navigate(`/warehouse/product/${productId}/stock-count`)}>Log Stock Count</button>
@@ -438,7 +468,7 @@ function AddProductPage({ navigate, showToast }) {
     setErrors(nextErrors);
     if (Object.keys(nextErrors).length) { showToast('Please fix the errors before submitting.', 'error'); return; }
     showToast('Product record created successfully.', 'success');
-    navigate('/warehouse/inventory');
+    navigate('/warehouse/branch-inventory');
   };
 
   return (
@@ -472,7 +502,7 @@ function AddProductPage({ navigate, showToast }) {
         ))}
       </section>
       <div className="flex justify-end gap-2 mt-4">
-        <button className="button secondary" type="button" onClick={() => navigate('/warehouse/inventory')}>Cancel</button>
+        <button className="button secondary" type="button" onClick={() => navigate('/warehouse/branch-inventory')}>Cancel</button>
         <button className="button" type="button" onClick={handleSubmit}>Create Product Record</button>
       </div>
     </div>
@@ -486,7 +516,7 @@ function StockCountPage({ productId, navigate, showToast }) {
   const [errors, setErrors] = useState({});
   const [submitted, setSubmitted] = useState(false);
 
-  if (!product) return <EmptyState title="Product not found" actionLabel="Back" onAction={() => navigate('/warehouse/inventory')} />;
+  if (!product) return <EmptyState title="Product not found" actionLabel="Back" onAction={() => navigate('/warehouse/branch-inventory')} />;
 
   const variance = physical !== '' ? Number(physical) - product.stock : null;
   const hasVariance = variance !== null && variance !== 0;
@@ -539,7 +569,7 @@ function RestockPage({ productId, navigate, showToast }) {
   const [form, setForm] = useState({ quantity: '', supplier: product?.supplier ?? '', deliveryRef: '', dateReceived: new Date().toISOString().slice(0, 10) });
   const [errors, setErrors] = useState({});
 
-  if (!product) return <EmptyState title="Product not found" actionLabel="Back" onAction={() => navigate('/warehouse/inventory')} />;
+  if (!product) return <EmptyState title="Product not found" actionLabel="Back" onAction={() => navigate('/warehouse/branch-inventory')} />;
 
   const handleSubmit = () => {
     const nextErrors = {};
@@ -577,7 +607,7 @@ function TransferPage({ productId, navigate, showToast }) {
   const [form, setForm] = useState({ destination: '', quantity: '', notes: '' });
   const [errors, setErrors] = useState({});
 
-  if (!product) return <EmptyState title="Product not found" actionLabel="Back" onAction={() => navigate('/warehouse/inventory')} />;
+  if (!product) return <EmptyState title="Product not found" actionLabel="Back" onAction={() => navigate('/warehouse/branch-inventory')} />;
 
   const handleSubmit = () => {
     const qty = Number(form.quantity);
@@ -627,33 +657,74 @@ function MovementsPage({ navigate }) {
   const [branchFilter, setBranchFilter] = useState('All');
   const [typeFilter, setTypeFilter] = useState('All');
   const [loading, setLoading] = useState(true);
+  const [movements, setMovements] = useState([]);
+  const [error, setError] = useState('');
 
   useEffect(() => {
-    const timer = window.setTimeout(() => setLoading(false), 400);
-    return () => window.clearTimeout(timer);
-  }, []);
+    async function load() {
+      setLoading(true);
+      setError('');
+      const params = {};
+      if (typeFilter !== 'All') params.type = typeFilter;
+      if (dateFrom) params.date_from = dateFrom;
+      if (dateTo) params.date_to = dateTo;
+      const result = await fetchStockMovements(params);
+      if (result.success) {
+        setMovements(result.data || []);
+      } else {
+        setMovements([]);
+        setError('Failed to load stock movements.');
+      }
+      setLoading(false);
+    }
+    load();
+  }, [typeFilter, dateFrom, dateTo]);
 
-  const filtered = useMemo(() => STOCK_MOVEMENTS.filter((m) => {
-    const matchProduct = productFilter === 'All' || m.productName === productFilter;
-    const matchBranch = branchFilter === 'All' || m.branch === branchFilter;
-    const matchType = typeFilter === 'All' || m.type === typeFilter;
-    const matchFrom = !dateFrom || m.date >= dateFrom;
-    const matchTo = !dateTo || m.date <= dateTo;
-    return matchProduct && matchBranch && matchType && matchFrom && matchTo;
-  }), [dateFrom, dateTo, productFilter, branchFilter, typeFilter]);
+  const productOptions = useMemo(() => {
+    const map = new Map();
+    movements.forEach((m) => {
+      if (m.product_id != null) map.set(String(m.product_id), m.product_name);
+    });
+    return [...map.entries()].sort((a, b) => a[1].localeCompare(b[1]));
+  }, [movements]);
 
-  const movementTypes = ['All', ...new Set(STOCK_MOVEMENTS.map((m) => m.type))];
+  const branchOptions = useMemo(() => {
+    return [...new Set(movements.map((m) => m.branch_name).filter(Boolean))].sort();
+  }, [movements]);
+
+  const movementTypes = useMemo(() => {
+    const types = [...new Set(movements.map((m) => m.type).filter(Boolean))].sort();
+    return ['All', ...types];
+  }, [movements]);
+
+  const filtered = useMemo(() => movements.filter((m) => {
+    const matchProduct = productFilter === 'All' || String(m.product_id) === productFilter;
+    const matchBranch = branchFilter === 'All' || m.branch_name === branchFilter;
+    return matchProduct && matchBranch;
+  }), [movements, productFilter, branchFilter]);
 
   if (loading) return <LoadingState message="Loading stock movements..." />;
 
   return (
     <div className="relative z-10 grid gap-[22px] w-full">
       <section className="panel content-panel relative overflow-hidden">
-        <div className="flex flex-col md:flex-row justify-between gap-4 items-start md:items-center mb-4"><h3>Movement History</h3></div>
+        <div className="flex flex-col md:flex-row justify-between gap-4 items-start md:items-center mb-4">
+          <h3>Movement History</h3>
+          <p className="text-ink/70" style={{ margin: 0, fontSize: '0.82rem' }}>{movements.length} record{movements.length !== 1 ? 's' : ''} from database</p>
+        </div>
+        {error ? <p className="form-error">{error}</p> : null}
         <div className="accounts-filters">
-          <select className="filter-select" value={productFilter} onChange={(e) => setProductFilter(e.target.value)}><option value="All">All Products</option>{PRODUCTS.map((p) => <option key={p.id} value={p.name}>{p.name}</option>)}</select>
-          <select className="filter-select" value={branchFilter} onChange={(e) => setBranchFilter(e.target.value)}><option value="All">All Branches</option>{BRANCHES.map((b) => <option key={b}>{b}</option>)}</select>
-          <select className="filter-select" value={typeFilter} onChange={(e) => setTypeFilter(e.target.value)}>{movementTypes.map((t) => <option key={t}>{t === 'All' ? 'All Types' : t}</option>)}</select>
+          <select className="filter-select" value={productFilter} onChange={(e) => setProductFilter(e.target.value)}>
+            <option value="All">All Products</option>
+            {productOptions.map(([id, name]) => <option key={id} value={id}>{name}</option>)}
+          </select>
+          <select className="filter-select" value={branchFilter} onChange={(e) => setBranchFilter(e.target.value)}>
+            <option value="All">All Branches</option>
+            {branchOptions.map((b) => <option key={b} value={b}>{b}</option>)}
+          </select>
+          <select className="filter-select" value={typeFilter} onChange={(e) => setTypeFilter(e.target.value)}>
+            {movementTypes.map((t) => <option key={t} value={t}>{t === 'All' ? 'All Types' : t}</option>)}
+          </select>
           <input className="filter-input" type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} aria-label="From date" />
           <input className="filter-input" type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} aria-label="To date" />
         </div>
@@ -662,55 +733,95 @@ function MovementsPage({ navigate }) {
         <section className="panel content-panel relative overflow-hidden">
           <div className="corvex-table-wrapper">
             <table className="corvex-table">
-              <thead><tr><th>Transaction ID</th><th>Product Name</th><th>Quantity</th><th>Type</th><th>Branch</th><th>Date</th><th>Actions</th></tr></thead>
+              <thead>
+                <tr>
+                  <th>Movement ID</th>
+                  <th>Reference</th>
+                  <th>Product</th>
+                  <th>Quantity</th>
+                  <th>Type</th>
+                  <th>Branch</th>
+                  <th>Date</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
               <tbody>
                 {filtered.map((m) => (
-                  <tr key={m.id}>
-                    <td>{m.id}</td>
-                    <td>{m.productName}</td>
-                    <td>{m.quantity > 0 ? `+${m.quantity}` : m.quantity}</td>
-                    <td>{m.type}</td>
-                    <td>{m.branch}</td>
-                    <td>{m.date}</td>
-                    <td><button className="icon-action-button" type="button" title="View" onClick={() => navigate(`/warehouse/movements/${m.id}`)}><NavIcon name="view" /></button></td>
+                  <tr key={m.movement_id}>
+                    <td><span style={{ fontFamily: 'monospace', fontSize: '0.82rem' }}>{m.movement_id}</span></td>
+                    <td><span style={{ fontFamily: 'monospace', fontSize: '0.82rem' }}>{m.movement_ref || '—'}</span></td>
+                    <td>{m.product_name}{m.sku ? <><br /><span className="text-ink/70" style={{ fontSize: '0.75rem' }}>{m.sku}</span></> : null}</td>
+                    <td style={{ fontWeight: 600, color: m.quantity > 0 ? '#059669' : '#dc2626' }}>
+                      {m.quantity > 0 ? `+${m.quantity}` : m.quantity}
+                    </td>
+                    <td><StatusBadge status={m.type} /></td>
+                    <td>{m.branch_name || '—'}</td>
+                    <td style={{ fontSize: '0.82rem' }}>{formatDisplayDate(m.movement_date)}</td>
+                    <td>
+                      <button className="icon-action-button" type="button" title="View" onClick={() => navigate(`/warehouse/movements/${m.movement_id}`)}>
+                        <NavIcon name="view" />
+                      </button>
+                    </td>
                   </tr>
                 ))}
               </tbody>
             </table>
           </div>
         </section>
-      ) : <EmptyState title="No movements found" description="Adjust your filters." />}
+      ) : <EmptyState title="No movements found" description="Adjust your filters or record stock activity to populate this list." />}
     </div>
   );
 }
 
 function MovementDetailPage({ movementId, navigate }) {
-  const movement = getMovementById(movementId);
+  const [movement, setMovement] = useState(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    async function load() {
+      setLoading(true);
+      const result = await fetchStockMovementById(movementId);
+      if (result.success) setMovement(result.data);
+      setLoading(false);
+    }
+    load();
+  }, [movementId]);
+
+  if (loading) return <LoadingState message="Loading movement..." />;
   if (!movement) return <EmptyState title="Movement not found" actionLabel="Back" onAction={() => navigate('/warehouse/movements')} />;
+
   return (
     <div className="relative z-10 grid gap-[22px] w-full">
       <StatsGrid stats={[
-        { label: 'Transaction ID', value: movement.id },
-        { label: 'Quantity', value: String(movement.quantity) },
+        { label: 'Movement ID', value: String(movement.movement_id) },
+        { label: 'Quantity', value: movement.quantity > 0 ? `+${movement.quantity}` : String(movement.quantity) },
         { label: 'Type', value: movement.type },
       ]} />
       <section className="panel content-panel relative overflow-hidden">
         <div className="transfer-detail-grid">
           <article className="transfer-detail-card">
+            <span>Reference</span>
+            <strong style={{ fontFamily: 'monospace' }}>{movement.movement_ref || '—'}</strong>
+          </article>
+          <article className="transfer-detail-card">
             <span>Product</span>
-            <strong>{movement.productName}</strong>
+            <strong>{movement.product_name}{movement.sku ? ` (${movement.sku})` : ''}</strong>
           </article>
           <article className="transfer-detail-card">
             <span>Branch</span>
-            <strong>{movement.branch}</strong>
+            <strong>{movement.branch_name || '—'}</strong>
           </article>
           <article className="transfer-detail-card">
-            <span>Date</span>
-            <strong>{movement.date}</strong>
+            <span>Movement Date</span>
+            <strong>{formatDisplayDate(movement.movement_date)}</strong>
           </article>
-          <article className="transfer-detail-card transfer-detail-card-wide">
-            <span>Notes</span>
-            <strong>{movement.notes}</strong>
+          <article className="transfer-detail-card">
+            <span>Performed By</span>
+            <strong>{movement.performed_by_name || '—'}</strong>
+          </article>
+          <article className="transfer-detail-card">
+            <span>Recorded At</span>
+            <strong>{formatDisplayDateTime(movement.created_at)}</strong>
           </article>
         </div>
       </section>
@@ -772,6 +883,8 @@ function TransfersPage({ navigate }) {
                   <th>To</th>
                   <th>Submitted By</th>
                   <th>Date</th>
+                  <th>Created At</th>
+                  <th>Updated At</th>
                   <th>Status</th>
                   <th>Actions</th>
                 </tr>
@@ -786,8 +899,10 @@ function TransfersPage({ navigate }) {
                     <td>{t.destination_branch}</td>
                     <td>{t.submitted_by_name || '—'}</td>
                     <td className="text-ink/70" style={{ fontSize: '0.82rem' }}>
-                      {t.submitted_date ? new Date(t.submitted_date).toLocaleDateString('en-PH') : '—'}
+                      {formatDisplayDate(t.submitted_date)}
                     </td>
+                    <td style={{ fontSize: '0.82rem' }}>{formatDisplayDateTime(t.created_at)}</td>
+                    <td style={{ fontSize: '0.82rem' }}>{formatDisplayDateTime(t.updated_at)}</td>
                     <td>
                       <StatusBadge status={t.status} />
                     </td>
@@ -854,7 +969,15 @@ function TransferDetailPage({ transferId, navigate, showToast }) {
           </article>
           <article className="transfer-detail-card">
             <span>Submitted Date</span>
-            <strong>{transfer.submitted_date ? new Date(transfer.submitted_date).toLocaleDateString('en-PH') : '—'}</strong>
+            <strong>{formatDisplayDate(transfer.submitted_date)}</strong>
+          </article>
+          <article className="transfer-detail-card">
+            <span>Created At</span>
+            <strong>{formatDisplayDateTime(transfer.created_at)}</strong>
+          </article>
+          <article className="transfer-detail-card">
+            <span>Updated At</span>
+            <strong>{formatDisplayDateTime(transfer.updated_at)}</strong>
           </article>
           {transfer.approved_by_name ? (
             <article className="transfer-detail-card">
@@ -865,7 +988,7 @@ function TransferDetailPage({ transferId, navigate, showToast }) {
           {transfer.completed_date ? (
             <article className="transfer-detail-card">
               <span>Completed Date</span>
-              <strong>{new Date(transfer.completed_date).toLocaleDateString('en-PH')}</strong>
+              <strong>{formatDisplayDate(transfer.completed_date)}</strong>
             </article>
           ) : null}
           {transfer.approval_info ? (
@@ -969,7 +1092,7 @@ function RestockHistoryPage({ navigate }) {
                     <td>{r.supplier_name}</td>
                     <td>{r.branch_name}</td>
                     <td style={{ color: '#059669', fontWeight: 600 }}>+{r.quantity}</td>
-                    <td>{r.received_date ? new Date(r.received_date).toLocaleDateString('en-PH') : '—'}</td>
+                    <td>{formatDisplayDate(r.received_date)}</td>
                   </tr>
                 ))}
               </tbody>
@@ -990,43 +1113,97 @@ function RestockDetailPage({ restockId, navigate }) {
 }
 
 function NotificationsPage({ navigate, showToast }) {
-  const [notifications, setNotifications] = useState(NOTIFICATIONS);
+  const [notifications, setNotifications] = useState([]);
+  const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState('All');
+
+  useEffect(() => {
+    async function load() {
+      setLoading(true);
+      const result = await fetchNotifications();
+      if (result.success) setNotifications(result.data || []);
+      else if (showToast) showToast('Failed to load notifications.', 'error');
+      setLoading(false);
+    }
+    load();
+  }, [showToast]);
+
+  const categories = useMemo(() => {
+    const fromData = [...new Set(notifications.map((n) => n.category).filter(Boolean))];
+    return ['All', 'Unread', 'Read', ...fromData.sort()];
+  }, [notifications]);
+
   const filtered = useMemo(() => {
-    if (filter === 'Unread') return notifications.filter((n) => !n.read);
-    if (filter === 'Read') return notifications.filter((n) => n.read);
-    if (filter === 'Low Stock') return notifications.filter((n) => n.type === 'low');
-    if (filter === 'Critical') return notifications.filter((n) => n.type === 'critical');
-    if (filter === 'Transfers') return notifications.filter((n) => n.type === 'transfer');
-    if (filter === 'Restocks') return notifications.filter((n) => n.type === 'restock');
-    if (filter === 'Forecast') return notifications.filter((n) => n.type === 'forecast');
-    return notifications;
+    if (filter === 'Unread') return notifications.filter((n) => n.status === 'Unread');
+    if (filter === 'Read') return notifications.filter((n) => n.status === 'Read');
+    if (filter === 'All') return notifications;
+    return notifications.filter((n) => n.category === filter);
   }, [notifications, filter]);
+
+  const markAllRead = async () => {
+    const unread = notifications.filter((n) => n.status === 'Unread');
+    await Promise.all(unread.map((n) => markNotificationRead(n.notification_id)));
+    setNotifications((items) => items.map((n) => ({ ...n, status: 'Read' })));
+    showToast('All notifications marked as read.', 'success');
+  };
+
+  const markOneRead = async (id) => {
+    const result = await markNotificationRead(id);
+    if (result.success) {
+      setNotifications((items) => items.map((n) => (n.notification_id === id ? { ...n, status: 'Read' } : n)));
+      showToast('Marked as read.', 'success');
+    }
+  };
+
+  if (loading) return <LoadingState message="Loading notifications..." />;
 
   return (
     <div className="relative z-10 grid gap-[22px] w-full">
       <div className="flex justify-end mt-2 mb-2">
-        <button className="button secondary" type="button" onClick={() => { setNotifications((items) => items.map((n) => ({ ...n, read: true }))); showToast('All marked as read.', 'success'); }}>Mark All as Read</button>
+        <button className="button secondary" type="button" onClick={markAllRead}>Mark All as Read</button>
       </div>
       <section className="panel content-panel relative overflow-hidden">
         <div className="segmented-control">
-          {['All', 'Unread', 'Read', 'Low Stock', 'Critical', 'Transfers', 'Restocks', 'Forecast'].map((f) => (
+          {categories.map((f) => (
             <button key={f} className={filter === f ? 'segment active' : 'segment'} type="button" onClick={() => setFilter(f)}>{f}</button>
           ))}
         </div>
       </section>
       {filtered.length ? (
-        <div className="notification-list">
-          {filtered.map((item) => (
-            <article key={item.id} className={`notification-item${item.read ? '' : ' unread'}`}>
-              <div><h4>{item.title}</h4><p className="text-ink/70">{item.message}</p><span className="notification-time">{item.time}</span></div>
-              <div className="notification-actions">
-                {!item.read ? <button className="inline-flex justify-center items-center gap-2 px-5 py-2.5 rounded-md bg-transparent text-blue border-[1.5px] border-blue-30 shadow-none hover:bg-blue-08 transition-all duration-160 cursor-pointer" type="button" onClick={() => { setNotifications((items) => items.map((n) => (n.id === item.id ? { ...n, read: true } : n))); showToast('Marked as read.', 'success'); }}>Mark as Read</button> : null}
-                <button className="inline-flex justify-center items-center gap-2 px-5 py-2.5 rounded-md bg-mint text-ink border-[1.5px] border-surface-3 shadow-none hover:border-blue hover:text-blue transition-all duration-160 cursor-pointer" type="button" onClick={() => navigate(item.relatedTo)}>Open Related Record</button>
-              </div>
-            </article>
-          ))}
-        </div>
+        <section className="panel content-panel relative overflow-hidden">
+          <div className="corvex-table-wrapper">
+            <table className="corvex-table">
+              <thead>
+                <tr>
+                  <th>Category</th>
+                  <th>Title</th>
+                  <th>Message</th>
+                  <th>Date</th>
+                  <th>Status</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filtered.map((item) => (
+                  <tr key={item.notification_id} className={item.status === 'Unread' ? 'notification-row-unread' : ''}>
+                    <td><StatusBadge status={item.category || 'General'} /></td>
+                    <td><strong>{item.title}</strong></td>
+                    <td style={{ maxWidth: 280 }}>{item.message}</td>
+                    <td>{formatDisplayDate(item.created_at)}</td>
+                    <td><StatusBadge status={item.status} /></td>
+                    <td className="table-actions">
+                      {item.status === 'Unread' ? (
+                        <button className="icon-action-button" type="button" title="Mark read" onClick={() => markOneRead(item.notification_id)}>
+                          <NavIcon name="check" />
+                        </button>
+                      ) : null}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </section>
       ) : <EmptyState title="No notifications" description="You're all caught up." />}
     </div>
   );
@@ -1256,22 +1433,21 @@ function SuppliersPage({ navigate, showToast }) {
           <div className="corvex-table-wrapper">
             <table className="corvex-table">
               <thead>
-                <tr><th>Supplier ID</th><th>Supplier Name</th><th>Contact</th><th>Email</th><th>Address</th><th>Status</th><th>Created At</th><th>Updated At</th><th>Actions</th></tr>
+                <tr><th>Supplier ID</th><th>Supplier Name</th><th>Contact</th><th>Email</th><th>Address</th><th>Status</th><th>Actions</th></tr>
               </thead>
               <tbody>
                 {suppliers.map((supplier) => (
-                  <tr key={supplier.supplier_id}>
-                    <td>{supplier.supplier_id}</td>
+                  <tr key={supplier.suppliers_id}>
+                    <td><span style={{ fontFamily: 'monospace', fontSize: '0.82rem' }}>{supplier.suppliers_id}</span></td>
                     <td>{supplier.supplier_name}</td>
                     <td>{supplier.contact || '—'}</td>
                     <td>{supplier.email || '—'}</td>
                     <td>{supplier.address || '—'}</td>
                     <td><StatusBadge status={supplier.status} /></td>
-                    <td>{supplier.created_at ? new Date(supplier.created_at).toLocaleDateString('en-PH') : '—'}</td>
-                    <td>{supplier.updated_at ? new Date(supplier.updated_at).toLocaleDateString('en-PH') : '—'}</td>
                     <td className="table-actions">
+                      <button className="icon-action-button" type="button" title="View" onClick={() => navigate(`/warehouse/suppliers/${supplier.suppliers_id}`)}><NavIcon name="view" /></button>
                       <button className="icon-action-button" type="button" title="Edit" onClick={() => handleEdit(supplier)}><NavIcon name="edit" /></button>
-                      <button className="icon-action-button" type="button" title="Delete" onClick={() => handleDelete(supplier.supplier_id)}><NavIcon name="delete" /></button>
+                      <button className="icon-action-button" type="button" title="Delete" onClick={() => handleDelete(supplier.suppliers_id)}><NavIcon name="delete" /></button>
                     </td>
                   </tr>
                 ))}
@@ -1325,6 +1501,70 @@ function SuppliersPage({ navigate, showToast }) {
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+function SupplierDetailPage({ supplierId, navigate, showToast }) {
+  const [supplier, setSupplier] = useState(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    async function load() {
+      setLoading(true);
+      try {
+        const apiClient = (await import('../../api/apiClient.js')).default;
+        const res = await apiClient.get(`/suppliers/${supplierId}`);
+        if (res.data.success) setSupplier(res.data.data);
+        else if (showToast) showToast('Supplier not found.', 'error');
+      } catch (err) {
+        console.error('[Suppliers] detail load error:', err.message);
+        if (showToast) showToast('Failed to load supplier.', 'error');
+      }
+      setLoading(false);
+    }
+    load();
+  }, [supplierId, showToast]);
+
+  if (loading) return <LoadingState message="Loading supplier..." />;
+  if (!supplier) {
+    return <EmptyState title="Supplier not found" actionLabel="Back" onAction={() => navigate('/warehouse/suppliers')} />;
+  }
+
+  return (
+    <div className="relative z-10 grid gap-[22px] w-full">
+      <StatsGrid stats={[
+        { label: 'Supplier ID', value: String(supplier.suppliers_id) },
+        { label: 'Status', value: supplier.status },
+        { label: 'Contact', value: supplier.contact || '—' },
+      ]} />
+      <section className="panel content-panel relative overflow-hidden">
+        <div className="transfer-detail-grid">
+          <article className="transfer-detail-card">
+            <span>Supplier Name</span>
+            <strong>{supplier.supplier_name}</strong>
+          </article>
+          <article className="transfer-detail-card">
+            <span>Email</span>
+            <strong>{supplier.email || '—'}</strong>
+          </article>
+          <article className="transfer-detail-card transfer-detail-card-wide">
+            <span>Address</span>
+            <strong>{supplier.address || '—'}</strong>
+          </article>
+          <article className="transfer-detail-card">
+            <span>Created At</span>
+            <strong>{formatDisplayDateTime(supplier.created_at)}</strong>
+          </article>
+          <article className="transfer-detail-card">
+            <span>Updated At</span>
+            <strong>{formatDisplayDateTime(supplier.updated_at)}</strong>
+          </article>
+        </div>
+      </section>
+      <div className="flex justify-end mt-4">
+        <button className="button ghost" type="button" onClick={() => navigate('/warehouse/suppliers')}>Back to Suppliers</button>
+      </div>
     </div>
   );
 }
@@ -1393,7 +1633,7 @@ function BranchInventoryPage({ navigate, showToast }) {
           <input
             className="filter-input search"
             type="search"
-            placeholder="Search by product name, SKU, or ID"
+            placeholder="Search by product or branch name"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
           />
@@ -1417,16 +1657,12 @@ function BranchInventoryPage({ navigate, showToast }) {
               <thead>
                 <tr>
                   <th>Inventory ID</th>
-                  <th>Branch ID</th>
                   <th>Branch</th>
-                  <th>Product ID</th>
                   <th>Product</th>
-                  <th>SKU</th>
                   <th>Category</th>
                   <th>Available Stock</th>
                   <th>Reorder Level</th>
                   <th>Status</th>
-                  <th>Last Updated</th>
                   <th>Created At</th>
                   <th>Updated At</th>
                 </tr>
@@ -1435,11 +1671,8 @@ function BranchInventoryPage({ navigate, showToast }) {
                 {filtered.map((r) => (
                   <tr key={r.branch_inventory_id}>
                     <td><span style={{ fontFamily: 'monospace', fontSize: '0.82rem' }}>{r.branch_inventory_id}</span></td>
-                    <td><span style={{ fontFamily: 'monospace', fontSize: '0.82rem' }}>{r.branch_id}</span></td>
                     <td>{r.branch_name}</td>
-                    <td><span style={{ fontFamily: 'monospace', fontSize: '0.82rem' }}>{r.product_id}</span></td>
                     <td><strong>{r.product_name}</strong></td>
-                    <td><span style={{ fontFamily: 'monospace', fontSize: '0.82rem' }}>{r.sku || '—'}</span></td>
                     <td>{r.category_name || '—'}</td>
                     <td style={{ fontWeight: 600, color: r.available_stock <= 0 ? '#dc2626' : r.available_stock <= r.reorder_level ? '#d97706' : '#059669' }}>
                       {r.available_stock}
@@ -1448,9 +1681,8 @@ function BranchInventoryPage({ navigate, showToast }) {
                     <td>
                       <StatusBadge status={r.stock_status || '—'} />
                     </td>
-                    <td style={{ fontSize: '0.82rem' }}>{r.last_updated ? new Date(r.last_updated).toLocaleDateString('en-PH') : '—'}</td>
-                    <td style={{ fontFamily: 'monospace', fontSize: '0.78rem' }}>{r.created_at ? new Date(r.created_at).toLocaleString() : '—'}</td>
-                    <td style={{ fontFamily: 'monospace', fontSize: '0.78rem' }}>{r.updated_at ? new Date(r.updated_at).toLocaleString() : '—'}</td>
+                    <td style={{ fontFamily: 'monospace', fontSize: '0.78rem' }}>{formatDisplayDateTime(r.created_at)}</td>
+                    <td style={{ fontFamily: 'monospace', fontSize: '0.78rem' }}>{formatDisplayDateTime(r.updated_at)}</td>
                   </tr>
                 ))}
               </tbody>
@@ -1472,14 +1704,16 @@ export function WarehousePageBody({ page, navigate, showToast }) {
     transferId: page.params?.transferId,
     restockId: page.params?.restockId,
     creditId: page.params?.creditId,
+    supplierId: page.params?.supplierId,
     navigate,
     showToast,
   };
   switch (page.pageType) {
     case 'dashboard':         return <DashboardPage {...props} />;
     case 'settings':          return <SettingsPage {...props} />;
-    case 'inventory':         return <InventoryPage {...props} />;
+    case 'inventory':
     case 'branchInventory':   return <BranchInventoryPage {...props} />;
+    case 'products':          return <InventoryPage {...props} />;
     case 'addProduct':        return <AddProductPage {...props} />;
     case 'productDetail':     return <ProductDetailPage {...props} />;
     case 'stockCount':        return <StockCountPage {...props} />;
@@ -1498,6 +1732,7 @@ export function WarehousePageBody({ page, navigate, showToast }) {
     case 'auditLog':          return <AuditLogPage {...props} />;
     case 'reports':           return <ReportsPage {...props} />;
     case 'suppliers':         return <SuppliersPage {...props} />;
+    case 'supplierDetail':    return <SupplierDetailPage {...props} />;
     default:                  return <EmptyState title="Page not found" description="This screen is not configured yet." />;
   }
 }

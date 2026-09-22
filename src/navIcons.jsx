@@ -617,6 +617,7 @@ const LABEL_ICON_KEY = {
   Customers: 'accounts',
   'Collection History': 'history',
   'Sales History': 'history',
+  'Log a Sale': 'add',
   'Stock Movements': 'transfer',
   'Restock History': 'restock',
   Inventory: 'inventory',

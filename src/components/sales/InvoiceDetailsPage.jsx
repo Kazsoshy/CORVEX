@@ -3,7 +3,7 @@ import { fetchInvoiceById, fetchInvoiceItems } from '../../api/salesService';
 import { EmptyState } from '../shared/EmptyState';
 import { LoadingState } from '../shared/LoadingState';
 import { StatusBadge } from '../StatusBadge';
-import { formatCurrency } from '../../data/salesMockData';
+import { formatCurrency, formatDisplayDate, formatDisplayDateTime } from '../../data/salesMockData';
 import { NavIcon } from '../../navIcons';
 
 export function InvoiceDetailsPage({ invoiceId, navigate, showToast }) {
@@ -96,11 +96,11 @@ export function InvoiceDetailsPage({ invoiceId, navigate, showToast }) {
             </div>
             <div style={{ padding: 14, background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 8 }}>
               <span style={{ fontSize: '0.78rem', color: '#64748b', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.03em' }}>Invoice Date</span>
-              <strong style={{ display: 'block', fontSize: '1.15rem', marginTop: 4 }}>{invoice.invoices_date ? new Date(invoice.invoices_date).toLocaleDateString('en-PH') : '—'}</strong>
+              <strong style={{ display: 'block', fontSize: '1.15rem', marginTop: 4 }}>{formatDisplayDate(invoice.invoices_date)}</strong>
             </div>
             <div style={{ padding: 14, background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 8 }}>
               <span style={{ fontSize: '0.78rem', color: '#64748b', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.03em' }}>Due Date</span>
-              <strong style={{ display: 'block', fontSize: '1.15rem', marginTop: 4 }}>{invoice.due_date ? new Date(invoice.due_date).toLocaleDateString('en-PH') : '—'}</strong>
+              <strong style={{ display: 'block', fontSize: '1.15rem', marginTop: 4 }}>{formatDisplayDate(invoice.due_date)}</strong>
             </div>
             <div style={{ padding: 14, background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 8 }}>
               <span style={{ fontSize: '0.78rem', color: '#64748b', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.03em' }}>Sales Agent</span>
@@ -108,11 +108,11 @@ export function InvoiceDetailsPage({ invoiceId, navigate, showToast }) {
             </div>
             <div style={{ padding: 14, background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 8 }}>
               <span style={{ fontSize: '0.78rem', color: '#64748b', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.03em' }}>Created</span>
-              <strong style={{ display: 'block', fontSize: '1.05rem', marginTop: 4 }}>{invoice.created_at ? new Date(invoice.created_at).toLocaleString() : '—'}</strong>
+              <strong style={{ display: 'block', fontSize: '1.05rem', marginTop: 4 }}>{formatDisplayDateTime(invoice.created_at)}</strong>
             </div>
             <div style={{ padding: 14, background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 8 }}>
               <span style={{ fontSize: '0.78rem', color: '#64748b', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.03em' }}>Updated</span>
-              <strong style={{ display: 'block', fontSize: '1.05rem', marginTop: 4 }}>{invoice.updated_at ? new Date(invoice.updated_at).toLocaleString() : '—'}</strong>
+              <strong style={{ display: 'block', fontSize: '1.05rem', marginTop: 4 }}>{formatDisplayDateTime(invoice.updated_at)}</strong>
             </div>
           </div>
         ) : null}
@@ -160,7 +160,7 @@ export function InvoiceDetailsPage({ invoiceId, navigate, showToast }) {
                       <td>{item.quantity}</td>
                       <td style={{ fontWeight: 600 }}>{formatCurrency(Number(item.unit_price))}</td>
                       <td style={{ fontWeight: 700 }}>{formatCurrency(Number(item.line_total))}</td>
-                      <td>{item.created_at ? new Date(item.created_at).toLocaleDateString('en-PH') : '—'}</td>
+                      <td>{formatDisplayDateTime(item.created_at)}</td>
                     </tr>
                   ))}
                 </tbody>

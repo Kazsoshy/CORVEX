@@ -19,6 +19,7 @@ import adminRouter     from './routes/admin.js';
 import permissionsRouter from './routes/permissions.js';
 import salesRouter     from './routes/sales.js';
 import collectorRouter from './routes/collector.js';
+import notificationsRouter from './routes/notifications.js';
 import { requireAuth, requireBranchScope } from './middleware/auth.js';
 
 dotenv.config();
@@ -97,6 +98,7 @@ app.use('/api/reports', requireAuth, reportsRouter);
 app.use('/api/inventory', requireAuth, inventoryRouter);
 app.use('/api/sales',      requireAuth, salesRouter);
 app.use('/api/collector',  requireAuth, collectorRouter);
+app.use('/api/notifications', requireAuth, notificationsRouter);
 
 // Admin routes — identify required
 app.use('/api/admin', requireAuth, adminRouter);
