@@ -582,7 +582,10 @@ function ReportsHubPage({
     async function load() {
       setLoading(true);
       const [staffResult, collectionResult, salesResult, inventoryResult, delinquencyResult, complianceResult, kpiResult, invoiceResult] = await Promise.all([getBranchStaff(), getReportCollection(), getReportSales(), getReportInventory(), getReportDelinquency(), getReportCompliance(), getReportKPI(), getReportInvoices()]);
-      if (staffResult.success) setStaff(staffResult.data);
+      if (staffResult.success) setStaff(staffResult.data || {
+        collectors: [],
+        salesAgents: []
+      });
       if (collectionResult.success) setCollectionData(collectionResult.data);
       if (salesResult.success) setSalesData(salesResult.data);
       if (inventoryResult.success) setInventoryData(inventoryResult.data);
@@ -594,19 +597,19 @@ function ReportsHubPage({
     }
     load();
   }, []);
-  const collectorAmt = staff.collectors.map(c => ({
+  const collectorAmt = (staff?.collectors || []).map(c => ({
     name: c.name.split(' ')[0],
     amount: c.collectionAmount,
     compliance: c.complianceScore
   }));
-  const agentRev = staff.salesAgents.map(a => ({
+  const agentRev = (staff?.salesAgents || []).map(a => ({
     name: a.name.split(' ')[0],
     revenue: a.totalSalesAmount,
     visits: a.visitCompletionRate
   }));
-  const pagination_inventoryData_lowStockItems = usePagination(inventoryData.lowStockItems);
+  const pagination_inventoryData_lowStockItems = usePagination(inventoryData?.lowStockItems || []);
   const paginated_inventoryData_lowStockItems = pagination_inventoryData_lowStockItems.paginatedData;
-  const pagination_invoices = usePagination(invoices);
+  const pagination_invoices = usePagination(invoices || []);
   const paginated_invoices = pagination_invoices.paginatedData;
   if (loading) return <LoadingState message="Loading reports..." />;
   return <div className="relative z-10 grid gap-[22px] w-full">
@@ -1248,7 +1251,7 @@ function CIQueuePage({
         {filtered.length ? <><div className="corvex-table-wrapper"><table className="corvex-table">
             <thead><tr><th>Customer</th><th>Submitted By</th><th>Date</th><th>Delinquency</th><th>Status</th><th>Actions</th></tr></thead>
             <tbody>{paginated_filtered.map(ci => <tr key={ci.id}><td>{ci.customerName}</td><td>{ci.submittedBy}</td><td>{ci.submissionDate}</td><td><StatusBadge status={ci.delinquencyStatus} /></td><td><StatusBadge status={ci.status} /></td><td className="table-actions">
-              <button className="icon-action-button" type="button" title="Open" onClick={() => navigate(`/branch-manager/ci-approvals/${ci.id}`)}><NavIcon name="view" /></button>
+              <button className="icon-action-button" type="button" title="View" onClick={() => navigate(`/branch-manager/ci-approvals/${ci.id}`)}><NavIcon name="view" /></button>
               {ci.status === 'Pending' && <><button className="icon-action-button" type="button" title="Approve" onClick={() => showToast(`Approved CI for ${ci.customerName}.`, 'success')}><NavIcon name="check" /></button><button className="icon-action-button danger" type="button" title="Reject" onClick={() => showToast(`Rejected CI for ${ci.customerName}.`, 'error')}><NavIcon name="close" /></button></>}
             </td></tr>)}</tbody>
           </table></div><Pagination {...pagination_filtered} /></>
@@ -1886,7 +1889,7 @@ function ApprovalCenterPage({
                       <td><StatusBadge status={ci.delinquencyStatus} /></td>
                       <td><StatusBadge status={ci.status} /></td>
                       <td className="table-actions">
-                        <button className="icon-action-button" type="button" title="Review" onClick={() => navigate(`/branch-manager/ci-approvals/${ci.id}`)}><NavIcon name="view" /></button>
+                        <button className="icon-action-button" type="button" title="View" onClick={() => navigate(`/branch-manager/ci-approvals/${ci.id}`)}><NavIcon name="view" /></button>
                         {ci.status === 'Pending' && <>
                           <button className="icon-action-button" type="button" title="Approve" onClick={() => approveCI(ci.id)}><NavIcon name="check" /></button>
                           <button className="icon-action-button danger" type="button" title="Reject" onClick={() => rejectCI(ci.id)}><NavIcon name="close" /></button>

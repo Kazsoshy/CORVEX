@@ -808,7 +808,7 @@ function InventoryPage({
                       <td><strong>{p.name}</strong></td><td>{p.sku}</td><td>{p.branch}</td><td>{p.quantity}</td>
                       <td><StatusPill status={p.status} /></td>
                       <td>{p.lastUpdated}</td>
-                      <td className="table-actions"><button className="icon-action-button" type="button" title="Details" onClick={() => showToast(`${p.name} details.`, 'success')}><NavIcon name="view" /></button></td>
+                      <td className="table-actions"><button className="icon-action-button" type="button" title="View" onClick={() => showToast(`${p.name} details.`, 'success')}><NavIcon name="view" /></button></td>
                     </tr>)}
                 </tbody>
               </table>

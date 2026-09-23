@@ -554,6 +554,13 @@ const ICONS = {
       <line x1="14" y1="11" x2="14" y2="17" />
     </>
   ),
+  archive: (
+    <>
+      <polyline points="21 8 21 21 3 21 3 8" />
+      <rect x="1" y="3" width="22" height="5" />
+      <line x1="10" y1="12" x2="14" y2="12" />
+    </>
+  ),
   view: (
     <>
       <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />

@@ -53,8 +53,9 @@ export async function fetchInvoices(params = {}) {
     return response.data;
   } catch (error) {
     const message = error?.response?.data?.message || error?.message || 'Failed to fetch invoices';
-    console.error('Failed to fetch invoices:', error);
-    return { success: false, data: [], pagination: { total: 0, page: 1, limit: 50, totalPages: 0 }, message };
+    const detail = error?.response?.data?.error || '';
+    console.error('Failed to fetch invoices:', message, detail);
+    return { success: false, data: [], pagination: { total: 0, page: 1, limit: 50, totalPages: 0 }, message, detail };
   }
 }
 
@@ -106,13 +107,15 @@ export async function fetchInvoiceItems(invoiceId) {
 // Field Visits API
 // ──────────────────────────────────────────────────────────────────────────────
 
-export async function fetchFieldVisits() {
+export async function fetchFieldVisits(params = {}) {
   try {
-    const response = await apiClient.get('/sales/visits');
+    const response = await apiClient.get('/sales/visits', { params });
     return response.data;
   } catch (error) {
-    console.error('Failed to fetch field visits:', error);
-    return { success: false, data: [], count: 0 };
+    const message = error?.response?.data?.message || error?.message || 'Failed to fetch field visits';
+    const detail = error?.response?.data?.error || '';
+    console.error('Failed to fetch field visits:', message, detail);
+    return { success: false, data: [], count: 0, message, detail };
   }
 }
 
@@ -121,8 +124,9 @@ export async function fetchFieldVisitById(id) {
     const response = await apiClient.get(`/sales/visits/${id}`);
     return response.data;
   } catch (error) {
+    const message = error?.response?.data?.message || error?.message || 'Failed to fetch field visit';
     console.error('Failed to fetch field visit:', error);
-    return { success: false, data: null };
+    return { success: false, data: null, message };
   }
 }
 

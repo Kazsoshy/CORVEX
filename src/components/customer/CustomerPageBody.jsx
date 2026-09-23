@@ -257,7 +257,9 @@ function PaymentHistoryPage({
                     <td>{p.collector}</td>
                     <td>{p.receiptNumber}</td>
                     <td className="table-actions">
-                      <button className="inline-flex justify-center items-center gap-2 px-5 py-2.5 rounded-md bg-transparent text-blue border-[1.5px] border-blue-30 shadow-none hover:bg-blue-08 transition-all duration-160 cursor-pointer" type="button" onClick={() => navigate(`/customer/receipts/${p.receiptNumber}`)}>View Receipt</button>
+                      <button className="icon-action-button" type="button" title="View" onClick={() => navigate(`/customer/receipts/${p.receiptNumber}`)}>
+                        <NavIcon name="view" />
+                      </button>
                     </td>
                   </tr>)}
               </tbody>
@@ -288,8 +290,12 @@ function ReceiptsPage({
                     <td>{r.date}</td>
                     <td>{formatCurrency(r.amount)}</td>
                     <td className="table-actions">
-                      <button className="inline-flex justify-center items-center gap-2 px-5 py-2.5 rounded-md bg-transparent text-blue border-[1.5px] border-blue-30 shadow-none hover:bg-blue-08 transition-all duration-160 cursor-pointer" type="button" onClick={() => navigate(`/customer/receipts/${r.receiptNumber}`)}>View</button>
-                      <button className="inline-flex justify-center items-center gap-2 px-5 py-2.5 rounded-md bg-transparent text-blue border-[1.5px] border-blue-30 shadow-none hover:bg-blue-08 transition-all duration-160 cursor-pointer" type="button" onClick={() => showToast(`Downloading ${r.receiptNumber}.pdf`, 'success')}>Download PDF</button>
+                      <button className="icon-action-button" type="button" title="View" onClick={() => navigate(`/customer/receipts/${r.receiptNumber}`)}>
+                        <NavIcon name="view" />
+                      </button>
+                      <button className="icon-action-button" type="button" title="Download" onClick={() => showToast(`Downloading ${r.receiptNumber}.pdf`, 'success')}>
+                        <NavIcon name="download" />
+                      </button>
                     </td>
                   </tr>)}
               </tbody>
@@ -345,8 +351,12 @@ function StatementsPage({
                     <td>{formatCurrency(s.outstandingBalance)}</td>
                     <td>{formatCurrency(s.totalPaid)}</td>
                     <td className="table-actions">
-                      <button className="inline-flex justify-center items-center gap-2 px-5 py-2.5 rounded-md bg-transparent text-blue border-[1.5px] border-blue-30 shadow-none hover:bg-blue-08 transition-all duration-160 cursor-pointer" type="button" onClick={() => navigate(`/customer/statements/${s.id}`)}>View</button>
-                      <button className="inline-flex justify-center items-center gap-2 px-5 py-2.5 rounded-md bg-transparent text-blue border-[1.5px] border-blue-30 shadow-none hover:bg-blue-08 transition-all duration-160 cursor-pointer" type="button" onClick={() => showToast(`Downloading ${s.month} statement.`, 'success')}>Download PDF</button>
+                      <button className="icon-action-button" type="button" title="View" onClick={() => navigate(`/customer/statements/${s.id}`)}>
+                        <NavIcon name="view" />
+                      </button>
+                      <button className="icon-action-button" type="button" title="Download" onClick={() => showToast(`Downloading ${s.month} statement.`, 'success')}>
+                        <NavIcon name="download" />
+                      </button>
                     </td>
                   </tr>)}
               </tbody>

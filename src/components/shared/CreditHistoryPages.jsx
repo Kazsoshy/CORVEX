@@ -120,7 +120,7 @@ export function CreditHistoryListPage({
                     </td>
                     <td><StatusBadge status={r.payment_status} /></td>
                     <td>{formatDisplayDate(r.transaction_date)}</td>
-                    <td>
+                    <td className="table-actions">
                       <button className="icon-action-button" type="button" title="View" onClick={() => navigate(`${basePath}/${r.credit_id}`)}>
                         <NavIcon name="view" />
                       </button>

@@ -136,11 +136,11 @@ function DashboardPage({
     }
     load();
   }, []);
-  const pagination_userStats_byRole = usePagination(userStats.byRole);
+  const pagination_userStats_byRole = usePagination(userStats?.byRole || []);
   const paginated_userStats_byRole = pagination_userStats_byRole.paginatedData;
-  const pagination_branches = usePagination(branches);
+  const pagination_branches = usePagination(branches || []);
   const paginated_branches = pagination_branches.paginatedData;
-  const pagination_auditLogs = usePagination(auditLogs);
+  const pagination_auditLogs = usePagination(auditLogs || []);
   const paginated_auditLogs = pagination_auditLogs.paginatedData;
   if (loading) return <LoadingState message="Loading system dashboard..." />;
   const dbColor = health?.dbStatus === 'Online' ? '#059669' : '#dc2626';
@@ -544,8 +544,8 @@ function RolesPage({
                           <td>{formatDisplayDateTime(r.created_at)}</td>
                           <td>{formatDisplayDateTime(r.updated_at)}</td>
                           <td className="table-actions">
-                            <button className="icon-action-button" title="Edit" onClick={() => openRoleModal(r)}><NavIcon name="edit" /></button>
-                            <button className="icon-action-button danger" title="Archive" disabled={r.slug === 'super_admin'} onClick={() => deleteRole(r)}><NavIcon name="archive" /></button>
+                            <button className="icon-action-button" type="button" title="Edit" onClick={() => openRoleModal(r)}><NavIcon name="edit" /></button>
+                            <button className="icon-action-button danger" type="button" title="Archive" disabled={r.slug === 'super_admin'} onClick={() => deleteRole(r)}><NavIcon name="archive" /></button>
                           </td>
                         </tr>)}
                     </tbody>
@@ -571,8 +571,8 @@ function RolesPage({
                           <td>{formatDisplayDateTime(p.created_at)}</td>
                           <td>{p.updated_at ? formatDisplayDateTime(p.updated_at) : '—'}</td>
                           <td className="table-actions">
-                            <button className="icon-action-button" title="Edit" onClick={() => openPermModal(p)}><NavIcon name="edit" /></button>
-                            <button className="icon-action-button danger" title="Archive" onClick={() => deletePerm(p)}><NavIcon name="archive" /></button>
+                            <button className="icon-action-button" type="button" title="Edit" onClick={() => openPermModal(p)}><NavIcon name="edit" /></button>
+                            <button className="icon-action-button danger" type="button" title="Archive" onClick={() => deletePerm(p)}><NavIcon name="archive" /></button>
                           </td>
                         </tr>)}
                     </tbody>

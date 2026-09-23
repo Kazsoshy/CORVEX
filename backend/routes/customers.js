@@ -20,15 +20,16 @@ const CUSTOMER_SELECT_CORE = `
          c.territory_id,
          t.territory_name,
          c.first_name,
+         c.middle_name,
          c.last_name,
          c.address,
          c.latitude,
          c.longitude,
          c.contact_phone,
          c.contact_person_fname,
+         c.contact_person_mname,
          c.contact_person_lname,
          c.contact_person_phone,
-         c.contact_person_relationship,
          c.secondary_contact_fname,
          c.secondary_contact_lname,
          c.secondary_contact_phone,
@@ -206,9 +207,9 @@ router.get('/:id', async (req, res) => {
 
 router.post('/', async (req, res) => {
   const {
-    first_name, last_name, address, latitude, longitude,
-    contact_phone, contact_person_fname, contact_person_lname,
-    contact_person_phone, contact_person_relationship,
+    first_name, middle_name, last_name, address, latitude, longitude,
+    contact_phone, contact_person_fname, contact_person_mname, contact_person_lname,
+    contact_person_phone,
     secondary_contact_fname, secondary_contact_lname,
     secondary_contact_phone, secondary_contact_relationship,
     branch_id, territory_id, account_manager_id, status,
@@ -243,27 +244,27 @@ router.post('/', async (req, res) => {
     const result = await client.query(
       `INSERT INTO customers
         (branch_id, account_manager_id, territory_id,
-         first_name, last_name, address, latitude, longitude,
-         contact_phone, contact_person_fname, contact_person_lname, contact_person_phone,
-         contact_person_relationship,
+         first_name, middle_name, last_name, address, latitude, longitude,
+         contact_phone, contact_person_fname, contact_person_mname, contact_person_lname, contact_person_phone,
          secondary_contact_fname, secondary_contact_lname, secondary_contact_phone,
          secondary_contact_relationship, status)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)
        RETURNING customer_id, created_at`,
       [
         resolvedBranchId,
         account_manager_id ? Number(account_manager_id) : (req.currentUser?.id ?? null),
         territory_id ? Number(territory_id) : null,
         first_name.trim(),
+        middle_name ? String(middle_name).trim() : null,
         last_name.trim(),
         address.trim(),
         lat,
         lng,
         contact_phone.trim(),
         contact_person_fname.trim(),
+        contact_person_mname ? String(contact_person_mname).trim() : null,
         contact_person_lname.trim(),
         contact_person_phone.trim(),
-        contact_person_relationship?.trim() || null,
         secondary_contact_fname?.trim() || null,
         secondary_contact_lname?.trim() || null,
         secondary_contact_phone?.trim() || null,
@@ -322,9 +323,9 @@ router.put('/:id', async (req, res) => {
     }
     if (!assertSameBranch(res, req.currentUser, existing.rows[0].branch_id)) return;
     const {
-      first_name, last_name, address, latitude, longitude,
-      contact_phone, contact_person_fname, contact_person_lname,
-      contact_person_phone, contact_person_relationship,
+      first_name, middle_name, last_name, address, latitude, longitude,
+      contact_phone, contact_person_fname, contact_person_mname, contact_person_lname,
+      contact_person_phone,
       secondary_contact_fname, secondary_contact_lname,
       secondary_contact_phone, secondary_contact_relationship,
       branch_id, territory_id, account_manager_id, status,
@@ -337,19 +338,22 @@ router.put('/:id', async (req, res) => {
     const addField = (col, val) => { updates.push(`${col} = $${pIdx++}`); params.push(val); };
 
     if (first_name !== undefined)            addField('first_name', first_name);
+    if (middle_name !== undefined)           addField('middle_name', middle_name ? String(middle_name).trim() : null);
     if (last_name !== undefined)             addField('last_name', last_name);
     if (address !== undefined)               addField('address', address);
     if (latitude !== undefined)              addField('latitude', latitude ? Number(latitude) : null);
     if (longitude !== undefined)             addField('longitude', longitude ? Number(longitude) : null);
     if (contact_phone !== undefined)         addField('contact_phone', contact_phone);
     if (contact_person_fname !== undefined)  addField('contact_person_fname', contact_person_fname);
+    if (contact_person_mname !== undefined)  addField('contact_person_mname', contact_person_mname ? String(contact_person_mname).trim() : null);
     if (contact_person_lname !== undefined)  addField('contact_person_lname', contact_person_lname);
     if (contact_person_phone !== undefined)  addField('contact_person_phone', contact_person_phone);
-    if (contact_person_relationship !== undefined) addField('contact_person_relationship', contact_person_relationship);
     if (secondary_contact_fname !== undefined) addField('secondary_contact_fname', secondary_contact_fname);
     if (secondary_contact_lname !== undefined) addField('secondary_contact_lname', secondary_contact_lname);
     if (secondary_contact_phone !== undefined) addField('secondary_contact_phone', secondary_contact_phone);
-    if (secondary_contact_relationship !== undefined) addField('secondary_contact_relationship', secondary_contact_relationship);
+    if (secondary_contact_relationship !== undefined) {
+      addField('secondary_contact_relationship', secondary_contact_relationship ? String(secondary_contact_relationship).trim() : null);
+    }
     if (branch_id !== undefined)             addField('branch_id', branch_id ? Number(branch_id) : null);
     if (territory_id !== undefined)          addField('territory_id', territory_id ? Number(territory_id) : null);
     if (account_manager_id !== undefined)    addField('account_manager_id', account_manager_id ? Number(account_manager_id) : null);

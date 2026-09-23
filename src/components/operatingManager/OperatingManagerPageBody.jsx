@@ -1503,8 +1503,14 @@ function AlertsPage({
                       <td><SeverityBadge severity={a.severity} /></td>
                       <td>{a.date}</td><td><StatusBadge status={a.resolved ? 'Resolved' : 'Open'} /></td>
                       <td className="table-actions">
-                        {!a.resolved ? <button className="button ghost" type="button" onClick={() => resolveAlert(a.id)}>Resolve</button> : null}
-                        <button className="button ghost" type="button" onClick={() => navigate(`/operating-manager/branch-performance/branch/${a.branchId}`)}>Open Branch</button>
+                        {!a.resolved ? (
+                          <button className="icon-action-button" type="button" title="Resolve" onClick={() => resolveAlert(a.id)}>
+                            <NavIcon name="check" />
+                          </button>
+                        ) : null}
+                        <button className="icon-action-button" type="button" title="View" onClick={() => navigate(`/operating-manager/branch-performance/branch/${a.branchId}`)}>
+                          <NavIcon name="view" />
+                        </button>
                       </td>
                     </tr>)}
                 </tbody>
@@ -1821,13 +1827,7 @@ function AnalyticsFilterBar({
           </p>
         </div>
       </div>
-      <div className="accounts-toolbar" style={{
-      alignItems: 'flex-end'
-    }}>
-        <div className="accounts-filters" style={{
-        flex: 1,
-        minWidth: 0
-      }}>
+      <div className="list-section-controls analytics-filter-controls">
           <select className="filter-select" value={filters.preset} onChange={e => setFilters(current => ({
           ...current,
           preset: e.target.value
@@ -1851,7 +1851,6 @@ function AnalyticsFilterBar({
             endDate: e.target.value
           }))} />
             </> : null}
-        </div>
       </div>
     </section>;
 }
@@ -1884,583 +1883,171 @@ function useOperatingManagerAnalytics(filters) {
     error
   };
 }
-function AnalyticalInsightsSection({
-  data,
-  filters,
-  branchOptions
-}) {
-  const insights = useMemo(() => {
-    const {
-      summary: s,
-      trends,
-      lowStockItems,
-      pendingVisits,
-      branchSummary
-    } = data || {};
-    const safeLowStockItems = lowStockItems || [];
-    const safePendingVisits = pendingVisits || [];
-    const safeTrends = trends || {
-      collections: [],
-      sales: []
-    };
-    const safeBranchOptions = branchOptions || [];
-
-    // Significance thresholds
-    const SIG_PCT = 5;
-    const SIG_RATE_PTS = 3;
-    const SIG_COMPLIANCE_PTS = 5;
-    const collectionGrowth = s?.collectionGrowthRate;
-    const salesGrowth = s?.salesGrowthRate;
-    const performanceScore = s?.performanceScore;
-    const routeCompliance = s?.routeCompliance;
-    const inventoryHealth = s?.inventoryHealth;
-    const totalOutstanding = s?.totalOutstandingBalance || 0;
-    const totalSales = s?.totalSales || 1;
-    const overdueCount = s?.overdueCount || 0;
-    const totalCustomers = s?.totalCustomers || 1;
-    const stockAlerts = s?.stockAlerts || 0;
-
-    // Calculate derived metrics
-    const outstandingRatio = totalSales > 0 ? totalOutstanding / totalSales * 100 : 0;
-    const overdueRatio = totalCustomers > 0 ? overdueCount / totalCustomers * 100 : 0;
-
-    // Generate scope label
-    const scopeParts = [];
-    if (filters.branchId !== 'all' && branchOptions.length > 0) {
-      const branch = branchOptions.find(b => String(b.branchId) === String(filters.branchId));
-      if (branch) scopeParts.push(branch.branchName);
-    }
-    const scopeLabel = scopeParts.length ? scopeParts.join(' · ') : 'All branches';
-
-    /* ---------- Overall summary paragraph ---------- */
-    const collectionPhrase = collectionGrowth === null || collectionGrowth === undefined ? 'is being recorded for the first time in this comparison window' : Math.abs(collectionGrowth) < SIG_PCT ? `held roughly steady at ${formatCurrency(s?.totalCollections || 0)}` : collectionGrowth > 0 ? `rose to ${formatCurrency(s?.totalCollections || 0)}, up ${collectionGrowth.toFixed(1)}% from the previous period` : `fell to ${formatCurrency(s?.totalCollections || 0)}, down ${Math.abs(collectionGrowth).toFixed(1)}% from the previous period`;
-    const salesPhrase = salesGrowth === null || salesGrowth === undefined ? 'is being recorded for the first time in this comparison window' : Math.abs(salesGrowth) < SIG_PCT ? `held roughly steady at ${formatCurrency(s?.totalSales || 0)}` : salesGrowth > 0 ? `rose to ${formatCurrency(s?.totalSales || 0)}, up ${salesGrowth.toFixed(1)}% from the previous period` : `fell to ${formatCurrency(s?.totalSales || 0)}, down ${Math.abs(salesGrowth).toFixed(1)}% from the previous period`;
-    const compliancePhrase = routeCompliance !== undefined && routeCompliance !== null ? `route compliance is at ${routeCompliance.toFixed(1)}%` : 'route compliance data is unavailable';
-    const inventoryPhrase = inventoryHealth !== undefined && inventoryHealth !== null ? `inventory health stands at ${inventoryHealth.toFixed(1)}%` : 'inventory health data is unavailable';
-    const summary = `${scopeLabel} recorded ${formatCurrency(s?.totalCollections || 0)} in collections and ${formatCurrency(s?.totalSales || 0)} in sales over the selected period. Collections ${collectionPhrase}; sales ${salesPhrase}. ${compliancePhrase}, and ${inventoryPhrase}. ` + `The overall performance score is ${performanceScore?.toFixed(0) || 'N/A'}/100, reflecting ${performanceScore >= 80 ? 'strong' : performanceScore >= 60 ? 'moderate' : 'challenging'} operational health across the organization.`;
-
-    /* ---------- Key findings ---------- */
-    const findings = [];
-    if (collectionGrowth !== null && Math.abs(collectionGrowth) >= SIG_PCT) {
-      findings.push({
-        label: 'Collections',
-        text: `Collection activity ${collectionGrowth > 0 ? 'increased' : 'decreased'} by ${Math.abs(collectionGrowth).toFixed(1)}% compared with the previous period, indicating ${collectionGrowth > 0 ? 'improved' : 'reduced'} cash flow momentum.`
-      });
-    }
-    if (salesGrowth !== null && Math.abs(salesGrowth) >= SIG_PCT) {
-      findings.push({
-        label: 'Sales',
-        text: `Sales volume ${salesGrowth > 0 ? 'increased' : 'decreased'} by ${Math.abs(salesGrowth).toFixed(1)}% compared with the previous period, suggesting ${salesGrowth > 0 ? 'expanding' : 'contracting'} market activity.`
-      });
-    }
-    if (outstandingRatio > 40) {
-      findings.push({
-        label: 'Credit Risk',
-        text: `Outstanding balance represents ${outstandingRatio.toFixed(1)}% of total sales, indicating significant credit exposure that may require collection process review.`
-      });
-    }
-    if (overdueRatio > 10) {
-      findings.push({
-        label: 'Delinquency',
-        text: `Overdue accounts represent ${overdueRatio.toFixed(1)}% of the customer base, which may indicate payment difficulties or collection follow-up challenges.`
-      });
-    }
-
-    // Branch exception detection
-    if (safeBranchOptions.length > 1) {
-      const avgCollections = safeBranchOptions.reduce((sum, b) => sum + (b.totalCollections || 0), 0) / safeBranchOptions.length;
-      const lowPerformer = safeBranchOptions.filter(b => (b.totalCollections || 0) < avgCollections * 0.7).sort((a, b) => (a.totalCollections || 0) - (b.totalCollections || 0))[0];
-      if (lowPerformer) {
-        findings.push({
-          label: 'Branch Exception',
-          text: `${lowPerformer.branchName} is performing below the network average in collections, which may warrant operational support or process review for this location.`
-        });
-      }
-    }
-
-    /* ---------- Attention required ---------- */
-    const attention = [];
-    if (overdueRatio > 15) {
-      attention.push({
-        severity: overdueRatio > 25 ? 'critical' : 'warning',
-        title: 'High delinquency rate',
-        text: `Overdue accounts represent ${overdueRatio.toFixed(1)}% of the customer base. This may indicate collection process inefficiencies or customer payment challenges requiring immediate attention.`
-      });
-    }
-    if (outstandingRatio > 50) {
-      attention.push({
-        severity: 'critical',
-        title: 'Elevated credit exposure',
-        text: `Outstanding balance represents ${outstandingRatio.toFixed(1)}% of total sales, suggesting collections are not keeping pace with sales activity and credit risk may be accumulating.`
-      });
-    }
-    if (routeCompliance !== undefined && routeCompliance < 75) {
-      attention.push({
-        severity: routeCompliance < 60 ? 'critical' : 'warning',
-        title: 'Low route compliance',
-        text: `Route compliance of ${routeCompliance.toFixed(1)}% falls below operational standards, which may impact collection efficiency and customer service consistency.`
-      });
-    }
-    if (inventoryHealth !== undefined && inventoryHealth < 70) {
-      attention.push({
-        severity: inventoryHealth < 50 ? 'critical' : 'warning',
-        title: 'Inventory health concerns',
-        text: `Inventory health of ${inventoryHealth.toFixed(1)}% suggests stock management challenges that may lead to stockouts and lost sales opportunities.`
-      });
-    }
-    if (safeLowStockItems.length > 5) {
-      attention.push({
-        severity: safeLowStockItems.length > 10 ? 'critical' : 'warning',
-        title: 'Multiple low stock items',
-        text: `${safeLowStockItems.length} products are at or below reorder level across branches, requiring immediate inventory replenishment to prevent stockouts.`
-      });
-    }
-    if (safePendingVisits.length > 10) {
-      attention.push({
-        severity: 'warning',
-        title: 'Pending field visits backlog',
-        text: `${safePendingVisits.length} pending field visits require scheduling and execution, which may impact customer service and collection follow-up.`
-      });
-    }
-    if (performanceScore !== undefined && performanceScore < 60) {
-      attention.push({
-        severity: performanceScore < 40 ? 'critical' : 'warning',
-        title: 'Low overall performance score',
-        text: `Performance score of ${performanceScore.toFixed(0)}/100 indicates significant operational challenges across multiple metrics requiring comprehensive review.`
-      });
-    }
-
-    /* ---------- Positive performance ---------- */
-    const positive = [];
-    if (collectionGrowth !== null && collectionGrowth > SIG_PCT) {
-      positive.push({
-        title: 'Collections growth',
-        text: `Collections increased by ${collectionGrowth.toFixed(1)}% compared with the previous period, indicating improved cash flow and collection efficiency.`
-      });
-    }
-    if (salesGrowth !== null && salesGrowth > SIG_PCT) {
-      positive.push({
-        title: 'Sales growth',
-        text: `Sales increased by ${salesGrowth.toFixed(1)}% compared with the previous period, suggesting expanding customer activity and market engagement.`
-      });
-    }
-    if (routeCompliance !== undefined && routeCompliance >= 90) {
-      positive.push({
-        title: 'Excellent route compliance',
-        text: `Route compliance of ${routeCompliance.toFixed(1)}% indicates strong field operations execution and collector adherence to scheduled routes.`
-      });
-    }
-    if (inventoryHealth !== undefined && inventoryHealth >= 85) {
-      positive.push({
-        title: 'Healthy inventory positions',
-        text: `Inventory health of ${inventoryHealth.toFixed(1)}% indicates effective stock management with minimal risk of stockouts.`
-      });
-    }
-    if (outstandingRatio < 30) {
-      positive.push({
-        title: 'Effective credit management',
-        text: `Outstanding balance represents only ${outstandingRatio.toFixed(1)}% of total sales, indicating effective collection management and controlled credit exposure.`
-      });
-    }
-    if (overdueRatio < 5) {
-      positive.push({
-        title: 'Low delinquency rate',
-        text: `Overdue accounts represent only ${overdueRatio.toFixed(1)}% of the customer base, indicating effective collection follow-up and customer payment compliance.`
-      });
-    }
-    if (safeLowStockItems.length === 0) {
-      positive.push({
-        title: 'No stock alerts',
-        text: `No products are currently at or below reorder level across branches, indicating healthy inventory positions and effective demand forecasting.`
-      });
-    }
-    if (performanceScore !== undefined && performanceScore >= 80) {
-      positive.push({
-        title: 'Strong overall performance',
-        text: `Performance score of ${performanceScore.toFixed(0)}/100 indicates strong operational health across collections, sales, inventory, and field operations.`
-      });
-    }
-
-    /* ---------- Decision support ---------- */
-    const decisionAreas = new Set();
-    if (attention.some(a => a.title.includes('delinquency') || a.title.includes('credit'))) {
-      decisionAreas.add('Collection process review');
-      decisionAreas.add('Credit risk management');
-    }
-    if (attention.some(a => a.title.includes('route') || a.title.includes('field visits'))) {
-      decisionAreas.add('Field operations scheduling');
-      decisionAreas.add('Collector performance monitoring');
-    }
-    if (attention.some(a => a.title.includes('inventory') || a.title.includes('stock'))) {
-      decisionAreas.add('Inventory replenishment');
-      decisionAreas.add('Demand forecasting');
-    }
-    if (attention.some(a => a.title.includes('performance'))) {
-      decisionAreas.add('Operational process improvement');
-      decisionAreas.add('Resource allocation review');
-    }
-    if (decisionAreas.size === 0) decisionAreas.add('Ongoing performance monitoring');
-    let decisionText;
-    if (attention.length === 0) {
-      decisionText = `No areas currently require intervention for ${scopeLabel.toLowerCase()}. Current data supports maintaining existing operational allocations, with continued monitoring as the primary action. The dashboard indicates stable performance across collections, sales, inventory, and field operations.`;
-    } else {
-      const top = attention[0];
-      decisionText = `The most significant signal in this view is "${top.title.toLowerCase()}." ${top.text.split('.')[0]}. ` + `This may warrant attention to ${Array.from(decisionAreas).slice(0, 3).join(', ').toLowerCase()}, ` + `though the data should be reviewed alongside operational context before acting, since the analysis reflects correlation in the current period rather than a confirmed root cause.`;
-    }
-    return {
-      empty: false,
-      summary,
-      findings,
-      attention,
-      positive,
-      decisionAreas: Array.from(decisionAreas),
-      decisionText,
-      scopeLabel
-    };
-  }, [data, branchOptions, filters]);
-  if (!insights || insights.empty) {
-    return null;
-  }
-  return <section className="panel content-panel" style={{
-    marginTop: 24,
-    borderTop: '2px solid #e2e8f0',
-    paddingTop: 20
-  }}>
-      <div className="panel-section-header" style={{
-      marginBottom: 18
-    }}>
-        <div style={{
-        display: 'flex',
-        alignItems: 'center',
-        gap: 8
-      }}>
-          <NavIcon name="brain" style={{
-          width: 20,
-          height: 20,
-          color: '#8b5cf6'
-        }} />
-          <div>
-            <h3 style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: 8,
-            fontSize: '1rem',
-            fontWeight: 600,
-            margin: '0 0 4px'
-          }}>
-              Operational Analysis & Insights
-            </h3>
-            <p className="muted" style={{
-            margin: 0,
-            fontSize: '0.8rem',
-            lineHeight: 1.5,
-            maxWidth: 650
-          }}>
-              The interpretation layer of this dashboard — generated from the data and filters currently in view, distinguishing what happened from what it may mean and why it matters for management.
-            </p>
-          </div>
-        </div>
-      </div>
-
-      {/* Overall Summary */}
-      <div style={{
-      background: '#f8fafc',
-      border: '1px solid #e2e8f0',
-      borderLeft: '3px solid #2563eb',
-      borderRadius: 4,
-      padding: '16px 18px',
-      marginBottom: 18
-    }}>
-        <div style={{
-        fontSize: '0.7rem',
-        textTransform: 'uppercase',
-        letterSpacing: '0.06em',
-        color: '#2563eb',
-        marginBottom: 8,
-        fontWeight: 600
-      }}>
-          Overall Summary
-        </div>
-        <p style={{
-        margin: 0,
-        fontSize: '0.85rem',
-        lineHeight: 1.7,
-        color: '#334155'
-      }}>
-          {insights.summary}
-        </p>
-      </div>
-
-      {/* Findings Grid */}
-      <div style={{
-      display: 'grid',
-      gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))',
-      gap: 12,
-      marginBottom: 18
-    }}>
-        {/* Key Findings */}
-        <div style={{
-        background: '#f8fafc',
-        border: '1px solid #e2e8f0',
-        borderRadius: 4,
-        padding: 16
-      }}>
-          <div style={{
-          display: 'flex',
-          alignItems: 'center',
-          gap: 8,
-          marginBottom: 12
-        }}>
-            <NavIcon name="search" style={{
-            width: 16,
-            height: 16,
-            color: '#2563eb'
-          }} />
-            <h4 style={{
-            fontSize: '0.8rem',
-            fontWeight: 600,
-            margin: 0,
-            color: '#2563eb'
-          }}>Key Findings</h4>
-          </div>
-          {insights.findings.length > 0 ? <ul style={{
-          listStyle: 'none',
-          padding: 0,
-          margin: 0,
-          display: 'flex',
-          flexDirection: 'column',
-          gap: 11
-        }}>
-              {insights.findings.map((f, i) => <li key={i} style={{
-            display: 'flex',
-            gap: 9,
-            alignItems: 'flex-start'
-          }}>
-                  <span style={{
-              width: 5,
-              height: 5,
-              borderRadius: '50%',
-              marginTop: 7,
-              flexShrink: 0,
-              background: '#64748b'
-            }} />
-                  <span style={{
-              fontSize: '0.78rem',
-              lineHeight: 1.55,
-              color: '#64748b'
-            }}>
-                    <strong style={{
-                color: '#334155'
-              }}>{f.label}:</strong> {f.text}
-                  </span>
-                </li>)}
-            </ul> : <p style={{
-          fontSize: '0.78rem',
-          color: '#94a3b8',
-          fontStyle: 'italic',
-          margin: 0
-        }}>
-              No notable shifts crossed significance thresholds for this view.
-            </p>}
-        </div>
-
-        {/* Attention Required */}
-        <div style={{
-        background: '#fffbeb',
-        border: '1px solid #fcd34d',
-        borderRadius: 4,
-        padding: 16
-      }}>
-          <div style={{
-          display: 'flex',
-          alignItems: 'center',
-          gap: 8,
-          marginBottom: 12
-        }}>
-            <NavIcon name="alert-triangle" style={{
-            width: 16,
-            height: 16,
-            color: '#d97706'
-          }} />
-            <h4 style={{
-            fontSize: '0.8rem',
-            fontWeight: 600,
-            margin: 0,
-            color: '#d97706'
-          }}>Attention Required</h4>
-          </div>
-          {insights.attention.length > 0 ? <div style={{
-          display: 'flex',
-          flexDirection: 'column',
-          gap: 10
-        }}>
-              {insights.attention.map((a, i) => {
-            const IconName = a.severity === 'critical' ? 'alert-circle' : a.severity === 'warning' ? 'alert-triangle' : 'info';
-            const color = a.severity === 'critical' ? '#dc2626' : a.severity === 'warning' ? '#d97706' : '#2563eb';
-            return <div key={i} style={{
-              display: 'flex',
-              gap: 10,
-              padding: '10px 0',
-              borderTop: i === 0 ? 'none' : '1px solid #fcd34d'
-            }}>
-                    <NavIcon name={IconName} style={{
-                width: 15,
-                height: 15,
-                color,
-                flexShrink: 0,
-                marginTop: 1
-              }} />
-                    <div>
-                      <p style={{
-                  fontSize: '0.78rem',
-                  fontWeight: 600,
-                  margin: '0 0 3px',
-                  color
-                }}>{a.title}</p>
-                      <p style={{
-                  fontSize: '0.78rem',
-                  color: '#78350f',
-                  lineHeight: 1.55,
-                  margin: 0
-                }}>{a.text}</p>
-                    </div>
-                  </div>;
-          })}
-            </div> : <p style={{
-          fontSize: '0.78rem',
-          color: '#94a3b8',
-          fontStyle: 'italic',
-          margin: 0
-        }}>
-              No areas currently exceed attention thresholds.
-            </p>}
-        </div>
-
-        {/* Positive Performance */}
-        <div style={{
-        background: '#f0fdf4',
-        border: '1px solid #86efac',
-        borderRadius: 4,
-        padding: 16
-      }}>
-          <div style={{
-          display: 'flex',
-          alignItems: 'center',
-          gap: 8,
-          marginBottom: 12
-        }}>
-            <NavIcon name="sparkles" style={{
-            width: 16,
-            height: 16,
-            color: '#059669'
-          }} />
-            <h4 style={{
-            fontSize: '0.8rem',
-            fontWeight: 600,
-            margin: 0,
-            color: '#059669'
-          }}>Positive Performance</h4>
-          </div>
-          {insights.positive.length > 0 ? <div style={{
-          display: 'flex',
-          flexDirection: 'column',
-          gap: 10
-        }}>
-              {insights.positive.map((p, i) => <div key={i} style={{
-            display: 'flex',
-            gap: 10,
-            padding: '10px 0',
-            borderTop: i === 0 ? 'none' : '1px solid #86efac'
-          }}>
-                  <NavIcon name="check-circle" style={{
-              width: 15,
-              height: 15,
-              color: '#059669',
-              flexShrink: 0,
-              marginTop: 1
-            }} />
-                  <div>
-                    <p style={{
-                fontSize: '0.78rem',
-                fontWeight: 600,
-                margin: '0 0 3px',
-                color: '#059669'
-              }}>{p.title}</p>
-                    <p style={{
-                fontSize: '0.78rem',
-                color: '#166534',
-                lineHeight: 1.55,
-                margin: 0
-              }}>{p.text}</p>
-                  </div>
-                </div>)}
-            </div> : <p style={{
-          fontSize: '0.78rem',
-          color: '#94a3b8',
-          fontStyle: 'italic',
-          margin: 0
-        }}>
-              No metrics showed a clear improvement in this view.
-            </p>}
-        </div>
-      </div>
-
-      {/* Decision Support */}
-      <div style={{
-      background: '#f0f9ff',
-      border: '1px solid #bae6fd',
-      borderRadius: 4,
-      padding: '16px 18px'
-    }}>
-        <div style={{
-        display: 'flex',
-        alignItems: 'center',
-        gap: 9,
-        marginBottom: 10
-      }}>
-          <NavIcon name="lightbulb" style={{
-          width: 16,
-          height: 16,
-          color: '#0284c7'
-        }} />
-          <h4 style={{
-          fontSize: '0.85rem',
-          fontWeight: 600,
-          margin: 0,
-          color: '#0284c7'
-        }}>Decision Support</h4>
-        </div>
-        <p style={{
-        fontSize: '0.8rem',
-        lineHeight: 1.65,
-        color: '#0c4a6e',
-        margin: '0 0 12px'
-      }}>
-          {insights.decisionText}
-        </p>
-        <div style={{
-        display: 'flex',
-        flexWrap: 'wrap',
-        gap: 7
-      }}>
-          {insights.decisionAreas.map((tag, i) => <span key={i} style={{
-          fontSize: '0.7rem',
-          padding: '5px 10px',
-          borderRadius: 12,
-          background: 'rgba(16, 185, 129, 0.1)',
-          color: '#059669',
-          border: '1px solid rgba(16, 185, 129, 0.3)'
-        }}>
-              {tag}
-            </span>)}
-        </div>
-      </div>
-    </section>;
+function formatPctChangeValue(currentTotal, previousTotal) {
+  if (previousTotal === null || previousTotal === undefined || Number(previousTotal) <= 0) return null;
+  const change = (Number(currentTotal) - Number(previousTotal)) / Number(previousTotal) * 100;
+  if (!Number.isFinite(change)) return null;
+  const abs = Math.abs(change);
+  const formatted = abs > 999 ? '>999' : abs.toLocaleString('en-US', {
+    minimumFractionDigits: 1,
+    maximumFractionDigits: 1
+  });
+  return {
+    change,
+    label: `${change > 0 ? '+' : change < 0 ? '-' : ''}${formatted}%`,
+    absLabel: `${formatted}%`
+  };
 }
+
+function describePeriodChange({
+  metricLabel,
+  currentTotal,
+  previousTotal,
+  comparisonEnabled
+}) {
+  const current = Number(currentTotal) || 0;
+  const previous = Number(previousTotal) || 0;
+  if (!comparisonEnabled) {
+    return `Recorded ${metricLabel} totaled ${formatCurrency(current)} during the selected period. No previous equivalent period is available for comparison. The daily values show fluctuations across the selected period.`;
+  }
+  if (previous <= 0 && current <= 0) {
+    return `No comparable ${metricLabel} amounts were recorded in the selected period or the previous equivalent period.`;
+  }
+  if (previous <= 0) {
+    return `Recorded ${metricLabel} totaled ${formatCurrency(current)} during the selected period. No comparable amount was recorded in the previous equivalent period, so a percentage change is not calculated. The daily values show fluctuations across the selected period.`;
+  }
+  const pct = formatPctChangeValue(current, previous);
+  if (!pct) {
+    return `Recorded ${metricLabel} totaled ${formatCurrency(current)} during the selected period. A percentage change could not be calculated from the previous equivalent period.`;
+  }
+  if (Math.abs(pct.change) <= 0.05) {
+    return `Recorded ${metricLabel} was unchanged compared with the previous equivalent period, remaining at ${formatCurrency(current)}. The daily values show fluctuations across the selected period.`;
+  }
+  const direction = pct.change > 0 ? 'increased' : 'decreased';
+  return `Recorded ${metricLabel} ${direction} by ${pct.absLabel} compared with the previous equivalent period, from ${formatCurrency(previous)} to ${formatCurrency(current)}. The daily values show fluctuations across the selected period.`;
+}
+
+function describeBranchCollectionsComparison(branches) {
+  const list = Array.isArray(branches) ? branches.filter(Boolean) : [];
+  if (!list.length) {
+    return 'No branch collection records are available for the selected period.';
+  }
+  const ranked = [...list].sort((a, b) => Number(b.totalCollections || 0) - Number(a.totalCollections || 0));
+  const highest = ranked[0];
+  const lowest = ranked[ranked.length - 1];
+  const totalCollections = ranked.reduce((sum, b) => sum + Number(b.totalCollections || 0), 0);
+  const average = totalCollections / ranked.length;
+  const zeroBranches = ranked.filter(b => Number(b.totalCollections || 0) <= 0);
+  const parts = [`Branch collections varied during the selected period.`];
+  if (ranked.length === 1) {
+    parts.push(`${highest.branchName} recorded ${formatCurrency(highest.totalCollections)} in collections.`);
+  } else {
+    parts.push(`${highest.branchName} recorded the highest collections at ${formatCurrency(highest.totalCollections)}.`);
+    if (zeroBranches.length > 1) {
+      parts.push(`${zeroBranches.map(b => b.branchName).join(' and ')} recorded ${formatCurrency(0)} in collections.`);
+    } else if (Number(lowest.totalCollections || 0) !== Number(highest.totalCollections || 0)) {
+      parts.push(`${lowest.branchName} recorded the lowest collections at ${formatCurrency(lowest.totalCollections)}.`);
+    }
+  }
+  parts.push(`The average collections across the ${ranked.length} branch${ranked.length === 1 ? '' : 'es'} were ${formatCurrency(average)}.`);
+  parts.push('The displayed values show differences in recorded collections across branches. Sales and outstanding balances are shown separately in the chart and are not combined into an overall performance ranking.');
+  return parts.join(' ');
+}
+
+function describeBranchSummary(branches, complianceThreshold = 70, inventoryThreshold = 70) {
+  const list = Array.isArray(branches) ? branches.filter(Boolean) : [];
+  if (!list.length) {
+    return 'No branch data recorded for the selected period.';
+  }
+  const count = list.length;
+  const avgCompliance = list.reduce((sum, b) => sum + Number(b.routeCompliance || 0), 0) / count;
+  const avgInventory = list.reduce((sum, b) => sum + Number(b.inventoryHealth || 0), 0) / count;
+  const lowCompliance = list.filter(b => Number(b.routeCompliance || 0) < complianceThreshold).length;
+  const lowInventory = list.filter(b => Number(b.inventoryHealth || 0) < inventoryThreshold).length;
+  const allInventoryAt100 = list.every(b => Number(b.inventoryHealth || 0) === 100);
+  const parts = [];
+  if (lowCompliance === 0) {
+    parts.push(`None of the ${count} branch${count === 1 ? '' : 'es'} recorded route compliance below ${complianceThreshold}%, with an average compliance rate of ${avgCompliance.toFixed(1)}%.`);
+  } else if (lowCompliance === count) {
+    parts.push(`All ${count} branch${count === 1 ? '' : 'es'} recorded route compliance below ${complianceThreshold}%, with an average compliance rate of ${avgCompliance.toFixed(1)}%.`);
+  } else {
+    parts.push(`${lowCompliance} of the ${count} branch${count === 1 ? '' : 'es'} recorded route compliance below ${complianceThreshold}%, with an average compliance rate of ${avgCompliance.toFixed(1)}%.`);
+  }
+  if (allInventoryAt100) {
+    parts.push(`All ${count} branch${count === 1 ? '' : 'es'} recorded 100% inventory health based on the displayed metric.`);
+  } else if (lowInventory === 0) {
+    parts.push(`None of the ${count} branch${count === 1 ? '' : 'es'} recorded inventory health below ${inventoryThreshold}%, with an average inventory health of ${avgInventory.toFixed(1)}%.`);
+  } else if (lowInventory === count) {
+    parts.push(`All ${count} branch${count === 1 ? '' : 'es'} recorded inventory health below ${inventoryThreshold}%, with an average inventory health of ${avgInventory.toFixed(1)}%.`);
+  } else {
+    parts.push(`${lowInventory} of the ${count} branch${count === 1 ? '' : 'es'} recorded inventory health below ${inventoryThreshold}%, with an average inventory health of ${avgInventory.toFixed(1)}%.`);
+  }
+  parts.push('The summary presents branch-level differences in compliance and inventory health during the selected period.');
+  return parts.join(' ');
+}
+
+function describeExceptionMonitoring(lowStockItems, pendingVisits) {
+  const lowStockCount = Array.isArray(lowStockItems) ? lowStockItems.length : 0;
+  const pendingVisitsCount = Array.isArray(pendingVisits) ? pendingVisits.length : 0;
+  const totalExceptions = lowStockCount + pendingVisitsCount;
+  if (totalExceptions === 0) {
+    return 'No operational exceptions recorded for the selected period.';
+  }
+  return `The system recorded ${totalExceptions} exception${totalExceptions === 1 ? '' : 's'} during the selected period, consisting of ${lowStockCount} low-stock item${lowStockCount === 1 ? '' : 's'} and ${pendingVisitsCount} pending field visit${pendingVisitsCount === 1 ? '' : 's'}. The table provides branch-level details for the recorded exceptions.`;
+}
+
+function hasCollectionHistory(customer) {
+  return Boolean(customer?.lastCollectionDate);
+}
+
+function formatDaysSinceCollection(customer) {
+  if (!hasCollectionHistory(customer)) return 'No collection recorded';
+  const days = Number(customer.daysSinceCollection);
+  if (!Number.isFinite(days)) return 'No collection recorded';
+  return String(days);
+}
+
+function describeTopCustomers(customers, daysThreshold = 30) {
+  const list = Array.isArray(customers) ? customers.filter(Boolean) : [];
+  if (!list.length) {
+    return 'No customer balances available for the selected period.';
+  }
+  const count = list.length;
+  const totalOutstanding = list.reduce((sum, c) => sum + Number(c.outstandingBalance || 0), 0);
+  const withHistory = list.filter(hasCollectionHistory);
+  const overThreshold = withHistory.filter(c => Number(c.daysSinceCollection || 0) > daysThreshold).length;
+  const parts = [`The displayed top ${count} customer${count === 1 ? '' : 's'} ${count === 1 ? 'has' : 'have'} a combined outstanding balance of ${formatCurrency(totalOutstanding)} as of the reporting date.`];
+  if (!withHistory.length) {
+    parts.push('None of the displayed customers has a recorded collection date.');
+  } else {
+    const avgDays = withHistory.reduce((sum, c) => sum + Number(c.daysSinceCollection || 0), 0) / withHistory.length;
+    parts.push(`Among customers with a recorded collection date, the average is ${avgDays.toFixed(0)} day${Math.round(avgDays) === 1 ? '' : 's'} since the last collection.`);
+    if (overThreshold === 0) {
+      parts.push(`None of the displayed customers with a recorded collection date has more than ${daysThreshold} days since collection based on the shown records.`);
+    } else {
+      parts.push(`${overThreshold} of the displayed customers with a recorded collection date ${overThreshold === 1 ? 'has' : 'have'} more than ${daysThreshold} days since collection based on the shown records.`);
+    }
+  }
+  return parts.join(' ');
+}
+
+function describeTopProducts(products) {
+  const list = Array.isArray(products) ? products.filter(Boolean) : [];
+  if (!list.length) {
+    return 'No product sales recorded for the selected period.';
+  }
+  const count = list.length;
+  const totalRevenue = list.reduce((sum, p) => sum + Number(p.revenue || 0), 0);
+  const totalQty = list.reduce((sum, p) => sum + Number(p.quantitySold || 0), 0);
+  const categories = [...new Set(list.map(p => p.categoryName).filter(Boolean))];
+  const topByRevenue = [...list].sort((a, b) => Number(b.revenue || 0) - Number(a.revenue || 0))[0];
+  const categoryPhrase = categories.length ? ` across the listed product categor${categories.length === 1 ? 'y' : 'ies'}` : '';
+  return `The displayed top ${count} product${count === 1 ? '' : 's'}, ranked by recorded sales revenue, generated ${formatCurrency(totalRevenue)} in recorded revenue from ${totalQty} unit${totalQty === 1 ? '' : 's'} sold${categoryPhrase}. ${topByRevenue.productName} recorded the highest revenue among the displayed products, with ${formatCurrency(topByRevenue.revenue)}.`;
+}
+
 function LiveOperationsDashboardPage({
   navigate
 }) {
-  const currentUser = getCurrentUser();
   const [filters, setFilters] = useState({
     preset: 'this_month',
     startDate: '',
@@ -2477,8 +2064,6 @@ function LiveOperationsDashboardPage({
     return <EmptyState title="Analytics unavailable" description={error || 'No analytics data available.'} />;
   }
   const branchOptions = data.branchSummary || [];
-  const topBranch = [...branchOptions].sort((a, b) => b.totalCollections - a.totalCollections)[0] ?? null;
-  const bottomBranch = [...branchOptions].sort((a, b) => a.totalCollections - b.totalCollections)[0] ?? null;
   const trendCollections = data.trends.collections.map((point, index) => ({
     ...point,
     previous: data.trends.collectionsPrevious[index]?.amount ?? 0
@@ -2488,24 +2073,6 @@ function LiveOperationsDashboardPage({
     previous: data.trends.salesPrevious[index]?.amount ?? 0
   }));
   return <div className="page">
-      <section className="dashboard-greeting">
-        <div className="dashboard-greeting-main">
-          <p className="dashboard-eyebrow">Operations Analytics</p>
-          <h2>{currentUser?.fullName || 'Operating Manager'}</h2>
-          <p className="muted">{data.filters.label} · {data.scope} · Updated {formatDisplayDateTime(data.generatedAt)}</p>
-        </div>
-        <div style={{
-        display: 'flex',
-        gap: 12,
-        alignItems: 'center',
-        flexWrap: 'wrap'
-      }}>
-          <Link to="/operating-manager/notifications" className="notification-bell" aria-label="Notifications">
-            <NavIcon name="bell" />
-          </Link>
-        </div>
-      </section>
-
       <AnalyticsFilterBar filters={filters} setFilters={setFilters} branchOptions={branchOptions} />
 
       <section className="panel content-panel" style={{
@@ -2528,36 +2095,23 @@ function LiveOperationsDashboardPage({
               margin: '2px 0 0',
               fontSize: '0.82rem'
             }}>
-                Real-time operational metrics tracking collections, sales, credit exposure, and execution quality across the organization.
+                Real-time operational metrics tracking credit exposure, overdue risk, route execution, and inventory health across the organization.
               </p>
             </div>
           </div>
         </div>
         <div className="kpi-grid">
           {[{
-          key: 'collections',
-          label: 'Total Collections',
-          value: formatCurrency(data.summary.totalCollections),
-          delta: data.summary.collectionGrowthRate,
-          deltaType: 'pct',
-          good: 'up',
-          icon: 'dollar-sign'
-        }, {
-          key: 'sales',
-          label: 'Total Sales',
-          value: formatCurrency(data.summary.totalSales),
-          delta: data.summary.salesGrowthRate,
-          deltaType: 'pct',
-          good: 'up',
-          icon: 'shopping-cart'
-        }, {
           key: 'outstanding',
           label: 'Outstanding Balance',
           value: formatCurrency(data.summary.totalOutstandingBalance),
           delta: null,
           deltaType: 'pct',
           good: null,
-          icon: 'credit-card'
+          icon: 'credit-card',
+          scopeLabel: 'As of reporting date',
+          description: 'Total unpaid customer balances as of the reporting date (point-in-time balance).',
+          title: 'Sum of current unpaid customer balances as of the reporting date. This is not new unpaid amounts recorded during the selected period.'
         }, {
           key: 'overdue',
           label: 'Overdue Accounts',
@@ -2565,7 +2119,10 @@ function LiveOperationsDashboardPage({
           delta: null,
           deltaType: 'pct',
           good: 'down',
-          icon: 'clock'
+          icon: 'clock',
+          scopeLabel: 'As of reporting date',
+          description: 'Customer accounts with an outstanding balance greater than zero as of the reporting date.',
+          title: 'Count of unique customer accounts with outstanding_balance > 0 as of the reporting date. This is not a due-date aging count of invoices.'
         }, {
           key: 'compliance',
           label: 'Route Compliance',
@@ -2573,7 +2130,10 @@ function LiveOperationsDashboardPage({
           delta: null,
           deltaType: 'pts',
           good: 'up',
-          icon: 'route'
+          icon: 'route',
+          scopeLabel: 'Selected period',
+          description: 'Completed scheduled field visits ÷ total scheduled visits in the selected period.',
+          title: 'Route compliance = Completed visits ÷ Total scheduled visits × 100 for the selected period. A visit qualifies when its status is Completed.'
         }, {
           key: 'inventory',
           label: 'Inventory Health',
@@ -2581,12 +2141,16 @@ function LiveOperationsDashboardPage({
           delta: null,
           deltaType: 'pts',
           good: 'up',
-          icon: 'package'
+          icon: 'package',
+          scopeLabel: 'As of reporting date',
+          description: 'Share of monitored items that are not out of stock (in-stock ÷ total monitored items).',
+          title: 'Inventory health = Items not out of stock ÷ Total monitored items × 100. 100% means no monitored items are out of stock; low-stock items may still be included.'
         }].map(k => {
           const delta = k.delta;
           let deltaClass = 'neutral';
-          let deltaLabel = '—';
-          if (delta !== null && !Number.isNaN(delta) && Math.abs(delta) > 0.05) {
+          let deltaLabel = '';
+          const hasDelta = delta !== null && delta !== undefined && !Number.isNaN(Number(delta));
+          if (hasDelta && Math.abs(delta) > 0.05) {
             const isUp = delta > 0;
             const absDelta = Math.abs(delta);
             const formattedDelta = absDelta > 999 ? '>999' : absDelta.toLocaleString('en-US', {
@@ -2596,7 +2160,7 @@ function LiveOperationsDashboardPage({
             deltaLabel = k.deltaType === 'pts' ? `${isUp ? '+' : delta < 0 ? '-' : ''}${formattedDelta} pts` : `${isUp ? '+' : delta < 0 ? '-' : ''}${formattedDelta}%`;
             if (k.good === null) deltaClass = 'neutral';else deltaClass = isUp && k.good === 'up' || !isUp && k.good === 'down' ? 'good' : 'bad';
           }
-          return <div key={k.key} className="kpi-card">
+          return <div key={k.key} className="kpi-card" title={k.title}>
                 <div className="kpi-card-header">
                   <div className="kpi-card-label">
                     <NavIcon name={k.icon} style={{
@@ -2608,19 +2172,17 @@ function LiveOperationsDashboardPage({
                   </div>
                 </div>
                 <div className="kpi-card-value">{k.value}</div>
-                <div className={`kpi-card-delta ${deltaClass}`}>
-                  {delta !== null && Math.abs(delta) > 0.05 && <>
-                      <NavIcon name={delta > 0 ? 'trending-up' : 'trending-down'} style={{
+                {hasDelta ? <div className={`kpi-card-delta ${deltaClass}`}>
+                    {Math.abs(delta) > 0.05 ? <>
+                        <NavIcon name={delta > 0 ? 'trending-up' : 'trending-down'} style={{
                   width: 14,
                   height: 14
                 }} />
-                      {deltaLabel}
-                    </>}
-                  <span style={{
-                color: '#94a3b8',
-                marginLeft: 4
-              }}>vs prior period</span>
-                </div>
+                        {deltaLabel}
+                      </> : <span>Unchanged</span>}
+                    <span className="kpi-card-delta-note">vs prior period</span>
+                  </div> : <div className="kpi-card-meta">{k.scopeLabel}</div>}
+                {k.description && <p className="kpi-card-description">{k.description}</p>}
               </div>;
         })}
         </div>
@@ -2644,7 +2206,7 @@ function LiveOperationsDashboardPage({
               margin: '2px 0 0',
               fontSize: '0.82rem'
             }}>
-                Compares current period performance against the previous equivalent period to identify growth trends and operational momentum.
+                Current-period totals with percentage change from the previous equivalent period, plus a derived composite performance score.
               </p>
             </div>
           </div>
@@ -2660,40 +2222,66 @@ function LiveOperationsDashboardPage({
             }
             return value >= 0 ? 'good' : 'bad';
           };
+          const formatPctChange = delta => {
+            if (delta === null || delta === undefined || Number.isNaN(Number(delta))) return null;
+            const abs = Math.abs(delta);
+            const formatted = abs > 999 ? '>999' : abs.toLocaleString('en-US', {
+              minimumFractionDigits: 1,
+              maximumFractionDigits: 1
+            });
+            if (delta === 0 || Math.abs(delta) <= 0.05) return '0.0%';
+            return `${delta > 0 ? '+' : '-'}${formatted}%`;
+          };
+          const getPerformanceClassification = score => {
+            if (score === null || score === undefined || Number.isNaN(Number(score))) return null;
+            if (score >= 80) return 'Excellent';
+            if (score >= 60) return 'Good';
+            return 'Needs Attention';
+          };
           const collectionClass = getCardClass(data.summary.collectionGrowthRate);
           const salesClass = getCardClass(data.summary.salesGrowthRate);
           const performanceClass = data.summary.performanceScore >= 80 ? 'good' : data.summary.performanceScore >= 60 ? 'neutral' : 'bad';
+          const performanceClassification = getPerformanceClassification(data.summary.performanceScore);
           return [{
             key: 'collections',
             label: 'Collections',
             icon: 'dollar-sign',
-            trendIcon: data.summary.collectionGrowthRate >= 0 ? 'trending-up' : data.summary.collectionGrowthRate < 0 ? 'trending-down' : 'minus',
+            trendIcon: data.summary.collectionGrowthRate > 0 ? 'trending-up' : data.summary.collectionGrowthRate < 0 ? 'trending-down' : 'minus',
             value: formatCurrency(data.summary.totalCollections),
+            previousValue: data.summary.totalCollectionsPrevious != null ? formatCurrency(data.summary.totalCollectionsPrevious) : null,
             delta: data.summary.collectionGrowthRate,
+            deltaLabel: formatPctChange(data.summary.collectionGrowthRate),
             deltaType: '%',
             cardClass: collectionClass,
-            description: 'Total cash collected from customers during the period, indicating collection efficiency and cash flow health.'
+            description: 'Total customer payment amount recorded during the selected period, presented with its percentage change from the previous equivalent period.',
+            methodology: null
           }, {
             key: 'sales',
             label: 'Sales',
             icon: 'shopping-cart',
-            trendIcon: data.summary.salesGrowthRate >= 0 ? 'trending-up' : data.summary.salesGrowthRate < 0 ? 'trending-down' : 'minus',
+            trendIcon: data.summary.salesGrowthRate > 0 ? 'trending-up' : data.summary.salesGrowthRate < 0 ? 'trending-down' : 'minus',
             value: formatCurrency(data.summary.totalSales),
+            previousValue: data.summary.totalSalesPrevious != null ? formatCurrency(data.summary.totalSalesPrevious) : null,
             delta: data.summary.salesGrowthRate,
+            deltaLabel: formatPctChange(data.summary.salesGrowthRate),
             deltaType: '%',
             cardClass: salesClass,
-            description: 'Total sales revenue generated, reflecting market activity and customer demand for products.'
+            description: 'Total sales revenue recorded during the selected period, presented with its percentage change from the previous equivalent period.',
+            methodology: null
           }, {
             key: 'performance',
             label: 'Performance Score',
             icon: 'shield-check',
             trendIcon: data.summary.performanceScore >= 80 ? 'award' : data.summary.performanceScore >= 60 ? 'star' : 'alert-circle',
             value: `${data.summary.performanceScore}/100`,
-            delta: data.summary.performanceScore >= 80 ? 'Excellent' : data.summary.performanceScore >= 60 ? 'Good' : 'Needs Attention',
+            previousValue: null,
+            delta: performanceClassification,
+            deltaLabel: performanceClassification,
             deltaType: 'label',
             cardClass: performanceClass,
-            description: 'Weighted composite score combining route compliance, inventory health, collection efficiency, and operational execution.'
-          }].map(card => <div key={card.key} className={`pop-card ${card.cardClass}`}>
+            description: 'Composite performance score calculated from the defined weights and measures for route compliance, inventory health, collection efficiency, and operational execution.',
+            methodology: 'Weights: Route Compliance 25%, Sales Visit Completion 15%, Inventory Health 20%, Overdue Penalty Score 20%, Stock Alert Penalty Score 20%. Overdue penalty = max(0, 100 − min(100, overdue accounts × 5)); stock-alert penalty = max(0, 100 − min(100, stock alerts × 2)). Classification: ≥80 Excellent · 60–79 Good · <60 Needs Attention.'
+          }].map(card => <div key={card.key} className={`pop-card ${card.cardClass}`} title={card.methodology || undefined}>
                 <div className="pop-card-header">
                   <div className="pop-card-label">
                     <NavIcon name={card.icon} style={{
@@ -2702,6 +2290,7 @@ function LiveOperationsDashboardPage({
                   color: '#64748b'
                 }} />
                     {card.label}
+                    {card.key === 'performance' && <span className="pop-card-badge">Derived</span>}
                   </div>
                   <NavIcon name={card.trendIcon} style={{
                 width: 16,
@@ -2711,8 +2300,14 @@ function LiveOperationsDashboardPage({
                 </div>
                 <div className="pop-card-value">{card.value}</div>
                 <div className={`pop-card-delta ${card.cardClass}`}>
-                  {card.deltaType === '%' ? card.delta !== null ? `${card.delta >= 0 ? '+' : ''}${card.delta}%` : 'No prior period' : card.delta}
+                  {card.deltaType === '%' ? card.deltaLabel !== null ? <>
+                        <span>{card.deltaLabel}</span>
+                        <span className="pop-card-delta-note">vs previous equivalent period</span>
+                      </> : <span className="pop-card-delta-note">No previous equivalent period</span> : card.deltaLabel}
                 </div>
+                {card.deltaType === '%' && card.previousValue != null && card.deltaLabel !== null && <div className="pop-card-previous">
+                    Previous equivalent period: {card.previousValue}
+                  </div>}
                 <p className="muted" style={{
               fontSize: '0.75rem',
               marginTop: 8,
@@ -2720,6 +2315,7 @@ function LiveOperationsDashboardPage({
             }}>
                   {card.description}
                 </p>
+                {card.methodology && <p className="pop-card-methodology">{card.methodology}</p>}
               </div>);
         })()}
         </div>
@@ -2743,7 +2339,7 @@ function LiveOperationsDashboardPage({
                 <p className="muted" style={{
                 margin: '2px 0 0',
                 fontSize: '0.82rem'
-              }}>{data.filters.label} vs prior period</p>
+              }}>{data.filters.label} vs previous equivalent period</p>
               </div>
             </div>
           </div>
@@ -2752,7 +2348,7 @@ function LiveOperationsDashboardPage({
           marginTop: 0,
           marginBottom: 16
         }}>
-            Daily collection amounts over the selected period compared to the previous equivalent period, revealing cash flow patterns and collection momentum.
+            Daily customer payment amounts recorded during the selected period compared with the previous equivalent period, showing changes in collection activity over time.
           </p>
           <ResponsiveContainer width="100%" height={230}>
             <LineChart data={trendCollections}>
@@ -2787,17 +2383,12 @@ function LiveOperationsDashboardPage({
             <p style={{
             margin: 0
           }}>
-              {(() => {
-              const currentTotal = trendCollections.reduce((sum, d) => sum + d.amount, 0);
-              const previousTotal = trendCollections.reduce((sum, d) => sum + d.previous, 0);
-              if (!data.filters.comparisonEnabled || previousTotal <= 0) {
-                return 'No prior-period data is available for this comparison.';
-              }
-              const growth = ((currentTotal - previousTotal) / previousTotal * 100).toFixed(1);
-              const isGrowth = Number(growth) >= 0;
-              const trend = trendCollections.length > 2 ? trendCollections[trendCollections.length - 1].amount > trendCollections[0].amount ? 'upward' : trendCollections[trendCollections.length - 1].amount < trendCollections[0].amount ? 'downward' : 'stable' : 'stable';
-              return isGrowth ? `Collections are ${growth}% higher (Current: ${formatCurrency(currentTotal)} vs Previous: ${formatCurrency(previousTotal)}; Growth = (${formatCurrency(currentTotal)} - ${formatCurrency(previousTotal)}) / ${formatCurrency(previousTotal)} × 100) with a ${trend} trend, indicating improved cash flow and collection efficiency. This suggests effective follow-up strategies and customer payment behavior.` : `Collections are ${Math.abs(growth)}% lower (Current: ${formatCurrency(currentTotal)} vs Previous: ${formatCurrency(previousTotal)}; Decline = (${formatCurrency(previousTotal)} - ${formatCurrency(currentTotal)}) / ${formatCurrency(previousTotal)} × 100) with a ${trend} trend, which may indicate payment delays or economic factors affecting customer liquidity. Consider reviewing collection schedules and customer outreach.`;
-            })()}
+              {describePeriodChange({
+              metricLabel: 'collections',
+              currentTotal: data.summary.totalCollections,
+              previousTotal: data.summary.totalCollectionsPrevious,
+              comparisonEnabled: data.filters.comparisonEnabled
+            })}
             </p>
           </div>
         </section>
@@ -2819,7 +2410,7 @@ function LiveOperationsDashboardPage({
                 <p className="muted" style={{
                 margin: '2px 0 0',
                 fontSize: '0.82rem'
-              }}>{data.filters.label} vs prior period</p>
+              }}>{data.filters.label} vs previous equivalent period</p>
               </div>
             </div>
           </div>
@@ -2828,7 +2419,7 @@ function LiveOperationsDashboardPage({
           marginTop: 0,
           marginBottom: 16
         }}>
-            Daily sales revenue over the selected period compared to the previous equivalent period, indicating market activity and customer demand trends.
+            Daily sales revenue recorded during the selected period compared with the previous equivalent period, showing changes in sales activity over time.
           </p>
           <ResponsiveContainer width="100%" height={230}>
             <LineChart data={trendSales}>
@@ -2863,17 +2454,12 @@ function LiveOperationsDashboardPage({
             <p style={{
             margin: 0
           }}>
-              {(() => {
-              const currentTotal = trendSales.reduce((sum, d) => sum + d.amount, 0);
-              const previousTotal = trendSales.reduce((sum, d) => sum + d.previous, 0);
-              if (!data.filters.comparisonEnabled || previousTotal <= 0) {
-                return 'No prior-period data is available for this comparison.';
-              }
-              const growth = ((currentTotal - previousTotal) / previousTotal * 100).toFixed(1);
-              const isGrowth = Number(growth) >= 0;
-              const trend = trendSales.length > 2 ? trendSales[trendSales.length - 1].amount > trendSales[0].amount ? 'upward' : trendSales[trendSales.length - 1].amount < trendSales[0].amount ? 'downward' : 'stable' : 'stable';
-              return isGrowth ? `Sales are ${growth}% higher (Current: ${formatCurrency(currentTotal)} vs Previous: ${formatCurrency(previousTotal)}; Growth = (${formatCurrency(currentTotal)} - ${formatCurrency(previousTotal)}) / ${formatCurrency(previousTotal)} × 100) with a ${trend} trend, indicating strong market demand and effective product offerings. This suggests customer confidence and healthy business growth.` : `Sales are ${Math.abs(growth)}% lower (Current: ${formatCurrency(currentTotal)} vs Previous: ${formatCurrency(previousTotal)}; Decline = (${formatCurrency(previousTotal)} - ${formatCurrency(currentTotal)}) / ${formatCurrency(previousTotal)} × 100) with a ${trend} trend, which may indicate seasonal factors, competitive pressure, or changing customer preferences. Consider reviewing product mix and marketing strategies.`;
-            })()}
+              {describePeriodChange({
+              metricLabel: 'sales revenue',
+              currentTotal: data.summary.totalSales,
+              previousTotal: data.summary.totalSalesPrevious,
+              comparisonEnabled: data.filters.comparisonEnabled
+            })}
             </p>
           </div>
         </section>
@@ -2896,7 +2482,7 @@ function LiveOperationsDashboardPage({
               <p className="muted" style={{
               margin: '2px 0 0',
               fontSize: '0.82rem'
-            }}>Collections, sales, balance, compliance, and inventory health</p>
+            }}>Collections, sales, and outstanding balances by branch</p>
             </div>
           </div>
         </div>
@@ -2905,7 +2491,7 @@ function LiveOperationsDashboardPage({
         marginTop: 0,
         marginBottom: 16
       }}>
-          Compares financial performance across all branches to identify top performers, underperforming locations, and resource allocation opportunities.
+          Compares recorded collections, sales, and outstanding balances across branches during the selected period to show differences in financial activity.
         </p>
         <ResponsiveContainer width="100%" height={260}>
           <BarChart data={branchOptions.map(branch => ({
@@ -2946,13 +2532,7 @@ function LiveOperationsDashboardPage({
             <p style={{
           margin: 0
         }}>
-              {(() => {
-            const topBranch = branchOptions.reduce((max, b) => b.totalCollections > max.totalCollections ? b : max, branchOptions[0]);
-            const bottomBranch = branchOptions.reduce((min, b) => b.totalCollections < min.totalCollections ? b : min, branchOptions[0]);
-            const avgCollections = branchOptions.reduce((sum, b) => sum + b.totalCollections, 0) / branchOptions.length;
-            const variance = branchOptions.some(b => Math.abs(b.totalCollections - avgCollections) > avgCollections * 0.3);
-            return variance ? `Branch performance shows significant variance with ${topBranch.branchName} leading (${formatCurrency(topBranch.totalCollections)}) and ${bottomBranch.branchName} trailing (${formatCurrency(bottomBranch.totalCollections)}). Average: ${formatCurrency(avgCollections)} (Avg = Total Collections / ${branchOptions.length} branches). Variance threshold: >30% from average. This disparity suggests operational differences that could be addressed through best practice sharing from top performers and targeted support for underperforming branches.` : `Branch performance is relatively balanced across the network with average collections of ${formatCurrency(avgCollections)} (Avg = Total Collections / ${branchOptions.length} branches). All branches within 30% of average, indicating consistent operational standards and effective resource distribution. Consider maintaining current practices while identifying incremental improvement opportunities across all locations.`;
-          })()}
+              {describeBranchCollectionsComparison(branchOptions)}
             </p>
           </div>
         </section>
@@ -2976,11 +2556,12 @@ function LiveOperationsDashboardPage({
                 margin: '2px 0 0',
                 fontSize: '0.82rem'
               }}>
-                  Detailed performance breakdown by branch including collections, sales, route compliance, and inventory health metrics.
+                  Summarizes collections, sales, route compliance, and inventory health metrics for each branch during the selected period.
                 </p>
               </div>
             </div>
           </div>
+          {branchOptions.length ? <>
           <div className="table-shell">
             <table className="corvex-table">
               <thead>
@@ -3007,18 +2588,10 @@ function LiveOperationsDashboardPage({
             <p style={{
             margin: 0
           }}>
-              {(() => {
-              const avgCompliance = branchOptions.reduce((sum, b) => sum + b.routeCompliance, 0) / branchOptions.length;
-              const avgInventory = branchOptions.reduce((sum, b) => sum + b.inventoryHealth, 0) / branchOptions.length;
-              const lowCompliance = branchOptions.filter(b => b.routeCompliance < 70).length;
-              const lowInventory = branchOptions.filter(b => b.inventoryHealth < 70).length;
-              if (lowCompliance > 0 || lowInventory > 0) {
-                return `${lowCompliance} branch(es) with compliance below 70% and ${lowInventory} branch(es) with inventory health below 70% require attention. Average compliance: ${avgCompliance.toFixed(1)}% (Avg = Sum of Compliance / ${branchOptions.length}), Average inventory: ${avgInventory.toFixed(1)}% (Avg = Sum of Inventory / ${branchOptions.length}). Consider reviewing route planning and inventory management processes for underperforming locations.`;
-              }
-              return `Branch performance is strong with average compliance at ${avgCompliance.toFixed(1)}% (Avg = Sum of Compliance / ${branchOptions.length}) and average inventory health at ${avgInventory.toFixed(1)}% (Avg = Sum of Inventory / ${branchOptions.length}). All branches are maintaining acceptable operational standards. Continue monitoring for early signs of performance degradation.`;
-            })()}
+              {describeBranchSummary(branchOptions)}
             </p>
           </div>
+          </> : <EmptyState title="No branch data recorded" description="No branch data recorded for the selected period." />}
         </section>
 
         <section className="panel content-panel">
@@ -3039,26 +2612,27 @@ function LiveOperationsDashboardPage({
                 margin: '2px 0 0',
                 fontSize: '0.82rem'
               }}>
-                  Tracks operational exceptions requiring attention, including low stock items and pending field visits across branches.
+                  Displays recorded operational exceptions, including pending field visits and inventory items that meet the defined low-stock threshold across branches.
                 </p>
               </div>
             </div>
           </div>
+          {(data.lowStockItems?.length || data.pendingVisits?.length) ? <>
           <div className="table-shell">
             <table className="corvex-table">
               <thead>
                 <tr><th>Type</th><th>Branch</th><th>Details</th></tr>
               </thead>
               <tbody>
-                {data.lowStockItems.slice(0, 5).map((item, index) => <tr key={`${item.branchName}-${item.productName}-${index}`}>
+                {(data.lowStockItems || []).slice(0, 5).map((item, index) => <tr key={`${item.branchName}-${item.productName}-${index}`}>
                     <td>Low stock</td>
                     <td>{item.branchName}</td>
                     <td>{item.productName} · {item.availableStock} remaining</td>
                   </tr>)}
-                {data.pendingVisits.slice(0, 5).map(visit => <tr key={visit.visitId}>
+                {(data.pendingVisits || []).slice(0, 5).map(visit => <tr key={visit.visitId}>
                     <td>Pending visit</td>
                     <td>{visit.branchName}</td>
-                    <td>{visit.customerName} · {visit.visitType} · {visit.scheduledDate}</td>
+                    <td>{visit.customerName} · {visit.visitType} · {formatDisplayDate(visit.scheduledDate)}</td>
                   </tr>)}
               </tbody>
             </table>
@@ -3067,17 +2641,10 @@ function LiveOperationsDashboardPage({
             <p style={{
             margin: 0
           }}>
-              {(() => {
-              const lowStockCount = data.lowStockItems.length;
-              const pendingVisitsCount = data.pendingVisits.length;
-              const totalExceptions = lowStockCount + pendingVisitsCount;
-              if (totalExceptions === 0) {
-                return 'No operational exceptions detected (Total = 0). All branches are operating within normal parameters with adequate inventory levels and up-to-date field visits.';
-              }
-              return `${totalExceptions} exception(s) require attention (Total = ${lowStockCount} + ${pendingVisitsCount}): ${lowStockCount} low stock item(s) and ${pendingVisitsCount} pending visit(s). Address inventory shortages promptly to prevent stockouts and ensure pending visits are scheduled to maintain customer relationships and collection continuity.`;
-            })()}
+              {describeExceptionMonitoring(data.lowStockItems, data.pendingVisits)}
             </p>
           </div>
+          </> : <EmptyState title="No exceptions recorded" description="No operational exceptions recorded for the selected period." />}
         </section>
       </div>
 
@@ -3100,11 +2667,12 @@ function LiveOperationsDashboardPage({
                 margin: '2px 0 0',
                 fontSize: '0.82rem'
               }}>
-                  Highest outstanding balances by customer, revealing credit exposure and collection priorities.
+                  Lists customers with the highest recorded outstanding balances as of the reporting date, including their associated branches and days since the last collection.
                 </p>
               </div>
             </div>
           </div>
+          {(data.topCustomers || []).length ? <>
           <div className="table-shell">
             <table className="corvex-table">
               <thead>
@@ -3115,7 +2683,7 @@ function LiveOperationsDashboardPage({
                     <td>{customer.customerName}</td>
                     <td>{customer.branchName}</td>
                     <td>{formatCurrency(customer.outstandingBalance)}</td>
-                    <td>{customer.daysSinceCollection}</td>
+                    <td>{formatDaysSinceCollection(customer)}</td>
                   </tr>)}
               </tbody>
             </table>
@@ -3124,14 +2692,10 @@ function LiveOperationsDashboardPage({
             <p style={{
             margin: 0
           }}>
-              {(() => {
-              const totalOutstanding = data.topCustomers.reduce((sum, c) => sum + c.outstandingBalance, 0);
-              const avgDays = data.topCustomers.reduce((sum, c) => sum + c.daysSinceCollection, 0) / data.topCustomers.length;
-              const highRisk = data.topCustomers.filter(c => c.daysSinceCollection > 30).length;
-              return `Top ${data.topCustomers.length} customers account for ${formatCurrency(totalOutstanding)} in outstanding balances (Total = Sum of all outstanding balances) with an average of ${avgDays.toFixed(0)} days since last collection (Avg = Sum of Days / ${data.topCustomers.length}). ${highRisk} customer(s) have not been collected from in over 30 days (Threshold: >30 days), indicating potential credit risk. Prioritize collection efforts on high-balance, long-overdue accounts to minimize bad debt exposure.`;
-            })()}
+              {describeTopCustomers(data.topCustomers)}
             </p>
           </div>
+          </> : <EmptyState title="No customer balances available" description="No customer balances available for the selected period." />}
         </section>
 
         <section className="panel content-panel">
@@ -3152,11 +2716,12 @@ function LiveOperationsDashboardPage({
                 margin: '2px 0 0',
                 fontSize: '0.82rem'
               }}>
-                  Best-selling products by revenue and quantity, revealing customer preferences and inventory planning insights.
+                  Lists the top-selling products based on recorded sales revenue and quantity sold during the selected period, including their product categories.
                 </p>
               </div>
             </div>
           </div>
+          {(data.topProducts || []).length ? <>
           <div className="table-shell">
             <table className="corvex-table">
               <thead>
@@ -3176,15 +2741,10 @@ function LiveOperationsDashboardPage({
             <p style={{
             margin: 0
           }}>
-              {(() => {
-              const totalRevenue = data.topProducts.reduce((sum, p) => sum + p.revenue, 0);
-              const totalQty = data.topProducts.reduce((sum, p) => sum + p.quantitySold, 0);
-              const topProduct = data.topProducts[0];
-              const categoryCount = [...new Set(data.topProducts.map(p => p.categoryName))].length;
-              return `Top ${data.topProducts.length} products generated ${formatCurrency(totalRevenue)} (Total = Sum of all product revenues) from ${totalQty} units sold (Total = Sum of all quantities) across ${categoryCount} categories. ${topProduct.productName} is the best-performing product with ${formatCurrency(topProduct.revenue)} revenue. Ensure adequate inventory levels for top performers and consider cross-selling opportunities within high-performing categories.`;
-            })()}
+              {describeTopProducts(data.topProducts)}
             </p>
           </div>
+          </> : <EmptyState title="No product sales recorded" description="No product sales recorded for the selected period." />}
         </section>
       </div>
 
@@ -3200,91 +2760,6 @@ function LiveOperationsDashboardPage({
       to: '/operating-manager/reports',
       variant: 'secondary'
     }]} onAction={action => navigate(action.to)} />
-
-      {topBranch && bottomBranch ? <section className="panel content-panel" style={{
-      marginTop: 16
-    }}>
-          <div className="panel-section-header">
-            <div style={{
-          display: 'flex',
-          alignItems: 'center',
-          gap: 8
-        }}>
-              <NavIcon name="trophy" style={{
-            width: 18,
-            height: 18,
-            color: '#f59e0b'
-          }} />
-              <div>
-                <h3>Branch Performance Highlights</h3>
-                <p className="muted" style={{
-              margin: '2px 0 0',
-              fontSize: '0.82rem'
-            }}>
-                  Identifies the highest-performing branch for best practice sharing and the lowest-performing branch requiring operational support.
-                </p>
-              </div>
-            </div>
-          </div>
-          <div className="performance-grid">
-            <div className="performance-card good">
-              <div className="performance-card-header">
-                <div className="performance-card-badge good">
-                  <NavIcon name="award" style={{
-                width: 14,
-                height: 14
-              }} />
-                  Top Branch
-                </div>
-              </div>
-              <div className="performance-card-title">{topBranch.branchName}</div>
-              <div className="performance-card-value">{formatCurrency(topBranch.totalCollections)} collections</div>
-              <p className="muted" style={{
-            fontSize: '0.75rem',
-            marginTop: 8,
-            marginBottom: 0,
-            color: '#64748b'
-          }}>
-                Highest collection performance across the network, indicating effective operational practices that could be replicated.
-              </p>
-            </div>
-            <div className="performance-card bad">
-              <div className="performance-card-header">
-                <div className="performance-card-badge bad">
-                  <NavIcon name="alert-circle" style={{
-                width: 14,
-                height: 14
-              }} />
-                  Needs Attention
-                </div>
-              </div>
-              <div className="performance-card-title">{bottomBranch.branchName}</div>
-              <div className="performance-card-value">{formatCurrency(bottomBranch.totalCollections)} collections</div>
-              <p className="muted" style={{
-            fontSize: '0.75rem',
-            marginTop: 8,
-            marginBottom: 0,
-            color: '#64748b'
-          }}>
-                Lowest collection performance, potentially requiring operational support, process review, or resource allocation.
-              </p>
-            </div>
-          </div>
-          <div className="analysis-box analysis-box-purple">
-            <p style={{
-          margin: 0
-        }}>
-              {(() => {
-            const gap = topBranch.totalCollections - bottomBranch.totalCollections;
-            const gapPercent = bottomBranch.totalCollections > 0 ? (gap / bottomBranch.totalCollections * 100).toFixed(1) : 0;
-            return `${topBranch.branchName} outperforms ${bottomBranch.branchName} by ${formatCurrency(gap)} (Gap = ${formatCurrency(topBranch.totalCollections)} - ${formatCurrency(bottomBranch.totalCollections)}) which is ${gapPercent}% of the bottom branch's performance (Gap % = Gap / ${formatCurrency(bottomBranch.totalCollections)} × 100). Document the operational practices of the top branch and implement knowledge transfer programs to elevate performance across the network. Consider assigning a mentor from the top branch to support the underperforming location.`;
-          })()}
-            </p>
-          </div>
-        </section> : null}
-
-      {/* Analytical Insights & Decision Support Section */}
-      <AnalyticalInsightsSection data={data} filters={filters} branchOptions={branchOptions} />
     </div>;
 }
 function LiveBranchComparisonPage({

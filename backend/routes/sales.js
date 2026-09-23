@@ -40,16 +40,17 @@ async function getInvoice(invoiceIdentifier, user) {
        si.invoice_number,
        si.customer_id,
        c.first_name,
+       c.middle_name,
        c.last_name,
-       COALESCE(NULLIF(CONCAT_WS(' ', c.first_name, c.last_name), ''), 'Customer') AS customer_name,
+       COALESCE(NULLIF(CONCAT_WS(' ', c.first_name, c.middle_name, c.last_name), ''), 'Customer') AS customer_name,
        si.sales_agent_id,
        agent.full_name AS sales_agent_name,
        si.branch_id,
        b.name AS branch_name,
        si.total_amount,
        si.status,
-       si.invoices_date,
-       si.due_date,
+       si.invoices_date::text AS invoices_date,
+       si.due_date::text AS due_date,
        si.notes,
        pm.method_name AS payment_method,
        si.created_at,
@@ -94,13 +95,15 @@ async function getVisit(pool, visitId, userId) {
        fv.visit_id,
        fv.customer_id,
        c.first_name,
+       c.middle_name,
        c.last_name,
-       COALESCE(NULLIF(CONCAT_WS(' ', c.first_name, c.last_name), ''), 'Customer') AS customer_name,
+       COALESCE(NULLIF(CONCAT_WS(' ', c.first_name, c.middle_name, c.last_name), ''), 'Customer') AS customer_name,
        c.address,
        c.latitude,
        c.longitude,
        c.contact_phone,
        c.contact_person_fname,
+       c.contact_person_mname,
        c.contact_person_lname,
        c.contact_person_phone,
        c.status AS customer_status,
@@ -109,7 +112,7 @@ async function getVisit(pool, visitId, userId) {
        u.last_name AS agent_last_name,
        COALESCE(NULLIF(CONCAT_WS(' ', u.first_name, u.last_name), ''), 'Sales Agent') AS agent_name,
        fv.visit_type,
-       fv.scheduled_date,
+       fv.scheduled_date::text AS scheduled_date,
        fv.status,
        fv.created_at,
        fv.updated_at
@@ -159,16 +162,17 @@ router.get('/invoices', async (req, res) => {
          si.invoice_number,
          si.customer_id,
          c.first_name,
+         c.middle_name,
          c.last_name,
-         COALESCE(NULLIF(CONCAT_WS(' ', c.first_name, c.last_name), ''), 'Customer') AS customer_name,
+         COALESCE(NULLIF(CONCAT_WS(' ', c.first_name, c.middle_name, c.last_name), ''), 'Customer') AS customer_name,
          si.sales_agent_id,
          agent.full_name AS sales_agent_name,
          si.branch_id,
          b.name AS branch_name,
          si.total_amount,
          si.status,
-         si.invoices_date,
-         si.due_date,
+         si.invoices_date::text AS invoices_date,
+         si.due_date::text AS due_date,
          si.notes,
          pm.method_name AS payment_method,
          ARRAY(
@@ -212,6 +216,7 @@ router.get('/invoices', async (req, res) => {
     return res.status(500).json({
       success: false,
       message: 'Failed to fetch invoices',
+      error: error.message,
     });
   }
 });
@@ -531,6 +536,27 @@ router.post('/invoices', async (req, res) => {
 router.get('/visits', async (req, res) => {
   const pool = req.app.locals.pool;
   const userId = req.currentUser.id;
+  const { status, scheduled_date: scheduledDate, start_date: startDate, end_date: endDate } = req.query;
+  const conditions = ['fv.user_id = $1'];
+  const params = [userId];
+  let pIdx = 2;
+
+  if (typeof status === 'string' && status.trim() && status !== 'All') {
+    conditions.push(`fv.status = $${pIdx++}`);
+    params.push(status.trim());
+  }
+  if (isValidDate(scheduledDate)) {
+    conditions.push(`fv.scheduled_date = $${pIdx++}`);
+    params.push(scheduledDate);
+  }
+  if (isValidDate(startDate)) {
+    conditions.push(`fv.scheduled_date >= $${pIdx++}`);
+    params.push(startDate);
+  }
+  if (isValidDate(endDate)) {
+    conditions.push(`fv.scheduled_date <= $${pIdx++}`);
+    params.push(endDate);
+  }
 
   try {
     const result = await pool.query(
@@ -538,13 +564,15 @@ router.get('/visits', async (req, res) => {
          fv.visit_id,
          fv.customer_id,
          c.first_name,
+         c.middle_name,
          c.last_name,
-         COALESCE(NULLIF(CONCAT_WS(' ', c.first_name, c.last_name), ''), 'Customer') AS customer_name,
+         COALESCE(NULLIF(CONCAT_WS(' ', c.first_name, c.middle_name, c.last_name), ''), 'Customer') AS customer_name,
          c.address,
          c.latitude,
          c.longitude,
          c.contact_phone,
          c.contact_person_fname,
+         c.contact_person_mname,
          c.contact_person_lname,
          c.contact_person_phone,
          c.status AS customer_status,
@@ -553,16 +581,16 @@ router.get('/visits', async (req, res) => {
          u.last_name AS agent_last_name,
          COALESCE(NULLIF(CONCAT_WS(' ', u.first_name, u.last_name), ''), 'Sales Agent') AS agent_name,
          fv.visit_type,
-         fv.scheduled_date,
+         fv.scheduled_date::text AS scheduled_date,
          fv.status,
          fv.created_at,
          fv.updated_at
        FROM field_visits fv
        JOIN customers c ON c.customer_id = fv.customer_id
        JOIN users u ON u.id = fv.user_id
-       WHERE fv.user_id = $1
+       WHERE ${conditions.join(' AND ')}
        ORDER BY fv.scheduled_date ASC, fv.visit_id ASC`,
-      [userId]
+      params
     );
 
     return res.status(200).json({
@@ -575,6 +603,7 @@ router.get('/visits', async (req, res) => {
     return res.status(500).json({
       success: false,
       message: 'Failed to fetch field visits',
+      error: error.message,
     });
   }
 });
@@ -745,7 +774,7 @@ router.put('/visits/:id', async (req, res) => {
       params
     );
 
-    const visit = await getVisit.call({ pool }, visitId, req.currentUser.id);
+    const visit = await getVisit(pool, visitId, req.currentUser.id);
 
     if (!visit) {
       return res.status(404).json({
@@ -781,7 +810,7 @@ router.get('/payments', async (req, res) => {
       `SELECT
          cp.collectionpayment_id,
          cp.customer_id,
-         COALESCE(NULLIF(CONCAT_WS(' ', c.first_name, c.last_name), ''), 'Customer') AS customer_name,
+         COALESCE(NULLIF(CONCAT_WS(' ', c.first_name, c.middle_name, c.last_name), ''), 'Customer') AS customer_name,
          cp.collector_id,
          COALESCE(NULLIF(CONCAT_WS(' ', u.first_name, u.last_name), ''), 'Collector') AS collector_name,
          cp.branch_id,

@@ -1259,7 +1259,7 @@ function NotificationsPage({
                     <td>{formatDisplayDate(item.created_at)}</td>
                     <td><StatusBadge status={item.status} /></td>
                     <td className="table-actions">
-                      {item.status === 'Unread' ? <button className="icon-action-button" type="button" title="Mark read" onClick={() => markOneRead(item.notification_id)}>
+                      {item.status === 'Unread' ? <button className="icon-action-button" type="button" title="Mark Read" onClick={() => markOneRead(item.notification_id)}>
                           <NavIcon name="check" />
                         </button> : null}
                     </td>
@@ -1538,7 +1538,7 @@ function SuppliersPage({
           <div className="modal-content">
             <div className="modal-header">
               <h3>{editingSupplier ? 'Edit Supplier' : 'Add Supplier'}</h3>
-              <button className="icon-action-button" onClick={() => {
+              <button className="icon-action-button" type="button" title="Close" onClick={() => {
             setShowAddModal(false);
             setEditingSupplier(null);
           }}><NavIcon name="close" /></button>

@@ -70,6 +70,13 @@ async function connectDatabase() {
     const result = await client.query('SELECT current_database(), current_user, version()');
     const { current_database, current_user } = result.rows[0];
     console.log(`✅ PostgreSQL connected — database: "${current_database}", user: "${current_user}"`);
+
+    // Ensure customer name columns required by sales/customers queries exist
+    await client.query(`
+      ALTER TABLE customers ADD COLUMN IF NOT EXISTS middle_name VARCHAR(50) DEFAULT NULL;
+      ALTER TABLE customers ADD COLUMN IF NOT EXISTS contact_person_mname VARCHAR(100) DEFAULT NULL;
+    `);
+
     client.release();
   } catch (err) {
     console.error('❌ Failed to connect to PostgreSQL:', err.message);

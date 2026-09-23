@@ -466,7 +466,7 @@ function RoutePage({
                     <td>{stop.address}</td>
                     <td>{formatCurrency(stop.outstandingBalance || 0)}</td>
                     <td><StatusBadge status={stop.status} /></td>
-                    <td>
+                    <td className="table-actions">
                       <button className="icon-action-button" type="button" title="View" onClick={() => navigate(`/collector/account-detail/${stop.id}?from=route`)}><NavIcon name="view" /></button>
                     </td>
                   </tr>)}
@@ -597,7 +597,7 @@ function AccountDetailPage({
     }
     load();
   }, [accountId]);
-  const pagination_account_paymentHistory = usePagination(account.paymentHistory);
+  const pagination_account_paymentHistory = usePagination(account?.paymentHistory || []);
   const paginated_account_paymentHistory = pagination_account_paymentHistory.paginatedData;
   if (loading) return <LoadingState message="Loading customer..." />;
   if (!account) {
@@ -930,7 +930,7 @@ function ReceiptsListPage({
                     <td><StatusBadge status={r.payment_status} /></td>
                     <td>{r.generated_by_name || '—'}</td>
                     <td>{formatDisplayDate(r.receipt_date)}</td>
-                    <td>
+                    <td className="table-actions">
                       <button className="icon-action-button" type="button" title="View" onClick={() => navigate(`/collector/receipts/${r.receipts_id}`)}>
                         <NavIcon name="view" />
                       </button>
@@ -1305,7 +1305,7 @@ function CollectionHistoryPage({
               <thead>
                 <tr>
                   <th>Payment ID</th>
-                  <th>Receipt ID</th>
+                  <th>Receipt Number</th>
                   <th>Customer</th>
                   <th>Collector</th>
                   <th>Branch</th>
@@ -1325,7 +1325,7 @@ function CollectionHistoryPage({
                     <td><span style={{
                     fontFamily: 'monospace',
                     fontSize: '0.82rem'
-                  }}>{p.receipts_id ?? '—'}</span></td>
+                  }}>{p.receipt_number || '—'}</span></td>
                     <td>{p.customer_name || '—'}</td>
                     <td>{p.collector_name || '—'}</td>
                     <td>{p.branch_name || '—'}</td>
@@ -1335,7 +1335,7 @@ function CollectionHistoryPage({
                   fontSize: '0.82rem'
                 }}>{formatPaymentTimestamp(p.payment_date, p.payment_time)}</td>
                     <td><StatusBadge status={p.status} /></td>
-                    <td>
+                    <td className="table-actions">
                       <button className="icon-action-button" type="button" title="View" onClick={() => navigate(`/collector/history/${p.collectionpayment_id}`)}>
                         <NavIcon name="view" />
                       </button>

@@ -122,6 +122,11 @@ export async function getCreditHistory(params = {}) {
     return response.data;
   } catch (error) {
     console.error('Failed to fetch credit history:', error);
-    return { success: false, data: [], count: 0 };
+    return {
+      success: false,
+      data: [],
+      count: 0,
+      message: error?.response?.data?.message || 'Failed to load credit history.',
+    };
   }
 }

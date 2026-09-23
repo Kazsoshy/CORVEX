@@ -1,4 +1,4 @@
-import { formatCustomerDisplayId, formatPurchaseVolumeUnits } from '../../utils/customerDisplay';
+import { formatContactPersonName, formatCustomerDisplayId, formatCustomerFullName, formatPurchaseVolumeUnits, formatSecondaryContactName } from '../../utils/customerDisplay';
 import { formatDisplayDateTime } from '../../utils/formatters';
 import { StatusBadge } from '../StatusBadge';
 
@@ -13,16 +13,17 @@ function resolvePurchaseVolumeUnits(customer) {
 
 export function CustomerCard({ customer, onViewDetails, onLogVisit, onNavigate, showRank = false }) {
   const displayId = formatCustomerDisplayId(customer);
-  const primaryContact = `${customer.contact_person_fname || ''} ${customer.contact_person_lname || ''}`.trim() || '—';
-  const secondaryContact = `${customer.secondary_contact_fname || ''} ${customer.secondary_contact_lname || ''}`.trim();
+  const ownerName = formatCustomerFullName(customer);
+  const primaryContact = formatContactPersonName(customer);
+  const secondaryContact = formatSecondaryContactName(customer);
 
   return (
     <article className="account-card customer-card">
       <div className="account-card-header">
         <div>
           {showRank && customer.rank ? <span className="customer-rank">#{customer.rank}</span> : null}
-          <h4>{customer.first_name} {customer.last_name}</h4>
-          <p className="muted account-meta">{displayId} · {customer.branch_name || customer.branch_id}</p>
+          <h4>{ownerName}</h4>
+          <p className="muted account-meta">Customer ID: {displayId} · {customer.branch_name || customer.branch_id}</p>
         </div>
         <StatusBadge status={customer.status || 'Inactive'} />
       </div>
@@ -37,16 +38,15 @@ export function CustomerCard({ customer, onViewDetails, onLogVisit, onNavigate, 
           <div>
             <span className="metric-label">Primary Contact</span>
             <strong>{primaryContact}</strong>
-            {customer.contact_person_relationship ? (
-              <span className="muted" style={{ display: 'block', fontSize: '0.82rem' }}>{customer.contact_person_relationship}</span>
-            ) : null}
           </div>
           {secondaryContact ? (
             <div>
               <span className="metric-label">Secondary Contact</span>
               <strong>{secondaryContact}</strong>
               {customer.secondary_contact_relationship ? (
-                <span className="muted" style={{ display: 'block', fontSize: '0.82rem' }}>{customer.secondary_contact_relationship}</span>
+                <span className="muted" style={{ display: 'block', fontSize: '0.82rem' }}>
+                  Relationship: {customer.secondary_contact_relationship}
+                </span>
               ) : null}
             </div>
           ) : null}

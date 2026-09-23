@@ -3,8 +3,13 @@ import { requireAuth, requireRole, requireAssignedBranch, ROLE_SETS } from '../m
 
 const router = express.Router();
 const ORG_REPORT_PATHS = new Set(['/executive', '/operating-manager', '/performance-history']);
+const CREDIT_HISTORY_PATHS = new Set(['/credit-history']);
 router.use((req, res, next) => {
-  const allowed = ORG_REPORT_PATHS.has(req.path) ? ROLE_SETS.reportsOrg : ROLE_SETS.reportsBranch;
+  const allowed = ORG_REPORT_PATHS.has(req.path)
+    ? ROLE_SETS.reportsOrg
+    : CREDIT_HISTORY_PATHS.has(req.path)
+      ? ROLE_SETS.creditHistory
+      : ROLE_SETS.reportsBranch;
   return requireRole(allowed)(req, res, next);
 });
 router.use(requireAssignedBranch);
