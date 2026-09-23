@@ -4,6 +4,7 @@ import dotenv from 'dotenv';
 import path from 'path';
 
 dotenv.config();
+dotenv.config({ path: path.join(process.cwd(), '..', '.env') });
 const { Pool } = pkg;
 
 if (!process.env.DB_PASSWORD) {
@@ -19,7 +20,9 @@ const pool = new Pool({
   port:     Number(process.env.DB_PORT) || 5432,
 });
 
-const MIGRATIONS_DIR = path.join(process.cwd(), 'backend', 'migrations');
+const MIGRATIONS_DIR = fs.existsSync(path.join(process.cwd(), 'migrations'))
+  ? path.join(process.cwd(), 'migrations')
+  : path.join(process.cwd(), 'backend', 'migrations');
 
 const MIGRATIONS = [
   { file: '001_initial_schema.sql',                  label: '001_initial_schema.sql' },
@@ -47,6 +50,9 @@ const MIGRATIONS = [
   { file: '026_territory_assignments.sql',              label: '026_territory_assignments.sql' },
   { file: '027_users_middle_name.sql',                  label: '027_users_middle_name.sql' },
   { file: '028_permissions_updated_at.sql',             label: '028_permissions_updated_at.sql' },
+  { file: '029_customer_middle_names.sql',                label: '029_customer_middle_names.sql' },
+  { file: '030_field_activity_report_photo.sql',        label: '030_field_activity_report_photo.sql' },
+  { file: '031_product_categories_updated_at.sql',      label: '031_product_categories_updated_at.sql' },
 ];
 
 async function ensureMigrationsTable() {

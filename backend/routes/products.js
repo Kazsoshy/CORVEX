@@ -48,6 +48,7 @@ router.get('/', async (req, res) => {
         SELECT
           p.id AS product_id,
           p.name AS product_name,
+          p.sku,
           p.category_id,
           pc.category_name,
           p.unit_price,
@@ -68,6 +69,7 @@ router.get('/', async (req, res) => {
         SELECT
           p.id AS product_id,
           p.name AS product_name,
+          p.sku,
           p.category_id,
           pc.category_name,
           p.unit_price,
@@ -83,7 +85,7 @@ router.get('/', async (req, res) => {
         LEFT JOIN product_categories pc ON pc.category_id = p.category_id
         LEFT JOIN branch_inventory i ON i.product_id = p.id
         ${where}
-        GROUP BY p.id, p.category_id, pc.category_name, p.unit_price, p.status, p.image_url
+        GROUP BY p.id, p.sku, p.category_id, pc.category_name, p.unit_price, p.status, p.image_url
         ORDER BY p.name
         LIMIT $${limitIdx} OFFSET $${offsetIdx}
       `;
@@ -116,11 +118,15 @@ router.get('/:id', async (req, res) => {
     const productResult = await pool.query(
       `SELECT p.id AS product_id,
               p.name AS product_name,
+              p.sku,
               p.category_id,
               pc.category_name,
               p.unit_price,
               p.status,
-              p.image_url
+              p.image_url,
+              p.description,
+              p.unit_type,
+              p.reorder_point
        FROM products p
        LEFT JOIN product_categories pc ON pc.category_id = p.category_id
        WHERE p.id = $1`,

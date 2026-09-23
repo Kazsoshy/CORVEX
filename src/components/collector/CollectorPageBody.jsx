@@ -163,7 +163,9 @@ function FieldActivityReportsPage({
   const [form, setForm] = useState({
     visit_id: '',
     activity_type: '',
-    remarks: ''
+    remarks: '',
+    photo: '',
+    photoName: '',
   });
   const [errors, setErrors] = useState({});
   async function loadReports() {
@@ -182,13 +184,15 @@ function FieldActivityReportsPage({
     if (!form.visit_id) nextErrors.visit_id = 'Select a visit.';
     if (!form.activity_type) nextErrors.activity_type = 'Select an activity type.';
     if (!form.remarks.trim()) nextErrors.remarks = 'Remarks are required.';
+    if (!form.photo) nextErrors.photo = 'Photo evidence is required.';
     setErrors(nextErrors);
     if (Object.keys(nextErrors).length) return;
     setSubmitting(true);
     const result = await submitFieldActivityReport({
       visit_id: Number(form.visit_id),
       activity_type: form.activity_type,
-      remarks: form.remarks.trim()
+      remarks: form.remarks.trim(),
+      photo: form.photo,
     });
     setSubmitting(false);
     if (result.success) {
@@ -196,7 +200,9 @@ function FieldActivityReportsPage({
       setForm({
         visit_id: '',
         activity_type: '',
-        remarks: ''
+        remarks: '',
+        photo: '',
+        photoName: '',
       });
       loadReports();
     } else {
@@ -265,6 +271,58 @@ function FieldActivityReportsPage({
           }))} />
           {errors.remarks ? <p className="form-error">{errors.remarks}</p> : null}
         </div>
+        <div className="form-group" style={{
+          marginBottom: 0
+        }}>
+          <label>Photo Evidence<span className="required">*</span></label>
+          <input
+            type="file"
+            accept="image/*"
+            capture="environment"
+            onChange={(e) => {
+              const file = e.target.files?.[0];
+              if (!file) {
+                setForm((p) => ({ ...p, photo: '', photoName: '' }));
+                return;
+              }
+              if (!file.type.startsWith('image/')) {
+                setErrors((prev) => ({ ...prev, photo: 'Please select an image file.' }));
+                return;
+              }
+              if (file.size > 700_000) {
+                setErrors((prev) => ({ ...prev, photo: 'Image must be 700 KB or smaller.' }));
+                return;
+              }
+              const reader = new FileReader();
+              reader.onload = () => {
+                setForm((p) => ({
+                  ...p,
+                  photo: typeof reader.result === 'string' ? reader.result : '',
+                  photoName: file.name,
+                }));
+                setErrors((prev) => {
+                  const next = { ...prev };
+                  delete next.photo;
+                  return next;
+                });
+              };
+              reader.readAsDataURL(file);
+            }}
+          />
+          {form.photoName ? (
+            <p className="text-ink/70" style={{ fontSize: '0.82rem', marginTop: 6 }}>
+              Selected: {form.photoName}
+            </p>
+          ) : null}
+          {form.photo ? (
+            <img
+              src={form.photo}
+              alt="Report preview"
+              style={{ marginTop: 8, maxWidth: 200, maxHeight: 140, borderRadius: 8, border: '1px solid #e2e8f0' }}
+            />
+          ) : null}
+          {errors.photo ? <p className="form-error">{errors.photo}</p> : null}
+        </div>
         <div className="flex justify-end">
           <button className="button" type="submit" disabled={submitting || !visits.length}>
             {submitting ? 'Submitting…' : 'Submit to Operating Manager'}
@@ -284,7 +342,8 @@ function FieldActivityReportsPage({
                   <th>Activity Type</th>
                   <th>Visit Date</th>
                   <th>Sync Status</th>
-                  <th>Submitted At</th>
+                  <th>Photo</th>
+                  <th>Created At</th>
                   <th>Remarks</th>
                 </tr>
               </thead>
@@ -302,6 +361,13 @@ function FieldActivityReportsPage({
                     <td>{r.activity_type}</td>
                     <td>{formatDisplayDate(r.scheduled_date)}</td>
                     <td><StatusBadge status={r.sync_status} /></td>
+                    <td>
+                      {r.photo ? (
+                        <a href={r.photo} target="_blank" rel="noreferrer">
+                          <img src={r.photo} alt="Report" style={{ width: 48, height: 48, objectFit: 'cover', borderRadius: 6, border: '1px solid #e2e8f0' }} />
+                        </a>
+                      ) : '—'}
+                    </td>
                     <td>{formatDisplayDateTime(r.created_at)}</td>
                     <td style={{
                   maxWidth: 220,

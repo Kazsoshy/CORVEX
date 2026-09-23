@@ -146,6 +146,7 @@ router.get('/field-reports', async (req, res) => {
          far.activity_type,
          far.remarks,
          far.sync_status,
+         far.photo,
          far.created_at,
          fv.scheduled_date,
          fv.visit_type,
@@ -173,12 +174,34 @@ router.get('/field-reports', async (req, res) => {
 router.post('/field-reports', async (req, res) => {
   const pool = req.app.locals.pool;
   const userId = req.currentUser.id;
-  const { visit_id, activity_type, remarks } = req.body;
+  const { visit_id, activity_type, remarks, photo } = req.body;
+  const photoValue = typeof photo === 'string' ? photo.trim() : '';
 
   if (!visit_id || !activity_type || !String(remarks || '').trim()) {
     return res.status(400).json({
       success: false,
       message: 'visit_id, activity_type, and remarks are required.',
+    });
+  }
+
+  if (!photoValue) {
+    return res.status(400).json({
+      success: false,
+      message: 'photo is required.',
+    });
+  }
+
+  if (!photoValue.startsWith('data:image/')) {
+    return res.status(400).json({
+      success: false,
+      message: 'photo must be a valid image upload.',
+    });
+  }
+
+  if (photoValue.length > 900_000) {
+    return res.status(400).json({
+      success: false,
+      message: 'photo is too large. Use a smaller image.',
     });
   }
 
@@ -193,10 +216,10 @@ router.post('/field-reports', async (req, res) => {
     }
 
     const result = await pool.query(
-      `INSERT INTO field_activity_reports (visit_id, user_id, activity_type, remarks, sync_status)
-       VALUES ($1, $2, $3, $4, 'Pending')
-       RETURNING report_id, visit_id, activity_type, remarks, sync_status, created_at`,
-      [Number(visit_id), userId, String(activity_type).trim(), String(remarks).trim()]
+      `INSERT INTO field_activity_reports (visit_id, user_id, activity_type, remarks, photo, sync_status)
+       VALUES ($1, $2, $3, $4, $5, 'Pending')
+       RETURNING report_id, visit_id, activity_type, remarks, photo, sync_status, created_at`,
+      [Number(visit_id), userId, String(activity_type).trim(), String(remarks).trim(), photoValue]
     );
 
     return res.status(201).json({

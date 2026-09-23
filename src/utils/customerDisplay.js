@@ -1,3 +1,9 @@
+/** Display value for optional middle name fields (always show label in UI). */
+export function formatMiddleNameDisplay(value) {
+  const trimmed = String(value ?? '').trim();
+  return trimmed || 'N/A';
+}
+
 /** UI label: plain sequential customer_id (display only; does not change stored data). */
 export function formatCustomerDisplayId(customer) {
   if (!customer) return '—';

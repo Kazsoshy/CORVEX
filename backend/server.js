@@ -24,8 +24,14 @@ import salesRouter     from './routes/sales.js';
 import collectorRouter from './routes/collector.js';
 import notificationsRouter from './routes/notifications.js';
 import { requireAuth, requireBranchScope } from './middleware/auth.js';
+import { ensureSchema } from './lib/ensureSchema.js';
 
+import path from 'path';
+import { fileURLToPath } from 'url';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 dotenv.config();
+dotenv.config({ path: path.join(__dirname, '..', '.env') });
 
 const { Pool } = pkg;
 const app = express();
@@ -71,20 +77,16 @@ async function connectDatabase() {
     const { current_database, current_user } = result.rows[0];
     console.log(`✅ PostgreSQL connected — database: "${current_database}", user: "${current_user}"`);
 
-    // Ensure customer name columns required by sales/customers queries exist
-    await client.query(`
-      ALTER TABLE customers ADD COLUMN IF NOT EXISTS middle_name VARCHAR(50) DEFAULT NULL;
-      ALTER TABLE customers ADD COLUMN IF NOT EXISTS contact_person_mname VARCHAR(100) DEFAULT NULL;
-    `);
+    await ensureSchema(client);
 
     client.release();
+    return true;
   } catch (err) {
     console.error('❌ Failed to connect to PostgreSQL:', err.message);
     console.error('   Check your .env DB credentials and ensure PostgreSQL is running.');
+    return false;
   }
 }
-
-connectDatabase();
 
 // ──────────────────────────────────────────────────────────────────────────────
 // ROUTES
@@ -120,6 +122,14 @@ app.use('/api/notifications', requireAuth, notificationsRouter);
 
 // Admin routes — identify required
 app.use('/api/admin', requireAuth, adminRouter);
+
+app.get('/api/health', (req, res) => {
+  res.json({
+    success: true,
+    message: 'CORVEX API is healthy.',
+    features: ['territories-assignable-users', 'users-middle-name'],
+  });
+});
 
 // Health Check
 app.get('/', (req, res) => {
@@ -185,8 +195,17 @@ app.use((err, req, res, _next) => {
 // ──────────────────────────────────────────────────────────────────────────────
 const PORT = Number(process.env.PORT) || 5000;
 
-app.listen(PORT, () => {
-  console.log(`🚀 CORVEX API running at http://localhost:${PORT}`);
-  console.log(`   Environment: ${process.env.NODE_ENV || 'development'}`);
-});
+async function startServer() {
+  const dbReady = await connectDatabase();
+  if (!dbReady) {
+    process.exit(1);
+  }
+
+  app.listen(PORT, () => {
+    console.log(`🚀 CORVEX API running at http://localhost:${PORT}`);
+    console.log(`   Environment: ${process.env.NODE_ENV || 'development'}`);
+  });
+}
+
+startServer();
 

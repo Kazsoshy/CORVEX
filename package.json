@@ -5,6 +5,8 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "dev:server": "node backend/server.js",
+    "migrate": "node backend/run_migrations.js",
     "build": "vite build",
     "preview": "vite preview"
   },

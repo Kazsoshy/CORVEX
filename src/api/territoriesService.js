@@ -25,3 +25,9 @@ export const deleteTerritory = async (id) => {
   const res = await apiClient.delete(`/territories/${id}`);
   return res.data;
 };
+
+/** Active staff in scope who can be assigned to a territory. */
+export const fetchAssignableUsers = async (params = {}) => {
+  const res = await apiClient.get('/territories/assignable-users', { params });
+  return res.data;
+};

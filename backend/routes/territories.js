@@ -5,6 +5,53 @@ const router = express.Router();
 router.use(allow(ROLE_SETS.territoryRead, ROLE_SETS.territoryWrite));
 
 // ──────────────────────────────────────────────────────────────────────────────
+// GET /api/territories/assignable-users
+// Active branch staff eligible for territory assignment (no user-admin role required).
+// ──────────────────────────────────────────────────────────────────────────────
+router.get('/assignable-users', async (req, res) => {
+  try {
+    const pool = req.app.locals.pool;
+    const user = req.currentUser;
+    const conditions = [`u.status = 'Active'`, `r.slug IN ('sales_staff', 'collector', 'branch_manager')`];
+    const params = [];
+
+    if (!isUnscoped(user)) {
+      if (user.branchId == null) {
+        return res.status(403).json({
+          success: false,
+          message: 'Access denied: no branch is assigned to this account.',
+        });
+      }
+      params.push(user.branchId);
+      conditions.push(`u.branch_id = $${params.length}`);
+    } else if (req.query.branch_id) {
+      params.push(Number(req.query.branch_id));
+      conditions.push(`u.branch_id = $${params.length}`);
+    }
+
+    const result = await pool.query(
+      `SELECT
+         u.id AS user_id,
+         u.first_name,
+         u.middle_name,
+         u.last_name,
+         r.role_name,
+         r.slug AS role_slug
+       FROM users u
+       JOIN roles r ON r.role_id = u.role_id
+       WHERE ${conditions.join(' AND ')}
+       ORDER BY u.first_name, u.last_name`,
+      params
+    );
+
+    return res.status(200).json({ success: true, data: result.rows });
+  } catch (err) {
+    console.error('[Territories] GET /assignable-users error:', err.message);
+    return res.status(500).json({ success: false, message: 'Failed to fetch assignable users.' });
+  }
+});
+
+// ──────────────────────────────────────────────────────────────────────────────
 // GET /api/territories
 // Query params: branch_id, search
 // Note: If requireBranchScope is used in server.js, req.currentUser.branchId

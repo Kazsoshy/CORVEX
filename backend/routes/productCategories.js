@@ -29,7 +29,7 @@ router.get('/', async (req, res) => {
     const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
 
     const result = await pool.query(
-      `SELECT category_id, category_name, status, created_at
+      `SELECT category_id, category_name, status, created_at, updated_at
        FROM product_categories
        ${where}
        ORDER BY category_id`,
@@ -52,7 +52,7 @@ router.get('/:id', async (req, res) => {
     const catId = Number(req.params.id);
 
     const result = await pool.query(
-      `SELECT category_id, category_name, status, created_at FROM product_categories WHERE category_id = $1`,
+      `SELECT category_id, category_name, status, created_at, updated_at FROM product_categories WHERE category_id = $1`,
       [catId]
     );
 
@@ -162,7 +162,7 @@ router.delete('/:id', async (req, res) => {
 
     // Archive instead of hard delete
     await pool.query(
-      `UPDATE product_categories SET status = 'Inactive' WHERE category_id = $1`,
+      `UPDATE product_categories SET status = 'Inactive', updated_at = CURRENT_TIMESTAMP WHERE category_id = $1`,
       [catId]
     );
 

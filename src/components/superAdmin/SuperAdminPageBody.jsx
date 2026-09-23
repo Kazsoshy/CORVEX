@@ -939,11 +939,23 @@ function UsersPage({
   const fetchData = useCallback(async () => {
     setLoading(true);
     try {
-      const [uRes, rRes, bRes] = await Promise.all([apiClient.get('/users?limit=100'), apiClient.get('/roles'), apiClient.get('/dashboard/branches') // using branches summary for dropdown
+      const [uRes, rRes, bRes] = await Promise.allSettled([
+        apiClient.get('/users?limit=100'),
+        apiClient.get('/roles'),
+        apiClient.get('/dashboard/branches'),
       ]);
-      setUsers(uRes.data.data || []);
-      setRoles(rRes.data.data.roles || []);
-      setBranches(bRes.data.data || []);
+      if (uRes.status === 'fulfilled' && uRes.value.data?.success) {
+        setUsers(uRes.value.data.data || []);
+      }
+      if (rRes.status === 'fulfilled' && rRes.value.data?.success) {
+        setRoles(rRes.value.data.data.roles || []);
+      }
+      if (bRes.status === 'fulfilled' && bRes.value.data?.success) {
+        setBranches(bRes.value.data.data || []);
+      }
+      if (uRes.status === 'rejected' || rRes.status === 'rejected' || bRes.status === 'rejected') {
+        showToast('Some user admin data failed to load. Restart the API on port 5000 if this persists.', 'error');
+      }
     } catch (err) {
       showToast('Failed to load users data.', 'error');
     } finally {

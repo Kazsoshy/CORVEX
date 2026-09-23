@@ -23,6 +23,8 @@ const ROUTE_DEFINITIONS = [
   { pattern: /^\/operating-manager\/profile$/, pageType: 'profile' },
   { pattern: /^\/operating-manager\/customers$/, pageType: 'customers' },
   { pattern: /^\/operating-manager\/customers\/([^/]+)$/, pageType: 'customerDetail', params: ['customerId'] },
+  { pattern: /^\/operating-manager\/sales-history$/, pageType: 'salesHistory' },
+  { pattern: /^\/operating-manager\/sales-history\/([^/]+)$/, pageType: 'salesHistoryInvoice', params: ['invoiceId'] },
   { pattern: /^\/operating-manager\/territories$/, pageType: 'territories' },
   { pattern: /^\/operating-manager\/digital-receipts$/, pageType: 'digitalReceipts' },
   { pattern: /^\/operating-manager\/saw-results$/, pageType: 'sawResults' },
@@ -93,6 +95,14 @@ export function buildOperatingManagerBreadcrumbs(pageType, params = {}) {
       return [...crumbs, { label: 'Customer Records', to: '/operating-manager/customers' }];
     case 'customerDetail':
       return [...crumbs, { label: 'Customer Records', to: '/operating-manager/customers' }, { label: 'Customer Detail', to: `/operating-manager/customers/${params.customerId}` }];
+    case 'salesHistory':
+      return [...crumbs, { label: 'Sales History', to: '/operating-manager/sales-history' }];
+    case 'salesHistoryInvoice':
+      return [
+        ...crumbs,
+        { label: 'Sales History', to: '/operating-manager/sales-history' },
+        { label: 'Invoice Details', to: `/operating-manager/sales-history/${params.invoiceId}` },
+      ];
     case 'territories':
       return [...crumbs, { label: 'Territories', to: '/operating-manager/territories' }];
     case 'digitalReceipts':
@@ -159,6 +169,8 @@ export function resolveOperatingManagerPage(pathname) {
     profile: 'Profile',
     customers: 'Customer Records',
     customerDetail: 'Customer Detail',
+    salesHistory: 'Sales History',
+    salesHistoryInvoice: 'Invoice Details',
     digitalReceipts: 'Digital Receipts',
     sawResults: 'SAW Results',
     performanceSummary: 'Performance Summary',
@@ -192,6 +204,9 @@ export function isOperatingManagerNavActive(fullPath, navTo) {
   if (navTo === '/operating-manager/notifications') return pathname === '/operating-manager/notifications';
   if (navTo === '/operating-manager/profile') return pathname === '/operating-manager/profile';
   if (navTo === '/operating-manager/customers') return pathname.startsWith('/operating-manager/customers');
+  if (navTo === '/operating-manager/sales-history') {
+    return pathname.startsWith('/operating-manager/sales-history');
+  }
   return pathname === navTo;
 }
 

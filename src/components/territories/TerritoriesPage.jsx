@@ -1,7 +1,13 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { NavIcon } from '../../navIcons';
 import { EmptyState } from '../shared/EmptyState';
-import { fetchTerritories, createTerritory, updateTerritory, deleteTerritory } from '../../api/territoriesService';
+import {
+  fetchTerritories,
+  createTerritory,
+  updateTerritory,
+  deleteTerritory,
+  fetchAssignableUsers,
+} from '../../api/territoriesService';
 import { getCurrentUser } from '../../api/authService';
 import apiClient from '../../api/apiClient';
 import { usePagination } from '../../hooks/usePagination';
@@ -62,11 +68,13 @@ export function TerritoriesPage({ showToast }) {
   const branchFieldRef = useRef(null);
   const userFieldRef = useRef(null);
 
-  const isBranchManager = !!currentUser?.branchId;
+  const userBranchId = currentUser?.branch?.id ?? currentUser?.branchId ?? null;
+  const canListAllUsers = ['super_admin', 'operating_manager'].includes(currentUser?.role?.slug);
+  const isBranchManager = userBranchId != null && currentUser?.role?.slug === 'branch_manager';
 
   const [form, setForm] = useState({
     territory_name: '',
-    branch_id: isBranchManager ? currentUser.branchId : '',
+    branch_id: isBranchManager ? userBranchId : '',
     coverage_area: '',
   });
 
@@ -101,12 +109,23 @@ export function TerritoriesPage({ showToast }) {
       }
 
       try {
-        const usersRes = await apiClient.get('/users', { params: { limit: 200, status: 'Active' } });
-        if (!cancelled && usersRes.data?.success) {
-          setUsers(usersRes.data.data || []);
+        if (canListAllUsers) {
+          const usersRes = await apiClient.get('/users', { params: { limit: 200, status: 'Active' } });
+          if (!cancelled && usersRes.data?.success) {
+            setUsers(usersRes.data.data || []);
+          }
+        } else {
+          const data = await fetchAssignableUsers();
+          if (!cancelled && data?.success) {
+            setUsers(data.data || []);
+          }
         }
-      } catch {
-        /* Branch managers may not have /users access; table still uses API names */
+      } catch (err) {
+        const status = err.response?.status;
+        if (status === 404) {
+          showToast?.('Restart the API server (port 5000) to load territory user lookup.', 'error');
+        }
+        /* Assignable users are optional; territory rows still include assigned names */
       }
     }
     loadLookups();
@@ -214,11 +233,11 @@ export function TerritoriesPage({ showToast }) {
   const handleAdd = () => {
     setForm({
       territory_name: '',
-      branch_id: isBranchManager ? currentUser.branchId : '',
+      branch_id: isBranchManager ? userBranchId : '',
       coverage_area: '',
     });
     setBranchQuery(isBranchManager
-      ? (branchOptions.find((b) => Number(b.branch_id) === Number(currentUser.branchId))?.branch_name || '')
+      ? (branchOptions.find((b) => Number(b.branch_id) === Number(userBranchId))?.branch_name || '')
       : '');
     setSelectedUsers([]);
     setUserQuery('');

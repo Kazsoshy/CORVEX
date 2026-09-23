@@ -14,6 +14,7 @@ import { getBranchAnalytics, getBranchStaff, getBranchCustomers, getBranchCustom
 import { getReportCollection, getReportSales, getReportInventory, getReportDelinquency, getReportCompliance, getReportKPI, getReportInvoices } from '../../api/reportsService.js';
 import { CreditHistoryListPage, CreditHistoryDetailPage } from '../shared/CreditHistoryPages';
 import { TerritoriesPage } from '../territories/TerritoriesPage';
+import { formatMiddleNameDisplay } from '../../utils/customerDisplay.js';
 
 // Re-export for use in other components
 export { getBranchAnalytics, getBranchStaff, getBranchCustomers, getBranchAlerts };
@@ -1499,10 +1500,12 @@ function CustomerDetailPage({
           <div className="flex flex-col md:flex-row justify-between gap-4 items-start md:items-center mb-4"><h3>Contact Information</h3></div>
           <ul className="info-grid">
             <li><span className="info-item-label">Customer Name</span><span className="info-item-value">{name}</span></li>
+            <li><span className="info-item-label">Middle Name</span><span className="info-item-value">{formatMiddleNameDisplay(customer.middle_name)}</span></li>
             <li><span className="info-item-label">Branch</span><span className="info-item-value">{customer.branch_name || branchName}</span></li>
             <li><span className="info-item-label">Address</span><span className="info-item-value">{customer.address || '—'}</span></li>
             <li><span className="info-item-label">Contact Phone</span><span className="info-item-value">{customer.contact_phone || '—'}</span></li>
             <li><span className="info-item-label">Contact Person</span><span className="info-item-value">{customer.contact_person_fname} {customer.contact_person_lname}</span></li>
+            <li><span className="info-item-label">Contact Person Middle Name</span><span className="info-item-value">{formatMiddleNameDisplay(customer.contact_person_mname)}</span></li>
             <li><span className="info-item-label">Contact Person Phone</span><span className="info-item-value">{customer.contact_person_phone || '—'}</span></li>
             <li><span className="info-item-label">Account Manager</span><span className="info-item-value">{customer.account_manager_name || '—'}</span></li>
             <li><span className="info-item-label">Customer Since</span><span className="info-item-value">{customerSince}</span></li>

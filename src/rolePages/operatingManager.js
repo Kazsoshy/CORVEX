@@ -19,6 +19,7 @@ export const operatingManagerRole = {
         { label: 'Branch Management', to: '/operating-manager/admin/branches' },
         { label: 'Territories', to: '/operating-manager/territories' },
         { label: 'Customer Records', to: '/operating-manager/customers' },
+        { label: 'Sales History', to: '/operating-manager/sales-history' },
       ],
     },
     {
@@ -38,7 +39,6 @@ export const operatingManagerRole = {
       items: [
         { label: 'Branch Performance', to: '/operating-manager/branch-performance' },
         { label: 'Staff Performance', to: '/operating-manager/operations/staff-performance' },
-        { label: 'Performance Summary', to: '/operating-manager/performance-summary' },
         { label: 'SAW Results', to: '/operating-manager/saw-results' },
         { label: 'Map', to: '/operating-manager/leaflet' },
         { label: 'Reports \u0026 Analytics', to: '/operating-manager/reports' },
@@ -68,6 +68,7 @@ export const operatingManagerRole = {
     { label: 'Branch Management', to: '/operating-manager/admin/branches' },
     { label: 'Territories', to: '/operating-manager/territories' },
     { label: 'Customer Records', to: '/operating-manager/customers' },
+    { label: 'Sales History', to: '/operating-manager/sales-history' },
     { label: 'Inventory Management', to: '/operating-manager/admin/inventory' },
     { label: 'Suppliers', to: '/operating-manager/admin/suppliers' },
     { label: 'Product Categories', to: '/operating-manager/admin/product-categories' },
@@ -77,7 +78,6 @@ export const operatingManagerRole = {
     { label: 'Approval Center', to: '/operating-manager/operations/approval-center' },
     { label: 'Branch Performance', to: '/operating-manager/branch-performance' },
     { label: 'Staff Performance', to: '/operating-manager/operations/staff-performance' },
-    { label: 'Performance Summary', to: '/operating-manager/performance-summary' },
     { label: 'SAW Results', to: '/operating-manager/saw-results' },
     { label: 'Leaflet | OpenStreetMap', to: '/operating-manager/leaflet' },
     { label: 'Reports \u0026 Analytics', to: '/operating-manager/reports' },

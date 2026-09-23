@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { createCustomer, createSalesInvoice, fetchCustomerById, fetchCustomers, fetchFieldVisits, fetchFieldVisitById, fetchInvoices, fetchPaymentMethods, fetchTerritories, updateFieldVisit } from '../../api/salesService';
-import { CONTACT_RELATIONSHIP_OPTIONS, formatContactPersonName, formatCustomerDisplayId, formatCustomerFullName, formatPurchaseVolumeUnits, formatSecondaryContactName } from '../../utils/customerDisplay';
+import { CONTACT_RELATIONSHIP_OPTIONS, formatContactPersonName, formatCustomerDisplayId, formatCustomerFullName, formatMiddleNameDisplay, formatPurchaseVolumeUnits, formatSecondaryContactName } from '../../utils/customerDisplay';
 import { getCurrentUser } from '../../api/authService.js';
 import { AUDIT_LOGS, CUSTOMERS, DASHBOARD_SUMMARY, LOW_STOCK_ITEMS, NOTIFICATIONS, OFFLINE_STATUS, PRODUCTS, ROUTE_TRACKING, SALES_ANALYTICS, SALES_HISTORY, SCHEDULE_STOPS, formatCurrency, formatDisplayDate, formatDisplayDateTime, getCustomerById, getProductById } from '../../data/salesMockData';
 import { CustomerCard } from './CustomerCard';
@@ -321,12 +321,10 @@ function SchedulePage({
               <thead>
                 <tr>
                   <th>Visit ID</th>
-                  <th>User ID</th>
                   <th>Visit Type</th>
                   <th>Scheduled Date</th>
                   <th>Status</th>
                   <th>Customer</th>
-                  <th>Customer ID</th>
                   <th>Agent</th>
                   <th>Created At</th>
                   <th>Updated At</th>
@@ -339,12 +337,10 @@ function SchedulePage({
                   fontFamily: 'monospace',
                   fontSize: '0.82rem'
                 }}>{v.visit_id}</span></td>
-                    <td>{v.user_id ?? '—'}</td>
                     <td>{v.visit_type || '—'}</td>
                     <td>{v.scheduled_date ? formatDisplayDate(v.scheduled_date) : '—'}</td>
                     <td><StatusBadge status={v.status} /></td>
                     <td>{v.customer_name || `${v.first_name || ''} ${v.last_name || ''}`.trim() || '—'}</td>
-                    <td>{v.customer_id ?? '—'}</td>
                     <td>{v.agent_name || '—'}</td>
                     <td>{formatDisplayDateTime(v.created_at)}</td>
                     <td>{formatDisplayDateTime(v.updated_at)}</td>
@@ -777,7 +773,7 @@ function CustomerDetailPage({
           <div>
             <p><strong>Customer ID:</strong> {displayId}</p>
             <p><strong>First Name:</strong> {customer.first_name || '—'}</p>
-            {customer.middle_name ? <p><strong>Middle Name:</strong> {customer.middle_name}</p> : null}
+            <p><strong>Middle Name:</strong> {formatMiddleNameDisplay(customer.middle_name)}</p>
             <p><strong>Last Name:</strong> {customer.last_name || '—'}</p>
             <p><strong>Branch:</strong> {customer.branch_name || '—'}</p>
             <p><strong>Account Manager:</strong> {customer.account_manager_name || '—'}</p>
@@ -793,7 +789,7 @@ function CustomerDetailPage({
             <p><strong>Longitude:</strong> {customer.longitude}</p>
             <h4 className="subsection-title">Primary Contact</h4>
             <p><strong>Name:</strong> {primaryContactName}</p>
-            {customer.contact_person_mname ? <p><strong>Middle Name:</strong> {customer.contact_person_mname}</p> : null}
+            <p><strong>Middle Name:</strong> {formatMiddleNameDisplay(customer.contact_person_mname)}</p>
             <p><strong>Phone:</strong> {customer.contact_person_phone || '—'}</p>
             {secondaryName ? <>
                 <h4 className="subsection-title" style={{
@@ -1514,9 +1510,11 @@ function ProductDetailsPage({
       </div>
     </div>;
 }
-function SalesHistoryPage({
+export function SalesHistoryPage({
   navigate,
-  showToast
+  showToast,
+  historyBasePath = '/sales/history',
+  getInvoiceDetailPath = (invoiceNumber) => `/sales/invoices/${encodeURIComponent(invoiceNumber)}`,
 }) {
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('All');
@@ -1620,14 +1618,14 @@ function SalesHistoryPage({
             <table className="corvex-table">
               <thead><tr><th>Invoice Number</th><th>Customer Name</th><th>Total Amount</th><th>Date</th><th>Status</th><th>Actions</th></tr></thead>
               <tbody>
-                {filtered.map(item => <tr key={item.invoice_number || item.sales_invoices_id} className="clickable-row" onClick={() => navigate(`/sales/invoices/${encodeURIComponent(item.invoice_number)}`)}>
+                {filtered.map(item => <tr key={item.invoice_number || item.sales_invoices_id} className="clickable-row" onClick={() => navigate(getInvoiceDetailPath(item.invoice_number))}>
                     <td>{item.invoice_number}</td>
                     <td>{item.customer_name || item.first_name + ' ' + item.last_name}</td>
                     <td>{formatCurrency(item.total_amount)}</td>
                     <td>{formatDisplayDate(item.invoices_date)}</td>
                     <td><StatusBadge status={item.status} /></td>
                     <td className="table-actions" onClick={e => e.stopPropagation()}>
-                      <button className="icon-action-button" type="button" title="View" onClick={() => navigate(`/sales/invoices/${encodeURIComponent(item.invoice_number)}`)}>
+                      <button className="icon-action-button" type="button" title="View" onClick={() => navigate(getInvoiceDetailPath(item.invoice_number))}>
                         <NavIcon name="view" />
                       </button>
                     </td>
@@ -1838,9 +1836,9 @@ export function SalesPageBody({
     case 'history':
       return <SalesHistoryPage {...props} />;
     case 'invoiceDetails':
-      return <InvoiceDetailsPage {...props} />;
+      return <InvoiceDetailsPage {...props} historyBasePath="/sales/history" />;
     case 'saleDetails':
-      return <InvoiceDetailsPage {...props} />;
+      return <InvoiceDetailsPage {...props} historyBasePath="/sales/history" />;
     case 'notifications':
       return <NotificationsPage {...props} />;
     case 'profile':

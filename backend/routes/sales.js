@@ -127,17 +127,30 @@ async function getVisit(pool, visitId, userId) {
   return result.rows[0] || null;
 }
 
-router.use(requireRole(['sales_staff']));
+const salesStaffOnly = requireRole(['sales_staff']);
+const salesStaffOrOperatingManager = requireRole(['sales_staff', 'operating_manager']);
 
-router.get('/invoices', async (req, res) => {
+router.get('/invoices', salesStaffOrOperatingManager, async (req, res) => {
   const pool = req.app.locals.pool;
-  const userId = req.currentUser.id;
-  const { status, page = 1, limit = 50, start_date: startDate, end_date: endDate } = req.query;
+  const user = req.currentUser;
+  const userId = user.id;
+  const { status, page = 1, limit = 50, start_date: startDate, end_date: endDate, branch_id: branchId } = req.query;
   const pageNumber = positiveInteger(page) || 1;
   const pageSize = Math.min(positiveInteger(limit) || 50, 100);
-  const conditions = ['si.sales_agent_id = $1'];
-  const params = [userId];
-  let pIdx = 2;
+  const conditions = [];
+  const params = [];
+  let pIdx = 1;
+
+  if (user.roleSlug === 'operating_manager') {
+    conditions.push('1=1');
+    if (branchId) {
+      conditions.push(`si.branch_id = $${pIdx++}`);
+      params.push(Number(branchId));
+    }
+  } else {
+    conditions.push(`si.sales_agent_id = $${pIdx++}`);
+    params.push(userId);
+  }
 
   if (typeof status === 'string' && status.trim() && status !== 'All') {
     conditions.push(`si.status = $${pIdx++}`);
@@ -154,6 +167,7 @@ router.get('/invoices', async (req, res) => {
 
   const where = `WHERE ${conditions.join(' AND ')}`;
   const offset = (pageNumber - 1) * pageSize;
+  const countParams = [...params];
 
   try {
     const result = await pool.query(
@@ -197,7 +211,7 @@ router.get('/invoices', async (req, res) => {
 
     const countResult = await pool.query(
       `SELECT COUNT(*) FROM sales_invoices si ${where}`,
-      params
+      countParams
     );
     const total = Number(countResult.rows[0].count);
 
@@ -221,7 +235,7 @@ router.get('/invoices', async (req, res) => {
   }
 });
 
-router.get('/invoices/:invoiceId/items', async (req, res) => {
+router.get('/invoices/:invoiceId/items', salesStaffOrOperatingManager, async (req, res) => {
   const user = { ...req.currentUser, pool: req.app.locals.pool };
 
   try {
@@ -251,7 +265,7 @@ router.get('/invoices/:invoiceId/items', async (req, res) => {
   }
 });
 
-router.get('/invoices/:invoiceId', async (req, res) => {
+router.get('/invoices/:invoiceId', salesStaffOrOperatingManager, async (req, res) => {
   const user = { ...req.currentUser, pool: req.app.locals.pool };
 
   try {
@@ -276,6 +290,8 @@ router.get('/invoices/:invoiceId', async (req, res) => {
     });
   }
 });
+
+router.use(salesStaffOnly);
 
 router.get('/payment-methods', async (req, res) => {
   const pool = req.app.locals.pool;

@@ -221,13 +221,38 @@ function UserListPage({
     async function loadData() {
       setLoading(true);
       try {
-        const [usersRes, rolesRes, branchesRes] = await Promise.all([apiClient.get('/users'), apiClient.get('/roles'), apiClient.get('/branches')]);
-        if (usersRes.data.success) setUsers(usersRes.data.data || []);
-        if (rolesRes.data.success) setRoles(rolesRes.data.data.roles || []);
-        if (branchesRes.data.success) setBranches(branchesRes.data.data || []);
+        const [usersRes, rolesRes, branchesRes] = await Promise.allSettled([
+          apiClient.get('/users'),
+          apiClient.get('/roles'),
+          apiClient.get('/branches'),
+        ]);
+        const failures = [];
+        if (usersRes.status === 'fulfilled' && usersRes.value.data?.success) {
+          setUsers(usersRes.value.data.data || []);
+        } else {
+          failures.push('users');
+        }
+        if (rolesRes.status === 'fulfilled' && rolesRes.value.data?.success) {
+          setRoles(rolesRes.value.data.data.roles || []);
+        } else {
+          failures.push('roles');
+        }
+        if (branchesRes.status === 'fulfilled' && branchesRes.value.data?.success) {
+          setBranches(branchesRes.value.data.data || []);
+        } else {
+          failures.push('branches');
+        }
+        if (failures.length) {
+          console.error('Error loading admin data:', failures, {
+            users: usersRes.status === 'rejected' ? usersRes.reason : null,
+            roles: rolesRes.status === 'rejected' ? rolesRes.reason : null,
+            branches: branchesRes.status === 'rejected' ? branchesRes.reason : null,
+          });
+          showToast(`Failed to load: ${failures.join(', ')}. Restart the API on port 5000 if this persists.`, 'error');
+        }
       } catch (err) {
         console.error('Error loading data:', err);
-        showToast('Failed to load users.', 'error');
+        showToast('Failed to load admin data.', 'error');
       }
       setLoading(false);
     }
@@ -1220,13 +1245,14 @@ function ProductCategoriesPage({
         </div>
         {loading ? <p>Loading…</p> : categories.length === 0 ? <EmptyState title="No categories found" /> : <><div className="corvex-table-wrapper">
             <table className="corvex-table">
-              <thead><tr><th>ID</th><th>Category Name</th><th>Status</th><th>Created At</th><th>Actions</th></tr></thead>
+              <thead><tr><th>ID</th><th>Category Name</th><th>Status</th><th>Created At</th><th>Updated At</th><th>Actions</th></tr></thead>
               <tbody>
                 {paginated_categories.map(c => <tr key={c.category_id}>
                     <td>{c.category_id}</td>
                     <td>{c.category_name}</td>
                     <td><StatusPill status={c.status} /></td>
                     <td>{formatDisplayDateTime(c.created_at)}</td>
+                    <td>{formatDisplayDateTime(c.updated_at || c.created_at)}</td>
                     <td className="table-actions">
                       <button className="icon-action-button" type="button" title="Edit" onClick={() => handleEdit(c)}><NavIcon name="edit" /></button>
                       {c.status === 'Active' && <button className="icon-action-button danger" type="button" title="Archive" onClick={() => handleArchive(c)}><NavIcon name="archive" /></button>}
@@ -1376,13 +1402,14 @@ function SuppliersAdminPage({
         </div>
         {loading ? <p>Loading…</p> : suppliers.length === 0 ? <EmptyState title="No suppliers found" /> : <><div className="corvex-table-wrapper">
             <table className="corvex-table">
-              <thead><tr><th>ID</th><th>Supplier Name</th><th>Contact</th><th>Email</th><th>Status</th></tr></thead>
+              <thead><tr><th>ID</th><th>Supplier Name</th><th>Contact</th><th>Email</th><th>Address</th><th>Status</th></tr></thead>
               <tbody>
-                {paginated_suppliers.map(s => <tr key={s.supplier_id}>
-                    <td>{s.supplier_id}</td>
+                {paginated_suppliers.map(s => <tr key={s.suppliers_id ?? s.supplier_id}>
+                    <td>{s.suppliers_id ?? s.supplier_id ?? '—'}</td>
                     <td>{s.supplier_name}</td>
                     <td>{s.contact_number || s.contact || '—'}</td>
                     <td>{s.email || '—'}</td>
+                    <td>{s.address?.trim() ? s.address : '—'}</td>
                     <td><StatusPill status={s.status || 'Active'} /></td>
                   </tr>)}
               </tbody>

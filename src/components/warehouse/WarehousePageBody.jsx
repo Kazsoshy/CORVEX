@@ -2,9 +2,9 @@ import { Pagination } from '../shared/Pagination';
 import { usePagination } from '../../hooks/usePagination';
 import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { AUDIT_LOGS, BRANCHES, CATEGORIES, DASHBOARD_SUMMARY, EXISTING_SKUS, INVENTORY_HEALTH, NOTIFICATIONS, PRODUCTS, RESTOCKS, TOP_MOVING_PRODUCTS, INVENTORY_TRANSFERS, WAREHOUSE_STAFF_PROFILE, getProductById, getRestockById, getTransferById } from '../../data/warehouseMockData';
+import { AUDIT_LOGS, BRANCHES, CATEGORIES, DASHBOARD_SUMMARY, INVENTORY_HEALTH, NOTIFICATIONS, PRODUCTS, RESTOCKS, TOP_MOVING_PRODUCTS, INVENTORY_TRANSFERS, WAREHOUSE_STAFF_PROFILE, getProductById, getRestockById, getTransferById } from '../../data/warehouseMockData';
 import { fetchInventoryTransfers, fetchInventoryTransferById, fetchRestocks, fetchBranchInventory, fetchStockMovements, fetchStockMovementById } from '../../api/inventoryService';
-import { fetchNotifications, markNotificationRead } from '../../api/notificationService';
+import { NotificationsInbox } from '../shared/NotificationsInbox';
 import { EmptyState } from '../shared/EmptyState';
 import { LoadingState } from '../shared/LoadingState';
 import { NavIcon } from '../../navIcons';
@@ -171,7 +171,14 @@ function InventoryPage({
   const filtered = useMemo(() => {
     let results = [...products];
     const query = search.trim().toLowerCase();
-    if (query) results = results.filter(p => p.product_name.toLowerCase().includes(query) || p.category_name && p.category_name.toLowerCase().includes(query));
+    if (query) {
+      results = results.filter((p) => {
+        const sku = String(p.sku || '').toLowerCase();
+        const name = String(p.product_name || '').toLowerCase();
+        const cat = String(p.category_name || '').toLowerCase();
+        return name.includes(query) || cat.includes(query) || sku.includes(query);
+      });
+    }
     if (category !== 'All') results = results.filter(p => p.category_id === Number(category));
     if (statusFilter !== 'All') results = results.filter(p => p.status === statusFilter);
     if (sortBy === 'Product Name') results.sort((a, b) => a.product_name.localeCompare(b.product_name));else if (sortBy === 'Unit Price') results.sort((a, b) => a.unit_price - b.unit_price);
@@ -194,7 +201,7 @@ function InventoryPage({
         marginBottom: 12
       }}>
           <div className="list-section-controls">
-            <input className="filter-input search" type="search" placeholder="Search by product name or category" value={search} onChange={e => {
+            <input className="filter-input search" type="search" placeholder="Search by name, SKU, or category" value={search} onChange={e => {
             setSearch(e.target.value);
             setPage(1);
           }} style={{
@@ -241,7 +248,7 @@ function InventoryPage({
         {paginated.length ? <><div className="corvex-table-wrapper">
             <table className="corvex-table">
               <thead>
-                <tr><th>Image</th><th>Product ID</th><th>Product Name</th><th>Category</th><th>Unit Price</th><th>Status</th><th>Actions</th></tr>
+                <tr><th>Image</th><th>Product ID</th><th>SKU</th><th>Product Name</th><th>Category</th><th>Unit Price</th><th>Status</th><th>Actions</th></tr>
               </thead>
               <tbody>
                 {paginated.map(product => <tr key={product.product_id}>
@@ -255,6 +262,7 @@ function InventoryPage({
                   }}>—</span>}
                     </td>
                     <td>{product.product_id}</td>
+                    <td><span style={{ fontFamily: 'monospace', fontSize: '0.82rem' }}>{product.sku || '—'}</span></td>
                     <td>{product.product_name}</td>
                     <td>{product.category_name || product.category_id}</td>
                     <td>{formatCurrency(product.unit_price)}</td>
@@ -306,6 +314,7 @@ function ProductDetailPage({
   if (!product) return <EmptyState title="Product not found" actionLabel="Back to Branch Inventory" onAction={() => navigate('/warehouse/branch-inventory')} />;
   const product_id = product.product_id || product.id || '—';
   const product_name = product.product_name || product.name || '—';
+  const sku = product.sku || '—';
   const category_id = product.category_id || '—';
   const category_name = product.category_name || product.category || '—';
   const unit_price = product.unit_price != null ? product.unit_price : product.unitPrice || 0;
@@ -348,6 +357,7 @@ function ProductDetailPage({
         </div>
         <ul className="info-grid">
           <li><span className="info-item-label">Product ID</span><span className="info-item-value">{product_id}</span></li>
+          <li><span className="info-item-label">SKU</span><span className="info-item-value"><span style={{ fontFamily: 'monospace' }}>{sku}</span></span></li>
           <li><span className="info-item-label">Product Name</span><span className="info-item-value">{product_name}</span></li>
           <li><span className="info-item-label">Category ID</span><span className="info-item-value">{category_id}</span></li>
           <li><span className="info-item-label">Category Name</span><span className="info-item-value">{category_name}</span></li>
@@ -473,29 +483,67 @@ function AddProductPage({
   navigate,
   showToast
 }) {
+  const [categories, setCategories] = useState([]);
+  const [submitting, setSubmitting] = useState(false);
   const [form, setForm] = useState({
     productName: '',
     sku: '',
     category: '',
     description: '',
-    unitType: '',
-    reorderPoint: '',
+    unitType: 'Unit',
+    reorderPoint: '5',
     supplier: '',
     initialQuantity: ''
   });
   const [errors, setErrors] = useState({});
-  const handleSubmit = () => {
+
+  useEffect(() => {
+    async function loadCategories() {
+      try {
+        const res = await apiClient.get('/products', { params: { limit: 1 } });
+        if (res.data?.success) {
+          setCategories(res.data.categories || []);
+        }
+      } catch {
+        /* categories optional for display */
+      }
+    }
+    loadCategories();
+  }, []);
+
+  const handleSubmit = async () => {
     const nextErrors = {};
     if (!form.productName.trim()) nextErrors.productName = 'Product name is required.';
+    if (!form.sku.trim()) nextErrors.sku = 'SKU is required.';
     if (!form.category) nextErrors.category = 'Category is required.';
-    if (form.sku && EXISTING_SKUS.includes(form.sku.trim())) nextErrors.sku = 'SKU must be unique.';
     setErrors(nextErrors);
     if (Object.keys(nextErrors).length) {
       showToast('Please fix the errors before submitting.', 'error');
       return;
     }
-    showToast('Product record created successfully.', 'success');
-    navigate('/warehouse/branch-inventory');
+
+    setSubmitting(true);
+    try {
+      const res = await apiClient.post('/products', {
+        name: form.productName.trim(),
+        sku: form.sku.trim(),
+        category_id: Number(form.category),
+        description: form.description.trim() || null,
+        unit_type: form.unitType.trim() || 'Unit',
+        reorder_point: form.reorderPoint !== '' ? Number(form.reorderPoint) : 5,
+        unit_price: 0,
+      });
+      if (!res.data?.success) {
+        showToast(res.data?.message || 'Failed to create product.', 'error');
+        return;
+      }
+      showToast('Product record created successfully.', 'success');
+      navigate('/warehouse/branch-inventory');
+    } catch (err) {
+      showToast(err.response?.data?.message || 'Failed to create product.', 'error');
+    } finally {
+      setSubmitting(false);
+    }
   };
   return <div className="relative z-10 grid gap-[22px] w-full">
       <section className="panel form-panel content-panel">
@@ -508,12 +556,15 @@ function AddProductPage({
       }, {
         name: 'sku',
         label: 'SKU',
-        type: 'text'
+        type: 'text',
+        required: true
       }, {
         name: 'category',
         label: 'Category',
         type: 'select',
-        options: CATEGORIES
+        options: categories,
+        optionValue: 'category_id',
+        optionLabel: 'category_name'
       }, {
         name: 'description',
         label: 'Description',
@@ -541,7 +592,11 @@ function AddProductPage({
           [field.name]: e.target.value
         }))}>
                 <option value="">Select category</option>
-                {field.options.map(o => <option key={o}>{o}</option>)}
+                {(field.optionValue
+                  ? field.options.map((o) => (
+                    <option key={o[field.optionValue]} value={o[field.optionValue]}>{o[field.optionLabel]}</option>
+                  ))
+                  : field.options.map((o) => <option key={o}>{o}</option>))}
               </select> : field.type === 'textarea' ? <textarea value={form[field.name]} onChange={e => setForm(p => ({
           ...p,
           [field.name]: e.target.value
@@ -554,7 +609,9 @@ function AddProductPage({
       </section>
       <div className="flex justify-end gap-2 mt-4">
         <button className="button secondary" type="button" onClick={() => navigate('/warehouse/branch-inventory')}>Cancel</button>
-        <button className="button" type="button" onClick={handleSubmit}>Create Product Record</button>
+        <button className="button" type="button" onClick={handleSubmit} disabled={submitting}>
+          {submitting ? 'Creating...' : 'Create Product Record'}
+        </button>
       </div>
     </div>;
 }
@@ -1182,94 +1239,25 @@ function NotificationsPage({
   navigate,
   showToast
 }) {
-  const [notifications, setNotifications] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [filter, setFilter] = useState('All');
-  useEffect(() => {
-    async function load() {
-      setLoading(true);
-      const result = await fetchNotifications();
-      if (result.success) setNotifications(result.data || []);else if (showToast) showToast('Failed to load notifications.', 'error');
-      setLoading(false);
-    }
-    load();
-  }, [showToast]);
-  const categories = useMemo(() => {
-    const fromData = [...new Set(notifications.map(n => n.category).filter(Boolean))];
-    return ['All', 'Unread', 'Read', ...fromData.sort()];
-  }, [notifications]);
-  const filtered = useMemo(() => {
-    if (filter === 'Unread') return notifications.filter(n => n.status === 'Unread');
-    if (filter === 'Read') return notifications.filter(n => n.status === 'Read');
-    if (filter === 'All') return notifications;
-    return notifications.filter(n => n.category === filter);
-  }, [notifications, filter]);
-  const markAllRead = async () => {
-    const unread = notifications.filter(n => n.status === 'Unread');
-    await Promise.all(unread.map(n => markNotificationRead(n.notification_id)));
-    setNotifications(items => items.map(n => ({
-      ...n,
-      status: 'Read'
-    })));
-    showToast('All notifications marked as read.', 'success');
-  };
-  const markOneRead = async id => {
-    const result = await markNotificationRead(id);
-    if (result.success) {
-      setNotifications(items => items.map(n => n.notification_id === id ? {
-        ...n,
-        status: 'Read'
-      } : n));
-      showToast('Marked as read.', 'success');
-    }
-  };
-  const pagination_filtered = usePagination(filtered);
-  const paginated_filtered = pagination_filtered.paginatedData;
-  if (loading) return <LoadingState message="Loading notifications..." />;
-  return <div className="relative z-10 grid gap-[22px] w-full">
-      <section className="panel content-panel relative overflow-hidden">
-        <div className="list-section-header">
-          <h3>Notifications</h3>
-          <div className="list-section-actions">
-            <button className="button secondary" type="button" onClick={markAllRead}>Mark All as Read</button>
-          </div>
-        </div>
-        <div className="segmented-control" style={{ marginBottom: 12 }}>
-          {categories.map(f => <button key={f} className={filter === f ? 'segment active' : 'segment'} type="button" onClick={() => setFilter(f)}>{f}</button>)}
-        </div>
-        {filtered.length ? <><div className="corvex-table-wrapper">
-            <table className="corvex-table">
-              <thead>
-                <tr>
-                  <th>Category</th>
-                  <th>Title</th>
-                  <th>Message</th>
-                  <th>Date</th>
-                  <th>Status</th>
-                  <th>Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {paginated_filtered.map(item => <tr key={item.notification_id} className={item.status === 'Unread' ? 'notification-row-unread' : ''}>
-                    <td><StatusBadge status={item.category || 'General'} /></td>
-                    <td><strong>{item.title}</strong></td>
-                    <td style={{
-                  maxWidth: 280
-                }}>{item.message}</td>
-                    <td>{formatDisplayDate(item.created_at)}</td>
-                    <td><StatusBadge status={item.status} /></td>
-                    <td className="table-actions">
-                      {item.status === 'Unread' ? <button className="icon-action-button" type="button" title="Mark Read" onClick={() => markOneRead(item.notification_id)}>
-                          <NavIcon name="check" />
-                        </button> : null}
-                    </td>
-                  </tr>)}
-              </tbody>
-            </table>
-          </div><LocalPagination {...pagination_filtered} /></>
-        : <EmptyState title="No notifications" description="You're all caught up." />}
-      </section>
-    </div>;
+  return (
+    <NotificationsInbox
+      navigate={navigate}
+      showToast={showToast}
+      resolveRelatedPath={(item) => {
+        const category = String(item.category || '').toLowerCase();
+        if (category.includes('inventory') || category.includes('stock')) {
+          return '/warehouse/branch-inventory';
+        }
+        if (category.includes('restock')) {
+          return '/warehouse/restock-history';
+        }
+        if (category.includes('transfer')) {
+          return '/warehouse/transfers';
+        }
+        return null;
+      }}
+    />
+  );
 }
 function ProfilePage({
   navigate,

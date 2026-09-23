@@ -9,6 +9,8 @@ import { BranchManagerPageBody } from '../branchManager/BranchManagerPageBody';
 import LeafletMap from '../common/LeafletMap';
 import { ALERTS, BRANCHES, BRANCH_RADAR, ENTERPRISE_KPIS, LEAFLET_LAYERS, MONTHLY_COLLECTIONS, MONTHLY_DELINQUENCY, MONTHLY_REVENUE, NOTIFICATIONS, OPERATING_MANAGER_PROFILE, REPORT_CATEGORIES, TREND_DATA, WEEKLY_COLLECTION_RATE, WEEKLY_SALES_RATE, SALES_ANALYTICS, INVENTORY_ANALYTICS, PAYMENT_ANALYTICS, formatCurrency, getBranchById, getHighestPerformingBranch, getLowestPerformingBranch } from '../../data/operatingManagerMockData';
 import { formatDisplayDate, formatDisplayDateTime } from '../../utils/formatters.js';
+import { getPresetDateRange } from '../../utils/analyticsDateRange.js';
+import { formatMiddleNameDisplay } from '../../utils/customerDisplay.js';
 import { getExecutiveDashboard, getOperatingManagerAnalytics, getPerformanceHistory } from '../../api/reportsService';
 import apiClient from '../../api/apiClient';
 import { fetchCustomers, fetchCustomerById } from '../../api/salesService';
@@ -17,6 +19,8 @@ import { LoadingState } from '../shared/LoadingState';
 import { NavIcon } from '../../navIcons';
 import { getCurrentUser } from '../../api/authService';
 import { TerritoriesPage } from '../territories/TerritoriesPage';
+import { SalesHistoryPage } from '../sales/SalesPageBody';
+import { InvoiceDetailsPage } from '../sales/InvoiceDetailsPage';
 import { fetchDigitalReceipts } from '../../api/digitalReceiptsService';
 import { fetchSawResults } from '../../api/sawResultsService';
 const COLORS = ['#2563eb', '#06b6d4', '#ef4444', '#f59e0b'];
@@ -1686,9 +1690,11 @@ function CustomerDetailPage({
           <div className="panel-section-header"><h3>Account Information</h3></div>
           <ul className="info-grid">
             <li><span className="info-item-label">Name</span><span className="info-item-value">{name}</span></li>
+            <li><span className="info-item-label">Middle Name</span><span className="info-item-value">{formatMiddleNameDisplay(customer.middle_name)}</span></li>
             <li><span className="info-item-label">Address</span><span className="info-item-value">{customer.address}</span></li>
             <li><span className="info-item-label">Contact Phone</span><span className="info-item-value">{customer.contact_phone}</span></li>
             <li><span className="info-item-label">Contact Person</span><span className="info-item-value">{customer.contact_person_fname} {customer.contact_person_lname}</span></li>
+            <li><span className="info-item-label">Contact Person Middle Name</span><span className="info-item-value">{formatMiddleNameDisplay(customer.contact_person_mname)}</span></li>
             <li><span className="info-item-label">Contact Person Phone</span><span className="info-item-value">{customer.contact_person_phone}</span></li>
             <li><span className="info-item-label">Status</span><span className="info-item-value">{customer.status}</span></li>
           </ul>
@@ -1812,9 +1818,44 @@ function buildAnalyticsParams(filters) {
 function AnalyticsFilterBar({
   filters,
   setFilters,
-  branchOptions = []
+  branchOptions = [],
+  showInlineCustomDateRange = false,
 }) {
-  const showCustom = filters.preset === 'custom';
+  const showPresetCustomDates = !showInlineCustomDateRange && filters.preset === 'custom';
+  const showDateFields = showInlineCustomDateRange || showPresetCustomDates;
+
+  function handlePresetChange(preset) {
+    if (showInlineCustomDateRange && preset !== 'custom') {
+      const range = getPresetDateRange(preset);
+      setFilters((current) => ({
+        ...current,
+        preset,
+        startDate: range.startDate,
+        endDate: range.endDate,
+      }));
+      return;
+    }
+    if (preset === 'custom') {
+      const fallback = getPresetDateRange('this_month');
+      setFilters((current) => ({
+        ...current,
+        preset,
+        startDate: current.startDate || fallback.startDate,
+        endDate: current.endDate || fallback.endDate,
+      }));
+      return;
+    }
+    setFilters((current) => ({ ...current, preset }));
+  }
+
+  function handleCustomDateChange(field, value) {
+    setFilters((current) => ({
+      ...current,
+      preset: 'custom',
+      [field]: value,
+    }));
+  }
+
   return <section className="panel content-panel">
       <div className="panel-section-header">
         <div>
@@ -1823,15 +1864,14 @@ function AnalyticsFilterBar({
           margin: '2px 0 0',
           fontSize: '0.82rem'
         }}>
-            Date range controls all operational KPIs, trends, and exceptions.
+            {showInlineCustomDateRange
+              ? 'Choose a preset period or set a custom start and end date. KPIs, trends, and exceptions follow the active range.'
+              : 'Date range controls all operational KPIs, trends, and exceptions.'}
           </p>
         </div>
       </div>
       <div className="list-section-controls analytics-filter-controls">
-          <select className="filter-select" value={filters.preset} onChange={e => setFilters(current => ({
-          ...current,
-          preset: e.target.value
-        }))}>
+          <select className="filter-select" value={filters.preset} onChange={e => handlePresetChange(e.target.value)}>
             {ANALYTIC_RANGE_OPTIONS.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}
           </select>
           <select className="filter-select" value={filters.branchId} onChange={e => setFilters(current => ({
@@ -1841,15 +1881,31 @@ function AnalyticsFilterBar({
             <option value="all">All Branches</option>
             {branchOptions.map(branch => <option key={branch.branchId} value={String(branch.branchId)}>{branch.branchName}</option>)}
           </select>
-          {showCustom ? <>
-              <input className="filter-input" type="date" value={filters.startDate} onChange={e => setFilters(current => ({
-            ...current,
-            startDate: e.target.value
-          }))} />
-              <input className="filter-input" type="date" value={filters.endDate} onChange={e => setFilters(current => ({
-            ...current,
-            endDate: e.target.value
-          }))} />
+          {showDateFields ? <>
+              <label className="table-filter-field">
+                <span>Start date</span>
+                <input
+                  className="filter-input"
+                  type="date"
+                  value={filters.startDate}
+                  max={filters.endDate || undefined}
+                  onChange={e => (showInlineCustomDateRange
+                    ? handleCustomDateChange('startDate', e.target.value)
+                    : setFilters(current => ({ ...current, startDate: e.target.value })))}
+                />
+              </label>
+              <label className="table-filter-field">
+                <span>End date</span>
+                <input
+                  className="filter-input"
+                  type="date"
+                  value={filters.endDate}
+                  min={filters.startDate || undefined}
+                  onChange={e => (showInlineCustomDateRange
+                    ? handleCustomDateChange('endDate', e.target.value)
+                    : setFilters(current => ({ ...current, endDate: e.target.value })))}
+                />
+              </label>
             </> : null}
       </div>
     </section>;
@@ -2048,11 +2104,14 @@ function describeTopProducts(products) {
 function LiveOperationsDashboardPage({
   navigate
 }) {
-  const [filters, setFilters] = useState({
-    preset: 'this_month',
-    startDate: '',
-    endDate: '',
-    branchId: 'all'
+  const [filters, setFilters] = useState(() => {
+    const range = getPresetDateRange('this_month');
+    return {
+      preset: 'this_month',
+      startDate: range.startDate,
+      endDate: range.endDate,
+      branchId: 'all',
+    };
   });
   const {
     data,
@@ -2073,7 +2132,12 @@ function LiveOperationsDashboardPage({
     previous: data.trends.salesPrevious[index]?.amount ?? 0
   }));
   return <div className="page">
-      <AnalyticsFilterBar filters={filters} setFilters={setFilters} branchOptions={branchOptions} />
+      <AnalyticsFilterBar
+        filters={filters}
+        setFilters={setFilters}
+        branchOptions={branchOptions}
+        showInlineCustomDateRange
+      />
 
       <section className="panel content-panel" style={{
       marginBottom: 16
@@ -3418,6 +3482,14 @@ function PerformanceSummaryPage({
       </section>
     </div>;
 }
+
+function HiddenPageRedirect({ navigate, to }) {
+  useEffect(() => {
+    navigate(to, { replace: true });
+  }, [navigate, to]);
+  return null;
+}
+
 export function OperatingManagerPageBody({
   page,
   navigate,
@@ -3468,6 +3540,24 @@ export function OperatingManagerPageBody({
       return <CustomerRecordsPage {...props} />;
     case 'customerDetail':
       return <CustomerDetailPage {...props} />;
+    case 'salesHistory':
+      return (
+        <SalesHistoryPage
+          navigate={navigate}
+          showToast={showToast}
+          historyBasePath="/operating-manager/sales-history"
+          getInvoiceDetailPath={(invoiceNumber) => `/operating-manager/sales-history/${encodeURIComponent(invoiceNumber)}`}
+        />
+      );
+    case 'salesHistoryInvoice':
+      return (
+        <InvoiceDetailsPage
+          invoiceId={page.params?.invoiceId}
+          navigate={navigate}
+          showToast={showToast}
+          historyBasePath="/operating-manager/sales-history"
+        />
+      );
     case 'territories':
       return <TerritoriesPage {...props} />;
     case 'digitalReceipts':
@@ -3475,7 +3565,7 @@ export function OperatingManagerPageBody({
     case 'sawResults':
       return <SawResultsPage {...props} />;
     case 'performanceSummary':
-      return <PerformanceSummaryPage {...props} />;
+      return <HiddenPageRedirect navigate={navigate} to="/operating-manager/dashboard" />;
     default:
       return <EmptyState title="Page not found" description="This screen is not configured yet." />;
   }
