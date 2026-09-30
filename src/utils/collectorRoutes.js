@@ -1,5 +1,3 @@
-import { getAccountById } from '../data/collectorMockData';
-
 const ROUTE_DEFINITIONS = [
   { pattern: /^\/collector\/dashboard$/, pageType: 'dashboard' },
   { pattern: /^\/collector\/settings$/, pageType: 'settings' },
@@ -14,6 +12,7 @@ const ROUTE_DEFINITIONS = [
   { pattern: /^\/collector\/receipts\/(\d+)$/, pageType: 'digitalReceipt', params: ['receiptId'] },
   { pattern: /^\/collector\/notifications$/, pageType: 'notifications' },
   { pattern: /^\/collector\/profile$/, pageType: 'profile' },
+  { pattern: /^\/collector\/map\/(\d+)$/, pageType: 'customerMap', params: ['accountId'] },
   { pattern: /^\/collector\/account-detail\/(\d+)$/, pageType: 'accountDetail', params: ['accountId'] },
   { pattern: /^\/collector\/collection-log\/(\d+)$/, pageType: 'collectionLog', params: ['accountId'] },
   { pattern: /^\/collector\/receipt\/(\d+)$/, pageType: 'digitalReceipt', params: ['receiptId'] },
@@ -48,8 +47,7 @@ export function getParentContext(search) {
 export function buildCollectorBreadcrumbs(pageType, params = {}, parentContext = 'accounts') {
   const crumbs = [{ label: 'Dashboard', to: '/collector/dashboard' }];
 
-  const account = params.accountId ? getAccountById(params.accountId) : null;
-  const accountLabel = account?.customerName ?? 'Account Detail';
+  const accountLabel = params.accountId ? `Customer #${params.accountId}` : 'Account Detail';
 
   switch (pageType) {
     case 'dashboard':
@@ -76,6 +74,19 @@ export function buildCollectorBreadcrumbs(pageType, params = {}, parentContext =
 
     case 'accounts':
       return [...crumbs, { label: 'Customers', to: '/collector/accounts' }];
+
+    case 'customerMap': {
+      const parentCrumb =
+        parentContext === 'route'
+          ? { label: "Today's Route", to: '/collector/route' }
+          : { label: 'Customers', to: '/collector/accounts' };
+      return [
+        ...crumbs,
+        parentCrumb,
+        { label: accountLabel, to: `/collector/account-detail/${params.accountId}?from=${parentContext}` },
+        { label: 'Map', to: `/collector/map/${params.accountId}?from=${parentContext}` },
+      ];
+    }
 
     case 'accountDetail': {
       const parentCrumb =
@@ -163,6 +174,7 @@ export function resolveCollectorPage(pathname, search = '') {
     fieldActivityReports: 'Field Activity Reports',
     accounts: 'Customers',
     accountDetail: 'Customer Detail',
+    customerMap: 'Customer Map',
     collectionLog: 'Collection Log',
     receiptsList: 'Digital Receipts',
     digitalReceipt: 'Digital Receipt',
@@ -190,7 +202,12 @@ export function isCollectorNavActive(fullPath, navTo) {
   if (navTo === '/collector/dashboard') return pathname === '/collector/dashboard' || pathname === '/collector/settings';
   if (navTo === '/collector/route') return pathname.startsWith('/collector/route') || fullPath.includes('from=route');
   if (navTo === '/collector/field-reports') return pathname === '/collector/field-reports';
-  if (navTo === '/collector/accounts') return pathname === '/collector/accounts' || fullPath.includes('from=accounts');
+  if (navTo === '/collector/accounts') {
+    return pathname === '/collector/accounts'
+      || pathname.startsWith('/collector/account-detail/')
+      || pathname.startsWith('/collector/map/')
+      || fullPath.includes('from=accounts');
+  }
   if (navTo === '/collector/history') return pathname.startsWith('/collector/history');
   if (navTo === '/collector/receipts') return pathname.startsWith('/collector/receipts') || pathname.startsWith('/collector/receipt/');
   if (navTo === '/collector/notifications') return pathname === '/collector/notifications';

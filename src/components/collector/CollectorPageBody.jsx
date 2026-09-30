@@ -2,15 +2,33 @@ import { Pagination } from '../shared/Pagination';
 import { usePagination } from '../../hooks/usePagination';
 import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { COLLECTION_HISTORY, NOTIFICATIONS, formatCurrency } from '../../data/collectorMockData';
-import { fetchAccounts, fetchAccountById, fetchCollectionPayments, fetchCollectionPaymentById, fetchDigitalReceipts, fetchDigitalReceiptById, fetchTodayFieldVisits, fetchFieldActivityReports, submitFieldActivityReport } from '../../api/collectorService';
-import { getCurrentUser } from '../../api/authService.js';
+import { formatCurrency, formatDisplayDate, formatDisplayDateTime, formatPaymentTimestamp } from '../../utils/formatters.js';
+import {
+  fetchAccounts,
+  fetchAccountById,
+  fetchCollectionPayments,
+  fetchCollectionPaymentById,
+  fetchDigitalReceipts,
+  fetchDigitalReceiptById,
+  fetchTodayFieldVisits,
+  fetchFieldActivityReports,
+  submitFieldActivityReport,
+  fetchCollectorDashboard,
+  fetchCollectorPaymentMethods,
+  submitCollectionPayment,
+  submitCollectorCreditInvestigation,
+  submitCollectorIncident,
+} from '../../api/collectorService';
+import { fetchNotifications } from '../../api/notificationService.js';
+import { fetchMyProfile, updateMyProfile } from '../../api/profileService.js';
+import { getCurrentUser, persistCurrentUserFromProfile, requestLogout } from '../../api/authService.js';
+import { downloadCsv } from '../../utils/csvExport';
+import { openPhoneCall } from '../../utils/mapsNavigation';
+import { NotificationsInbox } from '../shared/NotificationsInbox';
 import { AccountCard } from './AccountCard';
 import { EmptyState } from '../shared/EmptyState';
 import { LoadingState } from '../shared/LoadingState';
-import { Toast } from '../shared/Toast';
 import { NavIcon } from '../../navIcons';
-import { formatDisplayDate, formatDisplayDateTime, formatPaymentTimestamp } from '../../utils/formatters.js';
 import LeafletMap from '../common/LeafletMap';
 import { StatusBadge } from '../StatusBadge';
 function StatsGrid({
@@ -65,17 +83,59 @@ function FormPanel({
         </div>)}
     </section>;
 }
+function collectorCall(account, showToast) {
+  if (!openPhoneCall(account?.phone)) showToast('No phone number on file.', 'error');
+}
+
+function collectorOpenMap(account, navigate, parentContext = 'accounts') {
+  if (!account?.id) return;
+  navigate(`/collector/map/${account.id}?from=${parentContext}`);
+}
+
+function resolveCollectorNotificationPath(category) {
+  const c = String(category || '').toLowerCase();
+  if (c.includes('route') || c.includes('visit')) return '/collector/route';
+  if (c.includes('receipt') || c.includes('collection')) return '/collector/history';
+  if (c.includes('ci') || c.includes('credit')) return '/collector/accounts';
+  return '/collector/notifications';
+}
+
 function DashboardPage({
   navigate,
   showToast
 }) {
   const currentUser = getCurrentUser();
   const today = formatDisplayDate(new Date());
-  const unreadCount = NOTIFICATIONS.filter(n => !n.read).length;
+  const [dashboard, setDashboard] = useState(null);
+  const [unreadCount, setUnreadCount] = useState(0);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    async function load() {
+      setLoading(true);
+      const [dashRes, notifRes] = await Promise.all([
+        fetchCollectorDashboard(),
+        fetchNotifications(),
+      ]);
+      if (dashRes.success) setDashboard(dashRes.data);
+      else if (showToast) showToast(dashRes.message || 'Failed to load dashboard.', 'error');
+      if (notifRes.success) {
+        setUnreadCount((notifRes.data || []).filter(n => n.status !== 'Read').length);
+      }
+      setLoading(false);
+    }
+    load();
+  }, [showToast]);
+
   const agentName = currentUser?.fullName || 'Collector';
   const branchName = currentUser?.branch?.name || '—';
-  const recentCollections = COLLECTION_HISTORY.slice(0, 3);
-  const recentIncidents = NOTIFICATIONS.filter(n => n.type === 'incident').slice(0, 3);
+  const summary = dashboard?.summary || {};
+  const recentCollections = dashboard?.recentCollections || [];
+  const recentFieldReports = dashboard?.recentFieldReports || [];
+  const routeProgress = summary.routeProgressPercent ?? 0;
+
+  if (loading) return <LoadingState message="Loading dashboard..." />;
+
   return <div className="relative z-10 grid gap-[22px] w-full">
       <section className="panel dashboard-greeting">
         <div className="flex flex-col gap-1">
@@ -96,13 +156,16 @@ function DashboardPage({
       label: 'Notifications',
       value: String(unreadCount)
     }, {
-      label: 'Recent Collections',
-      value: String(COLLECTION_HISTORY.length)
+      label: 'Collected Today',
+      value: formatCurrency(summary.amountCollectedToday ?? 0)
+    }, {
+      label: 'Collections Today',
+      value: String(summary.collectionsToday ?? 0)
     }]} />
 
       <div className="flex flex-wrap gap-2 justify-end mt-2 mb-2">
         <button className="button secondary" type="button" onClick={() => navigate('/collector/accounts')}>View Accounts</button>
-        <button className="button secondary" type="button" onClick={() => navigate('/collector/incident/1?from=accounts')}>Report Incident</button>
+        <button className="button secondary" type="button" onClick={() => navigate('/collector/incident')}>Report Incident</button>
         <button className="button" type="button" onClick={() => navigate('/collector/route')}>Start Today's Route</button>
       </div>
 
@@ -112,28 +175,28 @@ function DashboardPage({
             <h3>Recent Collections</h3>
           </div>
           {recentCollections.length ? <ul className="list-none p-0 m-0 flex flex-col gap-3">
-              {recentCollections.map(item => <li key={item.id}>
+              {recentCollections.map(item => <li key={item.collectionpayment_id}>
                   <div>
-                    <strong>{item.customerName}</strong>
-                    <span className="text-ink/70">{item.date}</span>
+                    <strong>{item.customer_name}</strong>
+                    <span className="text-ink/70">{formatDisplayDate(item.payment_date)}</span>
                   </div>
-                  <span>{formatCurrency(item.amount)}</span>
+                  <span>{formatCurrency(Number(item.amount))}</span>
                 </li>)}
             </ul> : <EmptyState title="No collections yet" description="Collections logged today will appear here." />}
         </section>
 
         <section className="panel content-panel relative overflow-hidden">
           <div className="flex flex-col md:flex-row justify-between gap-4 items-start md:items-center mb-4">
-            <h3>Recent Incident Reports</h3>
+            <h3>Recent Field Reports</h3>
           </div>
-          {recentIncidents.length ? <ul className="list-none p-0 m-0 flex flex-col gap-3">
-              {recentIncidents.map(item => <li key={item.id}>
+          {recentFieldReports.length ? <ul className="list-none p-0 m-0 flex flex-col gap-3">
+              {recentFieldReports.map(item => <li key={item.report_id}>
                   <div>
-                    <strong>{item.title}</strong>
-                    <span className="text-ink/70">{item.time}</span>
+                    <strong>{item.activity_type}</strong>
+                    <span className="text-ink/70">{item.customer_name} · {formatDisplayDateTime(item.created_at)}</span>
                   </div>
                 </li>)}
-            </ul> : <EmptyState title="No incidents reported" description="Incident reports you submit will appear here." />}
+            </ul> : <EmptyState title="No field reports yet" description="Submit field activity from the Field Reports page." actionLabel="Field Reports" onAction={() => navigate('/collector/field-reports')} />}
         </section>
       </div>
 
@@ -142,13 +205,13 @@ function DashboardPage({
           <h3>Today&apos;s Route Progress</h3>
           <span className="text-ink/70">View route for updates</span>
         </div>
-        <div className="progress-bar" role="progressbar" aria-valuenow={0} aria-valuemin={0} aria-valuemax={100}>
+        <div className="progress-bar" role="progressbar" aria-valuenow={routeProgress} aria-valuemin={0} aria-valuemax={100}>
           <div className="progress-fill" style={{
-          width: `0%`
+          width: `${routeProgress}%`
         }} />
         </div>
         <p className="muted progress-caption">
-          Visit the route page for live status
+          {summary.routeStopsCompleted ?? 0} of {summary.routeStopsTotal ?? 0} today&apos;s visits completed ({routeProgress}%)
         </p>
       </section>
     </div>;
@@ -394,15 +457,38 @@ function RoutePage({
   useEffect(() => {
     async function load() {
       setLoading(true);
-      const result = await fetchAccounts();
-      if (result.success) {
-        const prioritized = result.data.filter(a => a.rawStatus === 'Active') // only active customers on the route
-        .map((a, i) => ({
-          ...a,
-          rank: i + 1
-        })).sort((a, b) => (b.outstandingBalance || 0) - (a.outstandingBalance || 0));
-        setCustomers(prioritized);
+      const [accountsRes, visitsRes] = await Promise.all([fetchAccounts(), fetchTodayFieldVisits()]);
+      const accountMap = new Map();
+      if (accountsRes.success) {
+        accountsRes.data.filter(a => a.rawStatus === 'Active').forEach(a => accountMap.set(String(a.id), a));
       }
+      let stops = [];
+      if (visitsRes.success && (visitsRes.data || []).length) {
+        stops = visitsRes.data.map((v, i) => {
+          const acct = accountMap.get(String(v.customer_id)) || {
+            id: String(v.customer_id),
+            customerName: v.customer_name,
+            address: '—',
+            outstandingBalance: 0,
+            status: 'Pending',
+          };
+          const visitDone = v.status === 'Completed';
+          return {
+            ...acct,
+            visitId: v.visit_id,
+            visitType: v.visit_type,
+            visitStatus: v.status,
+            status: visitDone ? 'Completed' : (acct.status === 'Overdue' ? 'Overdue' : 'Pending'),
+            rank: i + 1,
+          };
+        });
+      } else if (accountsRes.success) {
+        stops = accountsRes.data
+          .filter(a => a.rawStatus === 'Active')
+          .sort((a, b) => (b.outstandingBalance || 0) - (a.outstandingBalance || 0))
+          .map((a, i) => ({ ...a, rank: i + 1 }));
+      }
+      setCustomers(stops);
       setLoading(false);
     }
     load();
@@ -410,7 +496,7 @@ function RoutePage({
   const filteredStops = useMemo(() => {
     if (filter === 'All') return customers;
     if (filter === 'Pending') return customers.filter(s => s.status === 'Pending' || s.status === 'Overdue');
-    return customers.filter(s => s.status === 'Completed');
+    return customers.filter(s => s.status === 'Completed' || s.visitStatus === 'Completed');
   }, [filter, customers]);
   const actions = [{
     label: 'Route List',
@@ -502,17 +588,26 @@ function RoutePage({
         {showMap || pageType === 'routeMap' ? <div style={{
         marginTop: 16
       }}>
-            <LeafletMap center={[7.1907, 125.4553]} zoom={13} height={500} markers={customers.map((stop, i) => ({
-          id: stop.id,
-          position: [7.1907 + i * 0.005, 125.4553 + i * 0.005],
-          label: stop.customerName.substring(0, 2).toUpperCase(),
-          color: stop.status === 'Completed' ? '#10b981' : '#093850',
-          popup: `${stop.customerName} - ${stop.status}`
-        }))} polylines={[{
-          id: 'route',
-          positions: customers.map((stop, i) => [7.1907 + i * 0.005, 125.4553 + i * 0.005]),
-          color: '#093850'
-        }]} />
+            <LeafletMap
+            center={[7.1907, 125.4553]}
+            zoom={13}
+            height={500}
+            markers={customers.map((stop) => {
+              const { center: pos } = accountMapPosition(stop);
+              return {
+                id: stop.id,
+                position: pos,
+                label: (stop.customerName || 'CU').substring(0, 2).toUpperCase(),
+                color: stop.status === 'Completed' ? '#10b981' : '#093850',
+                popup: `${stop.customerName} - ${stop.status}`,
+              };
+            })}
+            polylines={customers.length > 1 ? [{
+              id: 'route',
+              positions: customers.map((stop) => accountMapPosition(stop).center),
+              color: '#093850',
+            }] : []}
+          />
           </div> : filteredStops.length ? <><div className="corvex-table-wrapper">
             <table className="corvex-table">
               <thead>
@@ -542,6 +637,74 @@ function RoutePage({
       </section>
     </div>;
 }
+function accountMapPosition(account) {
+  const lat = Number(account?.latitude);
+  const lng = Number(account?.longitude);
+  if (Number.isFinite(lat) && Number.isFinite(lng)) {
+    return { center: [lat, lng], hasCoords: true };
+  }
+  return { center: [7.1907, 125.4553], hasCoords: false };
+}
+
+function CustomerMapPage({
+  accountId,
+  parentContext,
+  navigate,
+}) {
+  const [account, setAccount] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const contextQuery = `?from=${parentContext}`;
+  const backTo = parentContext === 'route' ? '/collector/route/map' : `/collector/account-detail/${accountId}${contextQuery}`;
+
+  useEffect(() => {
+    async function load() {
+      setLoading(true);
+      const result = await fetchAccountById(accountId);
+      if (result.success) setAccount(result.data);
+      setLoading(false);
+    }
+    load();
+  }, [accountId]);
+
+  if (loading) return <LoadingState message="Loading map..." />;
+  if (!account) {
+    return <EmptyState title="Customer not found" actionLabel="Back" onAction={() => navigate('/collector/accounts')} />;
+  }
+
+  const { center, hasCoords } = accountMapPosition(account);
+
+  return <div className="relative z-10 grid gap-[22px] w-full">
+      <section className="panel content-panel relative overflow-hidden">
+        <div className="flex flex-col md:flex-row justify-between gap-4 items-start md:items-center mb-4">
+          <div>
+            <h3>{account.customerName}</h3>
+            <p className="text-ink/70" style={{ margin: '4px 0 0' }}>{account.address}</p>
+            {!hasCoords ? <p className="text-ink/60" style={{ margin: '8px 0 0', fontSize: '0.85rem' }}>
+                Exact GPS is not on file — map is centered on the branch area. Address shown above.
+              </p> : null}
+          </div>
+        </div>
+        <LeafletMap
+          center={center}
+          zoom={hasCoords ? 16 : 12}
+          height={520}
+          markers={[{
+            id: account.id,
+            position: center,
+            label: (account.customerName || 'CU').substring(0, 2).toUpperCase(),
+            color: '#093850',
+            popup: `<strong>${account.customerName}</strong><br/>${account.address || ''}`,
+          }]}
+        />
+      </section>
+      <div className="flex flex-wrap justify-end gap-2 mt-2">
+        <button className="button ghost" type="button" onClick={() => navigate(backTo)}>Back</button>
+        <button className="button secondary" type="button" onClick={() => navigate('/collector/route/map')}>Today&apos;s route map</button>
+        <button className="button" type="button" onClick={() => navigate(`/collector/account-detail/${accountId}${contextQuery}`)}>Customer details</button>
+      </div>
+    </div>;
+}
+
 function AccountsPage({
   navigate,
   showToast
@@ -638,7 +801,7 @@ function AccountsPage({
           </div>
         </div>
         {filteredCustomers.length ? <div className="account-card-grid">
-          {filteredCustomers.map(customer => <AccountCard key={customer.id} account={customer} onViewDetails={item => navigate(`/collector/account-detail/${item.id}?from=accounts`)} onCall={() => showToast(`Calling ${customer.customerName}...`, 'success')} onNavigate={() => showToast(`Opening navigation to ${customer.address}`, 'success')} />)}
+          {filteredCustomers.map(customer => <AccountCard key={customer.id} account={customer} onViewDetails={item => navigate(`/collector/account-detail/${item.id}?from=accounts`)} onCall={() => collectorCall(customer, showToast)} onNavigate={() => collectorOpenMap(customer, navigate, 'accounts')} />)}
         </div> : <EmptyState title="No customers found" description="Adjust your search or filters to find customers." actionLabel="Clear search" onAction={() => {
       setSearch('');
       setFilter('All Customers');
@@ -759,8 +922,8 @@ function AccountDetailPage({
 
       <div className="flex flex-wrap justify-end gap-2 mt-4">
         <button className="button ghost" type="button" onClick={() => navigate(backTo)}>Back</button>
-        <button className="button secondary" type="button" onClick={() => showToast(`Opening navigation to ${account.address}`, 'success')}>Open Navigation</button>
-        <button className="button secondary" type="button" onClick={() => showToast(`Calling ${account.customerName}...`, 'success')}>Call Customer</button>
+        <button className="button secondary" type="button" onClick={() => collectorOpenMap(account, navigate, parentContext)}>View on Map</button>
+        <button className="button secondary" type="button" onClick={() => collectorCall(account, showToast)}>Call Customer</button>
         <button className="button secondary" type="button" onClick={() => navigate(`/collector/incident/${account.id}${contextQuery}`)}>Report Incident</button>
         <button className="button secondary" type="button" onClick={() => navigate(`/collector/ci-form/${account.id}${contextQuery}`)}>Submit CI Form</button>
         <button className="button" type="button" onClick={() => navigate(`/collector/collection-log/${account.id}${contextQuery}`)}>Log Collection</button>
@@ -785,18 +948,25 @@ function CollectionLogPage({
     proofPhoto: ''
   });
   const [errors, setErrors] = useState({});
-  const [submitted, setSubmitted] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [paymentMethods, setPaymentMethods] = useState(['Cash', 'Check', 'Bank Transfer', 'GCash', 'Maya']);
   const contextQuery = `?from=${parentContext}`;
   useEffect(() => {
     async function load() {
       setLoading(true);
-      const result = await fetchAccountById(accountId);
-      if (result.success) {
-        setAccount(result.data);
+      const [acctRes, methodsRes] = await Promise.all([
+        fetchAccountById(accountId),
+        fetchCollectorPaymentMethods(),
+      ]);
+      if (acctRes.success) {
+        setAccount(acctRes.data);
         setFormData(prev => ({
           ...prev,
-          customerName: result.data.customerName || ''
+          customerName: acctRes.data.customerName || '',
         }));
+      }
+      if (methodsRes.success && methodsRes.data?.length) {
+        setPaymentMethods(methodsRes.data.map(m => m.method_name));
       }
       setLoading(false);
     }
@@ -817,21 +987,41 @@ function CollectionLogPage({
       [name]: undefined
     }));
   };
-  const handleSubmit = () => {
+  const handleSubmit = async () => {
     const amount = Number(formData.amountCollected);
+    const outstanding = account.outstandingBalance || 0;
     const nextErrors = {};
     if (!amount || amount <= 0) nextErrors.amountCollected = 'Enter a valid amount greater than zero.';
-    if (amount > (account.outstandingBalance || 0)) nextErrors.amountCollected = 'Amount cannot exceed outstanding balance.';
+    if (!formData.partialPayment && amount > outstanding) nextErrors.amountCollected = 'Amount cannot exceed outstanding balance.';
+    if (formData.partialPayment && amount > outstanding) nextErrors.amountCollected = 'Partial payment still cannot exceed outstanding balance.';
+    if (outstanding <= 0) nextErrors.amountCollected = 'Customer has no outstanding balance.';
     if (!formData.paymentMethod) nextErrors.paymentMethod = 'Select a payment method.';
-    if (submitted) nextErrors.amountCollected = 'This collection has already been submitted.';
     setErrors(nextErrors);
     if (Object.keys(nextErrors).length) {
       showToast('Please fix the errors before submitting.', 'error');
       return;
     }
-    setSubmitted(true);
-    showToast('Collection logged successfully.', 'success');
-    navigate(`/collector/receipt/${account.id}${contextQuery}`);
+    setSubmitting(true);
+    const result = await submitCollectionPayment({
+      customer_id: Number(account.id),
+      amount,
+      payment_method: formData.paymentMethod,
+      notes: formData.notes || null,
+      generate_receipt: formData.generateReceipt,
+    });
+    setSubmitting(false);
+    if (!result.success) {
+      showToast(result.message || 'Collection failed.', 'error');
+      return;
+    }
+    showToast(result.message || 'Collection logged successfully.', 'success');
+    if (result.data?.receipts_id) {
+      navigate(`/collector/receipts/${result.data.receipts_id}`);
+    } else if (result.data?.collectionpayment_id) {
+      navigate(`/collector/history/${result.data.collectionpayment_id}`);
+    } else {
+      navigate(`/collector/account-detail/${account.id}${contextQuery}`);
+    }
   };
   return <div className="relative z-10 grid gap-[22px] w-full">
       <FormPanel title="Log Payment Collection" formData={formData} onChange={handleChange} errors={errors} fields={[{
@@ -854,7 +1044,7 @@ function CollectionLogPage({
       type: 'select',
       required: true,
       placeholder: 'Select payment method',
-      options: ['Cash', 'Check', 'Bank Transfer', 'Mobile Money']
+      options: paymentMethods
     }, {
       name: 'notes',
       label: 'Notes',
@@ -883,7 +1073,7 @@ function CollectionLogPage({
     }]} />
       <div className="flex flex-wrap gap-2 justify-end mt-4 mb-2">
         <button className="button secondary" type="button" onClick={() => navigate(`/collector/account-detail/${account.id}${contextQuery}`)}>Cancel</button>
-        <button className="button" type="button" onClick={handleSubmit}>Submit & Generate Receipt</button>
+        <button className="button" type="button" onClick={handleSubmit} disabled={submitting}>{submitting ? 'Submitting…' : 'Submit & Generate Receipt'}</button>
       </div>
     </div>;
 }
@@ -933,7 +1123,25 @@ function ReceiptsListPage({
         <div className="list-section-header">
           <h3>Digital Receipts</h3>
           <div className="list-section-actions">
-            <button className="button secondary whitespace-nowrap" type="button" onClick={() => window.alert('Exporting Digital Receipts...')}>Generate Report</button>
+            <button
+              className="button secondary whitespace-nowrap"
+              type="button"
+              onClick={() => {
+                const rows = filtered.map(r => ({
+                  receipt_id: r.receipts_id,
+                  receipt_number: r.receipt_number,
+                  customer: r.customer_name,
+                  amount: r.amount,
+                  method: r.payment_method,
+                  status: r.payment_status,
+                  date: r.receipt_date,
+                }));
+                if (downloadCsv(rows, 'collector-receipts.csv')) showToast('Receipts exported.', 'success');
+                else showToast('Nothing to export.', 'error');
+              }}
+            >
+              Export CSV
+            </button>
           </div>
         </div>
         <div className="list-section-toolbar" style={{
@@ -1117,7 +1325,24 @@ function DigitalReceiptPage({
         <button className="button secondary" type="button" onClick={() => showToast(`Receipt ${receipt.receipt_number} sent to ${receipt.customer_name}${receipt.customer_phone ? ` (${receipt.customer_phone})` : ''}.`, 'success')}>
           Send to (Customer)
         </button>
-        <button className="button" type="button" onClick={() => showToast('Download PDF initiated.', 'success')}>Download PDF</button>
+        <button
+          className="button"
+          type="button"
+          onClick={() => {
+            const row = {
+              receipt_id: receipt.receipts_id,
+              receipt_number: receipt.receipt_number,
+              customer: receipt.customer_name,
+              amount: receipt.amount,
+              method: receipt.payment_method,
+              payment_date: receipt.payment_date,
+              branch: receipt.branch_name,
+            };
+            if (downloadCsv([row], `receipt-${receipt.receipt_number}.csv`)) showToast('Receipt exported.', 'success');
+          }}
+        >
+          Download CSV
+        </button>
       </div>
     </div>;
 }
@@ -1130,8 +1355,15 @@ function CIFormPage({
   const [account, setAccount] = useState(null);
   const [loading, setLoading] = useState(true);
   const [formData, setFormData] = useState({
-    customerName: ''
+    customerName: '',
+    purpose: '',
+    monthlyIncome: '',
+    businessType: '',
+    reference1: '',
+    reference2: '',
+    remarks: '',
   });
+  const [submitting, setSubmitting] = useState(false);
   const contextQuery = `?from=${parentContext}`;
   useEffect(() => {
     async function load() {
@@ -1141,7 +1373,7 @@ function CIFormPage({
         setAccount(result.data);
         setFormData(prev => ({
           ...prev,
-          customerName: result.data.customerName || ''
+          customerName: result.data.customerName || '',
         }));
       }
       setLoading(false);
@@ -1200,10 +1432,29 @@ function CIFormPage({
     }]} />
       <div className="flex flex-wrap gap-2 justify-end mt-4 mb-2">
         <button className="button secondary" type="button" onClick={() => navigate(`/collector/account-detail/${account.id}${contextQuery}`)}>Cancel</button>
-        <button className="button" type="button" onClick={() => {
-        showToast('CI Form sent to Operating Manager.', 'success');
+        <button className="button" type="button" disabled={submitting} onClick={async () => {
+        if (!formData.purpose || !formData.monthlyIncome || !formData.businessType) {
+          showToast('Purpose, monthly income, and business type are required.', 'error');
+          return;
+        }
+        const referencesSummary = [formData.reference1, formData.reference2].filter(Boolean).join(' | ') || null;
+        setSubmitting(true);
+        const result = await submitCollectorCreditInvestigation({
+          customer_id: Number(account.id),
+          purpose: formData.purpose,
+          monthly_income: Number(formData.monthlyIncome),
+          business_type: formData.businessType,
+          references_summary: referencesSummary,
+          form_remarks: formData.remarks || null,
+        });
+        setSubmitting(false);
+        if (!result.success) {
+          showToast(result.message || 'Submit failed.', 'error');
+          return;
+        }
+        showToast(result.message || 'CI submitted.', 'success');
         navigate(`/collector/account-detail/${account.id}${contextQuery}`);
-      }}>Submit to Operating Manager</button>
+      }}>{submitting ? 'Submitting…' : 'Submit to Operating Manager'}</button>
       </div>
     </div>;
 }
@@ -1216,11 +1467,15 @@ function IncidentReportPage({
   const [account, setAccount] = useState(null);
   const [loading, setLoading] = useState(true);
   const [formData, setFormData] = useState({});
+  const [submitting, setSubmitting] = useState(false);
   const contextQuery = parentContext ? `?from=${parentContext}` : '';
   const backTo = account ? `/collector/account-detail/${account.id}${contextQuery}` : '/collector/dashboard';
   useEffect(() => {
     async function load() {
-      if (!accountId) return;
+      if (!accountId) {
+        setLoading(false);
+        return;
+      }
       setLoading(true);
       const result = await fetchAccountById(accountId);
       if (result.success) setAccount(result.data);
@@ -1228,7 +1483,7 @@ function IncidentReportPage({
     }
     load();
   }, [accountId]);
-  if (loading) return <LoadingState message="Loading customer..." />;
+  if (accountId && loading) return <LoadingState message="Loading customer..." />;
   return <div className="relative z-10 grid gap-[22px] w-full">
       {account ? <section className="panel content-panel relative overflow-hidden">
           <p className="text-ink/70">Reporting incident for <strong>{account.customerName}</strong> ({account.accountNumber})</p>
@@ -1274,10 +1529,28 @@ function IncidentReportPage({
     }]} />
       <div className="flex flex-wrap gap-2 justify-end mt-4 mb-2">
         <button className="button secondary" type="button" onClick={() => navigate(backTo)}>Cancel</button>
-        <button className="button" type="button" onClick={() => {
-        showToast('Incident report sent to Operating Manager.', 'success');
+        <button className="button" type="button" disabled={submitting} onClick={async () => {
+        if (!formData.incidentType || !formData.description || !formData.severity) {
+          showToast('Incident type, description, and severity are required.', 'error');
+          return;
+        }
+        setSubmitting(true);
+        const result = await submitCollectorIncident({
+          customer_id: accountId ? Number(accountId) : null,
+          incident_type: formData.incidentType,
+          description: formData.description,
+          location: formData.location || account?.address || null,
+          severity: formData.severity,
+          gps: formData.gps || null,
+        });
+        setSubmitting(false);
+        if (!result.success) {
+          showToast(result.message || 'Submit failed.', 'error');
+          return;
+        }
+        showToast(result.message || 'Incident report sent.', 'success');
         navigate(backTo);
-      }}>Submit to Operating Manager</button>
+      }}>{submitting ? 'Submitting…' : 'Submit to Operating Manager'}</button>
       </div>
     </div>;
 }
@@ -1328,7 +1601,25 @@ function CollectionHistoryPage({
         <div className="list-section-header">
           <h3>Collection Payments</h3>
           <div className="list-section-actions">
-            <button className="button secondary whitespace-nowrap" type="button" onClick={() => window.alert('Exporting Payments...')}>Export Data</button>
+            <button
+              className="button secondary whitespace-nowrap"
+              type="button"
+              onClick={() => {
+                const rows = filtered.map(p => ({
+                  payment_id: p.collectionpayment_id,
+                  receipt: p.receipt_number,
+                  customer: p.customer_name,
+                  amount: p.amount,
+                  method: p.payment_method,
+                  status: p.status,
+                  date: p.payment_date,
+                }));
+                if (downloadCsv(rows, 'collector-payments.csv')) showToast('Payments exported.', 'success');
+                else showToast('Nothing to export.', 'error');
+              }}
+            >
+              Export CSV
+            </button>
           </div>
         </div>
         <div className="list-section-toolbar" style={{
@@ -1482,87 +1773,81 @@ function NotificationsPage({
   navigate,
   showToast
 }) {
-  const [notifications, setNotifications] = useState(NOTIFICATIONS);
-  const [filter, setFilter] = useState('All');
-  const filtered = useMemo(() => {
-    if (filter === 'Unread') return notifications.filter(n => !n.read);
-    if (filter === 'Read') return notifications.filter(n => n.read);
-    if (filter === 'Assignments') return notifications.filter(n => n.type === 'assignment');
-    if (filter === 'Incidents') return notifications.filter(n => n.type === 'incident');
-    if (filter === 'Routes') return notifications.filter(n => n.type === 'route');
-    if (filter === 'Collections') return notifications.filter(n => n.type === 'collection');
-    return notifications;
-  }, [notifications, filter]);
-  const markAllRead = () => {
-    setNotifications(items => items.map(item => ({
-      ...item,
-      read: true
-    })));
-    showToast('All notifications marked as read.', 'success');
-  };
-  return <div className="relative z-10 grid gap-[22px] w-full">
-      <div className="flex justify-end mt-2 mb-2">
-        <button className="button secondary" type="button" onClick={() => markAllRead()}>Mark All as Read</button>
-      </div>
-      <section className="panel content-panel relative overflow-hidden">
-        <div className="inline-toolbar">
-          <div className="segmented-control">
-            {['All', 'Unread', 'Read', 'Assignments', 'Incidents', 'Routes', 'Collections'].map(item => <button key={item} className={filter === item ? 'segment active' : 'segment'} type="button" onClick={() => setFilter(item)}>
-                {item}
-              </button>)}
-          </div>
-        </div>
-      </section>
-      {filtered.length ? <div className="notification-list">
-          {filtered.map(item => <article key={item.id} className={`notification-item${item.read ? '' : ' unread'}`}>
-              <div>
-                <h4>{item.title}</h4>
-                <p className="text-ink/70">{item.message}</p>
-                <span className="notification-time">{item.time}</span>
-              </div>
-              <div className="notification-actions">
-                {!item.read ? <button className="inline-flex justify-center items-center gap-2 px-5 py-2.5 rounded-md bg-transparent text-blue border-[1.5px] border-blue-30 shadow-none hover:bg-blue-08 transition-all duration-160 cursor-pointer" type="button" onClick={() => {
-            setNotifications(items => items.map(n => n.id === item.id ? {
-              ...n,
-              read: true
-            } : n));
-            showToast('Notification marked as read.', 'success');
-          }}>
-                    Mark as Read
-                  </button> : null}
-                <button className="inline-flex justify-center items-center gap-2 px-5 py-2.5 rounded-md bg-mint text-ink border-[1.5px] border-surface-3 shadow-none hover:border-blue hover:text-blue transition-all duration-160 cursor-pointer" type="button" onClick={() => navigate(item.relatedTo)}>
-                  Open Related Record
-                </button>
-              </div>
-            </article>)}
-        </div> : <EmptyState title="No notifications" description="You're all caught up." />}
-    </div>;
+  return (
+    <NotificationsInbox
+      showToast={showToast}
+      navigate={navigate}
+      resolveRelatedPath={(n) => resolveCollectorNotificationPath(n.category)}
+    />
+  );
 }
 function ProfilePage({
   navigate,
   showToast
 }) {
-  const currentUser = getCurrentUser();
-  const profile = currentUser || {};
+  const sessionUser = getCurrentUser();
+  const [profile, setProfile] = useState(null);
+  const [password, setPassword] = useState('');
+  const [editing, setEditing] = useState(false);
+  useEffect(() => {
+    async function load() {
+      const res = await fetchMyProfile();
+      if (res.success) setProfile(res.data);
+    }
+    load();
+  }, []);
+  const userName = profile
+    ? [profile.first_name, profile.last_name].filter(Boolean).join(' ')
+    : sessionUser?.fullName || 'Collector';
+  const userBranch = profile?.branch?.name || sessionUser?.branch?.name || '—';
+  const roleLabel = profile?.role?.name || sessionUser?.role?.name || 'Collector';
+  const userInitials = userName.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2);
+  const saveProfile = async () => {
+    if (!profile) return;
+    const payload = {
+      first_name: profile.first_name,
+      last_name: profile.last_name,
+      email: profile.email,
+      phone: profile.phone,
+    };
+    if (password.trim()) payload.password = password.trim();
+    const res = await updateMyProfile(payload);
+    if (res.success) {
+      persistCurrentUserFromProfile(res.data);
+      setProfile(res.data);
+      setPassword('');
+      setEditing(false);
+      showToast('Profile updated.', 'success');
+    } else showToast(res.message || 'Update failed.', 'error');
+  };
+  if (!profile) return <LoadingState message="Loading profile..." />;
   return <div className="relative z-10 grid gap-[22px] w-full">
       <section className="panel content-panel profile-panel">
         <div className="profile-header">
-          <div className="profile-avatar">{(profile.fullName || 'CO').split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase()}</div>
-          <div>
-            <h3>{profile.fullName || 'Collector'}</h3>
-            <p className="text-ink/70">{profile.email || ''}</p>
-          </div>
+          <div className="profile-avatar">{userInitials}</div>
+          <div><h3>{userName}</h3><p className="text-ink/70">{roleLabel}</p></div>
         </div>
-        <ul className="info-grid">
-          <li><span className="info-item-label">Branch Assignment</span><span className="info-item-value">{profile.branch?.name || '—'}</span></li>
-          <li><span className="info-item-label">Role</span><span className="info-item-value">{profile.role?.name || '—'}</span></li>
-          <li><span className="info-item-label">Status</span><span className="info-item-value">{profile.status || '—'}</span></li>
-        </ul>
+        {editing ? <div className="form-grid" style={{ marginTop: 16 }}>
+            <label>First name<input value={profile.first_name || ''} onChange={e => setProfile(p => ({ ...p, first_name: e.target.value }))} /></label>
+            <label>Last name<input value={profile.last_name || ''} onChange={e => setProfile(p => ({ ...p, last_name: e.target.value }))} /></label>
+            <label>Email<input type="email" value={profile.email || ''} onChange={e => setProfile(p => ({ ...p, email: e.target.value }))} /></label>
+            <label>Phone<input value={profile.phone || ''} onChange={e => setProfile(p => ({ ...p, phone: e.target.value }))} /></label>
+            <label>New password (optional)<input type="password" value={password} onChange={e => setPassword(e.target.value)} placeholder="Min. 8 characters" /></label>
+          </div>
+          : <ul className="info-grid">
+            <li><span className="info-item-label">Branch</span><span className="info-item-value">{userBranch}</span></li>
+            <li><span className="info-item-label">Email</span><span className="info-item-value">{profile.email}</span></li>
+            <li><span className="info-item-label">Phone</span><span className="info-item-value">{profile.phone || '—'}</span></li>
+            <li><span className="info-item-label">Status</span><span className="info-item-value">{profile.status || '—'}</span></li>
+          </ul>}
       </section>
       <div className="flex flex-wrap gap-2 justify-end mt-4 mb-2">
         <button className="button ghost" type="button" onClick={() => navigate('/collector/settings')}>Settings</button>
-        <button className="button secondary" type="button" onClick={() => showToast('Change Password form would open here.', 'success')}>Change Password</button>
-        <button className="button" type="button" onClick={() => showToast('Update Profile form would open here.', 'success')}>Update Profile</button>
+        <button className="button ghost" type="button" onClick={() => requestLogout()}>Logout</button>
+        {editing ? <>
+            <button className="button ghost" type="button" onClick={() => setEditing(false)}>Cancel</button>
+            <button className="button" type="button" onClick={saveProfile}>Save Profile</button>
+          </> : <button className="button" type="button" onClick={() => setEditing(true)}>Update Profile</button>}
       </div>
     </div>;
 }
@@ -1626,6 +1911,8 @@ export function CollectorPageBody({
       return <RoutePage pageType={page.pageType} {...props} />;
     case 'accounts':
       return <AccountsPage {...props} />;
+    case 'customerMap':
+      return <CustomerMapPage {...props} />;
     case 'accountDetail':
       return <AccountDetailPage {...props} />;
     case 'collectionLog':

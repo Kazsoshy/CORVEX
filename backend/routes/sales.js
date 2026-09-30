@@ -1,5 +1,16 @@
 import express from 'express';
 import { requireRole } from '../middleware/auth.js';
+import {
+  purchaseRequestListFilter,
+  purchaseRequestAccessSql,
+  userCanManagePurchaseRequest,
+  assignSalesAgentToCustomer,
+} from '../lib/purchaseRequests.js';
+import {
+  CREDIT_INVESTIGATION_FROM,
+  CREDIT_INVESTIGATION_SELECT,
+} from '../lib/creditInvestigationQueries.js';
+import { notifyCreditInvestigationSubmitted } from '../lib/creditInvestigationNotifications.js';
 
 const router = express.Router();
 
@@ -129,6 +140,333 @@ async function getVisit(pool, visitId, userId) {
 
 const salesStaffOnly = requireRole(['sales_staff']);
 const salesStaffOrOperatingManager = requireRole(['sales_staff', 'operating_manager']);
+
+function manilaTodayString() {
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Manila',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(new Date());
+}
+
+async function assertSalesCustomerAccess(pool, user, customerId) {
+  const result = await pool.query(
+    `SELECT customer_id, branch_id, assigned_sales_agent_id
+     FROM customers WHERE customer_id = $1`,
+    [customerId]
+  );
+  if (!result.rows.length) return { ok: false, status: 404, message: 'Customer not found.' };
+  const row = result.rows[0];
+  if (user.branchId != null && row.branch_id !== user.branchId) {
+    return { ok: false, status: 403, message: 'Customer is outside your branch.' };
+  }
+  if (user.roleSlug === 'sales_staff' && row.assigned_sales_agent_id != null && row.assigned_sales_agent_id !== user.id) {
+    const visit = await pool.query(
+      `SELECT 1 FROM field_visits WHERE customer_id = $1 AND user_id = $2 LIMIT 1`,
+      [customerId, user.id]
+    );
+    if (!visit.rows.length) {
+      return { ok: false, status: 403, message: 'Customer is not assigned to you.' };
+    }
+  }
+  return { ok: true, row };
+}
+
+router.get('/dashboard', salesStaffOnly, async (req, res) => {
+  try {
+    const pool = req.app.locals.pool;
+    const user = req.currentUser;
+    const userId = user.id;
+    const branchId = user.branchId;
+    const today = manilaTodayString();
+
+    const [
+      visitsToday,
+      salesPeriods,
+      recentSales,
+      topProducts,
+      topCustomers,
+      lowStock,
+      ciCounts,
+    ] = await Promise.all([
+      pool.query(
+        `SELECT
+           COUNT(*)::int AS total,
+           COUNT(*) FILTER (WHERE fv.status = 'Pending')::int AS pending,
+           COUNT(*) FILTER (WHERE fv.status = 'Completed')::int AS completed
+         FROM field_visits fv
+         WHERE fv.user_id = $1 AND fv.visit_type = 'Sales' AND fv.scheduled_date = $2::date`,
+        [userId, today]
+      ),
+      pool.query(
+        `SELECT
+           COALESCE(SUM(total_amount) FILTER (WHERE invoices_date = $2::date), 0) AS daily,
+           COALESCE(SUM(total_amount) FILTER (WHERE invoices_date >= $2::date - 6), 0) AS weekly,
+           COALESCE(SUM(total_amount) FILTER (WHERE invoices_date >= date_trunc('month', $2::date)::date), 0) AS monthly,
+           COUNT(*) FILTER (WHERE invoices_date = $2::date)::int AS sales_logged_today
+         FROM sales_invoices
+         WHERE sales_agent_id = $1`,
+        [userId, today]
+      ),
+      pool.query(
+        `SELECT si.sales_invoices_id, si.invoice_number, si.total_amount, si.invoices_date::text AS invoices_date,
+                c.first_name, c.last_name,
+                COALESCE(NULLIF(CONCAT_WS(' ', c.first_name, c.last_name), ''), 'Customer') AS customer_name
+         FROM sales_invoices si
+         LEFT JOIN customers c ON c.customer_id = si.customer_id
+         WHERE si.sales_agent_id = $1
+         ORDER BY si.invoices_date DESC, si.sales_invoices_id DESC
+         LIMIT 5`,
+        [userId]
+      ),
+      pool.query(
+        `SELECT p.name, SUM(sii.quantity)::int AS units
+         FROM sales_invoice_items sii
+         JOIN sales_invoices si ON si.sales_invoices_id = sii.invoices_id
+         JOIN products p ON p.id = sii.product_id
+         WHERE si.sales_agent_id = $1 AND si.invoices_date >= $2::date - 30
+         GROUP BY p.name
+         ORDER BY units DESC
+         LIMIT 5`,
+        [userId, today]
+      ),
+      pool.query(
+        `SELECT COALESCE(NULLIF(CONCAT_WS(' ', c.first_name, c.last_name), ''), 'Customer') AS name,
+                SUM(si.total_amount) AS revenue
+         FROM sales_invoices si
+         JOIN customers c ON c.customer_id = si.customer_id
+         WHERE si.sales_agent_id = $1 AND si.invoices_date >= $2::date - 90
+         GROUP BY c.customer_id, c.first_name, c.last_name
+         ORDER BY revenue DESC
+         LIMIT 5`,
+        [userId, today]
+      ),
+      branchId
+        ? pool.query(
+            `SELECT p.id, p.name, p.sku, bi.available_stock AS stock, bi.stock_status AS status, b.name AS branch
+             FROM branch_inventory bi
+             JOIN products p ON p.id = bi.product_id
+             JOIN branches b ON b.id = bi.branch_id
+             WHERE bi.branch_id = $1 AND bi.available_stock <= bi.reorder_level
+             ORDER BY bi.available_stock ASC
+             LIMIT 10`,
+            [branchId]
+          )
+        : Promise.resolve({ rows: [] }),
+      pool.query(
+        `SELECT
+           COUNT(*)::int AS total,
+           COUNT(*) FILTER (WHERE status = 'Pending')::int AS pending,
+           COUNT(*) FILTER (WHERE status = 'Approved')::int AS approved,
+           COUNT(*) FILTER (WHERE status IN ('Rejected', 'Revision Requested'))::int AS needs_action
+         FROM credit_investigations
+         WHERE submitted_by = $1`,
+        [userId]
+      ),
+    ]);
+
+    const vt = visitsToday.rows[0] || {};
+    const totalVisits = Number(vt.total) || 0;
+    const completedVisits = Number(vt.completed) || 0;
+    const pendingVisits = Number(vt.pending) || 0;
+    const sp = salesPeriods.rows[0] || {};
+    const ciRow = ciCounts.rows[0] || {};
+
+    return res.status(200).json({
+      success: true,
+      data: {
+        summary: {
+          accountsToVisit: totalVisits,
+          pendingVisits,
+          completedVisits,
+          salesLogged: Number(sp.sales_logged_today) || 0,
+          visitProgress: totalVisits > 0 ? Math.round((completedVisits / totalVisits) * 100) : 0,
+          creditInvestigationsPending: Number(ciRow.pending) || 0,
+          creditInvestigationsTotal: Number(ciRow.total) || 0,
+        },
+        analytics: {
+          dailyRevenue: Number(sp.daily) || 0,
+          weeklyRevenue: Number(sp.weekly) || 0,
+          monthlyRevenue: Number(sp.monthly) || 0,
+          topProducts: topProducts.rows.map((r) => ({ name: r.name, units: r.units })),
+          topCustomers: topCustomers.rows.map((r) => ({
+            name: r.name,
+            revenue: Number(r.revenue) || 0,
+          })),
+        },
+        recentSales: recentSales.rows.map((r) => ({
+          id: r.sales_invoices_id,
+          invoiceNumber: r.invoice_number,
+          customerName: r.customer_name,
+          totalAmount: Number(r.total_amount) || 0,
+          date: r.invoices_date,
+        })),
+        lowStockItems: lowStock.rows.map((r, idx) => ({
+          id: r.id ?? idx,
+          name: r.name,
+          sku: r.sku,
+          stock: r.stock,
+          status: r.status,
+          branch: r.branch,
+        })),
+      },
+    });
+  } catch (err) {
+    console.error('[Sales] GET /dashboard error:', err.message);
+    return res.status(500).json({ success: false, message: 'Failed to load dashboard.' });
+  }
+});
+
+router.post('/credit-investigations', salesStaffOnly, async (req, res) => {
+  try {
+    const pool = req.app.locals.pool;
+    const user = req.currentUser;
+    const customerId = Number(req.body.customer_id);
+    const {
+      purpose,
+      monthly_income: monthlyIncome,
+      business_type: businessType,
+      references_summary: referencesSummary,
+      form_remarks: formRemarks,
+    } = req.body;
+
+    if (!Number.isFinite(customerId)) {
+      return res.status(400).json({ success: false, message: 'Customer is required.' });
+    }
+    if (!String(purpose || '').trim()) {
+      return res.status(400).json({ success: false, message: 'Purpose is required.' });
+    }
+
+    const access = await assertSalesCustomerAccess(pool, user, customerId);
+    if (!access.ok) {
+      return res.status(access.status).json({ success: false, message: access.message });
+    }
+
+    const customerMeta = await pool.query(
+      `SELECT first_name, last_name FROM customers WHERE customer_id = $1`,
+      [customerId]
+    );
+    const customerName = customerMeta.rows[0]
+      ? `${customerMeta.rows[0].first_name} ${customerMeta.rows[0].last_name}`.trim()
+      : 'Customer';
+
+    const submitterMeta = await pool.query(
+      `SELECT COALESCE(NULLIF(TRIM(full_name), ''), email) AS display_name FROM users WHERE id = $1`,
+      [user.id]
+    );
+    const submitterName = submitterMeta.rows[0]?.display_name || 'Sales agent';
+
+    const result = await pool.query(
+      `INSERT INTO credit_investigations (
+         customer_id, branch_id, submitted_by, status, purpose, monthly_income,
+         business_type, references_summary, form_remarks
+       ) VALUES ($1, $2, $3, 'Pending', $4, $5, $6, $7, $8)
+       RETURNING ci_id, status, created_at`,
+      [
+        customerId,
+        access.row.branch_id,
+        user.id,
+        String(purpose).trim(),
+        Number(monthlyIncome) || 0,
+        businessType ? String(businessType).trim() : null,
+        referencesSummary ? String(referencesSummary).trim() : null,
+        formRemarks ? String(formRemarks).trim() : null,
+      ]
+    );
+
+    const ciId = result.rows[0].ci_id;
+    await notifyCreditInvestigationSubmitted(pool, {
+      branchId: access.row.branch_id,
+      ciId,
+      customerName,
+      submitterName,
+    });
+
+    return res.status(201).json({
+      success: true,
+      message: 'Credit investigation submitted for branch approval.',
+      data: { ...result.rows[0], customer_id: customerId, customer_name: customerName },
+    });
+  } catch (err) {
+    console.error('[Sales] POST /credit-investigations error:', err.message);
+    return res.status(500).json({ success: false, message: 'Failed to submit credit investigation.' });
+  }
+});
+
+router.get('/credit-investigations', salesStaffOnly, async (req, res) => {
+  try {
+    const pool = req.app.locals.pool;
+    const user = req.currentUser;
+    const { status } = req.query;
+    const params = [user.id];
+    let statusSql = '';
+    if (status && status !== 'All') {
+      statusSql = ' AND ci.status = $2';
+      params.push(String(status));
+    }
+
+    const result = await pool.query(
+      `SELECT ${CREDIT_INVESTIGATION_SELECT}
+       ${CREDIT_INVESTIGATION_FROM}
+       WHERE ci.submitted_by = $1${statusSql}
+       ORDER BY ci.created_at DESC
+       LIMIT 200`,
+      params
+    );
+
+    return res.status(200).json({ success: true, data: result.rows });
+  } catch (err) {
+    console.error('[Sales] GET /credit-investigations error:', err.message);
+    return res.status(500).json({ success: false, message: 'Failed to load your credit investigations.' });
+  }
+});
+
+router.get('/credit-investigations/:id', salesStaffOnly, async (req, res) => {
+  try {
+    const pool = req.app.locals.pool;
+    const user = req.currentUser;
+    const ciId = Number(req.params.id);
+    if (!Number.isFinite(ciId)) {
+      return res.status(400).json({ success: false, message: 'Invalid CI id.' });
+    }
+
+    const result = await pool.query(
+      `SELECT ${CREDIT_INVESTIGATION_SELECT}
+       ${CREDIT_INVESTIGATION_FROM}
+       WHERE ci.ci_id = $1 AND ci.submitted_by = $2`,
+      [ciId, user.id]
+    );
+
+    if (!result.rows.length) {
+      return res.status(404).json({ success: false, message: 'Credit investigation not found.' });
+    }
+    return res.status(200).json({ success: true, data: result.rows[0] });
+  } catch (err) {
+    console.error('[Sales] GET /credit-investigations/:id error:', err.message);
+    return res.status(500).json({ success: false, message: 'Failed to load credit investigation.' });
+  }
+});
+
+router.get('/audit-logs', salesStaffOnly, async (req, res) => {
+  try {
+    const pool = req.app.locals.pool;
+    const userId = req.currentUser.id;
+    const limit = Math.min(Number(req.query.limit) || 100, 300);
+    const result = await pool.query(
+      `SELECT log_id AS audit_id, action, status_details AS detail, ip_address, created_at
+       FROM audit_logs
+       WHERE user_id = $1
+       ORDER BY created_at DESC
+       LIMIT $2`,
+      [userId, limit]
+    );
+    return res.status(200).json({ success: true, data: result.rows });
+  } catch (err) {
+    console.error('[Sales] GET /audit-logs error:', err.message);
+    return res.status(500).json({ success: false, message: 'Failed to load audit log.' });
+  }
+});
 
 router.get('/invoices', salesStaffOrOperatingManager, async (req, res) => {
   const pool = req.app.locals.pool;
@@ -348,6 +686,7 @@ router.post('/invoices', async (req, res) => {
   const dueDate = req.body.due_date;
   const notes = typeof req.body.notes === 'string' ? req.body.notes.trim() : '';
   const items = Array.isArray(req.body.items) ? req.body.items : [];
+  const purchaseRequestId = positiveInteger(req.body.purchase_request_id);
 
   if (!customerId || !paymentMethodId || !isValidDate(invoicesDate)) {
     return res.status(400).json({
@@ -517,6 +856,29 @@ router.post('/invoices', async (req, res) => {
            (invoices_id, product_id, quantity, unit_price, line_total)
          VALUES ($1, $2, $3, $4, $5)`,
         [invoiceId, item.productId, item.quantity, item.unitPrice, item.lineTotal]
+      );
+    }
+
+    if (purchaseRequestId) {
+      const prCheck = await client.query(
+        `SELECT pr.request_id, pr.customer_id, pr.status, pr.sales_invoices_id
+         FROM purchase_requests pr
+         WHERE pr.request_id = $1`,
+        [purchaseRequestId]
+      );
+      if (!prCheck.rows.length || prCheck.rows[0].customer_id !== customerId) {
+        await client.query('ROLLBACK');
+        return res.status(400).json({ success: false, message: 'Invalid purchase request for this customer.' });
+      }
+      if (prCheck.rows[0].sales_invoices_id) {
+        await client.query('ROLLBACK');
+        return res.status(400).json({ success: false, message: 'This purchase request is already linked to an invoice.' });
+      }
+      await client.query(
+        `UPDATE purchase_requests
+         SET sales_invoices_id = $1, status = 'Invoiced', updated_at = CURRENT_TIMESTAMP
+         WHERE request_id = $2`,
+        [invoiceId, purchaseRequestId]
       );
     }
 
@@ -703,6 +1065,10 @@ router.post('/visits', async (req, res) => {
       [customerId, req.currentUser.id, visitType, scheduledDate, status]
     );
 
+    if (status === 'Completed' && visitType === 'Sales' && req.currentUser.roleSlug === 'sales_staff') {
+      await assignSalesAgentToCustomer(pool, customerId, req.currentUser.id);
+    }
+
     const visit = await getVisit.call({ pool }, result.rows[0].visit_id, req.currentUser.id);
 
     return res.status(201).json({
@@ -782,6 +1148,20 @@ router.put('/visits/:id', async (req, res) => {
   params.push(visitId, req.currentUser.id);
 
   try {
+    const priorVisit = await pool.query(
+      `SELECT customer_id, visit_type, status
+       FROM field_visits
+       WHERE visit_id = $1 AND user_id = $2`,
+      [visitId, req.currentUser.id]
+    );
+    if (!priorVisit.rows.length) {
+      return res.status(404).json({
+        success: false,
+        message: 'Field visit not found',
+      });
+    }
+    const prior = priorVisit.rows[0];
+
     await pool.query(
       `UPDATE field_visits
        SET ${updates.join(', ')}
@@ -797,6 +1177,12 @@ router.put('/visits/:id', async (req, res) => {
         success: false,
         message: 'Field visit not found',
       });
+    }
+
+    const effectiveStatus = status !== undefined ? status : visit.status;
+    const effectiveType = visitType !== undefined ? String(visitType).trim() : (visit.visit_type || prior.visit_type);
+    if (effectiveStatus === 'Completed' && effectiveType === 'Sales' && req.currentUser.roleSlug === 'sales_staff') {
+      await assignSalesAgentToCustomer(pool, visit.customer_id, req.currentUser.id);
     }
 
     return res.status(200).json({
@@ -862,6 +1248,150 @@ router.get('/payments', async (req, res) => {
       success: false,
       message: 'Failed to fetch collection payments',
     });
+  }
+});
+
+router.get('/purchase-requests', async (req, res) => {
+  const pool = req.app.locals.pool;
+  const user = req.currentUser;
+
+  try {
+    const { whereSql, params } = purchaseRequestListFilter(user);
+
+    const result = await pool.query(
+      `SELECT pr.request_id, pr.status, pr.notes, pr.created_at, pr.updated_at,
+              pr.sales_invoices_id,
+              c.customer_id, c.customer_code,
+              c.first_name || ' ' || c.last_name AS customer_name
+       FROM purchase_requests pr
+       JOIN customers c ON c.customer_id = pr.customer_id
+       WHERE ${whereSql}
+       ORDER BY pr.created_at DESC
+       LIMIT 100`,
+      params
+    );
+
+    const ids = result.rows.map((r) => r.request_id);
+    let itemsByRequest = {};
+    if (ids.length) {
+      const items = await pool.query(
+        `SELECT pri.request_id, pri.item_id, pri.product_id, pri.quantity, pri.notes,
+                p.name AS product_name, p.sku
+         FROM purchase_request_items pri
+         JOIN products p ON p.id = pri.product_id
+         WHERE pri.request_id = ANY($1::int[])`,
+        [ids]
+      );
+      itemsByRequest = items.rows.reduce((acc, row) => {
+        if (!acc[row.request_id]) acc[row.request_id] = [];
+        acc[row.request_id].push(row);
+        return acc;
+      }, {});
+    }
+
+    return res.status(200).json({
+      success: true,
+      data: result.rows.map((row) => ({ ...row, items: itemsByRequest[row.request_id] || [] })),
+    });
+  } catch (err) {
+    console.error('[Sales] GET /purchase-requests error:', err.message);
+    return res.status(500).json({ success: false, message: 'Failed to fetch purchase requests.' });
+  }
+});
+
+router.get('/purchase-requests/:id', async (req, res) => {
+  const pool = req.app.locals.pool;
+  const requestId = Number(req.params.id);
+  const user = req.currentUser;
+  const access = purchaseRequestAccessSql(user, 2);
+
+  try {
+    const result = await pool.query(
+      `SELECT pr.request_id, pr.status, pr.notes, pr.created_at, pr.updated_at, pr.sales_invoices_id,
+              pr.branch_id, pr.sales_agent_id,
+              c.customer_id, c.customer_code, c.assigned_sales_agent_id,
+              c.first_name || ' ' || c.last_name AS customer_name
+       FROM purchase_requests pr
+       JOIN customers c ON c.customer_id = pr.customer_id
+       WHERE pr.request_id = $1
+         AND ${access.sql}`,
+      [requestId, ...access.extraParams]
+    );
+    if (!result.rows.length) {
+      return res.status(404).json({ success: false, message: 'Purchase request not found.' });
+    }
+
+    const items = await pool.query(
+      `SELECT pri.item_id, pri.product_id, pri.quantity, pri.notes,
+              p.name AS product_name, p.sku, p.unit_price
+       FROM purchase_request_items pri
+       JOIN products p ON p.id = pri.product_id
+       WHERE pri.request_id = $1`,
+      [requestId]
+    );
+
+    return res.status(200).json({
+      success: true,
+      data: { ...result.rows[0], items: items.rows },
+    });
+  } catch (err) {
+    console.error('[Sales] GET /purchase-requests/:id error:', err.message);
+    return res.status(500).json({ success: false, message: 'Failed to fetch purchase request.' });
+  }
+});
+
+router.patch('/purchase-requests/:id', async (req, res) => {
+  const pool = req.app.locals.pool;
+  const requestId = Number(req.params.id);
+  const { status } = req.body;
+  const allowed = new Set(['In Review', 'Confirmed', 'Rejected']);
+  if (!allowed.has(status)) {
+    return res.status(400).json({ success: false, message: 'Invalid status.' });
+  }
+
+  try {
+    const existing = await pool.query(
+      `SELECT pr.request_id, pr.sales_agent_id, pr.customer_id, pr.branch_id, c.assigned_sales_agent_id
+       FROM purchase_requests pr
+       JOIN customers c ON c.customer_id = pr.customer_id
+       WHERE pr.request_id = $1`,
+      [requestId]
+    );
+    if (!existing.rows.length) {
+      return res.status(404).json({ success: false, message: 'Purchase request not found.' });
+    }
+    const row = existing.rows[0];
+    if (!userCanManagePurchaseRequest(req.currentUser, row)) {
+      return res.status(403).json({ success: false, message: 'You are not assigned to this request.' });
+    }
+
+    const updated = await pool.query(
+      `UPDATE purchase_requests SET status = $1, updated_at = CURRENT_TIMESTAMP
+       WHERE request_id = $2
+       RETURNING request_id, status, updated_at`,
+      [status, requestId]
+    );
+
+    const items = await pool.query(
+      `SELECT pri.product_id, pri.quantity, pri.notes, p.name AS product_name
+       FROM purchase_request_items pri
+       JOIN products p ON p.id = pri.product_id
+       WHERE pri.request_id = $1`,
+      [requestId]
+    );
+
+    return res.status(200).json({
+      success: true,
+      message: `Purchase request marked as ${status}.`,
+      data: {
+        ...updated.rows[0],
+        customer_id: row.customer_id,
+        items: items.rows,
+      },
+    });
+  } catch (err) {
+    console.error('[Sales] PATCH /purchase-requests/:id error:', err.message);
+    return res.status(500).json({ success: false, message: 'Failed to update purchase request.' });
   }
 });
 

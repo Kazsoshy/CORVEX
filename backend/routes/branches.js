@@ -163,4 +163,148 @@ router.get('/:id', requireAuth, async (req, res) => {
   }
 });
 
+function requireOrgScope(req, res, next) {
+  if (!isUnscoped(req.currentUser)) {
+    return res.status(403).json({
+      success: false,
+      message: 'Only organization administrators can modify branches.',
+    });
+  }
+  return next();
+}
+
+function normalizeBranchPayload(body, partial = false) {
+  const out = {};
+  const pick = (key, transform = (v) => v) => {
+    if (body[key] !== undefined) out[key] = transform(body[key]);
+  };
+  pick('branch_name', (v) => String(v || '').trim());
+  pick('name', (v) => String(v || '').trim());
+  pick('address', (v) => String(v || '').trim());
+  pick('latitude', (v) => Number(v));
+  pick('longitude', (v) => Number(v));
+  pick('phone', (v) => String(v || '').trim());
+  pick('contact_no', (v) => String(v || '').trim());
+  pick('email', (v) => String(v || '').trim().toLowerCase());
+  pick('region', (v) => (v ? String(v).trim() : null));
+  pick('status', (v) => String(v || '').trim());
+  pick('manager_id', (v) => (v === null || v === '' ? null : Number(v)));
+  if (!partial) {
+    const name = out.branch_name || out.name;
+    if (!name) return { error: 'branch_name is required.' };
+    if (!out.address) return { error: 'address is required.' };
+    if (!Number.isFinite(out.latitude)) return { error: 'latitude is required.' };
+    if (!Number.isFinite(out.longitude)) return { error: 'longitude is required.' };
+    const phone = out.phone || out.contact_no;
+    if (!phone) return { error: 'phone is required.' };
+    if (!out.email) return { error: 'email is required.' };
+    out.branch_name = name;
+    out.phone = phone;
+  }
+  return { data: out };
+}
+
+// POST /api/branches
+router.post('/', requireAuth, requireOrgScope, async (req, res) => {
+  try {
+    const pool = req.app.locals.pool;
+    const normalized = normalizeBranchPayload(req.body, false);
+    if (normalized.error) {
+      return res.status(400).json({ success: false, message: normalized.error });
+    }
+    const d = normalized.data;
+    const status = d.status === 'Inactive' ? 'Inactive' : 'Active';
+
+    const result = await pool.query(
+      `INSERT INTO branches (name, address, latitude, longitude, phone, email, region, status, manager_id)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+       RETURNING id AS branch_id, name AS branch_name, address, latitude, longitude,
+                 phone AS contact_no, email, region, status, manager_id, created_at, updated_at`,
+      [
+        d.branch_name,
+        d.address,
+        d.latitude,
+        d.longitude,
+        d.phone,
+        d.email,
+        d.region,
+        status,
+        d.manager_id ?? null,
+      ]
+    );
+
+    return res.status(201).json({
+      success: true,
+      message: 'Branch created.',
+      data: result.rows[0],
+    });
+  } catch (err) {
+    console.error('[Branches] POST / error:', err.message);
+    return res.status(500).json({ success: false, message: 'Failed to create branch.' });
+  }
+});
+
+// PUT /api/branches/:id
+router.put('/:id', requireAuth, requireOrgScope, async (req, res) => {
+  try {
+    const pool = req.app.locals.pool;
+    const bid = Number(req.params.id);
+    if (!Number.isFinite(bid)) {
+      return res.status(400).json({ success: false, message: 'Invalid branch ID.' });
+    }
+
+    const normalized = normalizeBranchPayload(req.body, true);
+    if (normalized.error) {
+      return res.status(400).json({ success: false, message: normalized.error });
+    }
+    const d = normalized.data;
+    const fields = [];
+    const params = [];
+    let idx = 1;
+
+    const add = (column, value) => {
+      fields.push(`${column} = $${idx++}`);
+      params.push(value);
+    };
+
+    if (d.branch_name || d.name) add('name', d.branch_name || d.name);
+    if (d.address !== undefined) add('address', d.address);
+    if (d.latitude !== undefined) add('latitude', d.latitude);
+    if (d.longitude !== undefined) add('longitude', d.longitude);
+    if (d.phone !== undefined || d.contact_no !== undefined) add('phone', d.phone || d.contact_no);
+    if (d.email !== undefined) add('email', d.email);
+    if (d.region !== undefined) add('region', d.region);
+    if (d.status !== undefined) add('status', d.status === 'Inactive' ? 'Inactive' : 'Active');
+    if (d.manager_id !== undefined) add('manager_id', d.manager_id);
+
+    if (!fields.length) {
+      return res.status(400).json({ success: false, message: 'No fields to update.' });
+    }
+
+    fields.push('updated_at = CURRENT_TIMESTAMP');
+    params.push(bid);
+
+    const result = await pool.query(
+      `UPDATE branches SET ${fields.join(', ')}
+       WHERE id = $${idx}
+       RETURNING id AS branch_id, name AS branch_name, address, latitude, longitude,
+                 phone AS contact_no, email, region, status, manager_id, created_at, updated_at`,
+      params
+    );
+
+    if (!result.rows.length) {
+      return res.status(404).json({ success: false, message: 'Branch not found.' });
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: 'Branch updated.',
+      data: result.rows[0],
+    });
+  } catch (err) {
+    console.error('[Branches] PUT /:id error:', err.message);
+    return res.status(500).json({ success: false, message: 'Failed to update branch.' });
+  }
+});
+
 export default router;

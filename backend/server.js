@@ -23,6 +23,9 @@ import sawResultsRouter from './routes/sawResults.js';
 import salesRouter     from './routes/sales.js';
 import collectorRouter from './routes/collector.js';
 import notificationsRouter from './routes/notifications.js';
+import customerPortalRouter from './routes/customerPortal.js';
+import approvalsRouter from './routes/approvals.js';
+import operationalAlertsRouter from './routes/operationalAlerts.js';
 import { requireAuth, requireBranchScope } from './middleware/auth.js';
 import { ensureSchema } from './lib/ensureSchema.js';
 
@@ -118,7 +121,10 @@ app.use('/api/reports', requireAuth, reportsRouter);
 app.use('/api/inventory', requireAuth, inventoryRouter);
 app.use('/api/sales',      requireAuth, salesRouter);
 app.use('/api/collector',  requireAuth, collectorRouter);
+app.use('/api/customer-portal', requireAuth, customerPortalRouter);
 app.use('/api/notifications', requireAuth, notificationsRouter);
+app.use('/api/approvals', requireAuth, approvalsRouter);
+app.use('/api/operational-alerts', requireAuth, operationalAlertsRouter);
 
 // Admin routes — identify required
 app.use('/api/admin', requireAuth, adminRouter);

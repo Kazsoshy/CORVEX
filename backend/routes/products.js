@@ -11,11 +11,18 @@ router.use(allow(ROLE_SETS.catalogRead, ROLE_SETS.catalogWrite));
 router.get('/', async (req, res) => {
   try {
     const pool = req.app.locals.pool;
-    const { branch_id, category, status, search, page = 1, limit = 50 } = req.query;
+    const { branch_id, category, status, product_status, search, page = 1, limit = 50 } = req.query;
 
-    const conditions = ["p.status = 'Active'"];
+    const conditions = [];
     const params = [];
     let pIdx = 1;
+
+    if (product_status && ['Active', 'Inactive'].includes(String(product_status))) {
+      conditions.push(`p.status = $${pIdx++}`);
+      params.push(String(product_status));
+    } else {
+      conditions.push("p.status = 'Active'");
+    }
 
     if (branch_id) {
       conditions.push(`i.branch_id = $${pIdx++}`);
@@ -35,7 +42,7 @@ router.get('/', async (req, res) => {
       pIdx++;
     }
 
-    const where = `WHERE ${conditions.join(' AND ')}`;
+    const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
     const offset = (Number(page) - 1) * Number(limit);
     const limitIdx = pIdx++;
     const offsetIdx = pIdx++;
@@ -126,7 +133,8 @@ router.get('/:id', async (req, res) => {
               p.image_url,
               p.description,
               p.unit_type,
-              p.reorder_point
+              p.reorder_point,
+              p.supplier_id
        FROM products p
        LEFT JOIN product_categories pc ON pc.category_id = p.category_id
        WHERE p.id = $1`,
@@ -138,7 +146,7 @@ router.get('/:id', async (req, res) => {
 
     const inventoryResult = await pool.query(
       `SELECT
-         i.branch_inventory_id,
+         i.inventory_id AS branch_inventory_id,
          i.branch_id,
          b.name    AS branch_name,
          i.product_id,

@@ -2,8 +2,41 @@ import { Pagination } from '../shared/Pagination';
 import { usePagination } from '../../hooks/usePagination';
 import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { AUDIT_LOGS, BRANCHES, CATEGORIES, DASHBOARD_SUMMARY, INVENTORY_HEALTH, NOTIFICATIONS, PRODUCTS, RESTOCKS, TOP_MOVING_PRODUCTS, INVENTORY_TRANSFERS, WAREHOUSE_STAFF_PROFILE, getProductById, getRestockById, getTransferById } from '../../data/warehouseMockData';
-import { fetchInventoryTransfers, fetchInventoryTransferById, fetchRestocks, fetchBranchInventory, fetchStockMovements, fetchStockMovementById } from '../../api/inventoryService';
+import {
+  createInventoryTransfer,
+  createRestock,
+  createWarehouseProduct,
+  fetchBranchInventory,
+  fetchInventoryBranches,
+  fetchInventoryTransferById,
+  fetchInventoryTransfers,
+  fetchRestockById,
+  fetchRestocks,
+  fetchStockMovementById,
+  fetchStockMovements,
+  fetchWarehouseAuditLogs,
+  fetchWarehouseDashboard,
+  patchInventoryTransfer,
+  submitStockCount,
+} from '../../api/inventoryService';
+import { fetchNotifications } from '../../api/notificationService.js';
+import { fetchMyProfile, updateMyProfile } from '../../api/profileService.js';
+import { getCurrentUser, persistCurrentUserFromProfile, requestLogout } from '../../api/authService.js';
+
+function transferWorkflowStepIndex(status) {
+  if (status === 'Rejected') return -1;
+  if (status === 'Pending Approval' || status === 'Submitted') return 0;
+  if (status === 'Approved') return 2;
+  if (status === 'Completed') return 3;
+  return 0;
+}
+
+function isTransferPendingApproval(status) {
+  return status === 'Pending Approval' || status === 'Submitted';
+}
+import apiClient from '../../api/apiClient.js';
+import { downloadCsv } from '../../utils/csvExport';
+import { getReportInventory } from '../../api/reportsService.js';
 import { NotificationsInbox } from '../shared/NotificationsInbox';
 import { EmptyState } from '../shared/EmptyState';
 import { LoadingState } from '../shared/LoadingState';
@@ -56,15 +89,33 @@ function DashboardPage({
   navigate,
   showToast
 }) {
-  const unreadCount = NOTIFICATIONS.filter(n => !n.read).length;
-  const criticalProducts = PRODUCTS.filter(p => p.status === 'Critical Stock' || p.status === 'Out of Stock');
-  const firstProduct = PRODUCTS[0];
+  const user = getCurrentUser();
+  const [dashboard, setDashboard] = useState(null);
+  const [unreadCount, setUnreadCount] = useState(0);
+  const [loading, setLoading] = useState(true);
+  useEffect(() => {
+    async function load() {
+      setLoading(true);
+      const [dashRes, notifRes] = await Promise.all([fetchWarehouseDashboard(), fetchNotifications()]);
+      if (dashRes.success) setDashboard(dashRes.data);
+      else if (showToast) showToast(dashRes.message || 'Failed to load dashboard.', 'error');
+      if (notifRes.success) {
+        setUnreadCount((notifRes.data || []).filter(n => n.status !== 'Read').length);
+      }
+      setLoading(false);
+    }
+    load();
+  }, [showToast]);
+  const summary = dashboard?.summary || {};
+  const health = dashboard?.inventoryHealth || {};
+  const quickId = dashboard?.quickProductId;
+  if (loading) return <LoadingState message="Loading dashboard..." />;
   return <div className="relative z-10 grid gap-[22px] w-full">
       <section className="panel dashboard-greeting">
         <div className="flex flex-col gap-1">
           <p className="text-[0.82rem] font-bold tracking-widest uppercase text-navy/60 m-0">Warehouse operations</p>
-          <h2>{WAREHOUSE_STAFF_PROFILE.name}</h2>
-          <p className="text-ink/70">{WAREHOUSE_STAFF_PROFILE.warehouse}</p>
+          <h2>{user?.fullName || 'Warehouse Staff'}</h2>
+          <p className="text-ink/70">{user?.branch?.name || 'Branch warehouse'}</p>
         </div>
         <Link to="/warehouse/notifications" className="relative p-2 text-ink/70 hover:text-blue hover:bg-blue/5 rounded-full transition-colors cursor-pointer" aria-label={`${unreadCount} unread notifications`}>
           <NavIcon name="bell" />
@@ -74,31 +125,35 @@ function DashboardPage({
 
       <StatsGrid stats={[{
       label: 'Total Products Tracked',
-      value: String(DASHBOARD_SUMMARY.totalProducts)
+      value: String(summary.totalProducts ?? 0)
     }, {
       label: 'Low Stock Alerts',
-      value: String(DASHBOARD_SUMMARY.lowStockAlerts)
+      value: String(summary.lowStockAlerts ?? 0)
     }, {
-      label: 'Pending Restocks',
-      value: String(DASHBOARD_SUMMARY.pendingRestocks)
+      label: 'Pending Transfers',
+      value: String(summary.pendingTransfers ?? 0)
     }, {
       label: "Today's Stock Movements",
-      value: String(DASHBOARD_SUMMARY.movementsToday)
+      value: String(summary.movementsToday ?? 0)
     }]} />
 
       <div className="flex flex-wrap gap-2 justify-end mt-2 mb-2">
+        <button className="button secondary" type="button" onClick={() => navigate('/warehouse/transfers')}>Transfers</button>
+        <button className="button secondary" type="button" onClick={() => navigate('/warehouse/transfers/new')}>New Transfer Request</button>
         <button className="button secondary" type="button" onClick={() => navigate('/warehouse/branch-inventory')}>View Branch Inventory</button>
-        <button className="button secondary" type="button" onClick={() => navigate(`/warehouse/product/${firstProduct.id}/transfer`)}>Transfer Stock</button>
-        <button className="button secondary" type="button" onClick={() => navigate(`/warehouse/product/${firstProduct.id}/restock`)}>Record Restock</button>
-        <button className="button" type="button" onClick={() => navigate(`/warehouse/product/${firstProduct.id}/stock-count`)}>Log Stock Count</button>
+        {quickId ? <>
+            <button className="button secondary" type="button" onClick={() => navigate(`/warehouse/product/${quickId}/transfer`)}>Transfer Stock</button>
+            <button className="button secondary" type="button" onClick={() => navigate(`/warehouse/product/${quickId}/restock`)}>Record Restock</button>
+            <button className="button" type="button" onClick={() => navigate(`/warehouse/product/${quickId}/stock-count`)}>Log Stock Count</button>
+          </> : null}
       </div>
 
-      {criticalProducts.length ? <section className="panel content-panel alert-panel">
+      {(dashboard?.criticalProducts || []).length ? <section className="panel content-panel alert-panel">
           <div className="flex flex-col md:flex-row justify-between gap-4 items-start md:items-center mb-4"><h3>Critical Stock Alerts</h3></div>
           <ul className="list-none p-0 m-0 flex flex-col gap-3">
-            {criticalProducts.map(p => <li key={p.id}>
-                <div><strong>{p.name}</strong><span className="text-ink/70">{p.sku} · {p.branch}</span></div>
-                <StatusBadge status={p.status} />
+            {(dashboard?.criticalProducts || []).map(p => <li key={p.product_id}>
+                <div><strong>{p.product_name}</strong><span className="text-ink/70">{p.sku} · {p.branch_name}</span></div>
+                <StatusBadge status={p.stock_status} />
               </li>)}
           </ul>
         </section> : null}
@@ -107,13 +162,15 @@ function DashboardPage({
         <section className="panel content-panel relative overflow-hidden">
           <div className="flex flex-col md:flex-row justify-between gap-4 items-start md:items-center mb-4"><h3>Recent Transfers</h3></div>
           <ul className="list-none p-0 m-0 flex flex-col gap-3">
-            {INVENTORY_TRANSFERS.slice(0, 3).map(t => <li key={t.id}><div><strong>{t.id}</strong><span className="text-ink/70">{t.productName}</span></div><span>{t.status}</span></li>)}
+            {(dashboard?.recentTransfers || []).map(t => <li key={t.transfer_id}><div><strong>{t.transfer_ref}</strong><span className="text-ink/70">{t.product_name}</span></div><span>{t.status}</span></li>)}
+            {!(dashboard?.recentTransfers || []).length ? <li className="text-ink/70">No transfers yet.</li> : null}
           </ul>
         </section>
         <section className="panel content-panel relative overflow-hidden">
           <div className="flex flex-col md:flex-row justify-between gap-4 items-start md:items-center mb-4"><h3>Recent Restocks</h3></div>
           <ul className="list-none p-0 m-0 flex flex-col gap-3">
-            {RESTOCKS.slice(0, 3).map(r => <li key={r.id}><div><strong>{r.productName}</strong><span className="text-ink/70">{r.dateReceived}</span></div><span>+{r.quantity}</span></li>)}
+            {(dashboard?.recentRestocks || []).map(r => <li key={r.restock_id}><div><strong>{r.product_name}</strong><span className="text-ink/70">{formatDisplayDate(r.received_date)}</span></div><span>+{r.quantity}</span></li>)}
+            {!(dashboard?.recentRestocks || []).length ? <li className="text-ink/70">No restocks yet.</li> : null}
           </ul>
         </section>
       </div>
@@ -122,16 +179,17 @@ function DashboardPage({
         <section className="panel content-panel relative overflow-hidden">
           <div className="flex flex-col md:flex-row justify-between gap-4 items-start md:items-center mb-4"><h3>Top Moving Products</h3></div>
           <ul className="list-none p-0 m-0 flex flex-col gap-3">
-            {TOP_MOVING_PRODUCTS.map(p => <li key={p.name}><div><strong>{p.name}</strong></div><span>{p.movements} movements</span></li>)}
+            {(dashboard?.topMovingProducts || []).map(p => <li key={p.name}><div><strong>{p.name}</strong></div><span>{p.movements} movements</span></li>)}
+            {!(dashboard?.topMovingProducts || []).length ? <li className="text-ink/70">No movement data (30 days).</li> : null}
           </ul>
         </section>
         <section className="panel content-panel relative overflow-hidden">
           <div className="flex flex-col md:flex-row justify-between gap-4 items-start md:items-center mb-4"><h3>Inventory Health Summary</h3></div>
           <div className="analytics-grid two-up">
-            <div className="analytics-card"><span className="metric-label">Sufficient</span><strong>{INVENTORY_HEALTH.sufficient}</strong></div>
-            <div className="analytics-card"><span className="metric-label">Low Stock</span><strong>{INVENTORY_HEALTH.low}</strong></div>
-            <div className="analytics-card"><span className="metric-label">Critical</span><strong>{INVENTORY_HEALTH.critical}</strong></div>
-            <div className="analytics-card"><span className="metric-label">Out of Stock</span><strong>{INVENTORY_HEALTH.outOfStock}</strong></div>
+            <div className="analytics-card"><span className="metric-label">Sufficient</span><strong>{health.sufficient ?? 0}</strong></div>
+            <div className="analytics-card"><span className="metric-label">Low Stock</span><strong>{health.low ?? 0}</strong></div>
+            <div className="analytics-card"><span className="metric-label">Critical</span><strong>{health.critical ?? 0}</strong></div>
+            <div className="analytics-card"><span className="metric-label">Out of Stock</span><strong>{health.outOfStock ?? 0}</strong></div>
           </div>
         </section>
       </div>
@@ -154,8 +212,9 @@ function InventoryPage({
     async function loadProducts() {
       setLoading(true);
       try {
-        const apiClient = (await import('../../api/apiClient.js')).default;
-        const res = await apiClient.get('/products');
+        const params = {};
+        if (statusFilter !== 'All') params.product_status = statusFilter;
+        const res = await apiClient.get('/products', { params });
         if (res.data.success) {
           setProducts(res.data.data);
           setCategories(res.data.categories || []);
@@ -167,7 +226,7 @@ function InventoryPage({
       setLoading(false);
     }
     loadProducts();
-  }, []);
+  }, [statusFilter, showToast]);
   const filtered = useMemo(() => {
     let results = [...products];
     const query = search.trim().toLowerCase();
@@ -180,7 +239,6 @@ function InventoryPage({
       });
     }
     if (category !== 'All') results = results.filter(p => p.category_id === Number(category));
-    if (statusFilter !== 'All') results = results.filter(p => p.status === statusFilter);
     if (sortBy === 'Product Name') results.sort((a, b) => a.product_name.localeCompare(b.product_name));else if (sortBy === 'Unit Price') results.sort((a, b) => a.unit_price - b.unit_price);
     return results;
   }, [products, search, category, statusFilter, sortBy]);
@@ -192,8 +250,23 @@ function InventoryPage({
         <div className="list-section-header">
           <h3>Product List</h3>
           <div className="list-section-actions">
-            <button className="button secondary" type="button" onClick={() => showToast('Excel export initiated.', 'success')}>Export Excel</button>
-            <button className="button secondary" type="button" onClick={() => showToast('PDF export initiated.', 'success')}>Export PDF</button>
+            <button
+              className="button secondary"
+              type="button"
+              onClick={() => {
+                const rows = filtered.map(p => ({
+                  sku: p.sku,
+                  name: p.product_name,
+                  category: p.category_name,
+                  unit_price: p.unit_price,
+                  status: p.status,
+                }));
+                if (downloadCsv(rows, 'warehouse-products.csv')) showToast('Products exported.', 'success');
+                else showToast('Nothing to export.', 'error');
+              }}
+            >
+              Export CSV
+            </button>
             <button className="button" type="button" onClick={() => navigate('/warehouse/add-product')}>Add Product</button>
           </div>
         </div>
@@ -268,7 +341,8 @@ function InventoryPage({
                     <td>{formatCurrency(product.unit_price)}</td>
                     <td><StatusBadge status={product.status} /></td>
                     <td className="table-actions" onClick={e => e.stopPropagation()}>
-                      <button className="icon-action-button" type="button" title="Edit" onClick={() => showToast('Edit form would open here.', 'success')}><NavIcon name="edit" /></button>
+                      <button className="icon-action-button" type="button" title="View" onClick={() => navigate(`/warehouse/product/${product.product_id}`)}><NavIcon name="view" /></button>
+                      <button className="icon-action-button" type="button" title="Edit" onClick={() => navigate(`/warehouse/product/${product.product_id}/edit`)}><NavIcon name="edit" /></button>
                     </td>
                   </tr>)}
               </tbody>
@@ -290,28 +364,40 @@ function ProductDetailPage({
   showToast
 }) {
   const [productData, setProductData] = useState(null);
+  const [loadError, setLoadError] = useState('');
   const [loading, setLoading] = useState(true);
   useEffect(() => {
     async function load() {
       setLoading(true);
+      setLoadError('');
       try {
-        const apiClient = (await import('../../api/apiClient.js')).default;
         const res = await apiClient.get(`/products/${productId}`);
         if (res.data.success) setProductData(res.data.data);
+        else setLoadError(res.data.message || 'Product not found.');
       } catch (err) {
         console.error('[ProductDetail] load error:', err.message);
+        setLoadError(err.response?.data?.message || 'Failed to load product.');
       }
       setLoading(false);
     }
     load();
   }, [productId]);
+  const inventory = productData?.inventory || [];
+  const movements = productData?.movements || [];
   const pagination_inventory = usePagination(inventory);
   const paginated_inventory = pagination_inventory.paginatedData;
   const pagination_movements = usePagination(movements);
   const paginated_movements = pagination_movements.paginatedData;
   if (loading) return <LoadingState message="Loading product..." />;
   const product = productData;
-  if (!product) return <EmptyState title="Product not found" actionLabel="Back to Branch Inventory" onAction={() => navigate('/warehouse/branch-inventory')} />;
+  if (!product) {
+    return <EmptyState
+      title={loadError || 'Product not found'}
+      description={loadError && loadError !== 'Product not found.' ? 'Check that the API is running and try again.' : 'This product ID may not exist in the catalog.'}
+      actionLabel="Back to Products"
+      onAction={() => navigate('/warehouse/products')}
+    />;
+  }
   const product_id = product.product_id || product.id || '—';
   const product_name = product.product_name || product.name || '—';
   const sku = product.sku || '—';
@@ -319,8 +405,6 @@ function ProductDetailPage({
   const category_name = product.category_name || product.category || '—';
   const unit_price = product.unit_price != null ? product.unit_price : product.unitPrice || 0;
   const status = product.status || '—';
-  const inventory = product.inventory || [];
-  const movements = product.movements || [];
   const totalStock = inventory.reduce((sum, b) => sum + Number(b.quantity || b.available_stock || 0), 0);
   return <div className="relative z-10 grid gap-[22px] w-full">
       <StatsGrid stats={[{
@@ -363,6 +447,9 @@ function ProductDetailPage({
           <li><span className="info-item-label">Category Name</span><span className="info-item-value">{category_name}</span></li>
           <li><span className="info-item-label">Unit Price</span><span className="info-item-value">{formatCurrency(unit_price)}</span></li>
           <li><span className="info-item-label">Status</span><span className="info-item-value"><StatusBadge status={status} /></span></li>
+          {product.description ? <li><span className="info-item-label">Description</span><span className="info-item-value">{product.description}</span></li> : null}
+          {product.unit_type ? <li><span className="info-item-label">Unit Type</span><span className="info-item-value">{product.unit_type}</span></li> : null}
+          {product.reorder_point != null ? <li><span className="info-item-label">Reorder Point</span><span className="info-item-value">{product.reorder_point}</span></li> : null}
         </ul>
       </section>
 
@@ -472,10 +559,162 @@ function ProductDetailPage({
       </section>
 
       <div className="flex flex-wrap justify-end gap-2 mt-4">
-        <button className="button ghost" type="button" onClick={() => navigate('/warehouse/branch-inventory')}>Back to Branch Inventory</button>
+        <button className="button ghost" type="button" onClick={() => navigate('/warehouse/products')}>Back to Products</button>
+        <button className="button secondary" type="button" onClick={() => navigate(`/warehouse/product/${productId}/edit`)}>Edit Product</button>
         <button className="button secondary" type="button" onClick={() => navigate(`/warehouse/product/${productId}/transfer`)}>Transfer Stock</button>
         <button className="button secondary" type="button" onClick={() => navigate(`/warehouse/product/${productId}/restock`)}>Record Restock</button>
         <button className="button" type="button" onClick={() => navigate(`/warehouse/product/${productId}/stock-count`)}>Log Stock Count</button>
+      </div>
+    </div>;
+}
+function EditProductPage({
+  productId,
+  navigate,
+  showToast
+}) {
+  const [loading, setLoading] = useState(true);
+  const [submitting, setSubmitting] = useState(false);
+  const [categories, setCategories] = useState([]);
+  const [suppliers, setSuppliers] = useState([]);
+  const [form, setForm] = useState({
+    productName: '',
+    sku: '',
+    category: '',
+    description: '',
+    unitType: 'Unit',
+    unitPrice: '',
+    reorderPoint: '5',
+    supplierId: '',
+    status: 'Active',
+  });
+  const [errors, setErrors] = useState({});
+
+  useEffect(() => {
+    async function load() {
+      setLoading(true);
+      try {
+        const [prodRes, catRes, supRes] = await Promise.all([
+          apiClient.get(`/products/${productId}`),
+          apiClient.get('/products', { params: { limit: 1 } }),
+          apiClient.get('/suppliers', { params: { status: 'Active', limit: 200 } }),
+        ]);
+        if (catRes.data?.success) setCategories(catRes.data.categories || []);
+        if (supRes.data?.success) setSuppliers(supRes.data.data || []);
+        if (prodRes.data?.success) {
+          const p = prodRes.data.data;
+          setForm({
+            productName: p.product_name || '',
+            sku: p.sku || '',
+            category: p.category_id != null ? String(p.category_id) : '',
+            description: p.description || '',
+            unitType: p.unit_type || 'Unit',
+            unitPrice: p.unit_price != null ? String(p.unit_price) : '',
+            reorderPoint: p.reorder_point != null ? String(p.reorder_point) : '5',
+            supplierId: p.supplier_id != null ? String(p.supplier_id) : '',
+            status: p.status || 'Active',
+          });
+        }
+      } catch (err) {
+        console.error('[EditProduct] load error:', err.message);
+        showToast('Failed to load product.', 'error');
+      }
+      setLoading(false);
+    }
+    load();
+  }, [productId, showToast]);
+
+  const handleSubmit = async () => {
+    const nextErrors = {};
+    if (!form.productName.trim()) nextErrors.productName = 'Product name is required.';
+    if (!form.category) nextErrors.category = 'Category is required.';
+    setErrors(nextErrors);
+    if (Object.keys(nextErrors).length) {
+      showToast('Please fix the errors before submitting.', 'error');
+      return;
+    }
+    setSubmitting(true);
+    try {
+      const payload = {
+        name: form.productName.trim(),
+        category_id: Number(form.category),
+        description: form.description.trim() || null,
+        unit_type: form.unitType.trim() || 'Unit',
+        unit_price: form.unitPrice !== '' ? Number(form.unitPrice) : 0,
+        reorder_point: form.reorderPoint !== '' ? Number(form.reorderPoint) : 5,
+        supplier_id: form.supplierId ? Number(form.supplierId) : null,
+        status: form.status,
+      };
+      const res = await apiClient.put(`/products/${productId}`, payload);
+      if (!res.data?.success) {
+        showToast(res.data?.message || 'Update failed.', 'error');
+        return;
+      }
+      showToast('Product updated.', 'success');
+      navigate(`/warehouse/product/${productId}`);
+    } catch (err) {
+      showToast(err.response?.data?.message || 'Failed to update product.', 'error');
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  if (loading) return <LoadingState message="Loading product..." />;
+
+  return <div className="relative z-10 grid gap-[22px] w-full">
+      <section className="panel form-panel content-panel">
+        <div className="flex flex-col md:flex-row justify-between gap-4 items-start md:items-center mb-4"><h3>Edit Product</h3></div>
+        <div className="form-group">
+          <label>SKU</label>
+          <p className="field-preview"><span style={{ fontFamily: 'monospace' }}>{form.sku || '—'}</span></p>
+          <p className="text-ink/60" style={{ fontSize: '0.82rem', margin: '4px 0 0' }}>SKU cannot be changed after creation.</p>
+        </div>
+        <div className="form-group">
+          <label>Product Name<span className="required">*</span></label>
+          <input type="text" value={form.productName} onChange={e => setForm(p => ({ ...p, productName: e.target.value }))} />
+          {errors.productName ? <p className="form-error">{errors.productName}</p> : null}
+        </div>
+        <div className="form-group">
+          <label>Category<span className="required">*</span></label>
+          <select className="filter-select" value={form.category} onChange={e => setForm(p => ({ ...p, category: e.target.value }))}>
+            <option value="">Select category</option>
+            {categories.map(c => <option key={c.category_id} value={c.category_id}>{c.category_name}</option>)}
+          </select>
+          {errors.category ? <p className="form-error">{errors.category}</p> : null}
+        </div>
+        <div className="form-group">
+          <label>Description</label>
+          <textarea value={form.description} onChange={e => setForm(p => ({ ...p, description: e.target.value }))} />
+        </div>
+        <div className="form-group">
+          <label>Unit Type</label>
+          <input type="text" value={form.unitType} onChange={e => setForm(p => ({ ...p, unitType: e.target.value }))} />
+        </div>
+        <div className="form-group">
+          <label>Unit Price</label>
+          <input type="number" min="0" step="0.01" value={form.unitPrice} onChange={e => setForm(p => ({ ...p, unitPrice: e.target.value }))} />
+        </div>
+        <div className="form-group">
+          <label>Reorder Point</label>
+          <input type="number" min="0" value={form.reorderPoint} onChange={e => setForm(p => ({ ...p, reorderPoint: e.target.value }))} />
+        </div>
+        <div className="form-group">
+          <label>Supplier</label>
+          <select className="filter-select" value={form.supplierId} onChange={e => setForm(p => ({ ...p, supplierId: e.target.value }))}>
+            <option value="">None</option>
+            {suppliers.map(s => <option key={s.suppliers_id} value={s.suppliers_id}>{s.supplier_name}</option>)}
+          </select>
+        </div>
+        <div className="form-group">
+          <label>Status</label>
+          <select className="filter-select" value={form.status} onChange={e => setForm(p => ({ ...p, status: e.target.value }))}>
+            <option value="Active">Active</option>
+            <option value="Inactive">Inactive</option>
+          </select>
+        </div>
+      </section>
+      <div className="flex justify-end gap-2 mt-4">
+        <button className="button secondary" type="button" onClick={() => navigate(`/warehouse/product/${productId}`)}>Cancel</button>
+        <button className="button" type="button" onClick={handleSubmit} disabled={submitting}>{submitting ? 'Saving…' : 'Save Changes'}</button>
       </div>
     </div>;
 }
@@ -485,30 +724,34 @@ function AddProductPage({
 }) {
   const [categories, setCategories] = useState([]);
   const [submitting, setSubmitting] = useState(false);
+  const [suppliers, setSuppliers] = useState([]);
   const [form, setForm] = useState({
     productName: '',
     sku: '',
     category: '',
     description: '',
     unitType: 'Unit',
+    unitPrice: '',
     reorderPoint: '5',
-    supplier: '',
+    supplierId: '',
     initialQuantity: ''
   });
   const [errors, setErrors] = useState({});
 
   useEffect(() => {
-    async function loadCategories() {
+    async function loadMeta() {
       try {
-        const res = await apiClient.get('/products', { params: { limit: 1 } });
-        if (res.data?.success) {
-          setCategories(res.data.categories || []);
-        }
+        const [catRes, supRes] = await Promise.all([
+          apiClient.get('/products', { params: { limit: 1 } }),
+          apiClient.get('/suppliers', { params: { status: 'Active', limit: 200 } }),
+        ]);
+        if (catRes.data?.success) setCategories(catRes.data.categories || []);
+        if (supRes.data?.success) setSuppliers(supRes.data.data || []);
       } catch {
-        /* categories optional for display */
+        /* optional */
       }
     }
-    loadCategories();
+    loadMeta();
   }, []);
 
   const handleSubmit = async () => {
@@ -524,21 +767,23 @@ function AddProductPage({
 
     setSubmitting(true);
     try {
-      const res = await apiClient.post('/products', {
+      const result = await createWarehouseProduct({
         name: form.productName.trim(),
         sku: form.sku.trim(),
         category_id: Number(form.category),
         description: form.description.trim() || null,
         unit_type: form.unitType.trim() || 'Unit',
         reorder_point: form.reorderPoint !== '' ? Number(form.reorderPoint) : 5,
-        unit_price: 0,
+        unit_price: form.unitPrice !== '' ? Number(form.unitPrice) : 0,
+        supplier_id: form.supplierId ? Number(form.supplierId) : null,
+        initial_quantity: form.initialQuantity !== '' ? Number(form.initialQuantity) : 0,
       });
-      if (!res.data?.success) {
-        showToast(res.data?.message || 'Failed to create product.', 'error');
+      if (!result.success) {
+        showToast(result.message || 'Failed to create product.', 'error');
         return;
       }
       showToast('Product record created successfully.', 'success');
-      navigate('/warehouse/branch-inventory');
+      navigate('/warehouse/products');
     } catch (err) {
       showToast(err.response?.data?.message || 'Failed to create product.', 'error');
     } finally {
@@ -562,6 +807,7 @@ function AddProductPage({
         name: 'category',
         label: 'Category',
         type: 'select',
+        required: true,
         options: categories,
         optionValue: 'category_id',
         optionLabel: 'category_name'
@@ -574,16 +820,24 @@ function AddProductPage({
         label: 'Unit Type',
         type: 'text'
       }, {
+        name: 'unitPrice',
+        label: 'Unit Price',
+        type: 'number'
+      }, {
         name: 'reorderPoint',
         label: 'Reorder Point',
         type: 'number'
       }, {
-        name: 'supplier',
+        name: 'supplierId',
         label: 'Supplier',
-        type: 'text'
+        type: 'select',
+        options: suppliers,
+        optionValue: 'suppliers_id',
+        optionLabel: 'supplier_name',
+        optional: true
       }, {
         name: 'initialQuantity',
-        label: 'Initial Quantity',
+        label: 'Initial Quantity (this branch)',
         type: 'number'
       }].map(field => <div key={field.name} className="form-group">
             <label>{field.label}{field.required ? <span className="required">*</span> : null}</label>
@@ -591,7 +845,7 @@ function AddProductPage({
           ...p,
           [field.name]: e.target.value
         }))}>
-                <option value="">Select category</option>
+                <option value="">{field.optional ? 'Optional' : 'Select'}</option>
                 {(field.optionValue
                   ? field.options.map((o) => (
                     <option key={o[field.optionValue]} value={o[field.optionValue]}>{o[field.optionLabel]}</option>
@@ -608,44 +862,77 @@ function AddProductPage({
           </div>)}
       </section>
       <div className="flex justify-end gap-2 mt-4">
-        <button className="button secondary" type="button" onClick={() => navigate('/warehouse/branch-inventory')}>Cancel</button>
+        <button className="button secondary" type="button" onClick={() => navigate('/warehouse/products')}>Cancel</button>
         <button className="button" type="button" onClick={handleSubmit} disabled={submitting}>
           {submitting ? 'Creating...' : 'Create Product Record'}
         </button>
       </div>
     </div>;
 }
+function useWarehouseProductContext(productId) {
+  const user = getCurrentUser();
+  const [product, setProduct] = useState(null);
+  const [branchStock, setBranchStock] = useState(null);
+  const [loading, setLoading] = useState(true);
+  useEffect(() => {
+    async function load() {
+      setLoading(true);
+      const res = await apiClient.get(`/products/${productId}`);
+      if (res.data?.success) {
+        setProduct(res.data.data);
+        const branchId = user?.branch?.id;
+        const inv = res.data.data?.inventory || [];
+        setBranchStock(branchId ? inv.find((r) => r.branch_id === branchId) : inv[0]);
+      }
+      setLoading(false);
+    }
+    load();
+  }, [productId, user?.branch?.id]);
+  return { product, branchStock, loading, systemQty: Number(branchStock?.available_stock ?? 0) };
+}
+
 function StockCountPage({
   productId,
   navigate,
   showToast
 }) {
-  const product = getProductById(productId);
+  const { product, loading, systemQty } = useWarehouseProductContext(productId);
   const [physical, setPhysical] = useState('');
   const [notes, setNotes] = useState('');
   const [errors, setErrors] = useState({});
-  const [submitted, setSubmitted] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  if (loading) return <LoadingState message="Loading product..." />;
   if (!product) return <EmptyState title="Product not found" actionLabel="Back" onAction={() => navigate('/warehouse/branch-inventory')} />;
-  const variance = physical !== '' ? Number(physical) - product.stock : null;
+  const variance = physical !== '' ? Number(physical) - systemQty : null;
   const hasVariance = variance !== null && variance !== 0;
-  const handleSubmit = () => {
+  const handleSubmit = async () => {
     const nextErrors = {};
     if (physical === '') nextErrors.physical = 'Physical count is required.';
     if (hasVariance && !notes.trim()) nextErrors.notes = 'Notes required when variance exists.';
-    if (submitted) nextErrors.submit = 'Already submitted.';
     setErrors(nextErrors);
     if (Object.keys(nextErrors).length) {
       showToast('Please fix the errors.', 'error');
       return;
     }
-    setSubmitted(true);
-    showToast('Stock adjustment record created.', 'success');
-    navigate(`/warehouse/product/${product.id}`);
+    setSubmitting(true);
+    const result = await submitStockCount({
+      product_id: Number(productId),
+      physical_count: Number(physical),
+      notes: notes.trim(),
+    });
+    setSubmitting(false);
+    if (!result.success) {
+      showToast(result.message || 'Submit failed.', 'error');
+      return;
+    }
+    showToast(result.message || 'Stock count saved.', 'success');
+    navigate(`/warehouse/product/${productId}`);
   };
+  const productName = product.product_name || product.name;
   return <div className="relative z-10 grid gap-[22px] w-full">
       <section className="panel form-panel content-panel">
-        <div className="flex flex-col md:flex-row justify-between gap-4 items-start md:items-center mb-4"><h3>Stock Count — {product.name}</h3></div>
-        <div className="form-group"><label>System Quantity</label><p className="field-preview">{product.stock} units</p></div>
+        <div className="flex flex-col md:flex-row justify-between gap-4 items-start md:items-center mb-4"><h3>Stock Count — {productName}</h3></div>
+        <div className="form-group"><label>System Quantity</label><p className="field-preview">{systemQty} units</p></div>
         <div className="form-group">
           <label>Physical Quantity<span className="required">*</span></label>
           <input type="number" min="0" value={physical} onChange={e => setPhysical(e.target.value)} />
@@ -660,11 +947,10 @@ function StockCountPage({
           <textarea value={notes} onChange={e => setNotes(e.target.value)} placeholder="Explain variance if any..." />
           {errors.notes ? <p className="form-error">{errors.notes}</p> : null}
         </div>
-        {errors.submit ? <p className="form-error">{errors.submit}</p> : null}
       </section>
       <div className="flex justify-end gap-2 mt-4">
-        <button className="button secondary" type="button" onClick={() => navigate(`/warehouse/product/${product.id}`)}>Cancel</button>
-        <button className="button" type="button" onClick={handleSubmit}>Submit Stock Count</button>
+        <button className="button secondary" type="button" onClick={() => navigate(`/warehouse/product/${productId}`)}>Cancel</button>
+        <button className="button" type="button" onClick={handleSubmit} disabled={submitting}>{submitting ? 'Saving…' : 'Submit Stock Count'}</button>
       </div>
     </div>;
 }
@@ -673,30 +959,60 @@ function RestockPage({
   navigate,
   showToast
 }) {
-  const product = getProductById(productId);
+  const { product, loading } = useWarehouseProductContext(productId);
+  const [suppliers, setSuppliers] = useState([]);
   const [form, setForm] = useState({
     quantity: '',
-    supplier: product?.supplier ?? '',
+    supplierId: '',
     deliveryRef: '',
     dateReceived: new Date().toISOString().slice(0, 10)
   });
   const [errors, setErrors] = useState({});
+  const [submitting, setSubmitting] = useState(false);
+  useEffect(() => {
+    async function loadSuppliers() {
+      try {
+        const res = await apiClient.get('/suppliers', { params: { status: 'Active', limit: 200 } });
+        if (res.data?.success) setSuppliers(res.data.data || []);
+      } catch {
+        setSuppliers([]);
+      }
+    }
+    loadSuppliers();
+  }, []);
+  if (loading) return <LoadingState message="Loading product..." />;
   if (!product) return <EmptyState title="Product not found" actionLabel="Back" onAction={() => navigate('/warehouse/branch-inventory')} />;
-  const handleSubmit = () => {
+  const handleSubmit = async () => {
     const nextErrors = {};
     if (!form.quantity || Number(form.quantity) <= 0) nextErrors.quantity = 'Quantity must be positive.';
+    if (!form.supplierId) nextErrors.supplierId = 'Supplier is required.';
+    if (!form.deliveryRef.trim()) nextErrors.deliveryRef = 'Delivery reference is required.';
     setErrors(nextErrors);
     if (Object.keys(nextErrors).length) {
       showToast('Please fix the errors.', 'error');
       return;
     }
-    showToast('Restock transaction created. Inventory updated.', 'success');
-    navigate(`/warehouse/product/${product.id}`);
+    setSubmitting(true);
+    const result = await createRestock({
+      product_id: Number(productId),
+      supplier_id: Number(form.supplierId),
+      quantity: Number(form.quantity),
+      delivery_ref: form.deliveryRef.trim(),
+      received_date: form.dateReceived,
+    });
+    setSubmitting(false);
+    if (!result.success) {
+      showToast(result.message || 'Restock failed.', 'error');
+      return;
+    }
+    showToast(result.message || 'Restock recorded.', 'success');
+    navigate(`/warehouse/product/${productId}`);
   };
+  const productName = product.product_name || product.name;
   return <div className="relative z-10 grid gap-[22px] w-full">
       <section className="panel form-panel content-panel">
-        <div className="flex flex-col md:flex-row justify-between gap-4 items-start md:items-center mb-4"><h3>Record Restock — {product.name}</h3></div>
-        <div className="form-group"><label>Product Name</label><p className="field-preview">{product.name}</p></div>
+        <div className="flex flex-col md:flex-row justify-between gap-4 items-start md:items-center mb-4"><h3>Record Restock — {productName}</h3></div>
+        <div className="form-group"><label>Product Name</label><p className="field-preview">{productName}</p></div>
         <div className="form-group">
           <label>Quantity Restocked<span className="required">*</span></label>
           <input type="number" min="1" value={form.quantity} onChange={e => setForm(p => ({
@@ -705,22 +1021,30 @@ function RestockPage({
         }))} />
           {errors.quantity ? <p className="form-error">{errors.quantity}</p> : null}
         </div>
-        <div className="form-group"><label>Supplier</label><input type="text" value={form.supplier} onChange={e => setForm(p => ({
-          ...p,
-          supplier: e.target.value
-        }))} /></div>
-        <div className="form-group"><label>Delivery Reference Number</label><input type="text" value={form.deliveryRef} onChange={e => setForm(p => ({
+        <div className="form-group">
+          <label>Supplier<span className="required">*</span></label>
+          <select className="filter-select" value={form.supplierId} onChange={e => setForm(p => ({ ...p, supplierId: e.target.value }))}>
+            <option value="">Select supplier</option>
+            {suppliers.map(s => <option key={s.suppliers_id} value={s.suppliers_id}>{s.supplier_name}</option>)}
+          </select>
+          {errors.supplierId ? <p className="form-error">{errors.supplierId}</p> : null}
+        </div>
+        <div className="form-group">
+          <label>Delivery Reference Number<span className="required">*</span></label>
+          <input type="text" value={form.deliveryRef} onChange={e => setForm(p => ({
           ...p,
           deliveryRef: e.target.value
-        }))} /></div>
+        }))} />
+          {errors.deliveryRef ? <p className="form-error">{errors.deliveryRef}</p> : null}
+        </div>
         <div className="form-group"><label>Date Received</label><input className="filter-input" type="date" value={form.dateReceived} onChange={e => setForm(p => ({
           ...p,
           dateReceived: e.target.value
         }))} /></div>
       </section>
       <div className="flex justify-end gap-2 mt-4">
-        <button className="button secondary" type="button" onClick={() => navigate(`/warehouse/product/${product.id}`)}>Cancel</button>
-        <button className="button" type="button" onClick={handleSubmit}>Create Restock Transaction</button>
+        <button className="button secondary" type="button" onClick={() => navigate(`/warehouse/product/${productId}`)}>Cancel</button>
+        <button className="button" type="button" onClick={handleSubmit} disabled={submitting}>{submitting ? 'Saving…' : 'Create Restock Transaction'}</button>
       </div>
     </div>;
 }
@@ -729,33 +1053,58 @@ function TransferPage({
   navigate,
   showToast
 }) {
-  const product = getProductById(productId);
+  const user = getCurrentUser();
+  const { product, loading, systemQty } = useWarehouseProductContext(productId);
+  const [branches, setBranches] = useState([]);
   const [form, setForm] = useState({
     destination: '',
     quantity: '',
     notes: ''
   });
   const [errors, setErrors] = useState({});
+  const [submitting, setSubmitting] = useState(false);
+  useEffect(() => {
+    async function load() {
+      const res = await fetchInventoryBranches();
+      if (res.success) setBranches(res.data || []);
+    }
+    load();
+  }, []);
+  if (loading) return <LoadingState message="Loading product..." />;
   if (!product) return <EmptyState title="Product not found" actionLabel="Back" onAction={() => navigate('/warehouse/branch-inventory')} />;
-  const handleSubmit = () => {
+  const sourceBranchId = user?.branch?.id;
+  const handleSubmit = async () => {
     const qty = Number(form.quantity);
     const nextErrors = {};
     if (!form.destination) nextErrors.destination = 'Destination branch is required.';
     if (!qty || qty <= 0) nextErrors.quantity = 'Quantity must be positive.';
-    if (qty > product.stock) nextErrors.quantity = `Cannot transfer more than available stock (${product.stock} units).`;
+    if (qty > systemQty) nextErrors.quantity = `Cannot transfer more than available stock (${systemQty} units).`;
     setErrors(nextErrors);
     if (Object.keys(nextErrors).length) {
       showToast('Please fix the errors.', 'error');
       return;
     }
-    showToast('Transfer submitted for approval.', 'success');
-    navigate('/warehouse/transfers');
+    setSubmitting(true);
+    const result = await createInventoryTransfer({
+      product_id: Number(productId),
+      destination_branch_id: Number(form.destination),
+      quantity: qty,
+      notes: form.notes.trim(),
+    });
+    setSubmitting(false);
+    if (!result.success) {
+      showToast(result.message || 'Transfer failed.', 'error');
+      return;
+    }
+    showToast(result.message || 'Transfer submitted for manager approval.', 'success');
+    navigate('/warehouse/transfers?tab=requests');
   };
+  const productName = product.product_name || product.name;
   return <div className="relative z-10 grid gap-[22px] w-full">
       <section className="panel form-panel content-panel">
-        <div className="flex flex-col md:flex-row justify-between gap-4 items-start md:items-center mb-4"><h3>Transfer Stock — {product.name}</h3></div>
-        <div className="form-group"><label>Product Name</label><p className="field-preview">{product.name}</p></div>
-        <div className="form-group"><label>Source Branch</label><p className="field-preview">{product.branch}</p></div>
+        <div className="flex flex-col md:flex-row justify-between gap-4 items-start md:items-center mb-4"><h3>Transfer Stock — {productName}</h3></div>
+        <div className="form-group"><label>Product Name</label><p className="field-preview">{productName}</p></div>
+        <div className="form-group"><label>Source Branch</label><p className="field-preview">{user?.branch?.name || '—'}</p></div>
         <div className="form-group">
           <label>Destination Branch<span className="required">*</span></label>
           <select className="filter-select" value={form.destination} onChange={e => setForm(p => ({
@@ -763,13 +1112,13 @@ function TransferPage({
           destination: e.target.value
         }))}>
             <option value="">Select destination</option>
-            {BRANCHES.filter(b => b !== product.branch).map(b => <option key={b}>{b}</option>)}
+            {branches.filter(b => b.branch_id !== sourceBranchId).map(b => <option key={b.branch_id} value={b.branch_id}>{b.branch_name}</option>)}
           </select>
           {errors.destination ? <p className="form-error">{errors.destination}</p> : null}
         </div>
         <div className="form-group">
           <label>Quantity<span className="required">*</span></label>
-          <input type="number" min="1" max={product.stock} value={form.quantity} onChange={e => setForm(p => ({
+          <input type="number" min="1" max={systemQty || undefined} value={form.quantity} onChange={e => setForm(p => ({
           ...p,
           quantity: e.target.value
         }))} />
@@ -781,8 +1130,8 @@ function TransferPage({
         }))} /></div>
       </section>
       <div className="flex justify-end gap-2 mt-4">
-        <button className="button secondary" type="button" onClick={() => navigate(`/warehouse/product/${product.id}`)}>Cancel</button>
-        <button className="button" type="button" onClick={handleSubmit}>Create Transfer Transaction</button>
+        <button className="button secondary" type="button" onClick={() => navigate(`/warehouse/product/${productId}`)}>Cancel</button>
+        <button className="button" type="button" onClick={handleSubmit} disabled={submitting}>{submitting ? 'Submitting…' : 'Create Transfer Transaction'}</button>
       </div>
     </div>;
 }
@@ -971,22 +1320,166 @@ function MovementDetailPage({
       </div>
     </div>;
 }
-function TransfersPage({
-  navigate
+function TransferRequestNewPage({
+  navigate,
+  showToast
 }) {
-  const [statusFilter, setStatusFilter] = useState('All');
-  const [transfers, setTransfers] = useState([]);
+  const user = getCurrentUser();
+  const sourceBranchId = user?.branch?.id;
+  const [branchStock, setBranchStock] = useState([]);
+  const [branches, setBranches] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [form, setForm] = useState({ productId: '', destination: '', quantity: '', notes: '' });
+  const [errors, setErrors] = useState({});
+  const [submitting, setSubmitting] = useState(false);
+
   useEffect(() => {
     async function load() {
       setLoading(true);
-      const result = await fetchInventoryTransfers();
-      if (result.success) setTransfers(result.data);
+      const [invRes, branchRes] = await Promise.all([
+        fetchBranchInventory(),
+        fetchInventoryBranches(),
+      ]);
+      if (invRes.success) setBranchStock(invRes.data || []);
+      if (branchRes.success) setBranches(branchRes.data || []);
       setLoading(false);
     }
     load();
   }, []);
-  const filtered = useMemo(() => {
+
+  const selectedRow = branchStock.find(r => String(r.product_id) === String(form.productId));
+  const availableQty = Number(selectedRow?.available_stock ?? selectedRow?.quantity ?? 0);
+
+  const handleSubmit = async () => {
+    const qty = Number(form.quantity);
+    const nextErrors = {};
+    if (!form.productId) nextErrors.productId = 'Select a product.';
+    if (!form.destination) nextErrors.destination = 'Select destination branch.';
+    if (!qty || qty <= 0) nextErrors.quantity = 'Enter a positive quantity.';
+    if (form.productId && qty > availableQty) nextErrors.quantity = `Max available at your branch: ${availableQty}.`;
+    setErrors(nextErrors);
+    if (Object.keys(nextErrors).length) {
+      showToast('Please fix the errors.', 'error');
+      return;
+    }
+    setSubmitting(true);
+    const result = await createInventoryTransfer({
+      product_id: Number(form.productId),
+      destination_branch_id: Number(form.destination),
+      quantity: qty,
+      notes: form.notes.trim(),
+    });
+    setSubmitting(false);
+    if (!result.success) {
+      showToast(result.message || 'Request failed.', 'error');
+      return;
+    }
+    showToast(result.message || 'Transfer request submitted.', 'success');
+    navigate('/warehouse/transfers?tab=requests');
+  };
+
+  if (loading) return <LoadingState message="Loading branch stock..." />;
+
+  const stockOptions = branchStock.filter(r => Number(r.available_stock ?? r.quantity ?? 0) > 0);
+
+  return <div className="relative z-10 grid gap-[22px] w-full">
+      <section className="panel form-panel content-panel">
+        <h3>New transfer request</h3>
+        <p className="text-ink/70" style={{ marginTop: 0 }}>From <strong>{user?.branch?.name || 'your branch'}</strong>. Request goes to branch / operating manager for approval.</p>
+        <div className="form-group">
+          <label>Product<span className="required">*</span></label>
+          <select className="filter-select" value={form.productId} onChange={e => setForm(p => ({ ...p, productId: e.target.value, quantity: '' }))}>
+            <option value="">Select product with stock</option>
+            {stockOptions.map(r => <option key={r.product_id} value={r.product_id}>
+                {r.product_name} ({r.sku}) — {r.available_stock ?? r.quantity} on hand
+              </option>)}
+          </select>
+          {errors.productId ? <p className="form-error">{errors.productId}</p> : null}
+        </div>
+        <div className="form-group">
+          <label>Destination branch<span className="required">*</span></label>
+          <select className="filter-select" value={form.destination} onChange={e => setForm(p => ({ ...p, destination: e.target.value }))}>
+            <option value="">Select destination</option>
+            {branches.filter(b => b.branch_id !== sourceBranchId).map(b => <option key={b.branch_id} value={b.branch_id}>{b.branch_name}</option>)}
+          </select>
+          {errors.destination ? <p className="form-error">{errors.destination}</p> : null}
+        </div>
+        <div className="form-group">
+          <label>Quantity<span className="required">*</span></label>
+          <input type="number" min="1" max={availableQty || undefined} value={form.quantity} onChange={e => setForm(p => ({ ...p, quantity: e.target.value }))} />
+          {selectedRow ? <p className="text-ink/60" style={{ fontSize: '0.82rem', margin: '4px 0 0' }}>Available: {availableQty}</p> : null}
+          {errors.quantity ? <p className="form-error">{errors.quantity}</p> : null}
+        </div>
+        <div className="form-group">
+          <label>Notes</label>
+          <textarea value={form.notes} onChange={e => setForm(p => ({ ...p, notes: e.target.value }))} />
+        </div>
+      </section>
+      <div className="flex justify-end gap-2 mt-4">
+        <button className="button secondary" type="button" onClick={() => navigate('/warehouse/transfers?tab=requests')}>Cancel</button>
+        <button className="button" type="button" onClick={handleSubmit} disabled={submitting || !stockOptions.length}>
+          {submitting ? 'Submitting…' : 'Submit request'}
+        </button>
+      </div>
+      {!stockOptions.length ? <p className="form-error">No products with stock at your branch. Restock or pick a product from Branch Inventory first.</p> : null}
+    </div>;
+}
+
+function TransfersPage({
+  navigate,
+  transferTab: transferTabProp = 'requests',
+}) {
+  const user = getCurrentUser();
+  const branchId = user?.branch?.id;
+  const mainTab = transferTabProp === 'history' ? 'history' : 'requests';
+  const [requestSegment, setRequestSegment] = useState('Action required');
+  const [statusFilter, setStatusFilter] = useState('All');
+  const [transfers, setTransfers] = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    async function load() {
+      setLoading(true);
+      const result = await fetchInventoryTransfers();
+      if (result.success) setTransfers(result.data || []);
+      setLoading(false);
+    }
+    load();
+  }, []);
+
+  const setMainTab = (tab) => {
+    navigate(tab === 'history' ? '/warehouse/transfers?tab=history' : '/warehouse/transfers?tab=requests');
+  };
+
+  const counts = useMemo(() => {
+    const awaiting = transfers.filter(t => isTransferPendingApproval(t.status)
+      && Number(t.source_branch_id) === Number(branchId)).length;
+    const readyToShip = transfers.filter(t => t.status === 'Approved'
+      && Number(t.source_branch_id) === Number(branchId)).length;
+    const incoming = transfers.filter(t => (t.status === 'Approved' || isTransferPendingApproval(t.status))
+      && Number(t.destination_branch_id) === Number(branchId)
+      && Number(t.source_branch_id) !== Number(branchId)).length;
+    return { awaiting, readyToShip, incoming };
+  }, [transfers, branchId]);
+
+  const requestsFiltered = useMemo(() => {
+    if (requestSegment === 'Action required') {
+      return transfers.filter(t => t.status === 'Approved'
+        && Number(t.source_branch_id) === Number(branchId));
+    }
+    if (requestSegment === 'Awaiting approval') {
+      return transfers.filter(t => isTransferPendingApproval(t.status)
+        && Number(t.source_branch_id) === Number(branchId));
+    }
+    if (requestSegment === 'Incoming') {
+      return transfers.filter(t => (t.status === 'Approved' || isTransferPendingApproval(t.status))
+        && Number(t.destination_branch_id) === Number(branchId)
+        && Number(t.source_branch_id) !== Number(branchId));
+    }
+    return transfers;
+  }, [requestSegment, transfers, branchId]);
+
+  const historyFiltered = useMemo(() => {
     if (statusFilter === 'All') return transfers;
     if (statusFilter === 'Pending Transfers') return transfers.filter(t => t.status.includes('Pending') || t.status === 'Submitted');
     if (statusFilter === 'Approved Transfers') return transfers.filter(t => t.status === 'Approved');
@@ -994,87 +1487,154 @@ function TransfersPage({
     if (statusFilter === 'Cancelled Transfers') return transfers.filter(t => t.status === 'Rejected');
     return transfers;
   }, [statusFilter, transfers]);
-  const pagination_filtered = usePagination(filtered);
-  const paginated_filtered = pagination_filtered.paginatedData;
+
+  const pagination_requests = usePagination(requestsFiltered);
+  const paginated_requests = pagination_requests.paginatedData;
+  const pagination_history = usePagination(historyFiltered);
+  const paginated_history = pagination_history.paginatedData;
+
   if (loading) return <LoadingState message="Loading transfers..." />;
+
   return <div className="relative z-10 grid gap-[22px] w-full">
+      {mainTab === 'requests' ? <StatsGrid stats={[{
+      label: 'Ready to ship',
+      value: String(counts.readyToShip)
+    }, {
+      label: 'Awaiting manager approval',
+      value: String(counts.awaiting)
+    }, {
+      label: 'Incoming to your branch',
+      value: String(counts.incoming)
+    }]} /> : null}
+
       <section className="panel content-panel relative overflow-hidden">
-        <div className="flex flex-col md:flex-row justify-between gap-4 items-start md:items-center mb-4"><h3>Inventory Transfer Requests</h3></div>
-        <div className="segmented-control" style={{ marginBottom: 12 }}>
-          {['All', 'Pending Transfers', 'Approved Transfers', 'Completed Transfers', 'Cancelled Transfers'].map(s => <button key={s} className={statusFilter === s ? 'segment active' : 'segment'} type="button" onClick={() => setStatusFilter(s)}>
-              {s.replace(' Transfers', '')}
-            </button>)}
+        <div className="list-section-header">
+          <div>
+            <h3>Transfers</h3>
+            <p className="text-ink/70" style={{ margin: '6px 0 0', fontSize: '0.88rem' }}>
+              Submit requests from your branch, track approval, and view full history.
+            </p>
+          </div>
+          <div className="list-section-actions">
+            <button className="button" type="button" onClick={() => navigate('/warehouse/transfers/new')}>New transfer request</button>
+          </div>
         </div>
-        {filtered.length ? <><div className="corvex-table-wrapper">
-            <table className="corvex-table">
-              <thead>
-                <tr>
-                  <th>Transfer Ref</th>
-                  <th>Product</th>
-                  <th>Qty</th>
-                  <th>From</th>
-                  <th>To</th>
-                  <th>Submitted By</th>
-                  <th>Date</th>
-                  <th>Created At</th>
-                  <th>Updated At</th>
-                  <th>Status</th>
-                </tr>
-              </thead>
-              <tbody>
-                {paginated_filtered.map(t => <tr key={t.transfer_id} className="clickable-row" onClick={() => navigate(`/warehouse/transfers/${t.transfer_id}`)}>
-                    <td><span style={{
-                    fontFamily: 'monospace',
-                    fontSize: '0.82rem'
-                  }}>{t.transfer_ref}</span></td>
-                    <td>{t.product_name}<br /><span className="text-ink/70" style={{
-                    fontSize: '0.75rem'
-                  }}>{t.sku}</span></td>
-                    <td>{t.quantity}</td>
-                    <td>{t.source_branch}</td>
-                    <td>{t.destination_branch}</td>
-                    <td>{t.submitted_by_name || '—'}</td>
-                    <td className="text-ink/70" style={{
-                  fontSize: '0.82rem'
-                }}>
-                      {formatDisplayDate(t.submitted_date)}
-                    </td>
-                    <td style={{
-                  fontSize: '0.82rem'
-                }}>{formatDisplayDateTime(t.created_at)}</td>
-                    <td style={{
-                  fontSize: '0.82rem'
-                }}>{formatDisplayDateTime(t.updated_at)}</td>
-                    <td>
-                      <StatusBadge status={t.status} />
-                    </td>
-                  </tr>)}
-              </tbody>
-            </table>
-          </div><LocalPagination {...pagination_filtered} /></>
-        : <EmptyState title="No transfers found" description="Adjust your filters." />}
+
+        <div className="segmented-control" style={{ marginBottom: 16 }}>
+          <button className={mainTab === 'requests' ? 'segment active' : 'segment'} type="button" onClick={() => setMainTab('requests')}>
+            Transfer requests
+          </button>
+          <button className={mainTab === 'history' ? 'segment active' : 'segment'} type="button" onClick={() => setMainTab('history')}>
+            History
+          </button>
+        </div>
+
+        {mainTab === 'requests' ? <>
+            <div className="segmented-control" style={{ marginBottom: 12 }}>
+              {['Action required', 'Awaiting approval', 'Incoming', 'All'].map(s => <button key={s} className={requestSegment === s ? 'segment active' : 'segment'} type="button" onClick={() => setRequestSegment(s)}>
+                  {s}
+                </button>)}
+            </div>
+            {requestsFiltered.length ? <><div className="corvex-table-wrapper">
+                <table className="corvex-table">
+                  <thead>
+                    <tr>
+                      <th>Ref</th>
+                      <th>Product</th>
+                      <th>Qty</th>
+                      <th>From → To</th>
+                      <th>Submitted</th>
+                      <th>Status</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {paginated_requests.map(t => <tr key={t.transfer_id} className="clickable-row" onClick={() => navigate(`/warehouse/transfers/${t.transfer_id}`)}>
+                        <td><span style={{ fontFamily: 'monospace', fontSize: '0.82rem' }}>{t.transfer_ref}</span></td>
+                        <td>{t.product_name}<br /><span className="text-ink/70" style={{ fontSize: '0.75rem' }}>{t.sku}</span></td>
+                        <td>{t.quantity}</td>
+                        <td>{t.source_branch} → {t.destination_branch}</td>
+                        <td style={{ fontSize: '0.82rem' }}>{formatDisplayDate(t.submitted_date)}</td>
+                        <td><StatusBadge status={t.status} /></td>
+                      </tr>)}
+                  </tbody>
+                </table>
+              </div><LocalPagination {...pagination_requests} /></>
+            : <EmptyState
+                title="No requests in this view"
+                description={requestSegment === 'Action required'
+                  ? 'Approved transfers ready for shipment will appear here.'
+                  : 'Create a new request or check another filter.'}
+                actionLabel="New transfer request"
+                onAction={() => navigate('/warehouse/transfers/new')}
+              />}
+          </> : <>
+            <div className="segmented-control" style={{ marginBottom: 12 }}>
+              {['All', 'Pending Transfers', 'Approved Transfers', 'Completed Transfers', 'Cancelled Transfers'].map(s => <button key={s} className={statusFilter === s ? 'segment active' : 'segment'} type="button" onClick={() => setStatusFilter(s)}>
+                  {s.replace(' Transfers', '')}
+                </button>)}
+            </div>
+            {historyFiltered.length ? <><div className="corvex-table-wrapper">
+                <table className="corvex-table">
+                  <thead>
+                    <tr>
+                      <th>Transfer Ref</th>
+                      <th>Product</th>
+                      <th>Qty</th>
+                      <th>From</th>
+                      <th>To</th>
+                      <th>Submitted By</th>
+                      <th>Date</th>
+                      <th>Created At</th>
+                      <th>Updated At</th>
+                      <th>Status</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {paginated_history.map(t => <tr key={t.transfer_id} className="clickable-row" onClick={() => navigate(`/warehouse/transfers/${t.transfer_id}`)}>
+                        <td><span style={{ fontFamily: 'monospace', fontSize: '0.82rem' }}>{t.transfer_ref}</span></td>
+                        <td>{t.product_name}<br /><span className="text-ink/70" style={{ fontSize: '0.75rem' }}>{t.sku}</span></td>
+                        <td>{t.quantity}</td>
+                        <td>{t.source_branch}</td>
+                        <td>{t.destination_branch}</td>
+                        <td>{t.submitted_by_name || '—'}</td>
+                        <td className="text-ink/70" style={{ fontSize: '0.82rem' }}>{formatDisplayDate(t.submitted_date)}</td>
+                        <td style={{ fontSize: '0.82rem' }}>{formatDisplayDateTime(t.created_at)}</td>
+                        <td style={{ fontSize: '0.82rem' }}>{formatDisplayDateTime(t.updated_at)}</td>
+                        <td><StatusBadge status={t.status} /></td>
+                      </tr>)}
+                  </tbody>
+                </table>
+              </div><LocalPagination {...pagination_history} /></>
+            : <EmptyState title="No transfers found" description="Adjust your filters." />}
+          </>}
       </section>
     </div>;
 }
 function TransferDetailPage({
   transferId,
   navigate,
-  showToast
+  showToast,
+  backPath = '/warehouse/transfers?tab=requests',
+  backLabel = 'Back to Transfers',
 }) {
+  const currentUser = getCurrentUser();
   const [transfer, setTransfer] = useState(null);
   const [loading, setLoading] = useState(true);
+  const reload = async () => {
+    setLoading(true);
+    const result = await fetchInventoryTransferById(transferId);
+    if (result.success) setTransfer(result.data);
+    setLoading(false);
+  };
   useEffect(() => {
-    async function load() {
-      setLoading(true);
-      const result = await fetchInventoryTransferById(transferId);
-      if (result.success) setTransfer(result.data);
-      setLoading(false);
-    }
-    load();
+    reload();
   }, [transferId]);
   if (loading) return <LoadingState message="Loading transfer..." />;
-  if (!transfer) return <EmptyState title="Transfer not found" actionLabel="Back" onAction={() => navigate('/warehouse/transfers')} />;
-  const workflowSteps = ['Submitted', 'Pending Approval', 'Approved', 'Completed'];
+  if (!transfer) return <EmptyState title="Transfer not found" actionLabel="Back" onAction={() => navigate(backPath)} />;
+  const workflowSteps = ['Submitted', 'Manager approval', 'Approved', 'Completed'];
+  const activeStep = transferWorkflowStepIndex(transfer.status);
+  const isSourceBranch = currentUser?.branch?.id != null
+    && Number(transfer.source_branch_id) === Number(currentUser.branch.id);
   return <div className="relative z-10 grid gap-[22px] w-full">
       <StatsGrid stats={[{
       label: 'Transfer Ref',
@@ -1137,17 +1697,46 @@ function TransferDetailPage({
         {transfer.status !== 'Rejected' ? <div className="approval-workflow">
             <h4 className="subsection-title">Approval Workflow</h4>
             <div className="workflow-steps">
-              {workflowSteps.map(step => <span key={step} className={`workflow-step${transfer.status && transfer.status.includes(step.split(' ')[0]) ? ' active' : ''}`}>{step}</span>)}
+              {workflowSteps.map((step, index) => (
+                <span
+                  key={step}
+                  className={`workflow-step${index <= activeStep && activeStep >= 0 ? ' active' : ''}`}
+                >
+                  {step}
+                </span>
+              ))}
             </div>
           </div> : null}
       </section>
-      {transfer.status === 'Pending Approval' ? <div className="flex justify-end gap-2 mt-4">
-          <button className="button ghost" type="button" onClick={() => navigate('/warehouse/transfers')}>Back</button>
-          <button className="button secondary" type="button" onClick={() => showToast('Transfer rejected.', 'error')}>Reject Transfer</button>
-          <button className="button" type="button" onClick={() => showToast('Transfer approved.', 'success')}>Approve Transfer</button>
-        </div> : <div className="flex justify-end mt-4">
-          <button className="button ghost" type="button" onClick={() => navigate('/warehouse/transfers')}>Back to Transfers</button>
-        </div>}
+      {(transfer.status === 'Pending Approval' || transfer.status === 'Submitted') ? (
+        <section className="panel content-panel">
+          <p className="muted">
+            This request is waiting for <strong>branch manager</strong> or <strong>operating manager</strong> approval
+            (Approval Center). Warehouse staff cannot approve their own transfers — that separation prevents stock
+            leaving the branch without oversight.
+          </p>
+        </section>
+      ) : null}
+      {transfer.status === 'Approved' && isSourceBranch ? (
+        <section className="panel content-panel">
+          <p className="muted">Managers approved this transfer. Confirm physical shipment to deduct source stock and add destination stock.</p>
+        </section>
+      ) : null}
+      <div className="flex justify-end gap-2 mt-4">
+        <button className="button ghost" type="button" onClick={() => navigate(backPath)}>{backLabel}</button>
+        {transfer.status === 'Approved' && isSourceBranch ? (
+          <button className="button" type="button" onClick={async () => {
+            const result = await patchInventoryTransfer(transferId, { status: 'Completed' });
+            if (result.success) {
+              showToast(result.message || 'Transfer completed.', 'success');
+              reload();
+            } else showToast(result.message || 'Complete failed.', 'error');
+          }}
+          >
+            Confirm shipment & complete
+          </button>
+        ) : null}
+      </div>
     </div>;
 }
 function RestockHistoryPage({
@@ -1231,8 +1820,42 @@ function RestockDetailPage({
   restockId,
   navigate
 }) {
+  const [restock, setRestock] = useState(null);
+  const [loading, setLoading] = useState(true);
+  useEffect(() => {
+    async function load() {
+      setLoading(true);
+      const res = await fetchRestockById(restockId);
+      if (res.success) setRestock(res.data);
+      setLoading(false);
+    }
+    load();
+  }, [restockId]);
+  if (loading) return <LoadingState message="Loading restock..." />;
+  if (!restock) return <EmptyState title="Restock not found" actionLabel="Back" onAction={() => navigate('/warehouse/restock-history')} />;
   return <div className="relative z-10 grid gap-[22px] w-full">
-      <EmptyState title="Restock Detail" description="Select a record from the Restock History page." actionLabel="Back" onAction={() => navigate('/warehouse/restock-history')} />
+      <StatsGrid stats={[{
+        label: 'Delivery ref',
+        value: restock.delivery_ref
+      }, {
+        label: 'Quantity',
+        value: `+${restock.quantity}`
+      }, {
+        label: 'Received',
+        value: formatDisplayDate(restock.received_date)
+      }]} />
+      <section className="panel content-panel">
+        <ul className="info-grid">
+          <li><span className="info-item-label">Product</span><span className="info-item-value">{restock.product_name}</span></li>
+          <li><span className="info-item-label">SKU</span><span className="info-item-value">{restock.sku}</span></li>
+          <li><span className="info-item-label">Supplier</span><span className="info-item-value">{restock.supplier_name}</span></li>
+          <li><span className="info-item-label">Branch</span><span className="info-item-value">{restock.branch_name}</span></li>
+        </ul>
+      </section>
+      <div className="flex justify-end mt-4">
+        <button className="button ghost" type="button" onClick={() => navigate('/warehouse/restock-history')}>Back</button>
+        <button className="button secondary" type="button" onClick={() => navigate(`/warehouse/product/${restock.product_id}`)}>View product</button>
+      </div>
     </div>;
 }
 function NotificationsPage({
@@ -1263,54 +1886,87 @@ function ProfilePage({
   navigate,
   showToast
 }) {
+  const user = getCurrentUser();
+  const [profile, setProfile] = useState(null);
+  const [editing, setEditing] = useState(false);
+  const [phone, setPhone] = useState('');
+  const [password, setPassword] = useState('');
+  useEffect(() => {
+    async function load() {
+      const res = await fetchMyProfile();
+      if (res.success && res.data) {
+        setProfile(res.data);
+        setPhone(res.data.phone || '');
+      }
+    }
+    load();
+  }, []);
+  const initials = (profile?.fullName || user?.fullName || 'W').split(' ').map(p => p[0]).join('').slice(0, 2).toUpperCase();
+  const save = async () => {
+    const body = { phone: phone.trim() };
+    if (password.trim().length >= 8) body.password = password.trim();
+    const res = await updateMyProfile(body);
+    if (res.success) {
+      persistCurrentUserFromProfile(res.data);
+      setProfile(res.data);
+      setPassword('');
+      setEditing(false);
+      showToast('Profile updated.', 'success');
+    } else showToast(res.message || 'Update failed.', 'error');
+  };
   return <div className="relative z-10 grid gap-[22px] w-full">
       <section className="panel content-panel profile-panel">
         <div className="profile-header">
-          <div className="profile-avatar">{WAREHOUSE_STAFF_PROFILE.avatarInitials}</div>
-          <div><h3>{WAREHOUSE_STAFF_PROFILE.name}</h3><p className="text-ink/70">{WAREHOUSE_STAFF_PROFILE.employeeId}</p></div>
+          <div className="profile-avatar">{initials}</div>
+          <div><h3>{profile?.fullName || user?.fullName}</h3><p className="text-ink/70">{profile?.email || user?.email}</p></div>
         </div>
-        <div className="transfer-detail-grid">
-          <article className="transfer-detail-card">
-            <span>Assigned Warehouse</span>
-            <strong>{WAREHOUSE_STAFF_PROFILE.warehouse}</strong>
-          </article>
-          <article className="transfer-detail-card">
-            <span>Branch</span>
-            <strong>{WAREHOUSE_STAFF_PROFILE.branch}</strong>
-          </article>
-          <article className="transfer-detail-card">
-            <span>Email</span>
-            <strong>{WAREHOUSE_STAFF_PROFILE.email}</strong>
-          </article>
-          <article className="transfer-detail-card">
-            <span>Phone</span>
-            <strong>{WAREHOUSE_STAFF_PROFILE.phone}</strong>
-          </article>
-        </div>
+        {editing ? <div className="form-group">
+            <label>Phone<input value={phone} onChange={e => setPhone(e.target.value)} /></label>
+            <label>New password<input type="password" value={password} onChange={e => setPassword(e.target.value)} placeholder="Min. 8 characters" /></label>
+          </div> : <div className="transfer-detail-grid">
+          <article className="transfer-detail-card"><span>Branch</span><strong>{profile?.branch?.name || user?.branch?.name || '—'}</strong></article>
+          <article className="transfer-detail-card"><span>Email</span><strong>{profile?.email || '—'}</strong></article>
+          <article className="transfer-detail-card"><span>Phone</span><strong>{profile?.phone || '—'}</strong></article>
+          <article className="transfer-detail-card"><span>Status</span><strong>{profile?.status || '—'}</strong></article>
+        </div>}
       </section>
       <div className="flex justify-end gap-2 mt-4">
         <button className="button ghost" type="button" onClick={() => navigate('/warehouse/audit-log')}>Audit Log</button>
         <button className="button ghost" type="button" onClick={() => navigate('/warehouse/reports')}>Reports</button>
         <button className="button ghost" type="button" onClick={() => requestLogout()}>Logout</button>
-        <button className="button secondary" type="button" onClick={() => showToast('Change Password form would open here.', 'success')}>Change Password</button>
-        <button className="button" type="button" onClick={() => showToast('Update Profile form would open here.', 'success')}>Update Profile</button>
+        {editing ? <>
+            <button className="button ghost" type="button" onClick={() => setEditing(false)}>Cancel</button>
+            <button className="button" type="button" onClick={save}>Save</button>
+          </> : <button className="button" type="button" onClick={() => setEditing(true)}>Update Profile</button>}
       </div>
     </div>;
 }
 function AuditLogPage({
   navigate
 }) {
-  const pagination_AUDIT_LOGS = usePagination(AUDIT_LOGS);
-  const paginated_AUDIT_LOGS = pagination_AUDIT_LOGS.paginatedData;
+  const [logs, setLogs] = useState([]);
+  const [loading, setLoading] = useState(true);
+  useEffect(() => {
+    async function load() {
+      setLoading(true);
+      const res = await fetchWarehouseAuditLogs();
+      if (res.success) setLogs(res.data || []);
+      setLoading(false);
+    }
+    load();
+  }, []);
+  const pagination_logs = usePagination(logs);
+  const paginated_logs = pagination_logs.paginatedData;
+  if (loading) return <LoadingState message="Loading audit log..." />;
   return <div className="relative z-10 grid gap-[22px] w-full">
       <section className="panel content-panel relative overflow-hidden">
-        <div className="flex flex-col md:flex-row justify-between gap-4 items-start md:items-center mb-4"><h3>Audit Log</h3><p className="text-ink/70">Product creation, updates, stock adjustments, restocks, and transfers.</p></div>
-        <><div className="corvex-table-wrapper">
+        <div className="flex flex-col md:flex-row justify-between gap-4 items-start md:items-center mb-4"><h3>Audit Log</h3><p className="text-ink/70">Your warehouse actions on this account.</p></div>
+        {logs.length ? <><div className="corvex-table-wrapper">
           <table className="corvex-table">
             <thead><tr><th>Action</th><th>Detail</th><th>Timestamp</th></tr></thead>
-            <tbody>{paginated_AUDIT_LOGS.map(log => <tr key={log.id}><td>{log.action}</td><td>{log.detail}</td><td>{log.timestamp}</td></tr>)}</tbody>
+            <tbody>{paginated_logs.map(log => <tr key={log.log_id}><td>{log.action}</td><td>{log.detail}</td><td>{formatDisplayDateTime(log.timestamp)}</td></tr>)}</tbody>
           </table>
-        </div><LocalPagination {...pagination_AUDIT_LOGS} /></>
+        </div><LocalPagination {...pagination_logs} /></> : <EmptyState title="No audit entries" description="Actions you take will appear here." />}
       </section>
       <div className="flex justify-end mt-4">
         <button className="button ghost" type="button" onClick={() => navigate('/warehouse/profile')}>Back to Profile</button>
@@ -1321,14 +1977,43 @@ function ReportsPage({
   navigate,
   showToast
 }) {
-  const reports = ['Inventory Report', 'Low Stock Report', 'Transfer Report', 'Restock Report', 'Stock Adjustment Report'];
+  const [reportData, setReportData] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const loadInventoryReport = async () => {
+    setLoading(true);
+    const branchId = getCurrentUser()?.branch?.id;
+    const res = await getReportInventory(branchId);
+    setLoading(false);
+    if (res.success) {
+      setReportData(res.data);
+      showToast('Inventory report loaded.', 'success');
+    } else showToast(res.message || 'Failed to load report.', 'error');
+  };
+  const exportReport = () => {
+    if (!reportData?.lowStockItems?.length) {
+      showToast('Load the inventory report first.', 'error');
+      return;
+    }
+    const rows = reportData.lowStockItems.map((r) => ({
+      product: r.product_name,
+      branch: r.branch_name,
+      available: r.available_stock,
+      reorder: r.reorder_level,
+      status: r.status,
+    }));
+    if (downloadCsv(rows, 'warehouse-low-stock.csv')) showToast('Report exported.', 'success');
+  };
+  const reports = [
+    { label: 'Inventory Report', action: loadInventoryReport },
+    { label: 'Export Low Stock CSV', action: exportReport },
+  ];
   return <div className="relative z-10 grid gap-[22px] w-full">
       <section className="panel content-panel relative overflow-hidden">
         <div className="flex flex-col md:flex-row justify-between gap-4 items-start md:items-center mb-4"><h3>Generate Reports</h3></div>
         <div className="quick-link-grid">
-          {reports.map(report => <button key={report} className="quick-link-card report-card" type="button" onClick={() => showToast(`${report} generated.`, 'success')}>
+          {reports.map(report => <button key={report.label} className="quick-link-card report-card" type="button" disabled={loading} onClick={report.action}>
               <span className="quick-link-icon"><NavIcon name="reports" /></span>
-              <span className="quick-link-copy"><strong>{report}</strong><span className="text-ink/70">Export PDF or Excel</span></span>
+              <span className="quick-link-copy"><strong>{report.label}</strong><span className="text-ink/70">Branch-scoped data</span></span>
             </button>)}
         </div>
       </section>
@@ -1726,7 +2411,7 @@ function BranchInventoryPage({
                 </tr>
               </thead>
               <tbody>
-                {paginated_filtered.map(r => <tr key={r.branch_inventory_id}>
+                {paginated_filtered.map(r => <tr key={r.branch_inventory_id} className="clickable-row" onClick={() => navigate(`/warehouse/product/${r.product_id}`)}>
                     <td><span style={{
                     fontFamily: 'monospace',
                     fontSize: '0.82rem'
@@ -1851,6 +2536,8 @@ export function WarehousePageBody({
       return <InventoryPage {...props} />;
     case 'addProduct':
       return <AddProductPage {...props} />;
+    case 'editProduct':
+      return <EditProductPage {...props} />;
     case 'productDetail':
       return <ProductDetailPage {...props} />;
     case 'stockCount':
@@ -1863,8 +2550,10 @@ export function WarehousePageBody({
       return <MovementsPage {...props} />;
     case 'movementDetail':
       return <MovementDetailPage {...props} />;
+    case 'transferRequestNew':
+      return <TransferRequestNewPage {...props} />;
     case 'transfers':
-      return <TransfersPage {...props} />;
+      return <TransfersPage {...props} transferTab={page.params?.transferTab} />;
     case 'transferDetail':
       return <TransferDetailPage {...props} />;
     case 'restockHistory':

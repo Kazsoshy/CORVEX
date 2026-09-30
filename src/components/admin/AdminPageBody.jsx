@@ -6,6 +6,7 @@ import { AreaChart, Area, BarChart, Bar, LineChart, Line, XAxis, YAxis, Cartesia
 import { ADMIN_BRANCHES, ADMIN_INVENTORY, ADMIN_PROFILE, BRANCH_PERFORMANCE_CHART, RESTOCK_REQUESTS, SYSTEM_MONTHLY_COLLECTIONS, SYSTEM_MONTHLY_SALES, TRANSFER_REQUESTS, USER_GROWTH, USER_STATS, USERS, getBranchById, getUserById } from '../../data/adminMockData';
 import { fetchAuditLogs } from '../../api/adminService';
 import { EmptyState } from '../shared/EmptyState';
+import { LoadingState } from '../shared/LoadingState';
 import { NavIcon } from '../../navIcons';
 import { formatDisplayDate, formatDisplayDateTime } from '../../utils/formatters.js';
 import { StatusBadge } from '../StatusBadge';
@@ -72,6 +73,29 @@ function StatusPill({
 }) {
   return <StatusBadge status={status} />;
 }
+
+const DEFAULT_ADMIN_BASE = '/operating-manager/admin';
+
+function getAdminBase(page) {
+  if (page?.breadcrumbs?.some((c) => c.to?.startsWith('/operating-manager/admin'))) {
+    return '/operating-manager/admin';
+  }
+  if (typeof window !== 'undefined' && window.location.pathname.startsWith('/operating-manager/admin')) {
+    return '/operating-manager/admin';
+  }
+  return '/admin';
+}
+
+const EMPTY_BRANCH_FORM = {
+  branch_name: '',
+  address: '',
+  latitude: '7.0731',
+  longitude: '125.6128',
+  contact_no: '',
+  email: '',
+  status: 'Active',
+  manager_id: '',
+};
 
 // ── Dashboard ─────────────────────────────────────────────────────────────────
 function DashboardPage({
@@ -607,32 +631,102 @@ function UserFormPage({
 // ── Branch Management ─────────────────────────────────────────────────────────
 function BranchListPage({
   navigate,
-  showToast
+  showToast,
+  adminBase = DEFAULT_ADMIN_BASE
 }) {
   const [branches, setBranches] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [confirmDisable, setConfirmDisable] = useState(null);
+  const [branchFormOpen, setBranchFormOpen] = useState(false);
+  const [branchForm, setBranchForm] = useState(EMPTY_BRANCH_FORM);
+  const [editingBranchId, setEditingBranchId] = useState(null);
+  const [savingBranch, setSavingBranch] = useState(false);
   const pagination = usePagination(branches);
   const paginatedBranches = pagination.paginatedData;
-  useEffect(() => {
-    async function loadBranches() {
-      setLoading(true);
-      try {
-        const response = await apiClient.get('/branches');
-        if (response.data.success) {
-          setBranches(response.data.data || []);
-        } else {
-          setError(response.data.message || 'Failed to load branches');
-        }
-      } catch (err) {
-        console.error('Error fetching branches:', err);
-        setError('Failed to load branches');
+  const loadBranches = useCallback(async () => {
+    setLoading(true);
+    try {
+      const response = await apiClient.get('/branches');
+      if (response.data.success) {
+        setBranches(response.data.data || []);
+        setError(null);
+      } else {
+        setError(response.data.message || 'Failed to load branches');
       }
-      setLoading(false);
+    } catch (err) {
+      console.error('Error fetching branches:', err);
+      setError('Failed to load branches');
     }
-    loadBranches();
+    setLoading(false);
   }, []);
+  useEffect(() => {
+    loadBranches();
+  }, [loadBranches]);
+  const openCreateBranch = () => {
+    setEditingBranchId(null);
+    setBranchForm(EMPTY_BRANCH_FORM);
+    setBranchFormOpen(true);
+  };
+  const openEditBranch = (branch, e) => {
+    e?.stopPropagation?.();
+    setEditingBranchId(branch.branch_id);
+    setBranchForm({
+      branch_name: branch.branch_name || '',
+      address: branch.address || '',
+      latitude: String(branch.latitude ?? ''),
+      longitude: String(branch.longitude ?? ''),
+      contact_no: branch.contact_no || '',
+      email: branch.email || '',
+      status: branch.status || 'Active',
+      manager_id: branch.manager_id ? String(branch.manager_id) : '',
+    });
+    setBranchFormOpen(true);
+  };
+  const saveBranch = async (e) => {
+    e.preventDefault();
+    if (!branchForm.branch_name.trim() || !branchForm.address.trim()) {
+      showToast('Branch name and address are required.', 'error');
+      return;
+    }
+    setSavingBranch(true);
+    try {
+      const payload = {
+        branch_name: branchForm.branch_name.trim(),
+        address: branchForm.address.trim(),
+        latitude: Number(branchForm.latitude),
+        longitude: Number(branchForm.longitude),
+        contact_no: branchForm.contact_no.trim(),
+        email: branchForm.email.trim(),
+        status: branchForm.status,
+        manager_id: branchForm.manager_id ? Number(branchForm.manager_id) : null,
+      };
+      if (editingBranchId) {
+        await apiClient.put(`/branches/${editingBranchId}`, payload);
+        showToast('Branch updated.', 'success');
+      } else {
+        await apiClient.post('/branches', payload);
+        showToast('Branch created.', 'success');
+      }
+      setBranchFormOpen(false);
+      loadBranches();
+    } catch (err) {
+      showToast(err.response?.data?.message || 'Failed to save branch.', 'error');
+    } finally {
+      setSavingBranch(false);
+    }
+  };
+  const disableBranch = async () => {
+    if (!confirmDisable) return;
+    try {
+      await apiClient.put(`/branches/${confirmDisable.branch_id}`, { status: 'Inactive' });
+      showToast(`${confirmDisable.branch_name} disabled.`, 'success');
+      setConfirmDisable(null);
+      loadBranches();
+    } catch (err) {
+      showToast(err.response?.data?.message || 'Failed to disable branch.', 'error');
+    }
+  };
   if (loading) {
     return <div className="relative z-10 grid gap-[22px] w-full">
         <section className="panel content-panel relative overflow-hidden">
@@ -664,7 +758,7 @@ function BranchListPage({
             fontWeight: 400,
             fontSize: '0.88rem'
           }}>({branches.length})</span></h3>
-          <button className="button" type="button" onClick={() => showToast('Add Branch form coming soon.', 'success')}>+ Add Branch</button>
+          <button className="button" type="button" onClick={openCreateBranch}>+ Add Branch</button>
         </div>
         <><div className="corvex-table-wrapper">
           <table className="corvex-table">
@@ -674,7 +768,7 @@ function BranchListPage({
                   textAlign: 'center',
                   padding: '40px',
                   color: '#64748b'
-                }}>No branches found</td></tr> : paginatedBranches.map(b => <tr key={b.branch_id} className="clickable-row" onClick={() => navigate(`/admin/branches/${b.branch_id}`)}>
+                }}>No branches found</td></tr> : paginatedBranches.map(b => <tr key={b.branch_id} className="clickable-row" onClick={() => navigate(`${adminBase}/branches/${b.branch_id}`)}>
                     <td>{b.branch_id}</td>
                     <td><strong>{b.branch_name}</strong></td>
                     <td>{b.address}</td>
@@ -685,7 +779,7 @@ function BranchListPage({
                     <td><StatusPill status={b.status} /></td>
                     <td>{formatDisplayDateTime(b.created_at)}</td>
                     <td className="table-actions" onClick={e => e.stopPropagation()}>
-                      <button className="icon-action-button" type="button" title="Edit" onClick={() => showToast(`Editing ${b.branch_name}.`, 'success')}><NavIcon name="edit" /></button>
+                      <button className="icon-action-button" type="button" title="Edit" onClick={(e) => openEditBranch(b, e)}><NavIcon name="edit" /></button>
                       <button className="icon-action-button danger" type="button" title="Disable" onClick={() => setConfirmDisable(b)}><NavIcon name="trash" /></button>
                     </td>
                   </tr>)}
@@ -693,6 +787,47 @@ function BranchListPage({
           </table>
         </div><Pagination {...pagination} /></>
       </section>
+      {branchFormOpen && <div className="modal-overlay" onClick={() => !savingBranch && setBranchFormOpen(false)}>
+          <div className="modal-content" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 520 }}>
+            <h3>{editingBranchId ? 'Edit Branch' : 'Add Branch'}</h3>
+            <form onSubmit={saveBranch}>
+              <div className="form-group">
+                <label>Branch Name *</label>
+                <input value={branchForm.branch_name} onChange={(e) => setBranchForm((f) => ({ ...f, branch_name: e.target.value }))} required />
+              </div>
+              <div className="form-group">
+                <label>Address *</label>
+                <input value={branchForm.address} onChange={(e) => setBranchForm((f) => ({ ...f, address: e.target.value }))} required />
+              </div>
+              <div className="form-group">
+                <label>Latitude / Longitude *</label>
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <input value={branchForm.latitude} onChange={(e) => setBranchForm((f) => ({ ...f, latitude: e.target.value }))} required />
+                  <input value={branchForm.longitude} onChange={(e) => setBranchForm((f) => ({ ...f, longitude: e.target.value }))} required />
+                </div>
+              </div>
+              <div className="form-group">
+                <label>Contact No *</label>
+                <input value={branchForm.contact_no} onChange={(e) => setBranchForm((f) => ({ ...f, contact_no: e.target.value }))} required />
+              </div>
+              <div className="form-group">
+                <label>Email *</label>
+                <input type="email" value={branchForm.email} onChange={(e) => setBranchForm((f) => ({ ...f, email: e.target.value }))} required />
+              </div>
+              <div className="form-group">
+                <label>Status</label>
+                <select className="filter-select" value={branchForm.status} onChange={(e) => setBranchForm((f) => ({ ...f, status: e.target.value }))}>
+                  <option value="Active">Active</option>
+                  <option value="Inactive">Inactive</option>
+                </select>
+              </div>
+              <div className="modal-actions">
+                <button type="button" className="button secondary" disabled={savingBranch} onClick={() => setBranchFormOpen(false)}>Cancel</button>
+                <button type="submit" className="button" disabled={savingBranch}>{savingBranch ? 'Saving…' : 'Save Branch'}</button>
+              </div>
+            </form>
+          </div>
+        </div>}
       {confirmDisable && <section className="panel content-panel relative overflow-hidden" style={{
       borderColor: '#fca5a5',
       background: 'rgba(220,38,38,0.04)'
@@ -705,10 +840,7 @@ function BranchListPage({
       }}>
             <button className="inline-flex justify-center items-center gap-2 px-5 py-2.5 rounded-md border-0 bg-blue text-white font-semibold cursor-pointer transition-all duration-160 hover:-translate-y-[1px] hover:shadow-[0_4px_16px_rgba(37,99,235,0.35)] hover:brightness-105 active:translate-y-0" type="button" style={{
           background: '#dc2626'
-        }} onClick={() => {
-          showToast(`${confirmDisable.branch_name} disabled.`, 'success');
-          setConfirmDisable(null);
-        }}>Confirm Disable</button>
+        }} onClick={disableBranch}>Confirm Disable</button>
             <button className="inline-flex justify-center items-center gap-2 px-5 py-2.5 rounded-md bg-mint text-ink border-[1.5px] border-surface-3 shadow-none hover:border-blue hover:text-blue transition-all duration-160 cursor-pointer" type="button" onClick={() => setConfirmDisable(null)}>Cancel</button>
           </div>
         </section>}
@@ -717,48 +849,154 @@ function BranchListPage({
 function BranchDetailPage({
   branchId,
   navigate,
-  showToast
+  showToast,
+  adminBase = DEFAULT_ADMIN_BASE
 }) {
-  const branch = getBranchById(branchId);
-  const pagination_branchUsers = usePagination(branchUsers);
+  const [branch, setBranch] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [managers, setManagers] = useState([]);
+  const [assignOpen, setAssignOpen] = useState(false);
+  const [managerId, setManagerId] = useState('');
+  const [editOpen, setEditOpen] = useState(false);
+  const [branchForm, setBranchForm] = useState(EMPTY_BRANCH_FORM);
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const [branchRes, usersRes] = await Promise.all([
+        apiClient.get(`/branches/${branchId}`),
+        apiClient.get('/users?role=branch_manager&status=Active&limit=100'),
+      ]);
+      if (branchRes.data.success) {
+        setBranch(branchRes.data.data);
+        setManagerId(branchRes.data.data.manager_id ? String(branchRes.data.data.manager_id) : '');
+      }
+      if (usersRes.data.success) setManagers(usersRes.data.data || []);
+    } catch (err) {
+      showToast(err.response?.data?.message || 'Failed to load branch.', 'error');
+    }
+    setLoading(false);
+  }, [branchId, showToast]);
+  useEffect(() => {
+    load();
+  }, [load]);
+  const staff = branch?.staff || [];
+  const pagination_branchUsers = usePagination(staff);
   const paginated_branchUsers = pagination_branchUsers.paginatedData;
-  if (!branch) return <EmptyState title="Branch not found" actionLabel="Back" onAction={() => navigate('/admin/branches')} />;
-  const branchUsers = USERS.filter(u => u.branch === branch.name);
+  if (loading) return <LoadingState message="Loading branch…" />;
+  if (!branch) return <EmptyState title="Branch not found" actionLabel="Back" onAction={() => navigate(`${adminBase}/branches`)} />;
+  const assignManager = async () => {
+    try {
+      await apiClient.put(`/branches/${branchId}`, { manager_id: managerId ? Number(managerId) : null });
+      showToast('Branch manager assigned.', 'success');
+      setAssignOpen(false);
+      load();
+    } catch (err) {
+      showToast(err.response?.data?.message || 'Failed to assign manager.', 'error');
+    }
+  };
+  const openEdit = () => {
+    setBranchForm({
+      branch_name: branch.branch_name || '',
+      address: branch.address || '',
+      latitude: String(branch.latitude ?? ''),
+      longitude: String(branch.longitude ?? ''),
+      contact_no: branch.contact_no || '',
+      email: branch.email || '',
+      status: branch.status || 'Active',
+      manager_id: branch.manager_id ? String(branch.manager_id) : '',
+    });
+    setEditOpen(true);
+  };
+  const saveEdit = async (e) => {
+    e.preventDefault();
+    try {
+      await apiClient.put(`/branches/${branchId}`, {
+        branch_name: branchForm.branch_name.trim(),
+        address: branchForm.address.trim(),
+        latitude: Number(branchForm.latitude),
+        longitude: Number(branchForm.longitude),
+        contact_no: branchForm.contact_no.trim(),
+        email: branchForm.email.trim(),
+        status: branchForm.status,
+      });
+      showToast('Branch updated.', 'success');
+      setEditOpen(false);
+      load();
+    } catch (err) {
+      showToast(err.response?.data?.message || 'Failed to update branch.', 'error');
+    }
+  };
   return <div className="relative z-10 grid gap-[22px] w-full">
       <section className="panel dashboard-greeting">
         <div className="flex flex-col gap-1">
-          <p className="text-[0.82rem] font-bold tracking-widest uppercase text-navy/60 m-0">{branch.region}</p>
-          <h2>{branch.name}</h2>
-          <p className="text-ink/70">{branch.city} · Manager: {branch.manager}</p>
+          <p className="text-[0.82rem] font-bold tracking-widest uppercase text-navy/60 m-0">{branch.region || 'Branch'}</p>
+          <h2>{branch.branch_name}</h2>
+          <p className="text-ink/70">{branch.address} · Manager: {branch.manager_name || '—'}</p>
         </div>
       </section>
       <Stats stats={[{
-      label: 'Total Employees',
-      value: String(branch.employees)
+      label: 'Active Staff',
+      value: String(staff.length)
     }, {
-      label: 'Collectors',
-      value: String(branch.collectors)
+      label: 'Customers',
+      value: String(branch.customers?.active ?? branch.customers?.total ?? 0)
     }, {
-      label: 'Sales Agents',
-      value: String(branch.salesAgents)
+      label: 'MTD Collections',
+      value: String(branch.collections?.count ?? 0)
     }, {
-      label: 'Warehouse Staff',
-      value: String(branch.warehouseStaff)
+      label: 'MTD Sales',
+      value: String(branch.sales?.count ?? 0)
     }]} />
       <section className="panel content-panel relative overflow-hidden">
         <div className="flex flex-col md:flex-row justify-between gap-4 items-start md:items-center mb-4"><h3>Branch Users</h3></div>
-        <><div className="corvex-table-wrapper">
+        {staff.length ? <><div className="corvex-table-wrapper">
           <table className="corvex-table">
-            <thead><tr><th>Name</th><th>Role</th><th>Status</th><th>Last Login</th></tr></thead>
-            <tbody>{paginated_branchUsers.map(u => <tr key={u.id}><td>{u.name}</td><td>{u.role}</td><td><StatusPill status={u.status} /></td><td>{u.lastLogin}</td></tr>)}</tbody>
+            <thead><tr><th>Name</th><th>Role</th><th>Status</th><th>Email</th></tr></thead>
+            <tbody>{paginated_branchUsers.map(u => <tr key={u.id}><td>{u.full_name}</td><td>{u.role_name}</td><td><StatusPill status={u.status} /></td><td>{u.email}</td></tr>)}</tbody>
           </table>
-        </div><Pagination {...pagination_branchUsers} /></>
+        </div><Pagination {...pagination_branchUsers} /></> : <EmptyState title="No active staff" description="Assign users to this branch in User Management." />}
         <div className="flex justify-end gap-2 mt-6">
-          <button className="button ghost" type="button" onClick={() => navigate('/admin/branches')}>Back</button>
-          <button className="button secondary" type="button" onClick={() => showToast('Assign Manager opened.', 'success')}>Assign Manager</button>
-          <button className="button" type="button" onClick={() => showToast('Edit Branch opened.', 'success')}>Edit Branch</button>
+          <button className="button ghost" type="button" onClick={() => navigate(`${adminBase}/branches`)}>Back</button>
+          <button className="button secondary" type="button" onClick={() => setAssignOpen(true)}>Assign Manager</button>
+          <button className="button" type="button" onClick={openEdit}>Edit Branch</button>
         </div>
       </section>
+      {assignOpen && <div className="modal-overlay" onClick={() => setAssignOpen(false)}>
+          <div className="modal-content" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 420 }}>
+            <h3>Assign Branch Manager</h3>
+            <select className="filter-select" value={managerId} onChange={(e) => setManagerId(e.target.value)} style={{ width: '100%', marginBottom: 16 }}>
+              <option value="">— None —</option>
+              {managers.map((m) => <option key={m.user_id} value={m.user_id}>{m.first_name} {m.last_name} ({m.branch_name || 'Org'})</option>)}
+            </select>
+            <div className="modal-actions">
+              <button type="button" className="button secondary" onClick={() => setAssignOpen(false)}>Cancel</button>
+              <button type="button" className="button" onClick={assignManager}>Save</button>
+            </div>
+          </div>
+        </div>}
+      {editOpen && <div className="modal-overlay" onClick={() => setEditOpen(false)}>
+          <div className="modal-content" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 520 }}>
+            <h3>Edit Branch</h3>
+            <form onSubmit={saveEdit}>
+              <div className="form-group"><label>Branch Name</label><input value={branchForm.branch_name} onChange={(e) => setBranchForm((f) => ({ ...f, branch_name: e.target.value }))} /></div>
+              <div className="form-group"><label>Address</label><input value={branchForm.address} onChange={(e) => setBranchForm((f) => ({ ...f, address: e.target.value }))} /></div>
+              <div className="form-group"><label>Contact / Email</label>
+                <input value={branchForm.contact_no} onChange={(e) => setBranchForm((f) => ({ ...f, contact_no: e.target.value }))} style={{ marginBottom: 8 }} />
+                <input type="email" value={branchForm.email} onChange={(e) => setBranchForm((f) => ({ ...f, email: e.target.value }))} />
+              </div>
+              <div className="form-group"><label>Status</label>
+                <select className="filter-select" value={branchForm.status} onChange={(e) => setBranchForm((f) => ({ ...f, status: e.target.value }))}>
+                  <option value="Active">Active</option>
+                  <option value="Inactive">Inactive</option>
+                </select>
+              </div>
+              <div className="modal-actions">
+                <button type="button" className="button secondary" onClick={() => setEditOpen(false)}>Cancel</button>
+                <button type="submit" className="button">Save Changes</button>
+              </div>
+            </form>
+          </div>
+        </div>}
     </div>;
 }
 
@@ -776,41 +1014,112 @@ function InventoryPage({
     label: 'Transfer Requests'
   }, {
     key: 'restock',
-    label: 'Restock Requests'
+    label: 'Restock Records'
   }];
+  const [products, setProducts] = useState([]);
+  const [transfers, setTransfers] = useState([]);
+  const [restocks, setRestocks] = useState([]);
+  const [loadingTab, setLoadingTab] = useState(false);
   const [showProductForm, setShowProductForm] = useState(false);
+  const [editingProductId, setEditingProductId] = useState(null);
   const [productForm, setProductForm] = useState({
     name: '',
     sku: '',
-    category_id: ''
+    category_id: '',
+    unit_price: '',
+    status: 'Active'
   });
+  const loadProducts = useCallback(async () => {
+    setLoadingTab(true);
+    try {
+      const res = await apiClient.get('/products?limit=200');
+      if (res.data.success) setProducts(res.data.data || []);
+    } catch (err) {
+      showToast('Failed to load products.', 'error');
+    }
+    setLoadingTab(false);
+  }, [showToast]);
+  const loadTransfers = useCallback(async () => {
+    setLoadingTab(true);
+    try {
+      const res = await apiClient.get('/inventory/transfers');
+      if (res.data.success) setTransfers(res.data.data || []);
+    } catch (err) {
+      showToast('Failed to load transfers.', 'error');
+    }
+    setLoadingTab(false);
+  }, [showToast]);
+  const loadRestocks = useCallback(async () => {
+    setLoadingTab(true);
+    try {
+      const res = await apiClient.get('/inventory/restocks');
+      if (res.data.success) setRestocks(res.data.data || []);
+    } catch (err) {
+      showToast('Failed to load restocks.', 'error');
+    }
+    setLoadingTab(false);
+  }, [showToast]);
+  useEffect(() => {
+    if (tab === 'products') loadProducts();
+    if (tab === 'transfers') loadTransfers();
+    if (tab === 'restock') loadRestocks();
+  }, [tab, loadProducts, loadTransfers, loadRestocks]);
+  const openCreateProduct = () => {
+    setEditingProductId(null);
+    setProductForm({ name: '', sku: '', category_id: '', unit_price: '', status: 'Active' });
+    setShowProductForm(true);
+  };
+  const openEditProduct = (p) => {
+    setEditingProductId(p.product_id);
+    setProductForm({
+      name: p.product_name || p.name || '',
+      sku: p.sku || '',
+      category_id: p.category_id ? String(p.category_id) : '',
+      unit_price: p.unit_price != null ? String(p.unit_price) : '',
+      status: p.status || 'Active',
+    });
+    setShowProductForm(true);
+  };
   const handleProductSubmit = async e => {
     e.preventDefault();
     if (!productForm.name.trim() || !productForm.sku.trim()) return showToast('Name and SKU are required.', 'error');
     try {
-      await apiClient.post('/products', {
+      const payload = {
         name: productForm.name.trim(),
         sku: productForm.sku.trim(),
-        category_id: productForm.category_id || null
-      });
-      showToast('Product created.', 'success');
+        category_id: productForm.category_id ? Number(productForm.category_id) : null,
+        unit_price: productForm.unit_price ? Number(productForm.unit_price) : 0,
+        status: productForm.status,
+      };
+      if (editingProductId) {
+        await apiClient.put(`/products/${editingProductId}`, payload);
+        showToast('Product updated.', 'success');
+      } else {
+        await apiClient.post('/products', payload);
+        showToast('Product created.', 'success');
+      }
       setShowProductForm(false);
-      setProductForm({
-        name: '',
-        sku: '',
-        category_id: ''
-      });
-      // In a real app, refresh the ADMIN_INVENTORY data or fetch from API
+      loadProducts();
     } catch (err) {
-      showToast(err.response?.data?.message || 'Failed to create product.', 'error');
+      showToast(err.response?.data?.message || 'Failed to save product.', 'error');
     }
   };
-  const pagination_ADMIN_INVENTORY = usePagination(ADMIN_INVENTORY);
-  const paginated_ADMIN_INVENTORY = pagination_ADMIN_INVENTORY.paginatedData;
-  const pagination_TRANSFER_REQUESTS = usePagination(TRANSFER_REQUESTS);
+  const updateTransferStatus = async (transferId, status) => {
+    try {
+      await apiClient.patch(`/inventory/transfers/${transferId}`, { status });
+      showToast(`Transfer ${status.toLowerCase()}.`, 'success');
+      loadTransfers();
+    } catch (err) {
+      showToast(err.response?.data?.message || 'Failed to update transfer.', 'error');
+    }
+  };
+  const pagination_products = usePagination(products);
+  const paginated_products = pagination_products.paginatedData;
+  const pagination_TRANSFER_REQUESTS = usePagination(transfers);
   const paginated_TRANSFER_REQUESTS = pagination_TRANSFER_REQUESTS.paginatedData;
-  const pagination_RESTOCK_REQUESTS = usePagination(RESTOCK_REQUESTS);
+  const pagination_RESTOCK_REQUESTS = usePagination(restocks);
   const paginated_RESTOCK_REQUESTS = pagination_RESTOCK_REQUESTS.paginatedData;
+  const pendingTransfer = (t) => ['Pending Approval', 'Submitted'].includes(t.status);
   return <div className="relative z-10 grid gap-[22px] w-full">
       <div className="segmented-control">
         {tabs.map(t => <button key={t.key} className={tab === t.key ? 'segment active' : 'segment'} type="button" onClick={() => setTab(t.key)}>{t.label}</button>)}
@@ -821,30 +1130,30 @@ function InventoryPage({
             <div className="list-section-header">
               <h3>All Products</h3>
               <div className="list-section-actions">
-                <button className="button" type="button" onClick={() => setShowProductForm(true)}>+ Add Product</button>
-                <button className="button secondary" type="button" onClick={() => showToast('Inventory exported.', 'success')}>Export Inventory</button>
+                <button className="button" type="button" onClick={openCreateProduct}>+ Add Product</button>
               </div>
             </div>
-            <><div className="corvex-table-wrapper">
+            {loadingTab ? <LoadingState message="Loading products…" /> : <><div className="corvex-table-wrapper">
               <table className="corvex-table">
-                <thead><tr><th>Product</th><th>SKU</th><th>Branch</th><th>Quantity</th><th>Status</th><th>Last Updated</th><th>Actions</th></tr></thead>
+                <thead><tr><th>Product</th><th>SKU</th><th>Category</th><th>Unit Price</th><th>Stock</th><th>Status</th><th>Actions</th></tr></thead>
                 <tbody>
-                  {paginated_ADMIN_INVENTORY.map(p => <tr key={p.id}>
-                      <td><strong>{p.name}</strong></td><td>{p.sku}</td><td>{p.branch}</td><td>{p.quantity}</td>
-                      <td><StatusPill status={p.status} /></td>
-                      <td>{p.lastUpdated}</td>
-                      <td className="table-actions"><button className="icon-action-button" type="button" title="View" onClick={() => showToast(`${p.name} details.`, 'success')}><NavIcon name="view" /></button></td>
+                  {!paginated_products.length ? <tr><td colSpan={7}><EmptyState title="No products" /></td></tr> : paginated_products.map(p => <tr key={p.product_id}>
+                      <td><strong>{p.product_name}</strong></td><td>{p.sku}</td><td>{p.category_name || '—'}</td>
+                      <td>{p.unit_price != null ? Number(p.unit_price).toFixed(2) : '—'}</td>
+                      <td>{p.total_quantity ?? p.quantity ?? '—'}</td>
+                      <td><StatusPill status={p.stock_status || p.status} /></td>
+                      <td className="table-actions"><button className="icon-action-button" type="button" title="Edit" onClick={() => openEditProduct(p)}><NavIcon name="edit" /></button></td>
                     </tr>)}
                 </tbody>
               </table>
-            </div><Pagination {...pagination_ADMIN_INVENTORY} /></>
+            </div><Pagination {...pagination_products} /></>}
           </section>
 
           {showProductForm && <div className="modal-overlay" onClick={() => setShowProductForm(false)}>
               <div className="modal-content" onClick={e => e.stopPropagation()} style={{
           maxWidth: 500
         }}>
-                <h3>Add Product</h3>
+                <h3>{editingProductId ? 'Edit Product' : 'Add Product'}</h3>
                 <form onSubmit={handleProductSubmit}>
                   <div className="form-group">
                     <label>Product Name <span className="required">*</span></label>
@@ -858,7 +1167,7 @@ function InventoryPage({
                     <input type="text" value={productForm.sku} onChange={e => setProductForm(p => ({
                 ...p,
                 sku: e.target.value
-              }))} placeholder="SOFA-123" />
+              }))} placeholder="SOFA-123" disabled={Boolean(editingProductId)} />
                   </div>
                   <div className="form-group">
                     <label>Category ID</label>
@@ -867,9 +1176,23 @@ function InventoryPage({
                 category_id: e.target.value
               }))} placeholder="e.g. 1" />
                   </div>
+                  <div className="form-group">
+                    <label>Unit Price</label>
+                    <input type="number" min="0" step="0.01" value={productForm.unit_price} onChange={e => setProductForm(p => ({
+                ...p,
+                unit_price: e.target.value
+              }))} />
+                  </div>
+                  {editingProductId ? <div className="form-group">
+                    <label>Status</label>
+                    <select className="filter-select" value={productForm.status} onChange={e => setProductForm(p => ({ ...p, status: e.target.value }))}>
+                      <option value="Active">Active</option>
+                      <option value="Inactive">Inactive</option>
+                    </select>
+                  </div> : null}
                   <div className="modal-actions">
                     <button type="button" className="button secondary" onClick={() => setShowProductForm(false)}>Cancel</button>
-                    <button type="submit" className="button">Create Product</button>
+                    <button type="submit" className="button">{editingProductId ? 'Save Changes' : 'Create Product'}</button>
                   </div>
                 </form>
               </div>
@@ -878,43 +1201,39 @@ function InventoryPage({
 
       {tab === 'transfers' && <section className="panel content-panel relative overflow-hidden">
           <div className="flex flex-col md:flex-row justify-between gap-4 items-start md:items-center mb-4"><h3>Transfer Requests</h3></div>
-          <><div className="corvex-table-wrapper">
+          {loadingTab ? <LoadingState message="Loading transfers…" /> : <><div className="corvex-table-wrapper">
             <table className="corvex-table">
-              <thead><tr><th>Product</th><th>From</th><th>To</th><th>Qty</th><th>Requested By</th><th>Date</th><th>Status</th><th>Actions</th></tr></thead>
+              <thead><tr><th>Ref</th><th>Product</th><th>From</th><th>To</th><th>Qty</th><th>Submitted By</th><th>Date</th><th>Status</th><th>Actions</th></tr></thead>
               <tbody>
-                {paginated_TRANSFER_REQUESTS.map(t => <tr key={t.id}>
-                    <td>{t.product}</td><td>{t.from}</td><td>{t.to}</td><td>{t.qty}</td>
-                    <td>{t.requestedBy}</td><td>{t.date}</td>
+                {paginated_TRANSFER_REQUESTS.map(t => <tr key={t.transfer_id}>
+                    <td>{t.transfer_ref}</td><td>{t.product_name}</td><td>{t.source_branch}</td><td>{t.destination_branch}</td><td>{t.quantity}</td>
+                    <td>{t.submitted_by_name || '—'}</td><td>{formatDisplayDate(t.submitted_date)}</td>
                     <td><StatusPill status={t.status} /></td>
                     <td className="table-actions">
-                      {t.status === 'Pending' && <>
-                        <button className="icon-action-button" type="button" title="Approve" onClick={() => showToast(`Transfer approved.`, 'success')}><NavIcon name="check" /></button>
-                        <button className="icon-action-button danger" type="button" title="Reject" onClick={() => showToast(`Transfer rejected.`, 'success')}><NavIcon name="close" /></button>
+                      {pendingTransfer(t) && <>
+                        <button className="icon-action-button" type="button" title="Approve" onClick={() => updateTransferStatus(t.transfer_id, 'Approved')}><NavIcon name="check" /></button>
+                        <button className="icon-action-button danger" type="button" title="Reject" onClick={() => updateTransferStatus(t.transfer_id, 'Rejected')}><NavIcon name="close" /></button>
                       </>}
                     </td>
                   </tr>)}
               </tbody>
             </table>
-          </div><Pagination {...pagination_TRANSFER_REQUESTS} /></>
+          </div><Pagination {...pagination_TRANSFER_REQUESTS} /></>}
         </section>}
 
       {tab === 'restock' && <section className="panel content-panel relative overflow-hidden">
-          <div className="flex flex-col md:flex-row justify-between gap-4 items-start md:items-center mb-4"><h3>Restock Requests</h3></div>
-          <><div className="corvex-table-wrapper">
+          <div className="flex flex-col md:flex-row justify-between gap-4 items-start md:items-center mb-4"><h3>Restock Records</h3></div>
+          {loadingTab ? <LoadingState message="Loading restocks…" /> : <><div className="corvex-table-wrapper">
             <table className="corvex-table">
-              <thead><tr><th>Product</th><th>Branch</th><th>Qty</th><th>Requested By</th><th>Date</th><th>Status</th><th>Actions</th></tr></thead>
+              <thead><tr><th>Delivery Ref</th><th>Product</th><th>Branch</th><th>Qty</th><th>Supplier</th><th>Received</th></tr></thead>
               <tbody>
-                {paginated_RESTOCK_REQUESTS.map(r => <tr key={r.id}>
-                    <td>{r.product}</td><td>{r.branch}</td><td>{r.qty}</td>
-                    <td>{r.requestedBy}</td><td>{r.date}</td>
-                    <td><StatusPill status={r.status} /></td>
-                    <td className="table-actions">
-                      {r.status === 'Pending' && <button className="icon-action-button" type="button" title="Approve" onClick={() => showToast('Restock approved.', 'success')}><NavIcon name="check" /></button>}
-                    </td>
+                {paginated_RESTOCK_REQUESTS.map(r => <tr key={r.restock_id}>
+                    <td>{r.delivery_ref}</td><td>{r.product_name}</td><td>{r.branch_name}</td><td>{r.quantity}</td>
+                    <td>{r.supplier_name || '—'}</td><td>{formatDisplayDate(r.received_date)}</td>
                   </tr>)}
               </tbody>
             </table>
-          </div><Pagination {...pagination_RESTOCK_REQUESTS} /></>
+          </div><Pagination {...pagination_RESTOCK_REQUESTS} /></>}
         </section>}
     </div>;
 }
@@ -1291,6 +1610,8 @@ function SuppliersAdminPage({
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [showForm, setShowForm] = useState(false);
+  const [editingSupplierId, setEditingSupplierId] = useState(null);
+  const [confirmDelete, setConfirmDelete] = useState(null);
   const [errors, setErrors] = useState({});
   const [submitting, setSubmitting] = useState(false);
   const [form, setForm] = useState({
@@ -1321,8 +1642,20 @@ function SuppliersAdminPage({
     const t = setTimeout(loadData, 300);
     return () => clearTimeout(t);
   }, [search, loadData]);
-  const openForm = () => {
-    setForm(emptyForm);
+  const openForm = (supplier = null) => {
+    if (supplier) {
+      setEditingSupplierId(supplier.suppliers_id ?? supplier.supplier_id);
+      setForm({
+        supplier_name: supplier.supplier_name || '',
+        contact: supplier.contact || supplier.contact_number || '',
+        email: supplier.email || '',
+        address: supplier.address || '',
+        status: supplier.status || 'Active',
+      });
+    } else {
+      setEditingSupplierId(null);
+      setForm(emptyForm);
+    }
     setErrors({});
     setShowForm(true);
   };
@@ -1360,15 +1693,22 @@ function SuppliersAdminPage({
     }
     try {
       setSubmitting(true);
-      await apiClient.post('/suppliers', {
+      const payload = {
         supplier_name: form.supplier_name.trim(),
         contact: form.contact.trim(),
         email: form.email.trim(),
         address: form.address.trim(),
         status: form.status
-      });
-      showToast('Supplier created.', 'success');
+      };
+      if (editingSupplierId) {
+        await apiClient.put(`/suppliers/${editingSupplierId}`, payload);
+        showToast('Supplier updated.', 'success');
+      } else {
+        await apiClient.post('/suppliers', payload);
+        showToast('Supplier created.', 'success');
+      }
       setShowForm(false);
+      setEditingSupplierId(null);
       setForm(emptyForm);
       setErrors({});
       loadData();
@@ -1402,7 +1742,7 @@ function SuppliersAdminPage({
         </div>
         {loading ? <p>Loading…</p> : suppliers.length === 0 ? <EmptyState title="No suppliers found" /> : <><div className="corvex-table-wrapper">
             <table className="corvex-table">
-              <thead><tr><th>ID</th><th>Supplier Name</th><th>Contact</th><th>Email</th><th>Address</th><th>Status</th></tr></thead>
+              <thead><tr><th>ID</th><th>Supplier Name</th><th>Contact</th><th>Email</th><th>Address</th><th>Status</th><th>Actions</th></tr></thead>
               <tbody>
                 {paginated_suppliers.map(s => <tr key={s.suppliers_id ?? s.supplier_id}>
                     <td>{s.suppliers_id ?? s.supplier_id ?? '—'}</td>
@@ -1411,6 +1751,10 @@ function SuppliersAdminPage({
                     <td>{s.email || '—'}</td>
                     <td>{s.address?.trim() ? s.address : '—'}</td>
                     <td><StatusPill status={s.status || 'Active'} /></td>
+                    <td className="table-actions">
+                      <button className="icon-action-button" type="button" title="Edit" onClick={() => openForm(s)}><NavIcon name="edit" /></button>
+                      <button className="icon-action-button danger" type="button" title="Delete" onClick={() => setConfirmDelete(s)}><NavIcon name="trash" /></button>
+                    </td>
                   </tr>)}
               </tbody>
             </table>
@@ -1420,7 +1764,7 @@ function SuppliersAdminPage({
           <div className="modal-content" role="dialog" aria-modal="true" aria-labelledby="add-supplier-title" onClick={e => e.stopPropagation()} style={{
         maxWidth: 500
       }}>
-            <h3 id="add-supplier-title">Add Supplier</h3>
+            <h3 id="add-supplier-title">{editingSupplierId ? 'Edit Supplier' : 'Add Supplier'}</h3>
             <form onSubmit={handleSubmit} noValidate>
               <div className="form-group">
                 <label htmlFor="supplier-name">Supplier Name <span aria-hidden="true">*</span></label>
@@ -1450,11 +1794,27 @@ function SuppliersAdminPage({
               {errors.submit && <p className="form-error" role="alert">{errors.submit}</p>}
               <div className="modal-actions">
                 <button type="button" className="button secondary" onClick={closeForm} disabled={submitting}>Cancel</button>
-                <button type="submit" className="button" disabled={submitting}>{submitting ? 'Adding...' : 'Add Supplier'}</button>
+                <button type="submit" className="button" disabled={submitting}>{submitting ? 'Saving…' : editingSupplierId ? 'Save Changes' : 'Add Supplier'}</button>
               </div>
             </form>
           </div>
         </div>}
+      {confirmDelete && <section className="panel content-panel" style={{ borderColor: '#fca5a5' }}>
+          <p>Delete supplier <strong>{confirmDelete.supplier_name}</strong>? This cannot be undone.</p>
+          <div className="flex gap-2 mt-4">
+            <button className="button" type="button" style={{ background: '#dc2626' }} onClick={async () => {
+              try {
+                await apiClient.delete(`/suppliers/${confirmDelete.suppliers_id ?? confirmDelete.supplier_id}`);
+                showToast('Supplier deleted.', 'success');
+                setConfirmDelete(null);
+                loadData();
+              } catch (err) {
+                showToast(err.response?.data?.message || 'Failed to delete supplier.', 'error');
+              }
+            }}>Confirm Delete</button>
+            <button className="button secondary" type="button" onClick={() => setConfirmDelete(null)}>Cancel</button>
+          </div>
+        </section>}
     </div>;
 }
 
@@ -1465,11 +1825,13 @@ export function AdminPageBody({
   showToast
 }) {
   if (!page) return <EmptyState title="Page not found" description="Use the sidebar to navigate." />;
+  const adminBase = getAdminBase(page);
   const p = {
     userId: page.params?.userId,
     branchId: page.params?.branchId,
     navigate,
-    showToast
+    showToast,
+    adminBase
   };
   switch (page.pageType) {
     case 'dashboard':

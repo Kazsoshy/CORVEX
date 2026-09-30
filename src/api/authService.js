@@ -40,6 +40,27 @@ export function getCurrentUser() {
   }
 }
 
+/** Refresh stored session user after profile updates. */
+export function persistCurrentUserFromProfile(profile) {
+  if (!profile) return;
+  const prev = getCurrentUser() || {};
+  const fullName = [profile.first_name, profile.middle_name, profile.last_name]
+    .filter(Boolean)
+    .join(' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  const next = {
+    ...prev,
+    id: profile.user_id ?? prev.id,
+    fullName: fullName || prev.fullName,
+    email: profile.email ?? prev.email,
+    phone: profile.phone ?? prev.phone,
+    role: profile.role ?? prev.role,
+    branch: profile.branch ?? prev.branch,
+  };
+  localStorage.setItem('corvex_user', JSON.stringify(next));
+}
+
 /**
  * Map a role slug from the API to the frontend route path prefix.
  */

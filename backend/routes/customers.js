@@ -1,5 +1,6 @@
 import express from 'express';
 import { allow, assertSameBranch, ROLE_SETS } from '../middleware/auth.js';
+import { createPortalInvitation, resendPortalInvitation } from '../lib/customerPortal.js';
 
 const router = express.Router();
 router.use(allow(ROLE_SETS.customerRead, ROLE_SETS.customerWrite));
@@ -17,6 +18,7 @@ const CUSTOMER_SELECT_CORE = `
          c.customer_code,
          c.branch_id,
          c.account_manager_id,
+         c.assigned_sales_agent_id,
          c.territory_id,
          t.territory_name,
          c.first_name,
@@ -35,10 +37,14 @@ const CUSTOMER_SELECT_CORE = `
          c.secondary_contact_phone,
          c.secondary_contact_relationship,
          c.status,
+         c.user_id,
+         c.portal_email,
+         c.portal_status,
          c.created_at,
          c.updated_at,
          b.name AS branch_name,
          mgr.full_name AS account_manager_name,
+         agent.full_name AS assigned_sales_agent_name,
          ${PURCHASE_VOLUME_UNITS_SQL} AS "purchaseVolumeUnits"`;
 
 router.get('/', async (req, res) => {
@@ -94,6 +100,7 @@ router.get('/', async (req, res) => {
        FROM customers c
        LEFT JOIN branches b ON b.id = c.branch_id
        LEFT JOIN users mgr ON mgr.id = c.account_manager_id
+       LEFT JOIN users agent ON agent.id = c.assigned_sales_agent_id
        LEFT JOIN territories t ON t.territory_id = c.territory_id
        ${where}
        ORDER BY c.customer_id DESC
@@ -117,6 +124,45 @@ router.get('/', async (req, res) => {
   }
 });
 
+router.get('/lookup', async (req, res) => {
+  try {
+    const pool = req.app.locals.pool;
+    const phone = String(req.query.contact_phone || '').trim();
+    const email = String(req.query.portal_email || '').trim().toLowerCase();
+    if (!phone && !email) {
+      return res.status(400).json({ success: false, message: 'Provide contact_phone or portal_email to search.' });
+    }
+
+    const matches = [];
+    if (phone) {
+      const byPhone = await pool.query(
+        `SELECT customer_id, customer_code, first_name, last_name, contact_phone, portal_email, portal_status
+         FROM customers
+         WHERE contact_phone = $1 OR contact_person_phone = $1
+         LIMIT 5`,
+        [phone]
+      );
+      matches.push(...byPhone.rows);
+    }
+    if (email) {
+      const byEmail = await pool.query(
+        `SELECT customer_id, customer_code, first_name, last_name, contact_phone, portal_email, portal_status
+         FROM customers
+         WHERE LOWER(portal_email) = $1
+         LIMIT 5`,
+        [email]
+      );
+      matches.push(...byEmail.rows);
+    }
+
+    const unique = [...new Map(matches.map((row) => [row.customer_id, row])).values()];
+    return res.status(200).json({ success: true, data: unique, count: unique.length });
+  } catch (err) {
+    console.error('[Customers] GET /lookup error:', err.message);
+    return res.status(500).json({ success: false, message: 'Lookup failed.' });
+  }
+});
+
 router.get('/:id', async (req, res) => {
   try {
     const pool = req.app.locals.pool;
@@ -127,6 +173,7 @@ router.get('/:id', async (req, res) => {
        FROM customers c
        LEFT JOIN branches b ON b.id = c.branch_id
        LEFT JOIN users mgr ON mgr.id = c.account_manager_id
+       LEFT JOIN users agent ON agent.id = c.assigned_sales_agent_id
        LEFT JOIN territories t ON t.territory_id = c.territory_id
        WHERE c.customer_id = $1`,
       [req.params.id]
@@ -213,6 +260,7 @@ router.post('/', async (req, res) => {
     secondary_contact_fname, secondary_contact_lname,
     secondary_contact_phone, secondary_contact_relationship,
     branch_id, territory_id, account_manager_id, status,
+    create_portal_account, portal_email,
   } = req.body;
 
   const resolvedBranchId = branch_id
@@ -241,18 +289,23 @@ router.post('/', async (req, res) => {
 
     await client.query('BEGIN');
 
+    const assignedSalesAgentId = req.currentUser?.roleSlug === 'sales_staff'
+      ? req.currentUser.id
+      : null;
+
     const result = await client.query(
       `INSERT INTO customers
-        (branch_id, account_manager_id, territory_id,
+        (branch_id, account_manager_id, assigned_sales_agent_id, territory_id,
          first_name, middle_name, last_name, address, latitude, longitude,
          contact_phone, contact_person_fname, contact_person_mname, contact_person_lname, contact_person_phone,
          secondary_contact_fname, secondary_contact_lname, secondary_contact_phone,
          secondary_contact_relationship, status)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20)
        RETURNING customer_id, created_at`,
       [
         resolvedBranchId,
         account_manager_id ? Number(account_manager_id) : (req.currentUser?.id ?? null),
+        assignedSalesAgentId,
         territory_id ? Number(territory_id) : null,
         first_name.trim(),
         middle_name ? String(middle_name).trim() : null,
@@ -288,6 +341,23 @@ router.post('/', async (req, res) => {
       [customerId]
     );
 
+    let portalMeta = null;
+    if (create_portal_account === true || create_portal_account === 'true') {
+      portalMeta = await createPortalInvitation(client, {
+        customerId,
+        branchId: resolvedBranchId,
+        portalEmail: portal_email,
+        contactFirstName: contact_person_fname,
+        contactLastName: contact_person_lname,
+      });
+      console.log(`[CustomerPortal] Invitation created for customer ${customerId}: ${portalMeta.activationUrl}`);
+    } else {
+      await client.query(
+        `UPDATE customers SET portal_status = 'none' WHERE customer_id = $1 AND portal_status IS NULL`,
+        [customerId]
+      );
+    }
+
     await client.query('COMMIT');
 
     const detail = await req.app.locals.pool.query(
@@ -295,6 +365,7 @@ router.post('/', async (req, res) => {
        FROM customers c
        LEFT JOIN branches b ON b.id = c.branch_id
        LEFT JOIN users mgr ON mgr.id = c.account_manager_id
+       LEFT JOIN users agent ON agent.id = c.assigned_sales_agent_id
        LEFT JOIN territories t ON t.territory_id = c.territory_id
        WHERE c.customer_id = $1`,
       [customerId]
@@ -302,13 +373,72 @@ router.post('/', async (req, res) => {
 
     return res.status(201).json({
       success: true,
-      message: 'Customer created.',
+      message: portalMeta
+        ? 'Customer created. Portal invitation is pending activation.'
+        : 'Customer created.',
       data: detail.rows[0],
+      portal: portalMeta ? {
+        status: 'invited',
+        email: portalMeta.portalEmail,
+        activationUrl: portalMeta.activationUrl,
+        expiresAt: portalMeta.expiresAt,
+      } : null,
     });
   } catch (err) {
     await client.query('ROLLBACK');
     console.error('[Customers] POST / error:', err.message);
-    return res.status(500).json({ success: false, message: 'Failed to create customer.' });
+    const clientMessage = err.message || 'Failed to create customer.';
+    const status = /email|portal|valid/i.test(clientMessage) ? 400 : 500;
+    return res.status(status).json({ success: false, message: clientMessage });
+  } finally {
+    client.release();
+  }
+});
+
+router.post('/:id/portal/resend', async (req, res) => {
+  const client = await req.app.locals.pool.connect();
+  try {
+    const customerId = Number(req.params.id);
+    const existing = await client.query(
+      `SELECT customer_id, branch_id, portal_email, portal_status, contact_person_fname, contact_person_lname
+       FROM customers WHERE customer_id = $1`,
+      [customerId]
+    );
+    if (!existing.rows.length) {
+      return res.status(404).json({ success: false, message: 'Customer not found.' });
+    }
+    const customer = existing.rows[0];
+    if (!assertSameBranch(res, req.currentUser, customer.branch_id)) return;
+
+    const portalEmail = String(req.body?.portal_email || customer.portal_email || '').trim();
+    if (!portalEmail) {
+      return res.status(400).json({ success: false, message: 'Portal email is required to send an invitation.' });
+    }
+
+    await client.query('BEGIN');
+
+    if (customer.portal_status === 'active') {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ success: false, message: 'Portal account is already active for this customer.' });
+    }
+
+    const portalMeta = await resendPortalInvitation(client, { customerId, portalEmail });
+
+    await client.query('COMMIT');
+    return res.status(200).json({
+      success: true,
+      message: 'Portal invitation resent.',
+      portal: {
+        status: 'invited',
+        email: portalMeta.portalEmail,
+        activationUrl: portalMeta.activationUrl,
+        expiresAt: portalMeta.expiresAt,
+      },
+    });
+  } catch (err) {
+    await client.query('ROLLBACK');
+    console.error('[Customers] POST /:id/portal/resend error:', err.message);
+    return res.status(500).json({ success: false, message: err.message || 'Failed to resend invitation.' });
   } finally {
     client.release();
   }

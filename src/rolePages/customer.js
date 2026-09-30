@@ -7,6 +7,7 @@ export const customerRole = {
   accent: 'Self-service payments and receipts',
   navPages: [
     { label: 'Home', to: '/customer/home' },
+    { label: 'Purchase Requests', to: '/customer/purchase-requests' },
     { label: 'Account Details', to: '/customer/account-details' },
     { label: 'Payment History', to: '/customer/payment-history' },
     { label: 'Digital Receipts', to: '/customer/receipts' },

@@ -49,3 +49,33 @@ export async function getBranchAlerts() {
     return { success: false, data: { alerts: [] } };
   }
 }
+
+export async function getBranchAuditLogs(params = {}) {
+  try {
+    const response = await apiClient.get('/branch-manager/audit-logs', { params });
+    return response.data;
+  } catch (error) {
+    console.error('Failed to fetch branch audit logs:', error);
+    return { success: false, data: [] };
+  }
+}
+
+export async function getBranchCollectorDetail(collectorId) {
+  try {
+    const response = await apiClient.get(`/branch-manager/staff/collectors/${collectorId}`);
+    return response.data;
+  } catch (error) {
+    console.error('Failed to fetch collector detail:', error);
+    return { success: false, data: null };
+  }
+}
+
+export async function getBranchSalesAgentDetail(agentId) {
+  try {
+    const response = await apiClient.get(`/branch-manager/staff/sales/${agentId}`);
+    return response.data;
+  } catch (error) {
+    console.error('Failed to fetch sales agent detail:', error);
+    return { success: false, data: null };
+  }
+}

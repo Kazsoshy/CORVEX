@@ -1,4 +1,4 @@
-import { formatCurrency } from '../../data/collectorMockData';
+import { formatCurrency } from '../../utils/formatters.js';
 import { StatusBadge } from '../StatusBadge';
 
 export function AccountCard({ account, onViewDetails, onCall, onNavigate }) {

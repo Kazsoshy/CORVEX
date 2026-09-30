@@ -1,8 +1,26 @@
 import express from 'express';
-import { requireAuth, requireRole, requireAssignedBranch, ROLE_SETS } from '../middleware/auth.js';
+import { requireAuth, requireRole, requireAssignedBranch, isUnscoped, ROLE_SETS } from '../middleware/auth.js';
 
 const router = express.Router();
 router.use(requireRole(ROLE_SETS.branchOps), requireAssignedBranch);
+
+function scopeUser(user) {
+  const branchScoped = user.branchId != null && !isUnscoped(user);
+  return { branchScoped, bid: user.branchId };
+}
+
+async function assertStaffInBranch(pool, user, staffId, roleSlug) {
+  const { branchScoped, bid } = scopeUser(user);
+  const params = [staffId, roleSlug];
+  let sql = `SELECT u.id FROM users u JOIN roles r ON r.role_id = u.role_id
+             WHERE u.id = $1 AND r.slug = $2 AND u.status = 'Active'`;
+  if (branchScoped) {
+    sql += ' AND u.branch_id = $3';
+    params.push(bid);
+  }
+  const found = await pool.query(sql, params);
+  return found.rows.length > 0;
+}
 
 // ──────────────────────────────────────────────────────────────────────────────
 // GET /api/branch-manager/analytics
@@ -156,6 +174,15 @@ router.get('/analytics', requireAuth, async (req, res) => {
       (Number(inventory.stockout_count) === 0 ? 15 : 0)
     ));
 
+    let pendingCiSql = `SELECT COUNT(*)::int AS count FROM credit_investigations ci WHERE ci.status = 'Pending'`;
+    const pendingCiParams = [];
+    if (isBranchScoped) {
+      pendingCiSql += ' AND ci.branch_id = $1';
+      pendingCiParams.push(bid);
+    }
+    const pendingCiResult = await pool.query(pendingCiSql, pendingCiParams);
+    const pendingCI = pendingCiResult.rows[0]?.count || 0;
+
     return res.status(200).json({
       success: true,
       data: {
@@ -167,7 +194,7 @@ router.get('/analytics', requireAuth, async (req, res) => {
         routeCompliance: Math.round(collectorCompliance),
         salesVisitCompletion: Math.round(salesCompletion),
         stockAlertsCount: Number(inventory.low_stock_count),
-        pendingCI: 0,
+        pendingCI,
         overdueAccounts: Number(customers.overdue_count) || 0,
         totalCollectionsToday: Number(collections.total_amount_collected),
         totalSalesToday: Number(sales.total_sales_amount),
@@ -281,6 +308,13 @@ router.get('/staff', requireAuth, async (req, res) => {
         const conversionRate = visitsCompleted > 0 ? Math.round((salesLogged / visitsCompleted) * 100) : 0;
         const avgSaleValue = salesLogged > 0 ? Math.round(totalSalesAmount / salesLogged) : 0;
 
+        const newCustResult = await pool.query(
+          `SELECT COUNT(*)::int AS count FROM customers
+           WHERE assigned_sales_agent_id = $1 AND created_at >= CURRENT_DATE - INTERVAL '30 days'`,
+          [u.id]
+        );
+        const newCustomersAcquired = newCustResult.rows[0]?.count || 0;
+
         return {
           id: String(u.id),
           name: `${u.first_name} ${u.last_name}`,
@@ -291,7 +325,7 @@ router.get('/staff', requireAuth, async (req, res) => {
           visitCompletionRate,
           conversionRate,
           avgSaleValue,
-          newCustomersAcquired: 0,
+          newCustomersAcquired,
           customers: [],
           productPerformance: [],
         };
@@ -327,9 +361,10 @@ router.get('/customers', requireAuth, async (req, res) => {
       `SELECT c.customer_id, c.first_name, c.last_name, c.contact_phone, c.status,
               c.latitude, c.longitude, c.address,
               c.contact_person_fname, c.contact_person_lname, c.contact_person_phone,
-              c.account_manager_id, c.created_at,
+              c.account_manager_id, c.assigned_sales_agent_id, c.created_at,
               b.name AS branch_name,
               mgr.full_name AS account_manager_name,
+              agent.first_name || ' ' || agent.last_name AS assigned_sales_agent_name,
               COALESCE(ca.outstanding_balance, 0) AS outstanding_balance,
               COALESCE(ca.purchase_volume, 0) AS purchase_volume,
               ca.last_collection_date, ca.last_sales_visit
@@ -337,6 +372,7 @@ router.get('/customers', requireAuth, async (req, res) => {
        JOIN branches b ON b.id = c.branch_id
        LEFT JOIN customer_activity ca ON c.customer_id = ca.customer_id
        LEFT JOIN users mgr ON mgr.id = c.account_manager_id
+       LEFT JOIN users agent ON agent.id = c.assigned_sales_agent_id
        ${isBranchScoped ? 'WHERE c.branch_id = $1' : ''}
        ORDER BY c.last_name, c.first_name`,
       isBranchScoped ? [bid] : []
@@ -373,7 +409,7 @@ router.get('/customers', requireAuth, async (req, res) => {
       balance: c.outstanding_balance,
       paymentStatus: c.paymentStatus,
       lastVisit: c.last_sales_visit || c.last_collection_date || 'N/A',
-      assignedStaff: 'Unassigned',
+      assignedStaff: c.assigned_sales_agent_name?.trim() || c.account_manager_name || 'Unassigned',
       lat: c.lat,
       lng: c.lng,
       zone: c.outstanding_balance > 0 ? 'High Collection' : 'Moderate',
@@ -480,15 +516,38 @@ router.get('/alerts', requireAuth, async (req, res) => {
       alerts.push({
         id: `inv${idx}`,
         type: 'inventory',
-        category: item.available_stock <= 0 ? 'Stockout Risk' : 'Low Stock',
+        category: item.available_stock <= 0 ? 'Inventory Stockout' : 'Inventory Low Stock',
         title: item.available_stock <= 0 ? `${item.product_name} out of stock` : `${item.product_name} low stock`,
         message: item.available_stock <= 0
           ? `${item.product_name} — zero units remaining at branch.`
           : `${item.product_name} below reorder point (${item.available_stock} units).`,
         severity: item.available_stock <= 0 ? 'Critical' : 'Warning',
-        time: 'Today',
+        time: new Date().toISOString(),
       });
     });
+
+    let opsSql = `SELECT oa.alert_id, oa.alert_type, oa.severity, oa.title, oa.message, oa.created_at
+                  FROM operational_alerts oa WHERE oa.status = 'Open'`;
+    const opsParams = [];
+    if (isBranchScoped) {
+      opsSql += ' AND oa.branch_id = $1';
+      opsParams.push(bid);
+    }
+    opsSql += ' ORDER BY oa.created_at DESC LIMIT 20';
+    const opsResult = await pool.query(opsSql, opsParams);
+    opsResult.rows.forEach((row) => {
+      alerts.push({
+        id: `oa${row.alert_id}`,
+        type: row.alert_type,
+        category: row.alert_type,
+        title: row.title,
+        message: row.message,
+        severity: row.severity,
+        time: row.created_at,
+      });
+    });
+
+    alerts.sort((a, b) => new Date(b.time) - new Date(a.time));
 
     return res.status(200).json({
       success: true,
@@ -497,6 +556,153 @@ router.get('/alerts', requireAuth, async (req, res) => {
   } catch (err) {
     console.error('[Branch Manager] GET /alerts error:', err.message);
     return res.status(500).json({ success: false, message: 'Failed to fetch alerts.' });
+  }
+});
+
+// GET /api/branch-manager/audit-logs — branch-scoped audit trail
+router.get('/audit-logs', requireAuth, async (req, res) => {
+  try {
+    const pool = req.app.locals.pool;
+    const user = req.currentUser;
+    const { branchScoped, bid } = scopeUser(user);
+    const limit = Math.min(Number(req.query.limit) || 200, 500);
+
+    const params = [];
+    let sql = `SELECT a.log_id AS audit_id, a.user_id, a.user_name, a.action, a.ip_address,
+                      a.status_details, a.created_at
+               FROM audit_logs a`;
+    if (branchScoped) {
+      sql += ` JOIN users u ON u.id = a.user_id WHERE u.branch_id = $1`;
+      params.push(bid);
+    }
+    sql += ` ORDER BY a.created_at DESC LIMIT ${limit}`;
+
+    const result = await pool.query(sql, params);
+    return res.status(200).json({ success: true, data: result.rows });
+  } catch (err) {
+    console.error('[Branch Manager] GET /audit-logs error:', err.message);
+    return res.status(500).json({ success: false, message: 'Failed to fetch audit logs.' });
+  }
+});
+
+// GET /api/branch-manager/staff/collectors/:id — route timeline & map points
+router.get('/staff/collectors/:id', requireAuth, async (req, res) => {
+  try {
+    const pool = req.app.locals.pool;
+    const user = req.currentUser;
+    const collectorId = Number(req.params.id);
+    if (!Number.isFinite(collectorId)) {
+      return res.status(400).json({ success: false, message: 'Invalid collector ID.' });
+    }
+    const allowed = await assertStaffInBranch(pool, user, collectorId, 'collector');
+    if (!allowed) {
+      return res.status(404).json({ success: false, message: 'Collector not found.' });
+    }
+
+    const visitsResult = await pool.query(
+      `SELECT fv.visit_id, fv.scheduled_date, fv.status, fv.visit_type,
+              c.customer_id, c.first_name || ' ' || c.last_name AS customer_name,
+              c.latitude, c.longitude,
+              (SELECT cp.amount FROM collection_payment cp
+               WHERE cp.collector_id = fv.user_id AND cp.customer_id = fv.customer_id
+               ORDER BY cp.payment_date DESC LIMIT 1) AS last_payment_amount
+       FROM field_visits fv
+       JOIN customers c ON c.customer_id = fv.customer_id
+       WHERE fv.user_id = $1 AND fv.visit_type = 'Collection'
+       ORDER BY fv.scheduled_date DESC, fv.visit_id DESC
+       LIMIT 100`,
+      [collectorId]
+    );
+
+    const today = new Date().toISOString().slice(0, 10);
+    const route = visitsResult.rows.map((row) => {
+      let status = row.status;
+      if (row.status === 'Pending' && row.scheduled_date < today) status = 'Missed';
+      return {
+        account: row.customer_name,
+        customerId: row.customer_id,
+        status,
+        time: row.scheduled_date,
+        amount: row.last_payment_amount != null ? Number(row.last_payment_amount) : null,
+        lat: row.latitude != null ? Number(row.latitude) : null,
+        lng: row.longitude != null ? Number(row.longitude) : null,
+      };
+    });
+
+    const missedAccounts = route.filter((r) => r.status === 'Missed').map((r) => r.account);
+    const mapMarkers = route
+      .filter((r) => r.lat && r.lng)
+      .map((r, idx) => ({
+        id: `${r.customerId}-${idx}`,
+        position: [r.lat, r.lng],
+        label: r.account.substring(0, 2).toUpperCase(),
+        color: r.status === 'Missed' ? '#ef4444' : r.status === 'Completed' ? '#10b981' : '#093850',
+        popup: `${r.account} (${r.status})`,
+      }));
+
+    const polyline = mapMarkers.length >= 2
+      ? [{ id: 'route', positions: mapMarkers.map((m) => m.position), color: '#093850' }]
+      : [];
+
+    return res.status(200).json({
+      success: true,
+      data: { route, missedAccounts, mapMarkers, polylines: polyline, gpsAttendance: true },
+    });
+  } catch (err) {
+    console.error('[Branch Manager] GET /staff/collectors/:id error:', err.message);
+    return res.status(500).json({ success: false, message: 'Failed to load collector detail.' });
+  }
+});
+
+// GET /api/branch-manager/staff/sales/:id — customers & product mix
+router.get('/staff/sales/:id', requireAuth, async (req, res) => {
+  try {
+    const pool = req.app.locals.pool;
+    const user = req.currentUser;
+    const agentId = Number(req.params.id);
+    if (!Number.isFinite(agentId)) {
+      return res.status(400).json({ success: false, message: 'Invalid sales agent ID.' });
+    }
+    const allowed = await assertStaffInBranch(pool, user, agentId, 'sales_staff');
+    if (!allowed) {
+      return res.status(404).json({ success: false, message: 'Sales agent not found.' });
+    }
+
+    const customersResult = await pool.query(
+      `SELECT DISTINCT c.first_name || ' ' || c.last_name AS name
+       FROM customers c
+       WHERE c.assigned_sales_agent_id = $1
+          OR c.customer_id IN (SELECT fv.customer_id FROM field_visits fv WHERE fv.user_id = $1)
+       ORDER BY 1
+       LIMIT 50`,
+      [agentId]
+    );
+
+    const productsResult = await pool.query(
+      `SELECT p.name AS product, SUM(sii.quantity)::int AS units
+       FROM sales_invoice_items sii
+       JOIN sales_invoices si ON si.sales_invoices_id = sii.invoices_id
+       JOIN products p ON p.id = sii.product_id
+       WHERE si.sales_agent_id = $1
+       GROUP BY p.name
+       ORDER BY units DESC
+       LIMIT 15`,
+      [agentId]
+    );
+
+    return res.status(200).json({
+      success: true,
+      data: {
+        customers: customersResult.rows.map((r) => r.name),
+        productPerformance: productsResult.rows.map((r) => ({
+          product: r.product,
+          units: r.units,
+        })),
+      },
+    });
+  } catch (err) {
+    console.error('[Branch Manager] GET /staff/sales/:id error:', err.message);
+    return res.status(500).json({ success: false, message: 'Failed to load sales agent detail.' });
   }
 });
 

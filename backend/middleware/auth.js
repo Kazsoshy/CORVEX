@@ -26,7 +26,7 @@ export const ROLE_SETS = {
   customerWrite: ['super_admin', 'operating_manager', 'branch_manager', 'sales_staff'],
   territoryRead: ['super_admin', 'operating_manager', 'branch_manager', 'sales_staff'],
   territoryWrite: ['super_admin', 'operating_manager', 'branch_manager'],
-  reportsBranch: ['super_admin', 'operating_manager', 'branch_manager'],
+  reportsBranch: ['super_admin', 'operating_manager', 'branch_manager', 'inventory_staff'],
   reportsOrg: ['super_admin', 'operating_manager'],
   creditHistory: ['super_admin', 'operating_manager', 'branch_manager', 'inventory_staff', 'sales_staff'],
   inventory: ['super_admin', 'operating_manager', 'branch_manager', 'inventory_staff'],

@@ -1,5 +1,3 @@
-import { getCreditRecordById, getProductById, getRestockById, getTransferById } from '../data/warehouseMockData';
-
 const ROUTE_DEFINITIONS = [
   { pattern: /^\/warehouse\/dashboard$/, pageType: 'dashboard' },
   { pattern: /^\/warehouse\/settings$/, pageType: 'settings' },
@@ -7,12 +5,14 @@ const ROUTE_DEFINITIONS = [
   { pattern: /^\/warehouse\/branch-inventory$/, pageType: 'branchInventory' },
   { pattern: /^\/warehouse\/products$/, pageType: 'products' },
   { pattern: /^\/warehouse\/add-product$/, pageType: 'addProduct' },
+  { pattern: /^\/warehouse\/product\/([^/]+)\/edit$/, pageType: 'editProduct', params: ['productId'] },
   { pattern: /^\/warehouse\/product\/([^/]+)\/stock-count$/, pageType: 'stockCount', params: ['productId'] },
   { pattern: /^\/warehouse\/product\/([^/]+)\/restock$/, pageType: 'restock', params: ['productId'] },
   { pattern: /^\/warehouse\/product\/([^/]+)\/transfer$/, pageType: 'transfer', params: ['productId'] },
   { pattern: /^\/warehouse\/product\/([^/]+)$/, pageType: 'productDetail', params: ['productId'] },
   { pattern: /^\/warehouse\/movements$/, pageType: 'movements' },
   { pattern: /^\/warehouse\/movements\/([^/]+)$/, pageType: 'movementDetail', params: ['movementId'] },
+  { pattern: /^\/warehouse\/transfers\/new$/, pageType: 'transferRequestNew' },
   { pattern: /^\/warehouse\/transfers$/, pageType: 'transfers' },
   { pattern: /^\/warehouse\/transfers\/([^/]+)$/, pageType: 'transferDetail', params: ['transferId'] },
   { pattern: /^\/warehouse\/restock-history$/, pageType: 'restockHistory' },
@@ -28,9 +28,18 @@ const ROUTE_DEFINITIONS = [
   { pattern: /^\/warehouse\/product-categories$/, pageType: 'productCategories' },
 ];
 
+function normalizeWarehousePathname(pathname) {
+  if (pathname === '/warehouse/transfer-requests') return '/warehouse/transfers';
+  if (pathname === '/warehouse/transfer-requests/new') return '/warehouse/transfers/new';
+  const legacy = pathname.match(/^\/warehouse\/transfer-requests\/([^/]+)$/);
+  if (legacy) return `/warehouse/transfers/${legacy[1]}`;
+  return pathname;
+}
+
 export function matchWarehouseRoute(pathname) {
+  const normalized = normalizeWarehousePathname(pathname);
   for (const route of ROUTE_DEFINITIONS) {
-    const match = pathname.match(route.pattern);
+    const match = normalized.match(route.pattern);
     if (!match) continue;
     const params = {};
     route.params?.forEach((name, index) => {
@@ -43,10 +52,7 @@ export function matchWarehouseRoute(pathname) {
 
 export function buildWarehouseBreadcrumbs(pageType, params = {}) {
   const crumbs = [{ label: 'Dashboard', to: '/warehouse/dashboard' }];
-  const product = params.productId ? getProductById(params.productId) : null;
-  const productLabel = product?.name ?? 'Product Detail';
-  const transfer = params.transferId ? getTransferById(params.transferId) : null;
-  const restock = params.restockId ? getRestockById(params.restockId) : null;
+  const productLabel = params.productId ? `Product #${params.productId}` : 'Product Detail';
 
   switch (pageType) {
     case 'dashboard':
@@ -58,9 +64,16 @@ export function buildWarehouseBreadcrumbs(pageType, params = {}) {
     case 'products':
       return [...crumbs, { label: 'Products', to: '/warehouse/products' }];
     case 'addProduct':
-      return [...crumbs, { label: 'Branch Inventory', to: '/warehouse/branch-inventory' }, { label: 'Add Product', to: '/warehouse/add-product' }];
+      return [...crumbs, { label: 'Products', to: '/warehouse/products' }, { label: 'Add Product', to: '/warehouse/add-product' }];
+    case 'editProduct':
+      return [
+        ...crumbs,
+        { label: 'Products', to: '/warehouse/products' },
+        { label: productLabel, to: `/warehouse/product/${params.productId}` },
+        { label: 'Edit', to: `/warehouse/product/${params.productId}/edit` },
+      ];
     case 'productDetail':
-      return [...crumbs, { label: 'Branch Inventory', to: '/warehouse/branch-inventory' }, { label: productLabel, to: `/warehouse/product/${params.productId}` }];
+      return [...crumbs, { label: 'Products', to: '/warehouse/products' }, { label: productLabel, to: `/warehouse/product/${params.productId}` }];
     case 'stockCount':
       return [
         ...buildWarehouseBreadcrumbs('productDetail', params).slice(0, -1),
@@ -87,13 +100,19 @@ export function buildWarehouseBreadcrumbs(pageType, params = {}) {
         { label: 'Stock Movements', to: '/warehouse/movements' },
         { label: params.movementId ? `Movement #${params.movementId}` : 'Movement Detail', to: `/warehouse/movements/${params.movementId}` },
       ];
+    case 'transferRequestNew':
+      return [
+        ...crumbs,
+        { label: 'Transfers', to: '/warehouse/transfers' },
+        { label: 'New Request', to: '/warehouse/transfers/new' },
+      ];
     case 'transfers':
       return [...crumbs, { label: 'Transfers', to: '/warehouse/transfers' }];
     case 'transferDetail':
       return [
         ...crumbs,
         { label: 'Transfers', to: '/warehouse/transfers' },
-        { label: transfer?.id ?? 'Transfer Detail', to: `/warehouse/transfers/${params.transferId}` },
+        { label: params.transferId ? `Transfer #${params.transferId}` : 'Transfer Detail', to: `/warehouse/transfers/${params.transferId}` },
       ];
     case 'restockHistory':
       return [...crumbs, { label: 'Restock History', to: '/warehouse/restock-history' }];
@@ -101,7 +120,7 @@ export function buildWarehouseBreadcrumbs(pageType, params = {}) {
       return [
         ...crumbs,
         { label: 'Restock History', to: '/warehouse/restock-history' },
-        { label: restock?.id ?? 'Restock Detail', to: `/warehouse/restock-history/${params.restockId}` },
+        { label: params.restockId ? `Restock #${params.restockId}` : 'Restock Detail', to: `/warehouse/restock-history/${params.restockId}` },
       ];
     case 'creditHistory':
       return [...crumbs, { label: 'Customer Credit History', to: '/warehouse/credit-history' }];
@@ -128,18 +147,28 @@ export function buildWarehouseBreadcrumbs(pageType, params = {}) {
   }
 }
 
-export function resolveWarehousePage(pathname) {
+export function resolveWarehousePage(pathname, search = '') {
   const match = matchWarehouseRoute(pathname);
   if (!match) return null;
 
-  const breadcrumbs = buildWarehouseBreadcrumbs(match.pageType, match.params);
+  const searchParams = new URLSearchParams(search.startsWith('?') ? search.slice(1) : search);
+  let transferTab = searchParams.get('tab');
+  if (!transferTab && pathname === '/warehouse/transfer-requests') transferTab = 'requests';
+  if (transferTab !== 'history') transferTab = 'requests';
+
+  const params = { ...match.params };
+  if (match.pageType === 'transfers') params.transferTab = transferTab;
+
+  const breadcrumbs = buildWarehouseBreadcrumbs(match.pageType, params);
   const titles = {
     dashboard: 'Dashboard',
     settings: 'Settings',
     branchInventory: 'Branch Inventory',
     products: 'Products',
     addProduct: 'Add Product',
+    editProduct: 'Edit Product',
     productDetail: 'Product Detail',
+    transferRequestNew: 'New Transfer Request',
     stockCount: 'Stock Count',
     restock: 'Restock',
     transfer: 'Transfer Stock',
@@ -161,7 +190,7 @@ export function resolveWarehousePage(pathname) {
 
   return {
     pageType: match.pageType,
-    params: match.params,
+    params,
     breadcrumbs,
     title: titles[match.pageType] ?? 'Warehouse',
     badge: 'Warehouse staff',
@@ -174,14 +203,20 @@ export function isWarehouseNavActive(fullPath, navTo) {
     return pathname === '/warehouse/dashboard' || pathname === '/warehouse/settings' || pathname === '/warehouse/audit-log' || pathname === '/warehouse/reports';
   }
   if (navTo === '/warehouse/branch-inventory') {
-    return pathname === '/warehouse/branch-inventory'
-      || pathname === '/warehouse/inventory'
-      || pathname.startsWith('/warehouse/product/')
-      || pathname === '/warehouse/add-product';
+    return pathname === '/warehouse/branch-inventory' || pathname === '/warehouse/inventory';
   }
-  if (navTo === '/warehouse/products') return pathname === '/warehouse/products';
+  if (navTo === '/warehouse/products') {
+    return pathname === '/warehouse/products'
+      || pathname === '/warehouse/add-product'
+      || (pathname.startsWith('/warehouse/product/')
+        && !pathname.includes('/stock-count')
+        && !pathname.includes('/restock')
+        && !pathname.endsWith('/transfer'));
+  }
   if (navTo === '/warehouse/movements') return pathname.startsWith('/warehouse/movements');
-  if (navTo === '/warehouse/transfers') return pathname.startsWith('/warehouse/transfers');
+  if (navTo === '/warehouse/transfers') {
+    return pathname.startsWith('/warehouse/transfers') || pathname.startsWith('/warehouse/transfer-requests');
+  }
   if (navTo === '/warehouse/restock-history') return pathname.startsWith('/warehouse/restock-history');
   if (navTo === '/warehouse/suppliers') return pathname.startsWith('/warehouse/suppliers');
   if (navTo === '/warehouse/credit-history') return pathname.startsWith('/warehouse/credit-history');

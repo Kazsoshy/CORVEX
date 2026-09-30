@@ -22,6 +22,40 @@ export async function fetchCustomerById(id) {
   }
 }
 
+export async function fetchSalesPurchaseRequests() {
+  try {
+    const response = await apiClient.get('/sales/purchase-requests');
+    return response.data;
+  } catch (error) {
+    console.error('Failed to fetch purchase requests:', error);
+    return { success: false, data: [] };
+  }
+}
+
+export async function fetchSalesPurchaseRequestById(requestId) {
+  try {
+    const response = await apiClient.get(`/sales/purchase-requests/${requestId}`);
+    return response.data;
+  } catch (error) {
+    return {
+      success: false,
+      message: error.response?.data?.message || 'Failed to load purchase request.',
+    };
+  }
+}
+
+export async function updateSalesPurchaseRequestStatus(requestId, status) {
+  try {
+    const response = await apiClient.patch(`/sales/purchase-requests/${requestId}`, { status });
+    return response.data;
+  } catch (error) {
+    return {
+      success: false,
+      message: error.response?.data?.message || 'Failed to update request.',
+    };
+  }
+}
+
 export async function createCustomer(payload) {
   try {
     const response = await apiClient.post('/customers', payload);
@@ -147,5 +181,57 @@ export async function updateFieldVisit(id, data) {
   } catch (error) {
     console.error('Failed to update field visit:', error);
     return { success: false, message: error?.response?.data?.message || 'Failed to update field visit' };
+  }
+}
+
+export async function fetchSalesDashboard() {
+  try {
+    const response = await apiClient.get('/sales/dashboard');
+    return response.data;
+  } catch (error) {
+    console.error('Failed to fetch sales dashboard:', error);
+    return { success: false, data: null };
+  }
+}
+
+export async function submitSalesCreditInvestigation(payload) {
+  try {
+    const response = await apiClient.post('/sales/credit-investigations', payload);
+    return response.data;
+  } catch (error) {
+    return {
+      success: false,
+      message: error.response?.data?.message || 'Failed to submit credit investigation.',
+    };
+  }
+}
+
+export async function fetchSalesCreditInvestigations(params = {}) {
+  try {
+    const response = await apiClient.get('/sales/credit-investigations', { params });
+    return response.data;
+  } catch (error) {
+    console.error('Failed to fetch sales credit investigations:', error);
+    return { success: false, data: [] };
+  }
+}
+
+export async function fetchSalesCreditInvestigationById(id) {
+  try {
+    const response = await apiClient.get(`/sales/credit-investigations/${id}`);
+    return response.data;
+  } catch (error) {
+    console.error('Failed to fetch sales credit investigation:', error);
+    return { success: false, data: null };
+  }
+}
+
+export async function fetchSalesAuditLogs(params = {}) {
+  try {
+    const response = await apiClient.get('/sales/audit-logs', { params });
+    return response.data;
+  } catch (error) {
+    console.error('Failed to fetch sales audit logs:', error);
+    return { success: false, data: [] };
   }
 }

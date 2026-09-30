@@ -1,9 +1,35 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { createCustomer, createSalesInvoice, fetchCustomerById, fetchCustomers, fetchFieldVisits, fetchFieldVisitById, fetchInvoices, fetchPaymentMethods, fetchTerritories, updateFieldVisit } from '../../api/salesService';
+import {
+  createCustomer,
+  createSalesInvoice,
+  fetchCustomerById,
+  fetchCustomers,
+  fetchFieldVisits,
+  fetchFieldVisitById,
+  fetchInvoices,
+  fetchPaymentMethods,
+  fetchSalesAuditLogs,
+  fetchSalesDashboard,
+  fetchSalesCreditInvestigationById,
+  fetchSalesCreditInvestigations,
+  fetchSalesPurchaseRequestById,
+  fetchSalesPurchaseRequests,
+  fetchTerritories,
+  submitSalesCreditInvestigation,
+  updateFieldVisit,
+  updateSalesPurchaseRequestStatus,
+} from '../../api/salesService';
+import { lookupCustomersForDuplicate, resendCustomerPortalInvitation } from '../../api/customerPortalService';
+import { fetchNotifications, markNotificationRead, markAllNotificationsRead, mapNotificationRow } from '../../api/notificationService.js';
+import { mapCreditInvestigationRow } from '../../api/approvalsService.js';
+import { fetchMyProfile, updateMyProfile } from '../../api/profileService.js';
+import { getCurrentUser, persistCurrentUserFromProfile, requestLogout } from '../../api/authService.js';
+import apiClient from '../../api/apiClient.js';
 import { CONTACT_RELATIONSHIP_OPTIONS, formatContactPersonName, formatCustomerDisplayId, formatCustomerFullName, formatMiddleNameDisplay, formatPurchaseVolumeUnits, formatSecondaryContactName } from '../../utils/customerDisplay';
-import { getCurrentUser } from '../../api/authService.js';
-import { AUDIT_LOGS, CUSTOMERS, DASHBOARD_SUMMARY, LOW_STOCK_ITEMS, NOTIFICATIONS, OFFLINE_STATUS, PRODUCTS, ROUTE_TRACKING, SALES_ANALYTICS, SALES_HISTORY, SCHEDULE_STOPS, formatCurrency, formatDisplayDate, formatDisplayDateTime, getCustomerById, getProductById } from '../../data/salesMockData';
+import { downloadCsv } from '../../utils/csvExport';
+import { openExternalNavigation } from '../../utils/mapsNavigation';
+import { formatCurrency, formatDisplayDate, formatDisplayDateTime } from '../../data/salesMockData';
 import { CustomerCard } from './CustomerCard';
 import { InvoiceDetailsPage } from './InvoiceDetailsPage';
 import { EmptyState } from '../shared/EmptyState';
@@ -30,19 +56,15 @@ function StatsGrid({
     </section>;
 }
 function OfflineBanner() {
-  if (!OFFLINE_STATUS.enabled) return null;
-  return <section className={`panel offline-banner${OFFLINE_STATUS.isOnline ? ' online' : ' offline'}`}>
-      <div>
-        <strong>{OFFLINE_STATUS.isOnline ? 'Online' : 'Offline Mode Active'}</strong>
-        <p className="muted">
-          Last sync: {OFFLINE_STATUS.lastSync}
-          {OFFLINE_STATUS.pendingSync > 0 ? ` · ${OFFLINE_STATUS.pendingSync} pending sync` : ''}
-        </p>
-      </div>
-      <span className="offline-cache muted">
-        Cached: {OFFLINE_STATUS.cachedSchedules} schedules, {OFFLINE_STATUS.cachedInventory} products
-      </span>
-    </section>;
+  return null;
+}
+function handleCustomerNavigate(customer, showToast) {
+  const ok = openExternalNavigation({
+    latitude: customer.latitude,
+    longitude: customer.longitude,
+    address: customer.address,
+  });
+  if (!ok && showToast) showToast('Add an address or coordinates to open navigation.', 'error');
 }
 function DashboardPage({
   navigate,
@@ -50,9 +72,25 @@ function DashboardPage({
 }) {
   const currentUser = getCurrentUser();
   const today = formatDisplayDate(new Date());
-  const unreadCount = NOTIFICATIONS.filter(n => !n.read).length;
-  const firstPending = SCHEDULE_STOPS.find(c => c.status !== 'Completed');
+  const [dashboard, setDashboard] = useState(null);
+  const [unreadCount, setUnreadCount] = useState(0);
+  const [loading, setLoading] = useState(true);
+  useEffect(() => {
+    async function load() {
+      setLoading(true);
+      const [dashRes, notifRes] = await Promise.all([fetchSalesDashboard(), fetchNotifications()]);
+      if (dashRes.success) setDashboard(dashRes.data);
+      if (notifRes.success) {
+        setUnreadCount((notifRes.data || []).filter(n => n.status !== 'Read').length);
+      }
+      setLoading(false);
+    }
+    load();
+  }, []);
+  const summary = dashboard?.summary || {};
+  const analytics = dashboard?.analytics || {};
   const agentName = currentUser?.fullName || 'Sales Agent';
+  if (loading) return <LoadingState message="Loading dashboard..." />;
   return <div className="page">
       <OfflineBanner />
 
@@ -70,24 +108,35 @@ function DashboardPage({
 
       <StatsGrid stats={[{
       label: 'Accounts to Visit Today',
-      value: String(DASHBOARD_SUMMARY.accountsToVisit)
+      value: String(summary.accountsToVisit ?? 0)
     }, {
       label: 'Sales Commitments Logged',
-      value: String(DASHBOARD_SUMMARY.salesLogged)
+      value: String(summary.salesLogged ?? 0)
     }, {
       label: 'Pending Visits',
-      value: String(DASHBOARD_SUMMARY.pendingVisits)
+      value: String(summary.pendingVisits ?? 0)
     }, {
       label: 'Completed Visits',
-      value: String(DASHBOARD_SUMMARY.completedVisits)
+      value: String(summary.completedVisits ?? 0)
+    }, {
+      label: 'Pending CIs',
+      value: String(summary.creditInvestigationsPending ?? 0)
     }]} />
 
-      {LOW_STOCK_ITEMS.length ? <section className="panel content-panel alert-panel">
+      {(summary.creditInvestigationsPending ?? 0) > 0 ? <section className="panel content-panel alert-panel">
+          <div className="panel-section-header">
+            <h3>Credit investigations awaiting approval</h3>
+            <p className="muted">{summary.creditInvestigationsPending} submission(s) pending branch or operating manager review.</p>
+          </div>
+          <button className="button secondary" type="button" onClick={() => navigate('/sales/credit-investigations')}>View My Credit Investigations</button>
+        </section> : null}
+
+      {(dashboard?.lowStockItems || []).length ? <section className="panel content-panel alert-panel">
           <div className="panel-section-header">
             <h3>Low Stock Alerts</h3>
           </div>
           <ul className="widget-list">
-            {LOW_STOCK_ITEMS.map(item => <li key={item.id}>
+            {(dashboard?.lowStockItems || []).map(item => <li key={item.id}>
                 <div>
                   <strong>{item.name}</strong>
                   <span className="muted">{item.sku} · {item.branch}</span>
@@ -106,17 +155,17 @@ function DashboardPage({
       <div className="dashboard-widgets grid two-up">
         <section className="panel content-panel">
           <div className="panel-section-header"><h3>Today&apos;s Revenue</h3></div>
-          <p className="analytics-value">{formatCurrency(SALES_ANALYTICS.dailyRevenue)}</p>
-          <p className="muted">Weekly: {formatCurrency(SALES_ANALYTICS.weeklyRevenue)} · Monthly: {formatCurrency(SALES_ANALYTICS.monthlyRevenue)}</p>
+          <p className="analytics-value">{formatCurrency(analytics.dailyRevenue || 0)}</p>
+          <p className="muted">Weekly: {formatCurrency(analytics.weeklyRevenue || 0)} · Monthly: {formatCurrency(analytics.monthlyRevenue || 0)}</p>
         </section>
         <section className="panel content-panel">
           <div className="panel-section-header"><h3>Visit Completion Progress</h3></div>
-          <div className="progress-bar" role="progressbar" aria-valuenow={DASHBOARD_SUMMARY.visitProgress} aria-valuemin={0} aria-valuemax={100}>
+          <div className="progress-bar" role="progressbar" aria-valuenow={summary.visitProgress || 0} aria-valuemin={0} aria-valuemax={100}>
             <div className="progress-fill" style={{
-            width: `${DASHBOARD_SUMMARY.visitProgress}%`
+            width: `${summary.visitProgress || 0}%`
           }} />
           </div>
-          <p className="muted progress-caption">{DASHBOARD_SUMMARY.completedVisits} of {DASHBOARD_SUMMARY.accountsToVisit} visits completed</p>
+          <p className="muted progress-caption">{summary.completedVisits ?? 0} of {summary.accountsToVisit ?? 0} visits completed</p>
         </section>
       </div>
 
@@ -124,8 +173,8 @@ function DashboardPage({
         <section className="panel content-panel">
           <div className="panel-section-header"><h3>Recent Sales</h3></div>
           <ul className="widget-list">
-            {SALES_HISTORY.slice(0, 3).map(sale => <li key={sale.id}>
-                <div><strong>{sale.customerName || sale.first_name + ' ' + sale.last_name}</strong><span className="muted">{formatDisplayDate(sale.date)}</span></div>
+            {(dashboard?.recentSales || []).slice(0, 3).map(sale => <li key={sale.id}>
+                <div><strong>{sale.customerName}</strong><span className="muted">{formatDisplayDate(sale.date)}</span></div>
                 <span>{formatCurrency(sale.totalAmount)}</span>
               </li>)}
           </ul>
@@ -133,7 +182,7 @@ function DashboardPage({
         <section className="panel content-panel">
           <div className="panel-section-header"><h3>Top Selling Products</h3></div>
           <ul className="widget-list">
-            {SALES_ANALYTICS.topProducts.map(product => <li key={product.name}>
+            {(analytics.topProducts || []).map(product => <li key={product.name}>
                 <div><strong>{product.name}</strong></div>
                 <span>{product.units} units</span>
               </li>)}
@@ -147,13 +196,13 @@ function DashboardPage({
           <button className="button ghost" type="button" onClick={() => navigate('/sales/route-tracking')}>Route Tracking</button>
         </div>
         <div className="analytics-grid three-up">
-          <div className="analytics-card"><span className="metric-label">Daily Total</span><strong>{formatCurrency(SALES_ANALYTICS.dailyRevenue)}</strong></div>
-          <div className="analytics-card"><span className="metric-label">Weekly Total</span><strong>{formatCurrency(SALES_ANALYTICS.weeklyRevenue)}</strong></div>
-          <div className="analytics-card"><span className="metric-label">Monthly Total</span><strong>{formatCurrency(SALES_ANALYTICS.monthlyRevenue)}</strong></div>
+          <div className="analytics-card"><span className="metric-label">Daily Total</span><strong>{formatCurrency(analytics.dailyRevenue || 0)}</strong></div>
+          <div className="analytics-card"><span className="metric-label">Weekly Total</span><strong>{formatCurrency(analytics.weeklyRevenue || 0)}</strong></div>
+          <div className="analytics-card"><span className="metric-label">Monthly Total</span><strong>{formatCurrency(analytics.monthlyRevenue || 0)}</strong></div>
         </div>
         <h4 className="subsection-title">Top Customers</h4>
         <ul className="widget-list">
-          {SALES_ANALYTICS.topCustomers.map(customer => <li key={customer.name}><div><strong>{customer.name}</strong></div><span>{formatCurrency(customer.revenue)}</span></li>)}
+          {(analytics.topCustomers || []).map(customer => <li key={customer.name}><div><strong>{customer.name}</strong></div><span>{formatCurrency(customer.revenue)}</span></li>)}
         </ul>
       </section>
     </div>;
@@ -413,7 +462,24 @@ function CustomersPage({
           <h3>Customer List</h3>
           <div className="list-section-actions">
             <button className="button" type="button" onClick={() => navigate('/sales/customers/new')}>Add Customer</button>
-            <button className="button secondary" type="button" onClick={() => showToast('Export initiated.', 'success')}>Export Data</button>
+            <button
+              className="button secondary"
+              type="button"
+              onClick={() => {
+                const rows = filteredCustomers.map((c) => ({
+                  customer_id: formatCustomerDisplayId(c),
+                  name: formatCustomerFullName(c),
+                  territory: c.territory_name || '',
+                  phone: c.contact_phone || '',
+                  status: c.status || '',
+                  address: c.address || '',
+                }));
+                if (downloadCsv(rows, 'sales-customers.csv')) showToast('Customer list exported.', 'success');
+                else showToast('Nothing to export.', 'error');
+              }}
+            >
+              Export Data
+            </button>
           </div>
         </div>
         <div className="list-section-toolbar" style={{
@@ -458,7 +524,7 @@ function CustomersPage({
         purchaseVolumeUnits: resolvePurchaseVolumeUnits(customer),
         activityUpdatedAt: customer.activityUpdatedAt || customer.activityupdatedat,
         phone: customer.contact_phone || customer.phone || '—'
-      }} onViewDetails={c => navigate(`/sales/customer-detail/${c.id || c.customer_id}?from=customers`)} onNavigate={() => showToast(`Opening navigation to ${customer.address}`, 'success')} />)}
+      }} onViewDetails={c => navigate(`/sales/customer-detail/${c.id || c.customer_id}?from=customers`)} onNavigate={c => handleCustomerNavigate(c, showToast)} />)}
           </div> : <div className="corvex-table-wrapper">
               <table className="corvex-table">
                 <thead>
@@ -535,8 +601,11 @@ function CustomerFormPage({
     secondary_contact_phone: '',
     secondary_contact_relationship: '',
     territory_id: '',
-    status: 'Active'
+    status: 'Active',
+    create_portal_account: true,
+    portal_email: '',
   });
+  const [duplicateMatches, setDuplicateMatches] = useState([]);
   useEffect(() => {
     async function load() {
       setLoading(true);
@@ -546,6 +615,22 @@ function CustomerFormPage({
     }
     load();
   }, []);
+  useEffect(() => {
+    const phone = form.contact_phone.trim();
+    const email = form.portal_email.trim();
+    if (!phone && !email) {
+      setDuplicateMatches([]);
+      return;
+    }
+    const timer = setTimeout(async () => {
+      const res = await lookupCustomersForDuplicate({
+        contact_phone: phone || undefined,
+        portal_email: email || undefined,
+      });
+      setDuplicateMatches(res.success ? res.data || [] : []);
+    }, 400);
+    return () => clearTimeout(timer);
+  }, [form.contact_phone, form.portal_email]);
   const updateField = (name, value) => {
     setForm(prev => ({
       ...prev,
@@ -568,8 +653,15 @@ function CustomerFormPage({
       nextErrors.secondary_contact_phone = 'Secondary contact must be different from the primary contact.';
     }
     setErrors(nextErrors);
+    if (form.create_portal_account && !form.portal_email.trim()) {
+      nextErrors.portal_email = 'Portal email is required when creating a customer login.';
+    }
     if (Object.keys(nextErrors).length) {
       showToast('Please complete all required fields.', 'error');
+      return;
+    }
+    if (duplicateMatches.length) {
+      showToast('Possible duplicate customer found. Review matches before saving.', 'error');
       return;
     }
     setSubmitting(true);
@@ -585,14 +677,16 @@ function CustomerFormPage({
       latitude: form.latitude !== '' ? Number(form.latitude) : undefined,
       longitude: form.longitude !== '' ? Number(form.longitude) : undefined,
       branch_id: currentUser?.branchId ?? undefined,
-      account_manager_id: currentUser?.id ?? undefined
+      account_manager_id: currentUser?.id ?? undefined,
+      create_portal_account: Boolean(form.create_portal_account),
+      portal_email: form.portal_email.trim() || undefined,
     });
     setSubmitting(false);
     if (!result.success || !result.data) {
       showToast(result.message || 'Failed to create customer.', 'error');
       return;
     }
-    showToast('Customer created successfully.', 'success');
+    showToast(result.message || 'Customer created successfully.', 'success');
     navigate(`/sales/customer-detail/${result.data.customer_id}?from=customers`);
   };
   if (loading) return <LoadingState message="Loading customer form..." />;
@@ -600,8 +694,21 @@ function CustomerFormPage({
       <section className="panel form-panel content-panel">
         <div className="panel-section-header">
           <h3>Add Customer</h3>
-          <p className="muted">Register a customer for your branch. The system assigns a sequential Customer ID automatically.</p>
+          <p className="muted">Register a customer for your branch. Search runs automatically on phone or portal email to help prevent duplicates.</p>
         </div>
+        {duplicateMatches.length ? (
+          <section className="panel content-panel" style={{ borderColor: '#fcd34d', background: 'rgba(245,158,11,0.06)', marginBottom: 16 }}>
+            <h4 style={{ marginTop: 0 }}>Possible existing customers</h4>
+            <ul className="detail-list">
+              {duplicateMatches.map((match) => (
+                <li key={match.customer_id}>
+                  <span>{match.customer_code || match.customer_id}</span>
+                  <strong>{match.first_name} {match.last_name} · {match.contact_phone}</strong>
+                </li>
+              ))}
+            </ul>
+          </section>
+        ) : null}
         <div className="account-detail-grid two-up">
           <div className="form-group">
             <label htmlFor="cust-first">First Name *</label>
@@ -671,6 +778,34 @@ function CustomerFormPage({
 
       <section className="panel form-panel content-panel">
         <div className="panel-section-header">
+          <h3>Customer Portal Access</h3>
+          <p className="muted">The customer sets their own password using an activation link. You only provide their verified email.</p>
+        </div>
+        <label className="toggle-label">
+          <input
+            type="checkbox"
+            checked={form.create_portal_account}
+            onChange={(e) => updateField('create_portal_account', e.target.checked)}
+          />
+          Create customer portal account (send invitation)
+        </label>
+        {form.create_portal_account ? (
+          <div className="form-group" style={{ marginTop: 12 }}>
+            <label htmlFor="portal-email">Customer portal email *</label>
+            <input
+              id="portal-email"
+              type="email"
+              value={form.portal_email}
+              onChange={(e) => updateField('portal_email', e.target.value)}
+              placeholder="customer@business.com"
+            />
+            {errors.portal_email ? <p className="form-error">{errors.portal_email}</p> : null}
+          </div>
+        ) : null}
+      </section>
+
+      <section className="panel form-panel content-panel">
+        <div className="panel-section-header">
           <h3>Secondary Contact Person</h3>
           <p className="muted">Optional backup contact — must not be the same person as the primary contact.</p>
         </div>
@@ -712,6 +847,19 @@ function CustomerFormPage({
       </div>
     </div>;
 }
+function portalStatusLabel(status) {
+  switch (status) {
+    case 'invited':
+      return 'Pending portal activation';
+    case 'active':
+      return 'Portal active';
+    case 'pending':
+      return 'Pending portal activation';
+    default:
+      return 'No portal account';
+  }
+}
+
 function CustomerDetailPage({
   customerId,
   parentContext,
@@ -720,17 +868,38 @@ function CustomerDetailPage({
 }) {
   const [customer, setCustomer] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [portalEmail, setPortalEmail] = useState('');
+  const [lastActivationUrl, setLastActivationUrl] = useState('');
+  const [resending, setResending] = useState(false);
   useEffect(() => {
     async function load() {
       setLoading(true);
       const res = await fetchCustomerById(customerId);
       if (res.success && res.data) {
         setCustomer(res.data);
+        setPortalEmail(res.data.portal_email || '');
       }
       setLoading(false);
     }
     load();
   }, [customerId]);
+  const handleResendPortal = async () => {
+    if (!portalEmail.trim()) {
+      showToast('Enter the customer portal email.', 'error');
+      return;
+    }
+    setResending(true);
+    const result = await resendCustomerPortalInvitation(customerId, portalEmail.trim());
+    setResending(false);
+    if (!result.success) {
+      showToast(result.message || 'Failed to resend invitation.', 'error');
+      return;
+    }
+    setLastActivationUrl(result.portal?.activationUrl || '');
+    showToast('Portal invitation sent.', 'success');
+    const refreshed = await fetchCustomerById(customerId);
+    if (refreshed.success && refreshed.data) setCustomer(refreshed.data);
+  };
   if (loading) return <LoadingState message="Loading customer details..." />;
   if (!customer) return <EmptyState title="Customer not found" actionLabel="Back to Customers" onAction={() => navigate('/sales/customers')} />;
   const purchaseVolumeUnits = resolvePurchaseVolumeUnits(customer);
@@ -777,9 +946,12 @@ function CustomerDetailPage({
             <p><strong>Last Name:</strong> {customer.last_name || '—'}</p>
             <p><strong>Branch:</strong> {customer.branch_name || '—'}</p>
             <p><strong>Account Manager:</strong> {customer.account_manager_name || '—'}</p>
+            <p><strong>Assigned Sales Agent:</strong> {customer.assigned_sales_agent_name || '—'}</p>
             <p><strong>Territory:</strong> {customer.territory_name || '—'}</p>
             <p><strong>Business Phone:</strong> {customer.contact_phone}</p>
             <p><strong>Status:</strong> {customer.status}</p>
+            <p><strong>Portal access:</strong> {portalStatusLabel(customer.portal_status)}</p>
+            {customer.portal_email ? <p><strong>Portal email:</strong> {customer.portal_email}</p> : null}
             <p><strong>Created At:</strong> {customer.created_at ? formatDisplayDateTime(customer.created_at) : 'N/A'}</p>
             <p><strong>Updated At:</strong> {customer.updated_at ? formatDisplayDateTime(customer.updated_at) : 'N/A'}</p>
           </div>
@@ -802,6 +974,25 @@ function CustomerDetailPage({
           </div>
         </div>
       </section>
+
+      {customer.portal_status !== 'active' ? (
+        <section className="panel content-panel account-detail-panel">
+          <div className="panel-section-header"><h3>Customer Portal Invitation</h3></div>
+          <p className="muted">Share the activation link with the customer (email/SMS in production). The sales agent never sets the customer password.</p>
+          <div className="form-group">
+            <label htmlFor="detail-portal-email">Portal email</label>
+            <input id="detail-portal-email" type="email" value={portalEmail} onChange={(e) => setPortalEmail(e.target.value)} />
+          </div>
+          <button className="button secondary" type="button" onClick={handleResendPortal} disabled={resending}>
+            {resending ? 'Sending…' : 'Send / Resend Invitation'}
+          </button>
+          {lastActivationUrl ? (
+            <p className="muted" style={{ marginTop: 12, wordBreak: 'break-all' }}>
+              Activation link (dev): {lastActivationUrl}
+            </p>
+          ) : null}
+        </section>
+      ) : null}
 
       <section className="panel content-panel account-detail-panel">
         <div className="panel-section-header">
@@ -913,12 +1104,21 @@ function CustomerDetailPage({
 
       <div className="flex flex-wrap justify-end gap-2 mt-4">
         <button className="button secondary" type="button" onClick={() => navigate(parentContext === 'schedule' ? '/sales/schedule' : '/sales/customers')}>Back</button>
+        <button
+          className="button secondary"
+          type="button"
+          onClick={() => navigate(`/sales/ci-form/${customer.customer_id}?from=${parentContext || 'customers'}`)}
+        >
+          Request Credit Investigation
+        </button>
+        <button className="button ghost" type="button" onClick={() => navigate('/sales/credit-investigations')}>My CIs</button>
         <button className="button" type="button" onClick={() => navigate(`/sales/log-sale/${customer.customer_id}`)}>Log a Sale</button>
       </div>
     </div>;
 }
 function LogSalePage({
   customerId,
+  purchaseRequestId,
   navigate,
   showToast
 }) {
@@ -941,6 +1141,7 @@ function LogSalePage({
     quantity: 1
   }]);
   const [errors, setErrors] = useState({});
+  const [linkedPurchaseRequestId, setLinkedPurchaseRequestId] = useState(purchaseRequestId ? String(purchaseRequestId) : '');
   useEffect(() => {
     if (customerId) {
       setForm(prev => ({
@@ -972,10 +1173,30 @@ function LogSalePage({
       } catch (err) {
         console.error('[LogSale] product load error:', err.message);
       }
+      if (purchaseRequestId) {
+        const pr = await fetchSalesPurchaseRequestById(purchaseRequestId);
+        if (pr.success && pr.data) {
+          setLinkedPurchaseRequestId(String(pr.data.request_id));
+          setForm((prev) => ({
+            ...prev,
+            customerId: String(pr.data.customer_id),
+            notes: [prev.notes, pr.data.notes].filter(Boolean).join('\n').trim()
+              || `Fulfilling purchase request #${pr.data.request_id}`,
+          }));
+          if (pr.data.items?.length) {
+            setLineItems(pr.data.items.map((item) => ({
+              productId: String(item.product_id),
+              quantity: Number(item.quantity) || 1,
+            })));
+          }
+        } else {
+          showToast(pr.message || 'Could not load purchase request.', 'error');
+        }
+      }
       setLoading(false);
     }
     load();
-  }, [currentUser?.branchId]);
+  }, [currentUser?.branchId, purchaseRequestId, showToast]);
   const totalAmount = useMemo(() => lineItems.reduce((sum, line) => {
     const product = products.find(p => String(p.product_id) === String(line.productId));
     const quantity = Number(line.quantity) || 0;
@@ -1028,7 +1249,8 @@ function LogSalePage({
       invoices_date: form.invoicesDate,
       due_date: form.dueDate || undefined,
       notes: form.notes,
-      items
+      items,
+      purchase_request_id: linkedPurchaseRequestId ? Number(linkedPurchaseRequestId) : undefined,
     });
     setSubmitting(false);
     if (!result.success || !result.data) {
@@ -1044,6 +1266,11 @@ function LogSalePage({
         <div className="panel-section-header">
           <h3>Log a Sale</h3>
           <p className="muted">Record a customer sales invoice and line items for branch review.</p>
+          {linkedPurchaseRequestId ? (
+            <p className="muted" style={{ marginTop: 8 }}>
+              Prefilled from purchase request #{linkedPurchaseRequestId}. Submitting will create the invoice and mark the request as invoiced.
+            </p>
+          ) : null}
         </div>
 
         <div className="form-group">
@@ -1311,6 +1538,124 @@ function VisitLogPage({
       </div>
     </div>;
 }
+function SalesCISubmissionsPage({
+  navigate,
+  showToast
+}) {
+  const [filter, setFilter] = useState('All');
+  const [items, setItems] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const reload = async () => {
+    setLoading(true);
+    const res = await fetchSalesCreditInvestigations({ status: filter === 'All' ? undefined : filter });
+    if (res.success) setItems((res.data || []).map(mapCreditInvestigationRow));
+    else if (showToast) showToast(res.message || 'Failed to load credit investigations.', 'error');
+    setLoading(false);
+  };
+  useEffect(() => {
+    reload();
+  }, [filter]);
+  if (loading && !items.length) return <LoadingState message="Loading credit investigations..." />;
+  return <div className="page">
+      <section className="panel content-panel">
+        <div className="list-section-header">
+          <h3>My Credit Investigations</h3>
+          <p className="muted">Requests you submitted for branch manager and operating manager approval.</p>
+        </div>
+        <div className="list-section-toolbar" style={{ marginBottom: 12 }}>
+          <div className="segmented-control">
+            {['All', 'Pending', 'Approved', 'Rejected', 'Revision Requested'].map(f => (
+              <button key={f} className={filter === f ? 'segment active' : 'segment'} type="button" onClick={() => setFilter(f)}>{f}</button>
+            ))}
+          </div>
+        </div>
+        {items.length ? <div className="corvex-table-wrapper">
+            <table className="corvex-table">
+              <thead>
+                <tr><th>CI #</th><th>Customer</th><th>Purpose</th><th>Submitted</th><th>Status</th><th>Actions</th></tr>
+              </thead>
+              <tbody>
+                {items.map(ci => <tr key={ci.id} className="clickable-row" onClick={() => navigate(`/sales/credit-investigations/${ci.ciId}`)}>
+                    <td>{ci.ciId}</td>
+                    <td>{ci.customerName}</td>
+                    <td>{ci.purpose || '—'}</td>
+                    <td>{formatDisplayDate(ci.submissionDate)}</td>
+                    <td><StatusBadge status={ci.status} /></td>
+                    <td className="table-actions" onClick={e => e.stopPropagation()}>
+                      <button className="icon-action-button" type="button" title="View" onClick={() => navigate(`/sales/credit-investigations/${ci.ciId}`)}>
+                        <NavIcon name="view" />
+                      </button>
+                      {(ci.status === 'Rejected' || ci.status === 'Revision Requested') && ci.customerId ? (
+                        <button className="button secondary" type="button" style={{ marginLeft: 8 }} onClick={() => navigate(`/sales/ci-form/${ci.customerId}?from=customers`)}>Resubmit</button>
+                      ) : null}
+                    </td>
+                  </tr>)}
+              </tbody>
+            </table>
+          </div> : <EmptyState title="No credit investigations" description="Request a CI from a customer profile, or adjust the status filter." actionLabel="Browse customers" onAction={() => navigate('/sales/customers')} />}
+      </section>
+    </div>;
+}
+function SalesCIDetailPage({
+  ciId,
+  navigate,
+  showToast
+}) {
+  const [ci, setCi] = useState(null);
+  const [loading, setLoading] = useState(true);
+  useEffect(() => {
+    async function load() {
+      setLoading(true);
+      const res = await fetchSalesCreditInvestigationById(ciId);
+      if (res.success && res.data) setCi(mapCreditInvestigationRow(res.data));
+      else {
+        setCi(null);
+        if (showToast) showToast(res.message || 'Credit investigation not found.', 'error');
+      }
+      setLoading(false);
+    }
+    load();
+  }, [ciId, showToast]);
+  if (loading) return <LoadingState message="Loading credit investigation..." />;
+  if (!ci) {
+    return <EmptyState title="Not found" description="This submission is not on your account." actionLabel="Back to list" onAction={() => navigate('/sales/credit-investigations')} />;
+  }
+  const canResubmit = ci.status === 'Rejected' || ci.status === 'Revision Requested';
+  return <div className="page">
+      <StatsGrid stats={[{
+        label: 'Status',
+        value: ci.status
+      }, {
+        label: 'Monthly income',
+        value: formatCurrency(ci.monthlyIncome)
+      }, {
+        label: 'Risk score',
+        value: String(ci.riskScore ?? '—')
+      }]} />
+      <section className="panel content-panel">
+        <div className="panel-section-header">
+          <h3>CI #{ci.ciId} · {ci.customerName}</h3>
+          <p className="muted">Submitted {formatDisplayDateTime(ci.submissionDate)} · Branch review by manager</p>
+        </div>
+        <ul className="info-grid">
+          <li><span className="info-item-label">Purpose</span><span className="info-item-value">{ci.purpose || '—'}</span></li>
+          <li><span className="info-item-label">Business type</span><span className="info-item-value">{ci.businessType || '—'}</span></li>
+          <li><span className="info-item-label">References</span><span className="info-item-value">{ci.references || '—'}</span></li>
+          <li><span className="info-item-label">Remarks</span><span className="info-item-value">{ci.formRemarks || '—'}</span></li>
+          {ci.rejectionReason ? <li><span className="info-item-label">Decision notes</span><span className="info-item-value">{ci.rejectionReason}</span></li> : null}
+        </ul>
+      </section>
+      <div className="flex flex-wrap justify-end gap-2 mt-4">
+        <button className="button ghost" type="button" onClick={() => navigate('/sales/credit-investigations')}>Back to list</button>
+        {ci.customerId ? (
+          <button className="button secondary" type="button" onClick={() => navigate(`/sales/customer-detail/${ci.customerId}?from=customers`)}>Customer profile</button>
+        ) : null}
+        {canResubmit && ci.customerId ? (
+          <button className="button" type="button" onClick={() => navigate(`/sales/ci-form/${ci.customerId}?from=customers`)}>Submit revised CI</button>
+        ) : null}
+      </div>
+    </div>;
+}
 function CIFormPage({
   customerId,
   parentContext,
@@ -1357,11 +1702,24 @@ function CIFormPage({
         }))} /></div>
       </section>
       <div className="flex justify-end gap-2 mt-4">
-        <button className="button secondary" type="button" onClick={() => navigate(`/sales/customer-detail/${customer.id}${contextQuery}`)}>Cancel</button>
-        <button className="button" type="button" onClick={() => {
-        showToast('CI Form sent to Operating Manager.', 'success');
-        navigate(`/sales/customer-detail/${customer.id}${contextQuery}`);
-      }}>Submit to Operating Manager</button>
+        <button className="button secondary" type="button" onClick={() => navigate(`/sales/customer-detail/${customer.customer_id}${contextQuery}`)}>Cancel</button>
+        <button className="button" type="button" onClick={async () => {
+        const result = await submitSalesCreditInvestigation({
+          customer_id: customer.customer_id,
+          purpose: formData.purpose,
+          monthly_income: formData.income,
+          business_type: formData.businessType,
+          references_summary: formData.references,
+          form_remarks: formData.remarks,
+        });
+        if (!result.success) {
+          showToast(result.message || 'Submit failed.', 'error');
+          return;
+        }
+        showToast(result.message || 'CI submitted for branch approval.', 'success');
+        const newId = result.data?.ci_id;
+        navigate(newId ? `/sales/credit-investigations/${newId}` : '/sales/credit-investigations');
+      }}>Submit for Branch Approval</button>
       </div>
     </div>;
 }
@@ -1380,8 +1738,10 @@ function InventoryPage({
     async function loadProducts() {
       setLoading(true);
       try {
-        const apiClient = (await import('../../api/apiClient.js')).default;
-        const res = await apiClient.get('/products');
+        const branchId = getCurrentUser()?.branch?.id;
+        const res = await apiClient.get('/products', {
+          params: branchId ? { branch_id: branchId, limit: 200 } : { limit: 200 },
+        });
         if (res.data.success) {
           setProducts(res.data.data);
           setCategories(res.data.categories || []);
@@ -1407,7 +1767,23 @@ function InventoryPage({
         <div className="list-section-header">
           <h3>Inventory Viewer</h3>
           <div className="list-section-actions">
-            <button className="button secondary" type="button" onClick={() => showToast('Export initiated.', 'success')}>Export Data</button>
+            <button
+              className="button secondary"
+              type="button"
+              onClick={() => {
+                const rows = filtered.map((p) => ({
+                  product_id: p.product_id,
+                  name: p.product_name,
+                  category: p.category_name || '',
+                  unit_price: p.unit_price,
+                  status: p.status || '',
+                }));
+                if (downloadCsv(rows, 'sales-inventory.csv')) showToast('Inventory exported.', 'success');
+                else showToast('Nothing to export.', 'error');
+              }}
+            >
+              Export Data
+            </button>
           </div>
         </div>
         <div className="list-section-toolbar" style={{
@@ -1483,26 +1859,43 @@ function ProductDetailsPage({
   productId,
   navigate
 }) {
-  const product = getProductById(productId);
+  const [product, setProduct] = useState(null);
+  const [branchStock, setBranchStock] = useState(null);
+  const [loading, setLoading] = useState(true);
+  useEffect(() => {
+    async function load() {
+      setLoading(true);
+      const res = await apiClient.get(`/products/${productId}`);
+      if (res.data.success) {
+        setProduct(res.data.data);
+        const branchId = getCurrentUser()?.branch?.id;
+        const inv = res.data.data?.inventory || [];
+        setBranchStock(branchId ? inv.find((row) => row.branch_id === branchId) : inv[0]);
+      }
+      setLoading(false);
+    }
+    load();
+  }, [productId]);
+  if (loading) return <LoadingState message="Loading product..." />;
   if (!product) return <EmptyState title="Product not found" actionLabel="Back to Inventory" onAction={() => navigate('/sales/inventory')} />;
   return <div className="page">
       <StatsGrid stats={[{
       label: 'Current Stock',
-      value: String(product.stock)
+      value: String(branchStock?.available_stock ?? '—')
     }, {
       label: 'Unit Price',
-      value: formatCurrency(product.unitPrice)
+      value: formatCurrency(product.unit_price)
     }, {
       label: 'Status',
-      value: product.status
+      value: branchStock?.stock_status || product.status
     }]} />
       <section className="panel content-panel">
         <ul className="info-grid">
-          <li><span className="info-item-label">Product</span><span className="info-item-value">{product.name}</span></li>
+          <li><span className="info-item-label">Product</span><span className="info-item-value">{product.product_name}</span></li>
           <li><span className="info-item-label">SKU</span><span className="info-item-value">{product.sku}</span></li>
-          <li><span className="info-item-label">Category</span><span className="info-item-value">{product.category}</span></li>
-          <li><span className="info-item-label">Branch</span><span className="info-item-value">{product.branch}</span></li>
-          <li><span className="info-item-label">Minimum Stock</span><span className="info-item-value">{product.minStock} units</span></li>
+          <li><span className="info-item-label">Category</span><span className="info-item-value">{product.category_name || '—'}</span></li>
+          <li><span className="info-item-label">Branch</span><span className="info-item-value">{branchStock?.branch_name || getCurrentUser()?.branch?.name || '—'}</span></li>
+          <li><span className="info-item-label">Reorder Level</span><span className="info-item-value">{branchStock?.reorder_level ?? product.reorder_point ?? '—'} units</span></li>
         </ul>
       </section>
       <div className="flex justify-end mt-4">
@@ -1569,7 +1962,23 @@ export function SalesHistoryPage({
         <div className="list-section-header">
           <h3>Sales Transactions</h3>
           <div className="list-section-actions">
-            <button className="button secondary" type="button" onClick={() => showToast('Export initiated.', 'success')}>Export Data</button>
+            <button
+              className="button secondary"
+              type="button"
+              onClick={() => {
+                const rows = filtered.map((item) => ({
+                  invoice_number: item.invoice_number,
+                  customer: item.customer_name || `${item.first_name || ''} ${item.last_name || ''}`.trim(),
+                  date: item.invoice_date || item.created_at || '',
+                  total: item.total_amount,
+                  status: item.status || '',
+                }));
+                if (downloadCsv(rows, 'sales-history.csv')) showToast('Sales history exported.', 'success');
+                else showToast('Nothing to export.', 'error');
+              }}
+            >
+              Export Data
+            </button>
           </div>
         </div>
         <div className="list-section-toolbar" style={{
@@ -1640,26 +2049,39 @@ function NotificationsPage({
   navigate,
   showToast
 }) {
-  const [notifications, setNotifications] = useState(NOTIFICATIONS);
+  const [notifications, setNotifications] = useState([]);
+  const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState('All');
+  const load = async () => {
+    setLoading(true);
+    const res = await fetchNotifications();
+    if (res.success) {
+      setNotifications((res.data || []).map(row => mapNotificationRow(row, { opsBase: '/sales', orgBase: '/sales' })));
+    }
+    setLoading(false);
+  };
+  useEffect(() => {
+    load();
+  }, []);
   const filtered = useMemo(() => {
     if (filter === 'Unread') return notifications.filter(n => !n.read);
     if (filter === 'Read') return notifications.filter(n => n.read);
-    if (filter === 'Stock') return notifications.filter(n => n.type === 'stock');
-    if (filter === 'Schedule') return notifications.filter(n => n.type === 'schedule');
-    if (filter === 'Sales') return notifications.filter(n => n.type === 'sale');
-    if (filter === 'Assignments') return notifications.filter(n => n.type === 'assignment');
-    if (filter === 'CI') return notifications.filter(n => n.type === 'ci');
+    if (filter === 'Stock') return notifications.filter(n => (n.category || '').toLowerCase().includes('stock'));
+    if (filter === 'Schedule') return notifications.filter(n => (n.category || '').toLowerCase().includes('schedule'));
+    if (filter === 'Sales') return notifications.filter(n => (n.category || '').toLowerCase().includes('sales'));
+    if (filter === 'Assignments') return notifications.filter(n => (n.category || '').toLowerCase().includes('assign'));
+    if (filter === 'CI') return notifications.filter(n => (n.category || '').toLowerCase().includes('ci'));
     return notifications;
   }, [notifications, filter]);
+  if (loading && !notifications.length) return <LoadingState message="Loading notifications..." />;
   return <div className="page">
       <div className="flex justify-end mt-2 mb-2">
-        <button className="button secondary" type="button" onClick={() => {
-        setNotifications(items => items.map(n => ({
-          ...n,
-          read: true
-        })));
-        showToast('All notifications marked as read.', 'success');
+        <button className="button secondary" type="button" onClick={async () => {
+        const res = await markAllNotificationsRead();
+        if (res.success) {
+          showToast('All notifications marked as read.', 'success');
+          load();
+        }
       }}>Mark All as Read</button>
       </div>
       <section className="panel content-panel">
@@ -1669,16 +2091,13 @@ function NotificationsPage({
       </section>
       {filtered.length ? <div className="notification-list">
           {filtered.map(item => <article key={item.id} className={`notification-item${item.read ? '' : ' unread'}`}>
-              <div><h4>{item.title}</h4><p className="muted">{item.message}</p><span className="notification-time">{item.time}</span></div>
+              <div><h4>{item.title}</h4><p className="muted">{item.message}</p><span className="notification-time">{formatDisplayDateTime(item.time)}</span></div>
               <div className="notification-actions">
-                {!item.read ? <button className="button ghost" type="button" onClick={() => {
-            setNotifications(items => items.map(n => n.id === item.id ? {
-              ...n,
-              read: true
-            } : n));
-            showToast('Marked as read.', 'success');
+                {!item.read ? <button className="button ghost" type="button" onClick={async () => {
+            const res = await markNotificationRead(item.id);
+            if (res.success) load();
           }}>Mark as Read</button> : null}
-                <button className="button secondary" type="button" onClick={() => navigate(item.relatedTo)}>Open Related Record</button>
+                {item.relatedTo ? <button className="button secondary" type="button" onClick={() => navigate(item.relatedTo)}>Open Related Record</button> : null}
               </div>
             </article>)}
         </div> : <EmptyState title="No notifications" description="You're all caught up." />}
@@ -1688,66 +2107,127 @@ function ProfilePage({
   navigate,
   showToast
 }) {
-  const currentUser = getCurrentUser();
-  const profile = currentUser || {};
+  const sessionUser = getCurrentUser();
+  const [profile, setProfile] = useState(null);
+  const [password, setPassword] = useState('');
+  const [editing, setEditing] = useState(false);
+  useEffect(() => {
+    async function load() {
+      const res = await fetchMyProfile();
+      if (res.success) setProfile(res.data);
+    }
+    load();
+  }, []);
+  const displayName = profile
+    ? [profile.first_name, profile.last_name].filter(Boolean).join(' ')
+    : sessionUser?.fullName || 'Sales Agent';
+  const save = async () => {
+    if (!profile) return;
+    const payload = {
+      first_name: profile.first_name,
+      last_name: profile.last_name,
+      email: profile.email,
+      phone: profile.phone,
+    };
+    if (password.trim()) payload.password = password.trim();
+    const res = await updateMyProfile(payload);
+    if (res.success) {
+      persistCurrentUserFromProfile(res.data);
+      setProfile(res.data);
+      setPassword('');
+      setEditing(false);
+      showToast('Profile updated.', 'success');
+    } else showToast(res.message || 'Update failed.', 'error');
+  };
+  if (!profile) return <LoadingState message="Loading profile..." />;
   return <div className="page">
       <OfflineBanner />
       <section className="panel content-panel profile-panel">
         <div className="profile-header">
-          <div className="profile-avatar">{(profile.fullName || 'SA').split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase()}</div>
-          <div><h3>{profile.fullName || 'Sales Agent'}</h3><p className="muted">{profile.email || ''}</p></div>
+          <div className="profile-avatar">{displayName.split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase()}</div>
+          <div><h3>{displayName}</h3><p className="muted">{profile.email || ''}</p></div>
         </div>
-        <ul className="info-grid">
+        {editing ? <div className="form-grid" style={{ marginTop: 16 }}>
+            <label>First name<input value={profile.first_name || ''} onChange={e => setProfile(p => ({ ...p, first_name: e.target.value }))} /></label>
+            <label>Last name<input value={profile.last_name || ''} onChange={e => setProfile(p => ({ ...p, last_name: e.target.value }))} /></label>
+            <label>Email<input type="email" value={profile.email || ''} onChange={e => setProfile(p => ({ ...p, email: e.target.value }))} /></label>
+            <label>Phone<input value={profile.phone || ''} onChange={e => setProfile(p => ({ ...p, phone: e.target.value }))} /></label>
+            <label>New password<input type="password" value={password} onChange={e => setPassword(e.target.value)} placeholder="Min. 8 characters" /></label>
+          </div>
+          : <ul className="info-grid">
           <li><span className="info-item-label">Assigned Branch</span><span className="info-item-value">{profile.branch?.name || '—'}</span></li>
           <li><span className="info-item-label">Role</span><span className="info-item-value">{profile.role?.name || '—'}</span></li>
+          <li><span className="info-item-label">Phone</span><span className="info-item-value">{profile.phone || '—'}</span></li>
           <li><span className="info-item-label">Status</span><span className="info-item-value">{profile.status || '—'}</span></li>
-        </ul>
+        </ul>}
       </section>
       <div className="flex justify-end gap-2 mt-4">
         <button className="button ghost" type="button" onClick={() => navigate('/sales/audit-log')}>Audit Log</button>
         <button className="button ghost" type="button" onClick={() => requestLogout()}>Logout</button>
-        <button className="button secondary" type="button" onClick={() => showToast('Change Password form would open here.', 'success')}>Change Password</button>
-        <button className="button" type="button" onClick={() => showToast('Update Profile form would open here.', 'success')}>Update Profile</button>
+        {editing ? <>
+            <button className="button ghost" type="button" onClick={() => setEditing(false)}>Cancel</button>
+            <button className="button" type="button" onClick={save}>Save Profile</button>
+          </> : <button className="button" type="button" onClick={() => setEditing(true)}>Update Profile</button>}
       </div>
     </div>;
 }
 function RouteTrackingPage({
   navigate
 }) {
+  const [visits, setVisits] = useState([]);
+  const [loading, setLoading] = useState(true);
+  useEffect(() => {
+    async function load() {
+      setLoading(true);
+      const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Manila', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
+      const res = await fetchFieldVisits({ scheduled_date: today, status: 'All' });
+      if (res.success) setVisits(res.data || []);
+      setLoading(false);
+    }
+    load();
+  }, []);
+  const withCoords = visits.filter(v => v.latitude && v.longitude);
+  const completed = visits.filter(v => v.status === 'Completed');
+  const mapCenter = withCoords.length
+    ? [Number(withCoords[0].latitude), Number(withCoords[0].longitude)]
+    : [7.0731, 125.6128];
+  const markers = withCoords.map(v => ({
+    id: v.visit_id,
+    position: [Number(v.latitude), Number(v.longitude)],
+    label: String(v.visit_id),
+    color: v.status === 'Completed' ? '#10b981' : '#f59e0b',
+    popup: `${v.customer_name} — ${v.status}`,
+  }));
+  const polyline = markers.length >= 2
+    ? [{ id: 'route', positions: markers.map(m => m.position), color: '#093850' }]
+    : [];
+  const coverage = visits.length ? Math.round((completed.length / visits.length) * 100) : 0;
+  if (loading) return <LoadingState message="Loading route..." />;
   return <div className="page">
       <StatsGrid stats={[{
-      label: 'GPS Status',
-      value: ROUTE_TRACKING.gpsEnabled ? 'Active' : 'Off'
+      label: 'GPS Pins',
+      value: String(withCoords.length)
     }, {
       label: 'Territory Coverage',
-      value: `${ROUTE_TRACKING.territoryCoverage}%`
+      value: `${coverage}%`
     }, {
       label: 'Visits Verified',
-      value: `${ROUTE_TRACKING.visitsVerified}/${ROUTE_TRACKING.visitsPlanned}`
+      value: `${completed.length}/${visits.length}`
     }]} />
       <section className="panel content-panel">
         <div className="panel-section-header"><h3>Territory Coverage Map</h3></div>
         <div style={{
         marginTop: 16
       }}>
-          <LeafletMap center={[7.1907, 125.4553]} zoom={13} height={500} polylines={[{
-          id: 'route',
-          positions: customers.map((stop, i) => [7.1907 + i * 0.006, 125.4553 + i * 0.006]),
-          color: '#10b981'
-        }]} markers={customers.map((stop, i) => ({
-          id: stop.id,
-          position: [7.1907 + i * 0.006, 125.4553 + i * 0.006],
-          label: stop.id.replace('customer-', ''),
-          color: stop.status === 'Completed' ? '#10b981' : '#f59e0b',
-          popup: `${stop.first_name} ${stop.last_name} - ${stop.status}`
-        }))} />
+          <LeafletMap center={mapCenter} zoom={13} height={500} polylines={polyline} markers={markers} />
         </div>
-        <p className="muted">Current location: {ROUTE_TRACKING.currentLocation}</p>
+        <p className="muted">Today&apos;s sales visits with customer coordinates on file.</p>
       </section>
       <section className="panel content-panel">
         <div className="panel-section-header"><h3>Visit Verification</h3></div>
         <ul className="widget-list">
-          {customers.filter(c => c.status === 'Completed').map(c => <li key={c.id}><div><strong>{c.first_name} {c.last_name}</strong><span className="muted">GPS verified · {c.lastVisitDate}</span></div><StatusBadge status="Verified" /></li>)}
+          {completed.map(v => <li key={v.visit_id}><div><strong>{v.customer_name}</strong><span className="muted">Completed · {formatDisplayDate(v.scheduled_date)}</span></div><StatusBadge status="Verified" /></li>)}
+          {!completed.length ? <li className="muted">No completed visits yet today.</li> : null}
         </ul>
       </section>
       <div className="flex justify-end mt-4">
@@ -1755,20 +2235,111 @@ function RouteTrackingPage({
       </div>
     </div>;
 }
+function SalesPurchaseRequestsPage({ navigate, showToast }) {
+  const [requests, setRequests] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const load = async () => {
+    setLoading(true);
+    const res = await fetchSalesPurchaseRequests();
+    if (res.success) setRequests(res.data || []);
+    setLoading(false);
+  };
+  useEffect(() => {
+    load();
+  }, []);
+  const updateStatus = async (requestId, status, customerId) => {
+    const result = await updateSalesPurchaseRequestStatus(requestId, status);
+    if (!result.success) {
+      showToast(result.message || 'Update failed.', 'error');
+      return;
+    }
+    showToast(result.message || 'Updated.', 'success');
+    if (status === 'Confirmed' && customerId) {
+      navigate(`/sales/log-sale/${customerId}?purchaseRequestId=${requestId}`);
+      return;
+    }
+    load();
+  };
+  if (loading) return <LoadingState message="Loading purchase requests…" />;
+  return <div className="page">
+      <section className="panel content-panel">
+        <div className="panel-section-header">
+          <h3>Customer Purchase Requests</h3>
+          <p className="muted">Review requests from the customer portal before creating a sales order or invoice.</p>
+        </div>
+        {!requests.length ? <EmptyState title="No purchase requests" description="Requests from customer portal accounts will appear here." /> : (
+          <div className="corvex-table-wrapper">
+            <table className="corvex-table">
+              <thead>
+                <tr>
+                  <th>ID</th>
+                  <th>Customer</th>
+                  <th>Status</th>
+                  <th>Items</th>
+                  <th>Created</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {requests.map((req) => <tr key={req.request_id}>
+                    <td>{req.request_id}</td>
+                    <td>{req.customer_name} ({req.customer_code || req.customer_id})</td>
+                    <td><StatusBadge status={req.status} /></td>
+                    <td>{(req.items || []).map((item) => `${item.product_name} × ${item.quantity}`).join(', ') || '—'}</td>
+                    <td>{formatDisplayDateTime(req.created_at)}</td>
+                    <td className="table-actions">
+                      {req.status === 'Pending' || req.status === 'In Review' ? <>
+                          {req.status === 'Pending' ? (
+                            <button className="button ghost" type="button" onClick={() => updateStatus(req.request_id, 'In Review', req.customer_id)}>Review</button>
+                          ) : null}
+                          <button className="button" type="button" onClick={() => updateStatus(req.request_id, 'Confirmed', req.customer_id)}>Confirm & Log Sale</button>
+                          <button className="button ghost" type="button" onClick={() => updateStatus(req.request_id, 'Rejected', req.customer_id)}>Reject</button>
+                        </> : null}
+                      {req.status === 'Invoiced' && req.sales_invoices_id ? (
+                        <button className="button ghost" type="button" onClick={() => navigate(`/sales/invoices/${req.sales_invoices_id}`)}>View Invoice</button>
+                      ) : null}
+                      {req.status === 'Confirmed' ? (
+                        <button className="button" type="button" onClick={() => navigate(`/sales/log-sale/${req.customer_id}?purchaseRequestId=${req.request_id}`)}>Log Sale</button>
+                      ) : null}
+                    </td>
+                  </tr>)}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </section>
+      <div className="flex justify-end mt-4">
+        <button className="button ghost" type="button" onClick={() => navigate('/sales/dashboard')}>Back to Dashboard</button>
+      </div>
+    </div>;
+}
+
 function AuditLogPage({
   navigate
 }) {
+  const [logs, setLogs] = useState([]);
+  const [loading, setLoading] = useState(true);
+  useEffect(() => {
+    async function load() {
+      setLoading(true);
+      const res = await fetchSalesAuditLogs({ limit: 200 });
+      if (res.success) setLogs(res.data || []);
+      setLoading(false);
+    }
+    load();
+  }, []);
   return <div className="page">
       <section className="panel content-panel">
-        <div className="panel-section-header"><h3>Audit Log</h3><p className="muted">Tracks login, sales, inventory views, CI submissions, and schedule completion.</p></div>
-        <div className="table-shell">
+        <div className="panel-section-header"><h3>Audit Log</h3><p className="muted">Your recent actions in CORVEX.</p></div>
+        {loading ? <LoadingState message="Loading audit log..." /> : <div className="table-shell">
           <table className="corvex-table">
             <thead><tr><th>Action</th><th>Detail</th><th>Timestamp</th></tr></thead>
             <tbody>
-              {AUDIT_LOGS.map(log => <tr key={log.id}><td>{log.action}</td><td>{log.detail}</td><td>{log.timestamp}</td></tr>)}
+              {logs.length ? logs.map(log => <tr key={log.audit_id}><td>{log.action}</td><td>{log.detail || log.status_details || '—'}</td><td>{formatDisplayDateTime(log.created_at)}</td></tr>)
+                : <tr><td colSpan={3}><EmptyState title="No audit entries" /></td></tr>}
             </tbody>
           </table>
-        </div>
+        </div>}
       </section>
       <div className="flex justify-end mt-4">
         <button className="button ghost" type="button" onClick={() => navigate('/sales/profile')}>Back to Profile</button>
@@ -1778,14 +2349,27 @@ function AuditLogPage({
 function SettingsPage({
   navigate
 }) {
+  const [prefs, setPrefs] = useState(() => ({
+    offline: localStorage.getItem('corvex_sales_offline') === '1',
+    autosync: localStorage.getItem('corvex_sales_autosync') !== '0',
+    gps: localStorage.getItem('corvex_sales_gps') !== '0',
+  }));
+  const toggle = (key, storageKey) => {
+    setPrefs(p => {
+      const next = { ...p, [key]: !p[key] };
+      localStorage.setItem(storageKey, next[key] ? '1' : '0');
+      return next;
+    });
+  };
   return <div className="page">
       <section className="panel form-panel content-panel">
-        <div className="panel-section-header"><h3>Settings</h3></div>
-        <div className="form-group"><label className="toggle-label"><input type="checkbox" defaultChecked />Enable offline mode</label></div>
-        <div className="form-group"><label className="toggle-label"><input type="checkbox" defaultChecked />Auto-sync when online</label></div>
-        <div className="form-group"><label className="toggle-label"><input type="checkbox" defaultChecked />Enable GPS route tracking</label></div>
+        <div className="panel-section-header"><h3>Settings</h3><p className="muted">Preferences stored on this device (offline sync is not yet connected to the server).</p></div>
+        <div className="form-group"><label className="toggle-label"><input type="checkbox" checked={prefs.offline} onChange={() => toggle('offline', 'corvex_sales_offline')} />Enable offline mode (UI preference)</label></div>
+        <div className="form-group"><label className="toggle-label"><input type="checkbox" checked={prefs.autosync} onChange={() => toggle('autosync', 'corvex_sales_autosync')} />Auto-sync when online (UI preference)</label></div>
+        <div className="form-group"><label className="toggle-label"><input type="checkbox" checked={prefs.gps} onChange={() => toggle('gps', 'corvex_sales_gps')} />Show GPS route tracking on map</label></div>
       </section>
       <div className="flex justify-end mt-4">
+        <button className="button ghost" type="button" onClick={() => navigate('/sales/profile')}>Profile</button>
         <button className="button ghost" type="button" onClick={() => navigate('/sales/dashboard')}>Back to Dashboard</button>
       </div>
     </div>;
@@ -1797,11 +2381,13 @@ export function SalesPageBody({
 }) {
   if (!page) return <EmptyState title="Page not found" description="Use the sidebar to open a supported screen." />;
   const props = {
+    ciId: page.params?.ciId,
     customerId: page.params?.customerId,
     visitId: page.params?.visitId,
     productId: page.params?.productId,
     invoiceId: page.params?.invoiceId,
     parentContext: page.parentContext,
+    purchaseRequestId: page.purchaseRequestId,
     navigate,
     showToast
   };
@@ -1815,6 +2401,8 @@ export function SalesPageBody({
       return <SchedulePage pageType={page.pageType} {...props} />;
     case 'customers':
       return <CustomersPage {...props} />;
+    case 'purchaseRequests':
+      return <SalesPurchaseRequestsPage {...props} />;
     case 'customerForm':
       return <CustomerFormPage {...props} />;
     case 'clients':
@@ -1827,6 +2415,10 @@ export function SalesPageBody({
       return <VisitLogPage {...props} />;
     case 'logSale':
       return <LogSalePage {...props} />;
+    case 'ciSubmissions':
+      return <SalesCISubmissionsPage {...props} />;
+    case 'ciSubmissionDetail':
+      return <SalesCIDetailPage {...props} />;
     case 'ciForm':
       return <CIFormPage {...props} />;
     case 'inventory':

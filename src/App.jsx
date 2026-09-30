@@ -11,6 +11,7 @@ import { Toast, useToast } from './components/shared/Toast';
 import { getEntryPathForRole, logout, getCurrentUser } from './api/authService.js';
 import logo from './assets/corvex-logo.png';
 import { LoginPage } from './components/auth/LoginPage';
+import { ActivatePortalPage } from './components/auth/ActivatePortalPage';
 import { NavIcon } from './navIcons';
 import { StatusBadge } from './components/StatusBadge';
 import LeafletMap from './components/common/LeafletMap';
@@ -39,6 +40,7 @@ function App() {
     <Routes>
       <Route path="/" element={<Navigate to="/login" replace />} />
       <Route path="/login" element={<LoginPage />} />
+      <Route path="/activate-account" element={<ActivatePortalPage />} />
       <Route path="/collector" element={<Navigate to={collectorRole.entryPath} replace />} />
       <Route path="/sales" element={<Navigate to={salesRole.entryPath} replace />} />
       <Route path="/warehouse" element={<Navigate to={warehouseRole.entryPath} replace />} />
@@ -72,7 +74,7 @@ function PrototypeShell() {
     : isSales
       ? resolveSalesPage(location.pathname, location.search)
       : isWarehouse
-        ? resolveWarehousePage(location.pathname)
+        ? resolveWarehousePage(location.pathname, location.search)
         : isOperatingManager
           ? resolveOperatingManagerPage(location.pathname)
           : isBranchManager

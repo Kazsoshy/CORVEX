@@ -7,7 +7,11 @@ import { AreaChart, Area, BarChart, Bar, LineChart, Line, RadarChart, Radar, Pol
 import { AdminPageBody } from '../admin/AdminPageBody';
 import { BranchManagerPageBody } from '../branchManager/BranchManagerPageBody';
 import LeafletMap from '../common/LeafletMap';
-import { ALERTS, BRANCHES, BRANCH_RADAR, ENTERPRISE_KPIS, LEAFLET_LAYERS, MONTHLY_COLLECTIONS, MONTHLY_DELINQUENCY, MONTHLY_REVENUE, NOTIFICATIONS, OPERATING_MANAGER_PROFILE, REPORT_CATEGORIES, TREND_DATA, WEEKLY_COLLECTION_RATE, WEEKLY_SALES_RATE, SALES_ANALYTICS, INVENTORY_ANALYTICS, PAYMENT_ANALYTICS, formatCurrency, getBranchById, getHighestPerformingBranch, getLowestPerformingBranch } from '../../data/operatingManagerMockData';
+import { BRANCHES, BRANCH_RADAR, ENTERPRISE_KPIS, LEAFLET_LAYERS, MONTHLY_COLLECTIONS, MONTHLY_DELINQUENCY, MONTHLY_REVENUE, REPORT_CATEGORIES, TREND_DATA, WEEKLY_COLLECTION_RATE, WEEKLY_SALES_RATE, SALES_ANALYTICS, INVENTORY_ANALYTICS, PAYMENT_ANALYTICS, formatCurrency, getBranchById, getHighestPerformingBranch, getLowestPerformingBranch } from '../../data/operatingManagerMockData';
+import { fetchOperationalAlerts, patchOperationalAlert, mapOperationalAlertRow } from '../../api/operationalAlertsService.js';
+import { fetchNotifications, markNotificationRead, markAllNotificationsRead, mapNotificationRow } from '../../api/notificationService.js';
+import { fetchMyProfile, updateMyProfile } from '../../api/profileService.js';
+import { persistCurrentUserFromProfile, requestLogout } from '../../api/authService.js';
 import { formatDisplayDate, formatDisplayDateTime } from '../../utils/formatters.js';
 import { getPresetDateRange } from '../../utils/analyticsDateRange.js';
 import { formatMiddleNameDisplay } from '../../utils/customerDisplay.js';
@@ -1481,16 +1485,27 @@ function AlertsPage({
   navigate,
   showToast
 }) {
-  const [alerts, setAlerts] = useState(ALERTS);
+  const [alerts, setAlerts] = useState([]);
+  const [loading, setLoading] = useState(true);
   const [severityFilter, setSeverityFilter] = useState('All');
-  const filtered = useMemo(() => severityFilter === 'All' ? alerts : alerts.filter(a => a.severity === severityFilter), [alerts, severityFilter]);
-  const resolveAlert = id => {
-    setAlerts(prev => prev.map(a => a.id === id ? {
-      ...a,
-      resolved: true
-    } : a));
-    showToast('Alert resolved.', 'success');
+  const load = async () => {
+    setLoading(true);
+    const res = await fetchOperationalAlerts();
+    if (res.success) setAlerts((res.data || []).map(mapOperationalAlertRow));
+    setLoading(false);
   };
+  useEffect(() => {
+    load();
+  }, []);
+  const filtered = useMemo(() => severityFilter === 'All' ? alerts : alerts.filter(a => a.severity === severityFilter), [alerts, severityFilter]);
+  const resolveAlert = async (id) => {
+    const result = await patchOperationalAlert(id, { status: 'Resolved' });
+    if (result.success) {
+      showToast('Alert resolved.', 'success');
+      load();
+    } else showToast(result.message || 'Resolve failed.', 'error');
+  };
+  if (loading && !alerts.length) return <LoadingState message="Loading alerts..." />;
   return <div className="page">
       <section className="panel content-panel">
         <div className="list-section-header"><h3>Alerts</h3></div>
@@ -1505,16 +1520,16 @@ function AlertsPage({
                   {filtered.map(a => <tr key={a.id}>
                       <td>{a.type}</td><td>{a.branch}</td><td>{a.message}</td>
                       <td><SeverityBadge severity={a.severity} /></td>
-                      <td>{a.date}</td><td><StatusBadge status={a.resolved ? 'Resolved' : 'Open'} /></td>
+                      <td>{formatDisplayDate(a.date)}</td><td><StatusBadge status={a.resolved ? 'Resolved' : 'Open'} /></td>
                       <td className="table-actions">
                         {!a.resolved ? (
                           <button className="icon-action-button" type="button" title="Resolve" onClick={() => resolveAlert(a.id)}>
                             <NavIcon name="check" />
                           </button>
                         ) : null}
-                        <button className="icon-action-button" type="button" title="View" onClick={() => navigate(`/operating-manager/branch-performance/branch/${a.branchId}`)}>
+                        {a.branchId ? <button className="icon-action-button" type="button" title="View" onClick={() => navigate(`/operating-manager/branch-performance/branch/${a.branchId}`)}>
                           <NavIcon name="view" />
-                        </button>
+                        </button> : null}
                       </td>
                     </tr>)}
                 </tbody>
@@ -1528,18 +1543,32 @@ function NotificationsPage({
   navigate,
   showToast
 }) {
-  const [items, setItems] = useState(NOTIFICATIONS);
-  const markRead = id => setItems(prev => prev.map(n => n.id === id ? {
-    ...n,
-    read: true
-  } : n));
-  const markAllRead = () => {
-    setItems(prev => prev.map(n => ({
-      ...n,
-      read: true
-    })));
-    showToast('All marked as read.', 'success');
+  const [items, setItems] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const opsBase = '/operating-manager/operations';
+  const load = async () => {
+    setLoading(true);
+    const res = await fetchNotifications();
+    if (res.success) {
+      setItems((res.data || []).map(row => mapNotificationRow(row, { opsBase, orgBase: '/operating-manager' })));
+    }
+    setLoading(false);
   };
+  useEffect(() => {
+    load();
+  }, []);
+  const markRead = async (id) => {
+    const res = await markNotificationRead(id);
+    if (res.success) load();
+  };
+  const markAllRead = async () => {
+    const res = await markAllNotificationsRead();
+    if (res.success) {
+      showToast('All marked as read.', 'success');
+      load();
+    }
+  };
+  if (loading && !items.length) return <LoadingState message="Loading notifications..." />;
   return <div className="page">
       <PageToolbar actions={[{
       label: 'Mark All as Read',
@@ -1547,7 +1576,7 @@ function NotificationsPage({
     }]} onAction={markAllRead} />
       {items.length === 0 ? <EmptyState title="No notifications" description="You're all caught up." /> : <ul className="notification-list">
           {items.map(n => <li key={n.id} className={`notification-item${n.read ? '' : ' unread'}`}>
-              <div><strong>{n.type}</strong><p className="muted">{n.message}</p></div>
+              <div><strong>{n.title || n.category}</strong><p className="muted">{n.message}</p><span className="notification-time">{formatDisplayDateTime(n.time)}</span></div>
               <div className="notification-actions">
                 {!n.read ? <button className="button ghost" type="button" onClick={() => markRead(n.id)}>Mark Read</button> : null}
                 {n.relatedTo ? <button className="button ghost" type="button" onClick={() => navigate(n.relatedTo)}>Open Record</button> : null}
@@ -1733,39 +1762,73 @@ function ProfilePage({
   navigate,
   showToast
 }) {
-  const [profile, setProfile] = useState({
-    ...OPERATING_MANAGER_PROFILE
-  });
+  const [profile, setProfile] = useState(null);
+  const [password, setPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
+  useEffect(() => {
+    async function load() {
+      const res = await fetchMyProfile();
+      if (res.success) setProfile(res.data);
+    }
+    load();
+  }, []);
+  const saveProfile = async (includePassword) => {
+    if (!profile) return;
+    const payload = {
+      first_name: profile.first_name,
+      last_name: profile.last_name,
+      email: profile.email,
+      phone: profile.phone,
+    };
+    if (includePassword && password.trim()) payload.password = password.trim();
+    const res = await updateMyProfile(payload);
+    if (res.success) {
+      persistCurrentUserFromProfile(res.data);
+      setProfile(res.data);
+      setPassword('');
+      setShowPassword(false);
+      showToast(includePassword ? 'Password updated.' : 'Profile updated.', 'success');
+    } else showToast(res.message || 'Update failed.', 'error');
+  };
+  if (!profile) return <LoadingState message="Loading profile..." />;
   return <div className="page">
       <section className="panel form-panel content-panel">
         <div className="panel-section-header"><h3>Operating Manager Information</h3></div>
         <div className="form-grid">
-          <label>Full Name<input value={profile.name} onChange={e => setProfile(p => ({
+          <label>First name<input value={profile.first_name || ''} onChange={e => setProfile(p => ({
             ...p,
-            name: e.target.value
+            first_name: e.target.value
           }))} /></label>
-          <label>Employee ID<input value={profile.employeeId} readOnly /></label>
-          <label>Assigned Region<input value={profile.region} readOnly /></label>
-          <label>Email<input type="email" value={profile.email} onChange={e => setProfile(p => ({
+          <label>Last name<input value={profile.last_name || ''} onChange={e => setProfile(p => ({
+            ...p,
+            last_name: e.target.value
+          }))} /></label>
+          <label>Employee ID<input value={String(profile.user_id)} readOnly /></label>
+          <label>Role<input value={profile.role?.name || 'Operating Manager'} readOnly /></label>
+          <label>Email<input type="email" value={profile.email || ''} onChange={e => setProfile(p => ({
             ...p,
             email: e.target.value
           }))} /></label>
-          <label>Phone<input value={profile.phone} onChange={e => setProfile(p => ({
+          <label>Phone<input value={profile.phone || ''} onChange={e => setProfile(p => ({
             ...p,
             phone: e.target.value
           }))} /></label>
+          {showPassword ? <label>New password<input type="password" value={password} onChange={e => setPassword(e.target.value)} placeholder="Min. 8 characters" /></label> : null}
         </div>
       </section>
       <PageToolbar actions={[{
       label: 'Update Profile'
     }, {
-      label: 'Change Password',
+      label: showPassword ? 'Save Password' : 'Change Password',
       variant: 'secondary'
     }, {
       label: 'Logout',
       variant: 'ghost'
     }]} onAction={a => {
-      if (a.label === 'Logout') requestLogout();else showToast(`${a.label} action recorded.`, 'success');
+      if (a.label === 'Logout') requestLogout();
+      else if (a.label === 'Change Password') setShowPassword(true);
+      else if (a.label === 'Save Password') saveProfile(true);
+      else saveProfile(false);
     }} />
     </div>;
 }

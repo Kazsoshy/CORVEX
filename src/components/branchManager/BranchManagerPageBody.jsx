@@ -3,14 +3,37 @@ import { usePagination } from '../../hooks/usePagination';
 import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { AreaChart, Area, BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
-import { AUDIT_LOGS, ALERTS, BRANCH_ANALYTICS, CI_QUEUE, formatCurrency, formatDisplayDate, formatDisplayDateTime, getCIById, getMapAccountById, MAP_ACCOUNTS, NOTIFICATIONS } from '../../data/branchManagerMockData';
+import { formatCurrency, formatDisplayDate, formatDisplayDateTime } from '../../data/branchManagerMockData';
+import {
+  fetchCreditInvestigations,
+  fetchCreditInvestigationById,
+  patchCreditInvestigation,
+  fetchSpecialCollectionRequests,
+  patchSpecialCollectionRequest,
+  mapCreditInvestigationRow,
+  mapSpecialCollectionRow,
+} from '../../api/approvalsService.js';
+import { fetchOperationalAlerts, patchOperationalAlert, mapOperationalAlertRow } from '../../api/operationalAlertsService.js';
+import { fetchNotifications, markNotificationRead, markAllNotificationsRead, mapNotificationRow } from '../../api/notificationService.js';
+import { fetchInventoryTransfers, patchInventoryTransfer, mapInventoryTransferRow } from '../../api/inventoryService.js';
+import { fetchMyProfile, updateMyProfile } from '../../api/profileService.js';
+import { persistCurrentUserFromProfile } from '../../api/authService.js';
 import { EmptyState } from '../shared/EmptyState';
 import { LoadingState } from '../shared/LoadingState';
 import { NavIcon } from '../../navIcons';
 import LeafletMap from '../common/LeafletMap';
 import { StatusBadge } from '../StatusBadge';
 import { requestLogout, getCurrentUser } from '../../api/authService.js';
-import { getBranchAnalytics, getBranchStaff, getBranchCustomers, getBranchCustomerById, getBranchAlerts } from '../../api/branchManagerService.js';
+import {
+  getBranchAnalytics,
+  getBranchStaff,
+  getBranchCustomers,
+  getBranchCustomerById,
+  getBranchAlerts,
+  getBranchAuditLogs,
+  getBranchCollectorDetail,
+  getBranchSalesAgentDetail,
+} from '../../api/branchManagerService.js';
 import { getReportCollection, getReportSales, getReportInventory, getReportDelinquency, getReportCompliance, getReportKPI, getReportInvoices } from '../../api/reportsService.js';
 import { CreditHistoryListPage, CreditHistoryDetailPage } from '../shared/CreditHistoryPages';
 import { TerritoriesPage } from '../territories/TerritoriesPage';
@@ -78,7 +101,8 @@ function StaffCard({
 // ── Dashboard ─────────────────────────────────────────────────────────────────
 function DashboardPage({
   navigate,
-  branchName
+  branchName,
+  opsBase
 }) {
   const currentUser = getCurrentUser();
   const userName = currentUser?.fullName || 'User';
@@ -97,23 +121,36 @@ function DashboardPage({
   const [delinquencyData, setDelinquencyData] = useState(null);
   const [kpi, setKpi] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [unread, setUnread] = useState(0);
   useEffect(() => {
     async function fetchData() {
       setLoading(true);
-      const [analyticsData, alertsData, staffData, customersData, reportCollection, reportSales, reportDelinquency, reportKpi] = await Promise.all([getBranchAnalytics(), getBranchAlerts(), getBranchStaff(), getBranchCustomers(), getReportCollection(), getReportSales(), getReportDelinquency(), getReportKPI()]);
+      const [analyticsData, alertsData, staffData, customersData, reportCollection, reportSales, reportDelinquency, reportKpi, notifData] = await Promise.all([
+        getBranchAnalytics(),
+        getBranchAlerts(),
+        getBranchStaff(),
+        getBranchCustomers(),
+        getReportCollection(),
+        getReportSales(),
+        getReportDelinquency(),
+        getReportKPI(),
+        fetchNotifications(),
+      ]);
       if (analyticsData.success) setAnalytics(analyticsData.data);
-      if (alertsData.success) setAlerts(alertsData.data.alerts);
+      if (alertsData.success) setAlerts(alertsData.data.alerts || []);
       if (staffData.success) setStaff(staffData.data);
       if (customersData.success) setCustomers(customersData.data);
       if (reportCollection.success) setCollectionData(reportCollection.data);
       if (reportSales.success) setSalesData(reportSales.data);
       if (reportDelinquency.success) setDelinquencyData(reportDelinquency.data);
       if (reportKpi.success) setKpi(reportKpi.data);
+      if (notifData.success) {
+        setUnread((notifData.data || []).filter(n => n.status !== 'Read').length);
+      }
       setLoading(false);
     }
     fetchData();
   }, []);
-  const unread = 0; // Would come from notifications API
   const critical = alerts.filter(a => a.severity === 'Critical');
   if (loading) return <LoadingState />;
   return <div className="relative z-10 grid gap-[22px] w-full">
@@ -123,7 +160,7 @@ function DashboardPage({
           <h2>{userName}</h2>
           <p className="text-ink/70">Branch Health: <strong>{analytics?.healthScore || 0}/100</strong></p>
         </div>
-        <Link to="/branch-manager/notifications" className="relative p-2 text-ink/70 hover:text-blue hover:bg-blue/5 rounded-full transition-colors cursor-pointer" aria-label={`${unread} unread`}>
+        <Link to={`${opsBase}/notifications`} className="relative p-2 text-ink/70 hover:text-blue hover:bg-blue/5 rounded-full transition-colors cursor-pointer" aria-label={`${unread} unread`}>
           <NavIcon name="bell" />{unread > 0 && <span className="absolute top-0 right-0 min-w-[18px] h-[18px] px-1 flex justify-center items-center rounded-full bg-red text-white text-[0.7rem] font-bold border-2 border-mint">{unread}</span>}
         </Link>
       </section>
@@ -201,20 +238,21 @@ function DashboardPage({
         <section className="panel content-panel relative overflow-hidden">
           <div className="flex flex-col md:flex-row justify-between gap-4 items-start md:items-center mb-4">
             <h3>Critical Alerts</h3>
-            <button className="inline-flex justify-center items-center gap-2 px-5 py-2.5 rounded-md bg-transparent text-blue border-[1.5px] border-blue-30 shadow-none hover:bg-blue-08 transition-all duration-160 cursor-pointer" type="button" onClick={() => navigate('/branch-manager/alerts')}>View All</button>
+            <button className="inline-flex justify-center items-center gap-2 px-5 py-2.5 rounded-md bg-transparent text-blue border-[1.5px] border-blue-30 shadow-none hover:bg-blue-08 transition-all duration-160 cursor-pointer" type="button" onClick={() => navigate(`${opsBase}/alerts`)}>View All</button>
           </div>
           <ul className="list-none p-0 m-0 flex flex-col gap-3">
             {critical.slice(0, 4).map(a => <li key={a.id}><div><strong>{a.title}</strong><span className="text-ink/70">{a.category}</span></div><Severity severity={a.severity} /></li>)}
+            {!critical.length ? <li className="text-ink/70">No critical alerts right now.</li> : null}
           </ul>
         </section>
       </div>
 
       <div className="flex flex-wrap gap-2 mt-2">
-        <button className="button" type="button" onClick={() => navigate('/branch-manager/field-operations')}>Field Operations</button>
-        <button className="button secondary" type="button" onClick={() => navigate('/branch-manager/customers')}>Customers</button>
-        <button className="button secondary" type="button" onClick={() => navigate('/branch-manager/ci-approvals')}>Approve CIs</button>
-        <button className="button secondary" type="button" onClick={() => navigate('/branch-manager/leaflet')}>Leaflet | OpenStreetMap</button>
-        <button className="button secondary" type="button" onClick={() => navigate('/branch-manager/reports')}>Reports</button>
+        <button className="button" type="button" onClick={() => navigate(`${opsBase}/field-operations`)}>Field Operations</button>
+        <button className="button secondary" type="button" onClick={() => navigate(`${opsBase}/customers`)}>Customers</button>
+        <button className="button secondary" type="button" onClick={() => navigate(`${opsBase}/ci-approvals`)}>Approve CIs</button>
+        <button className="button secondary" type="button" onClick={() => navigate(`${opsBase}/leaflet`)}>Leaflet | OpenStreetMap</button>
+        <button className="button secondary" type="button" onClick={() => navigate(`${opsBase}/reports`)}>Reports</button>
       </div>
     </div>;
 }
@@ -222,9 +260,18 @@ function DashboardPage({
 // ── Field Operations (combined hub + tab navigation) ─────────────────────────
 function FieldOperationsHub({
   navigate,
-  showToast
+  showToast,
+  pageType,
+  opsBase
 }) {
-  const [tab, setTab] = useState('overview');
+  const initialTab = pageType === 'collectorRoutes' ? 'collectors'
+    : pageType === 'salesSchedules' ? 'sales'
+      : pageType === 'routePerformance' ? 'performance'
+        : 'overview';
+  const [tab, setTab] = useState(initialTab);
+  useEffect(() => {
+    setTab(initialTab);
+  }, [initialTab]);
   const [staff, setStaff] = useState({
     collectors: [],
     salesAgents: []
@@ -375,7 +422,7 @@ function FieldOperationsHub({
         action: 'map',
         variant: 'ghost'
       }]} onAction={a => {
-        if (a.action === 'detail') navigate(`/branch-manager/field-operations/collectors/${c.id}`);else navigate('/branch-manager/leaflet');
+        if (a.action === 'detail') navigate(`${opsBase}/field-operations/collectors/${c.id}`);else navigate(`${opsBase}/leaflet`);
       }} />)}
         </div>}
 
@@ -400,7 +447,7 @@ function FieldOperationsHub({
         action: 'map',
         variant: 'ghost'
       }]} onAction={act => {
-        if (act.action === 'detail') navigate(`/branch-manager/field-operations/sales/${a.id}`);else navigate('/branch-manager/leaflet');
+        if (act.action === 'detail') navigate(`${opsBase}/field-operations/sales/${a.id}`);else navigate(`${opsBase}/leaflet`);
       }} />)}
         </div>}
 
@@ -420,27 +467,35 @@ function FieldOperationsHub({
 }
 function CollectorDetailPage({
   collectorId,
-  navigate
+  navigate,
+  opsBase
 }) {
   const [staff, setStaff] = useState({
     collectors: [],
     salesAgents: []
   });
+  const [routeDetail, setRouteDetail] = useState(null);
   const [loading, setLoading] = useState(true);
   useEffect(() => {
     async function load() {
       setLoading(true);
-      const result = await getBranchStaff();
-      if (result.success) setStaff(result.data);
+      const [staffResult, detailResult] = await Promise.all([
+        getBranchStaff(),
+        getBranchCollectorDetail(collectorId),
+      ]);
+      if (staffResult.success) setStaff(staffResult.data);
+      if (detailResult.success) setRouteDetail(detailResult.data);
       setLoading(false);
     }
     load();
-  }, []);
+  }, [collectorId]);
   const c = staff.collectors.find(x => x.id === String(collectorId));
-  const pagination_c_route = usePagination(c.route);
+  const route = routeDetail?.route || c?.route || [];
+  const pagination_c_route = usePagination(route);
   const paginated_c_route = pagination_c_route.paginatedData;
+  const mapCenter = routeDetail?.mapMarkers?.[0]?.position || [7.1907, 125.4553];
   if (loading) return <LoadingState />;
-  if (!c) return <EmptyState title="Collector not found" actionLabel="Back" onAction={() => navigate('/branch-manager/field-operations')} />;
+  if (!c) return <EmptyState title="Collector not found" actionLabel="Back" onAction={() => navigate(`${opsBase}/field-operations`)} />;
   return <div className="relative z-10 grid gap-[22px] w-full">
       <Stats stats={[{
       label: 'Compliance',
@@ -456,57 +511,49 @@ function CollectorDetailPage({
       value: `${c.recoveryRate}%`
     }]} />
       <section className="panel content-panel relative overflow-hidden">
-        <div className="flex flex-col md:flex-row justify-between gap-4 items-start md:items-center mb-4"><h3>Route Timeline</h3><span className="text-ink/70">GPS: {c.gpsAttendance ? 'Active' : 'Off'}</span></div>
-        {c.route.length ? <><div className="corvex-table-wrapper"><table className="corvex-table"><thead><tr><th>Account</th><th>Status</th><th>Time</th><th>Amount</th></tr></thead><tbody>{paginated_c_route.map(r => <tr key={r.account}><td>{r.account}</td><td><StatusBadge status={r.status} /></td><td>{r.time}</td><td>{r.amount ? formatCurrency(r.amount) : '—'}</td></tr>)}</tbody></table></div><Pagination {...pagination_c_route} /></> : <EmptyState title="No route data" />}
+        <div className="flex flex-col md:flex-row justify-between gap-4 items-start md:items-center mb-4"><h3>Route Timeline</h3><span className="text-ink/70">GPS: {routeDetail?.gpsAttendance ?? c.gpsAttendance ? 'Active' : 'Off'}</span></div>
+        {route.length ? <><div className="corvex-table-wrapper"><table className="corvex-table"><thead><tr><th>Account</th><th>Status</th><th>Time</th><th>Amount</th></tr></thead><tbody>{paginated_c_route.map(r => <tr key={`${r.account}-${r.time}`}><td>{r.account}</td><td><StatusBadge status={r.status} /></td><td>{formatDisplayDate(r.time)}</td><td>{r.amount ? formatCurrency(r.amount) : '—'}</td></tr>)}</tbody></table></div><Pagination {...pagination_c_route} /></> : <EmptyState title="No route data" description="Collection visits will appear here once scheduled." />}
         <div style={{
         marginTop: 16
       }}>
-          <LeafletMap center={[7.1907, 125.4553]} zoom={13} height={400} polylines={[{
-          id: 'route',
-          positions: [[7.1907, 125.4553], [7.1950, 125.4600], [7.2000, 125.4500]],
-          color: '#093850'
-        }]} markers={[{
-          id: 'start',
-          position: [7.1907, 125.4553],
-          label: 'S',
-          color: '#10b981',
-          popup: 'Start Location'
-        }, {
-          id: 'end',
-          position: [7.2000, 125.4500],
-          label: 'E',
-          color: '#ef4444',
-          popup: 'End Location'
-        }]} />
+          <LeafletMap center={mapCenter} zoom={13} height={400} polylines={routeDetail?.polylines || []} markers={routeDetail?.mapMarkers || []} />
         </div>
       </section>
       <div className="flex justify-end gap-2 mt-4">
-        <button className="button ghost" type="button" onClick={() => navigate('/branch-manager/field-operations')}>Back</button>
-        <button className="button secondary" type="button" onClick={() => navigate('/branch-manager/leaflet')}>View on Map</button>
+        <button className="button ghost" type="button" onClick={() => navigate(`${opsBase}/field-operations`)}>Back</button>
+        <button className="button secondary" type="button" onClick={() => navigate(`${opsBase}/leaflet`)}>View on Map</button>
       </div>
     </div>;
 }
 function SalesAgentDetailPage({
   agentId,
-  navigate
+  navigate,
+  opsBase
 }) {
   const [staff, setStaff] = useState({
     collectors: [],
     salesAgents: []
   });
+  const [detail, setDetail] = useState({ customers: [], productPerformance: [] });
   const [loading, setLoading] = useState(true);
   useEffect(() => {
     async function load() {
       setLoading(true);
-      const result = await getBranchStaff();
-      if (result.success) setStaff(result.data);
+      const [staffResult, detailResult] = await Promise.all([
+        getBranchStaff(),
+        getBranchSalesAgentDetail(agentId),
+      ]);
+      if (staffResult.success) setStaff(staffResult.data);
+      if (detailResult.success && detailResult.data) setDetail(detailResult.data);
       setLoading(false);
     }
     load();
-  }, []);
+  }, [agentId]);
   const a = staff.salesAgents.find(x => x.id === String(agentId));
+  const customers = detail.customers?.length ? detail.customers : a?.customers || [];
+  const productPerformance = detail.productPerformance?.length ? detail.productPerformance : a?.productPerformance || [];
   if (loading) return <LoadingState />;
-  if (!a) return <EmptyState title="Agent not found" actionLabel="Back" onAction={() => navigate('/branch-manager/field-operations')} />;
+  if (!a) return <EmptyState title="Agent not found" actionLabel="Back" onAction={() => navigate(`${opsBase}/field-operations`)} />;
   return <div className="relative z-10 grid gap-[22px] w-full">
       <Stats stats={[{
       label: 'Visit Completion',
@@ -522,12 +569,12 @@ function SalesAgentDetailPage({
       value: String(a.newCustomersAcquired)
     }]} />
       <section className="panel content-panel relative overflow-hidden">
-        {a.customers.length ? <><h4 className="subsection-title">Customers</h4><div style={{
+        {customers.length ? <><h4 className="subsection-title">Customers</h4><div style={{
           display: 'flex',
           flexWrap: 'wrap',
           gap: 8,
           marginTop: 8
-        }}>{a.customers.map(c => <span key={c} style={{
+        }}>{customers.map(c => <span key={c} style={{
             padding: '5px 12px',
             borderRadius: 999,
             background: 'var(--surface)',
@@ -535,12 +582,13 @@ function SalesAgentDetailPage({
             fontSize: '0.88rem',
             fontWeight: 500
           }}>{c}</span>)}</div></> : null}
-        {a.productPerformance.length ? <><h4 className="subsection-title" style={{
+        {productPerformance.length ? <><h4 className="subsection-title" style={{
           marginTop: 16
-        }}>Product Performance</h4><ul className="list-none p-0 m-0 flex flex-col gap-3">{a.productPerformance.map(p => <li key={p.product}><div><strong>{p.product}</strong></div><span>{p.units} units</span></li>)}</ul></> : null}
+        }}>Product Performance</h4><ul className="list-none p-0 m-0 flex flex-col gap-3">{productPerformance.map(p => <li key={p.product}><div><strong>{p.product}</strong></div><span>{p.units} units</span></li>)}</ul></> : null}
+        {!customers.length && !productPerformance.length ? <EmptyState title="No activity yet" description="Customers and sales mix will appear after visits and invoices are logged." /> : null}
       </section>
       <div className="flex justify-end gap-2 mt-4">
-        <button className="button ghost" type="button" onClick={() => navigate('/branch-manager/field-operations')}>Back</button>
+        <button className="button ghost" type="button" onClick={() => navigate(`${opsBase}/field-operations`)}>Back</button>
       </div>
     </div>;
 }
@@ -548,9 +596,17 @@ function SalesAgentDetailPage({
 // ── Reports & Analytics (combined with tab nav) ───────────────────────────────
 function ReportsHubPage({
   navigate,
-  showToast
+  showToast,
+  pageType
 }) {
-  const [tab, setTab] = useState('collection');
+  const initialTab = pageType === 'reportSales' ? 'sales'
+    : pageType === 'reportInventory' ? 'inventory'
+      : pageType === 'reportDelinquency' ? 'delinquency'
+        : 'collection';
+  const [tab, setTab] = useState(initialTab);
+  useEffect(() => {
+    setTab(initialTab);
+  }, [initialTab]);
   const [staff, setStaff] = useState({
     collectors: [],
     salesAgents: []
@@ -1024,9 +1080,17 @@ function ReportsHubPage({
 
 // ── Staff Performance (improved) ──────────────────────────────────────────────
 function StaffPerformancePage({
-  navigate
+  navigate,
+  pageType
 }) {
-  const [tab, setTab] = useState('overview');
+  const initialTab = pageType === 'staffCollectors' ? 'collectors'
+    : pageType === 'staffSales' ? 'sales'
+      : pageType === 'staffScorecards' ? 'scorecards'
+        : 'overview';
+  const [tab, setTab] = useState(initialTab);
+  useEffect(() => {
+    setTab(initialTab);
+  }, [initialTab]);
   const [period, setPeriod] = useState('Daily');
   const [staff, setStaff] = useState({
     collectors: [],
@@ -1231,12 +1295,32 @@ function StaffPerformancePage({
 // ── CI Queue ──────────────────────────────────────────────────────────────────
 function CIQueuePage({
   navigate,
-  showToast
+  showToast,
+  opsBase
 }) {
   const [filter, setFilter] = useState('Pending');
-  const filtered = useMemo(() => CI_QUEUE.filter(c => filter === 'All' || c.status === filter), [filter]);
+  const [items, setItems] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const reload = async () => {
+    setLoading(true);
+    const res = await fetchCreditInvestigations({ status: filter === 'All' ? undefined : filter });
+    if (res.success) setItems((res.data || []).map(mapCreditInvestigationRow));
+    setLoading(false);
+  };
+  useEffect(() => {
+    reload();
+  }, [filter]);
+  const filtered = items;
   const pagination_filtered = usePagination(filtered);
   const paginated_filtered = pagination_filtered.paginatedData;
+  const handlePatch = async (ci, status, rejectionReason) => {
+    const result = await patchCreditInvestigation(ci.ciId, { status, rejection_reason: rejectionReason });
+    if (result.success) {
+      showToast(`CI ${status.toLowerCase()} for ${ci.customerName}.`, status === 'Rejected' ? 'error' : 'success');
+      reload();
+    } else showToast(result.message || 'Action failed.', 'error');
+  };
+  if (loading && !items.length) return <LoadingState message="Loading credit investigations..." />;
   return <div className="relative z-10 grid gap-[22px] w-full">
       <section className="panel content-panel relative overflow-hidden">
         <div className="list-section-header">
@@ -1251,9 +1335,16 @@ function CIQueuePage({
         </div>
         {filtered.length ? <><div className="corvex-table-wrapper"><table className="corvex-table">
             <thead><tr><th>Customer</th><th>Submitted By</th><th>Date</th><th>Delinquency</th><th>Status</th><th>Actions</th></tr></thead>
-            <tbody>{paginated_filtered.map(ci => <tr key={ci.id}><td>{ci.customerName}</td><td>{ci.submittedBy}</td><td>{ci.submissionDate}</td><td><StatusBadge status={ci.delinquencyStatus} /></td><td><StatusBadge status={ci.status} /></td><td className="table-actions">
-              <button className="icon-action-button" type="button" title="View" onClick={() => navigate(`/branch-manager/ci-approvals/${ci.id}`)}><NavIcon name="view" /></button>
-              {ci.status === 'Pending' && <><button className="icon-action-button" type="button" title="Approve" onClick={() => showToast(`Approved CI for ${ci.customerName}.`, 'success')}><NavIcon name="check" /></button><button className="icon-action-button danger" type="button" title="Reject" onClick={() => showToast(`Rejected CI for ${ci.customerName}.`, 'error')}><NavIcon name="close" /></button></>}
+            <tbody>{paginated_filtered.map(ci => <tr key={ci.id}><td>{ci.customerName}</td><td>{ci.submittedBy}</td><td>{formatDisplayDate(ci.submissionDate)}</td><td><StatusBadge status={ci.delinquencyStatus} /></td><td><StatusBadge status={ci.status} /></td><td className="table-actions">
+              <button className="icon-action-button" type="button" title="View" onClick={() => navigate(`${opsBase}/ci-approvals/${ci.id}`)}><NavIcon name="view" /></button>
+              {ci.status === 'Pending' && <><button className="icon-action-button" type="button" title="Approve" onClick={() => handlePatch(ci, 'Approved')}><NavIcon name="check" /></button><button className="icon-action-button danger" type="button" title="Reject" onClick={() => {
+                const reason = window.prompt('Rejection reason (required):');
+                if (!reason?.trim()) {
+                  showToast('Reason required.', 'error');
+                  return;
+                }
+                handlePatch(ci, 'Rejected', reason.trim());
+              }}><NavIcon name="close" /></button></>}
             </td></tr>)}</tbody>
           </table></div><Pagination {...pagination_filtered} /></>
         : <EmptyState title="No CI records" description="No items match this filter." />}
@@ -1263,14 +1354,34 @@ function CIQueuePage({
 function CIDetailPage({
   ciId,
   navigate,
-  showToast
+  showToast,
+  opsBase
 }) {
-  const ci = getCIById(ciId);
+  const [ci, setCi] = useState(null);
+  const [loading, setLoading] = useState(true);
   const [rejectReason, setRejectReason] = useState('');
   const [showReject, setShowReject] = useState(false);
-  const pagination_ci_paymentHistory = usePagination(ci.paymentHistory);
+  useEffect(() => {
+    async function load() {
+      setLoading(true);
+      const res = await fetchCreditInvestigationById(ciId);
+      if (res.success && res.data) setCi(mapCreditInvestigationRow(res.data));
+      else setCi(null);
+      setLoading(false);
+    }
+    load();
+  }, [ciId]);
+  const pagination_ci_paymentHistory = usePagination(ci?.paymentHistory || []);
   const paginated_ci_paymentHistory = pagination_ci_paymentHistory.paginatedData;
-  if (!ci) return <EmptyState title="CI not found" actionLabel="Back" onAction={() => navigate('/branch-manager/ci-approvals')} />;
+  const applyStatus = async (status, rejectionReason) => {
+    const result = await patchCreditInvestigation(ciId, { status, rejection_reason: rejectionReason });
+    if (result.success) {
+      showToast(`CI ${status.toLowerCase()}.`, status === 'Rejected' ? 'error' : 'success');
+      navigate(`${opsBase}/ci-approvals`);
+    } else showToast(result.message || 'Action failed.', 'error');
+  };
+  if (loading) return <LoadingState message="Loading credit investigation..." />;
+  if (!ci) return <EmptyState title="CI not found" actionLabel="Back" onAction={() => navigate(`${opsBase}/ci-approvals`)} />;
   return <div className="relative z-10 grid gap-[22px] w-full">
       <Stats stats={[{
       label: 'Customer',
@@ -1299,27 +1410,20 @@ function CIDetailPage({
       </section>
       {showReject && <section className="panel form-panel content-panel"><div className="form-group"><label>Rejection Reason<span className="required">*</span></label><textarea value={rejectReason} onChange={e => setRejectReason(e.target.value)} placeholder="Mandatory reason..." /></div></section>}
       {ci.status === 'Pending' ? <div className="flex justify-end gap-2 mt-4">
-          <button className="button ghost" type="button" onClick={() => navigate('/branch-manager/ci-approvals')}>Back</button>
-          <button className="button secondary" type="button" onClick={() => {
-        showToast('Revision requested.', 'success');
-        navigate('/branch-manager/ci-approvals');
-      }}>Request Revision</button>
+          <button className="button ghost" type="button" onClick={() => navigate(`${opsBase}/ci-approvals`)}>Back</button>
+          <button className="button secondary" type="button" onClick={() => applyStatus('Revision Requested')}>Request Revision</button>
           <button className="button secondary" type="button" onClick={() => {
         if (showReject) {
           if (!rejectReason.trim()) {
             showToast('Reason required.', 'error');
             return;
           }
-          showToast(`CI rejected.`, 'error');
-          navigate('/branch-manager/ci-approvals');
+          applyStatus('Rejected', rejectReason.trim());
         } else setShowReject(true);
       }}>{showReject ? 'Confirm Reject' : 'Reject'}</button>
-          <button className="button" type="button" onClick={() => {
-        showToast('CI approved.', 'success');
-        navigate('/branch-manager/ci-approvals');
-      }}>Approve</button>
+          <button className="button" type="button" onClick={() => applyStatus('Approved')}>Approve</button>
         </div> : <div className="flex justify-end gap-2 mt-4">
-          <button className="button ghost" type="button" onClick={() => navigate('/branch-manager/ci-approvals')}>Back</button>
+          <button className="button ghost" type="button" onClick={() => navigate(`${opsBase}/ci-approvals`)}>Back</button>
         </div>}
     </div>;
 }
@@ -1327,7 +1431,8 @@ function CIDetailPage({
 // ── Customers ─────────────────────────────────────────────────────────────────
 function CustomersPage({
   navigate,
-  branchName
+  branchName,
+  opsBase
 }) {
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('All');
@@ -1431,7 +1536,7 @@ function CustomersPage({
                     <td><StatusBadge status={c.paymentStatus} /></td>
                     <td><StatusBadge status={c.status} /></td>
                     <td className="table-actions">
-                      <button className="icon-action-button" type="button" title="View" onClick={() => navigate(`/branch-manager/customers/${c.id}`)}>
+                      <button className="icon-action-button" type="button" title="View" onClick={() => navigate(`${opsBase}/customers/${c.id}`)}>
                         <NavIcon name="view" />
                       </button>
                     </td>
@@ -1446,7 +1551,8 @@ function CustomersPage({
 function CustomerDetailPage({
   customerId,
   navigate,
-  branchName
+  branchName,
+  opsBase
 }) {
   const [customer, setCustomer] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -1461,7 +1567,7 @@ function CustomerDetailPage({
   }, [customerId]);
   if (loading) return <LoadingState message="Loading customer..." />;
   if (!customer) {
-    return <EmptyState title="Customer not found" description="This customer may not belong to your branch or no longer exists." actionLabel="Back to Customers" onAction={() => navigate('/branch-manager/customers')} />;
+    return <EmptyState title="Customer not found" description="This customer may not belong to your branch or no longer exists." actionLabel="Back to Customers" onAction={() => navigate(`${opsBase}/customers`)} />;
   }
   const name = `${customer.first_name} ${customer.last_name}`;
   const paymentStatus = Number(customer.activity?.outstanding_balance || 0) > 0 ? 'Overdue' : 'Current';
@@ -1553,8 +1659,8 @@ function CustomerDetailPage({
         </section> : null}
 
       <div className="flex justify-end gap-2 mt-4">
-        <button className="button ghost" type="button" onClick={() => navigate('/branch-manager/customers')}>Back to Customers</button>
-        <button className="button secondary" type="button" onClick={() => navigate('/branch-manager/leaflet')}>View on Map</button>
+        <button className="button ghost" type="button" onClick={() => navigate(`${opsBase}/customers`)}>Back to Customers</button>
+        <button className="button secondary" type="button" onClick={() => navigate(`${opsBase}/leaflet`)}>View on Map</button>
       </div>
     </div>;
 }
@@ -1563,7 +1669,8 @@ function CustomerDetailPage({
 function LeafletPage({
   pageType,
   navigate,
-  showToast
+  showToast,
+  opsBase
 }) {
   const [layers, setLayers] = useState(['Collector Routes', 'Delinquency Clusters']);
   const [mapAccounts, setMapAccounts] = useState([]);
@@ -1612,21 +1719,51 @@ function LeafletPage({
         <div className="flex flex-col md:flex-row justify-between gap-4 items-start md:items-center mb-4"><h3>Customer Pins</h3></div>
         {mapAccounts.length ? <><div className="corvex-table-wrapper"><table className="corvex-table">
             <thead><tr><th>Customer</th><th>Balance</th><th>Status</th><th>Last Visit</th><th>Staff</th><th>Actions</th></tr></thead>
-            <tbody>{paginated_mapAccounts.map(a => <tr key={a.id}><td>{a.customerName}</td><td>{formatCurrency(a.balance)}</td><td><StatusBadge status={a.paymentStatus} /></td><td>{a.lastVisit}</td><td>{a.assignedStaff}</td><td className="table-actions"><button className="icon-action-button" type="button" title="View" onClick={() => navigate(`/branch-manager/customers/${a.id}`)}><NavIcon name="view" /></button></td></tr>)}</tbody>
+            <tbody>{paginated_mapAccounts.map(a => <tr key={a.id}><td>{a.customerName}</td><td>{formatCurrency(a.balance)}</td><td><StatusBadge status={a.paymentStatus} /></td><td>{a.lastVisit}</td><td>{a.assignedStaff}</td><td className="table-actions"><button className="icon-action-button" type="button" title="View" onClick={() => navigate(`${opsBase}/customers/${a.id}`)}><NavIcon name="view" /></button></td></tr>)}</tbody>
           </table></div><Pagination {...pagination_mapAccounts} /></> : <EmptyState title="No customers on map" description="Customers for your branch will appear here once they have location data." />}
       </section>
       <div className="flex justify-end gap-2 mt-4">
-        <button className="button secondary" type="button" onClick={() => navigate('/branch-manager/leaflet/delinquency')}>Delinquency Heatmap</button>
-        <button className="button secondary" type="button" onClick={() => navigate('/branch-manager/leaflet/profitability')}>Profitability Zones</button>
+        <button className="button secondary" type="button" onClick={() => navigate(`${opsBase}/leaflet/delinquency`)}>Delinquency Heatmap</button>
+        <button className="button secondary" type="button" onClick={() => navigate(`${opsBase}/leaflet/profitability`)}>Profitability Zones</button>
       </div>
     </div>;
 }
 function AlertsPage({
   navigate,
-  showToast
+  showToast,
+  currentUser
 }) {
   const [filter, setFilter] = useState('All');
-  const filtered = useMemo(() => filter === 'All' ? ALERTS : ALERTS.filter(a => a.category.includes(filter)), [filter]);
+  const [alerts, setAlerts] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const load = async () => {
+    setLoading(true);
+    const res = await fetchOperationalAlerts({ status: 'Open' });
+    if (res.success) setAlerts((res.data || []).map(mapOperationalAlertRow));
+    setLoading(false);
+  };
+  useEffect(() => {
+    load();
+  }, []);
+  const filtered = useMemo(() => {
+    if (filter === 'All') return alerts;
+    return alerts.filter(a => (a.category || '').toLowerCase().includes(filter.toLowerCase()));
+  }, [alerts, filter]);
+  const assignAlert = async (alertId) => {
+    const result = await patchOperationalAlert(alertId, { assigned_to: currentUser?.id });
+    if (result.success) {
+      showToast('Follow-up assigned to you.', 'success');
+      load();
+    } else showToast(result.message || 'Assign failed.', 'error');
+  };
+  const resolveAlert = async (alertId) => {
+    const result = await patchOperationalAlert(alertId, { status: 'Resolved' });
+    if (result.success) {
+      showToast('Resolved.', 'success');
+      load();
+    } else showToast(result.message || 'Resolve failed.', 'error');
+  };
+  if (loading && !alerts.length) return <LoadingState message="Loading alerts..." />;
   return <div className="relative z-10 grid gap-[22px] w-full">
       <section className="panel content-panel relative overflow-hidden">
         <div className="segmented-control">
@@ -1635,45 +1772,58 @@ function AlertsPage({
       </section>
       <div className="notification-list">
         {filtered.map(a => <article key={a.id} className="notification-item">
-            <div><h4>{a.title}</h4><p className="text-ink/70">{a.message}</p><span className="notification-time">{a.category} · {a.time}</span></div>
-            <div className="notification-actions"><Severity severity={a.severity} /><button className="inline-flex justify-center items-center gap-2 px-5 py-2.5 rounded-md bg-transparent text-blue border-[1.5px] border-blue-30 shadow-none hover:bg-blue-08 transition-all duration-160 cursor-pointer" type="button" onClick={() => showToast('Follow-up assigned.', 'success')}>Assign</button><button className="inline-flex justify-center items-center gap-2 px-5 py-2.5 rounded-md border-0 bg-blue text-white font-semibold cursor-pointer transition-all duration-160 hover:-translate-y-[1px] hover:shadow-[0_4px_16px_rgba(37,99,235,0.35)] hover:brightness-105 active:translate-y-0" type="button" onClick={() => showToast('Resolved.', 'success')}>Resolve</button></div>
+            <div><h4>{a.title}</h4><p className="text-ink/70">{a.message}</p><span className="notification-time">{a.category} · {formatDisplayDateTime(a.time)}</span></div>
+            <div className="notification-actions"><Severity severity={a.severity} /><button className="inline-flex justify-center items-center gap-2 px-5 py-2.5 rounded-md bg-transparent text-blue border-[1.5px] border-blue-30 shadow-none hover:bg-blue-08 transition-all duration-160 cursor-pointer" type="button" onClick={() => assignAlert(a.id)}>Assign</button><button className="inline-flex justify-center items-center gap-2 px-5 py-2.5 rounded-md border-0 bg-blue text-white font-semibold cursor-pointer transition-all duration-160 hover:-translate-y-[1px] hover:shadow-[0_4px_16px_rgba(37,99,235,0.35)] hover:brightness-105 active:translate-y-0" type="button" onClick={() => resolveAlert(a.id)}>Resolve</button></div>
           </article>)}
       </div>
     </div>;
 }
 function NotificationsPage({
   navigate,
-  showToast
+  showToast,
+  opsBase
 }) {
-  const [items, setItems] = useState(NOTIFICATIONS);
+  const [items, setItems] = useState([]);
+  const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState('All');
+  const load = async () => {
+    setLoading(true);
+    const res = await fetchNotifications();
+    if (res.success) {
+      setItems((res.data || []).map(row => mapNotificationRow(row, { opsBase, orgBase: '/operating-manager' })));
+    }
+    setLoading(false);
+  };
+  useEffect(() => {
+    load();
+  }, [opsBase]);
   const filtered = useMemo(() => {
     if (filter === 'Unread') return items.filter(n => !n.read);
     if (filter === 'All') return items;
-    return items.filter(n => n.type === filter.toLowerCase());
+    return items.filter(n => (n.category || n.type || '').toLowerCase().includes(filter.toLowerCase()));
   }, [items, filter]);
   return <div className="relative z-10 grid gap-[22px] w-full">
       <section className="panel content-panel relative overflow-hidden">
         <div className="flex flex-col md:flex-row justify-between gap-4 items-start md:items-center">
           <div className="segmented-control">{['All', 'Unread', 'CI', 'Route', 'Delinquency', 'Inventory', 'Staff'].map(f => <button key={f} className={filter === f ? 'segment active' : 'segment'} type="button" onClick={() => setFilter(f)}>{f}</button>)}</div>
-          <button className="button" type="button" onClick={() => {
-          setItems(n => n.map(i => ({
-            ...i,
-            read: true
-          })));
-          showToast('All marked read.', 'success');
+          <button className="button" type="button" onClick={async () => {
+          const res = await markAllNotificationsRead();
+          if (res.success) {
+            showToast('All marked read.', 'success');
+            load();
+          }
         }}>Mark All as Read</button>
         </div>
       </section>
-      {filtered.length ? <div className="notification-list">
+      {loading && !items.length ? <LoadingState message="Loading notifications..." /> : filtered.length ? <div className="notification-list">
           {filtered.map(item => <article key={item.id} className={`notification-item${item.read ? '' : ' unread'}`}>
-              <div><h4>{item.title}</h4><p className="text-ink/70">{item.message}</p><span className="notification-time">{item.time}</span></div>
+              <div><h4>{item.title}</h4><p className="text-ink/70">{item.message}</p><span className="notification-time">{formatDisplayDateTime(item.time)}</span></div>
               <div className="notification-actions">
-                {!item.read && <button className="inline-flex justify-center items-center gap-2 px-5 py-2.5 rounded-md bg-transparent text-blue border-[1.5px] border-blue-30 shadow-none hover:bg-blue-08 transition-all duration-160 cursor-pointer" type="button" onClick={() => setItems(ns => ns.map(n => n.id === item.id ? {
-            ...n,
-            read: true
-          } : n))}>Mark Read</button>}
-                <button className="inline-flex justify-center items-center gap-2 px-5 py-2.5 rounded-md bg-mint text-ink border-[1.5px] border-surface-3 shadow-none hover:border-blue hover:text-blue transition-all duration-160 cursor-pointer" type="button" onClick={() => navigate(item.relatedTo)}>Open</button>
+                {!item.read && <button className="inline-flex justify-center items-center gap-2 px-5 py-2.5 rounded-md bg-transparent text-blue border-[1.5px] border-blue-30 shadow-none hover:bg-blue-08 transition-all duration-160 cursor-pointer" type="button" onClick={async () => {
+            const res = await markNotificationRead(item.id);
+            if (res.success) load();
+          }}>Mark Read</button>}
+                {item.relatedTo ? <button className="inline-flex justify-center items-center gap-2 px-5 py-2.5 rounded-md bg-mint text-ink border-[1.5px] border-surface-3 shadow-none hover:border-blue hover:text-blue transition-all duration-160 cursor-pointer" type="button" onClick={() => navigate(item.relatedTo)}>Open</button> : null}
               </div>
             </article>)}
         </div> : <EmptyState title="No notifications" description="You're all caught up." />}
@@ -1682,88 +1832,101 @@ function NotificationsPage({
 function ProfilePage({
   navigate,
   showToast,
-  branchName
+  branchName,
+  opsBase
 }) {
-  const currentUser = getCurrentUser();
-  const userName = currentUser?.fullName || 'User';
-  const userBranch = currentUser?.branch?.name || branchName || 'Branch';
-  const userEmail = currentUser?.email || 'N/A';
+  const sessionUser = getCurrentUser();
+  const [profile, setProfile] = useState(null);
+  const [password, setPassword] = useState('');
+  const [editing, setEditing] = useState(false);
+  useEffect(() => {
+    async function load() {
+      const res = await fetchMyProfile();
+      if (res.success) setProfile(res.data);
+    }
+    load();
+  }, []);
+  const userName = profile
+    ? [profile.first_name, profile.last_name].filter(Boolean).join(' ')
+    : sessionUser?.fullName || 'User';
+  const userBranch = profile?.branch?.name || sessionUser?.branch?.name || branchName || 'Branch';
+  const roleLabel = profile?.role?.name || sessionUser?.role?.name || 'Staff';
   const userInitials = userName.split(' ').map(n => n[0]).join('').toUpperCase();
+  const saveProfile = async () => {
+    if (!profile) return;
+    const payload = {
+      first_name: profile.first_name,
+      last_name: profile.last_name,
+      email: profile.email,
+      phone: profile.phone,
+    };
+    if (password.trim()) payload.password = password.trim();
+    const res = await updateMyProfile(payload);
+    if (res.success) {
+      persistCurrentUserFromProfile(res.data);
+      setProfile(res.data);
+      setPassword('');
+      setEditing(false);
+      showToast('Profile updated.', 'success');
+    } else showToast(res.message || 'Update failed.', 'error');
+  };
+  if (!profile) return <LoadingState message="Loading profile..." />;
   return <div className="relative z-10 grid gap-[22px] w-full">
       <section className="panel content-panel relative overflow-hidden">
         <div className="profile-header">
           <div className="profile-avatar">{userInitials}</div>
-          <div><h3>{userName}</h3><p className="text-ink/70">Branch Manager</p></div>
+          <div><h3>{userName}</h3><p className="text-ink/70">{roleLabel}</p></div>
         </div>
-        <ul className="info-grid"><li><span className="info-item-label">Branch</span><span className="info-item-value">{userBranch}</span></li><li><span className="info-item-label">Email</span><span className="info-item-value">{userEmail}</span></li><li><span className="info-item-label">Phone</span><span className="info-item-value">N/A</span></li></ul>
+        {editing ? <div className="form-grid" style={{ marginTop: 16 }}>
+            <label>First name<input value={profile.first_name || ''} onChange={e => setProfile(p => ({ ...p, first_name: e.target.value }))} /></label>
+            <label>Last name<input value={profile.last_name || ''} onChange={e => setProfile(p => ({ ...p, last_name: e.target.value }))} /></label>
+            <label>Email<input type="email" value={profile.email || ''} onChange={e => setProfile(p => ({ ...p, email: e.target.value }))} /></label>
+            <label>Phone<input value={profile.phone || ''} onChange={e => setProfile(p => ({ ...p, phone: e.target.value }))} /></label>
+            <label>New password (optional)<input type="password" value={password} onChange={e => setPassword(e.target.value)} placeholder="Min. 8 characters" /></label>
+          </div>
+          : <ul className="info-grid"><li><span className="info-item-label">Branch</span><span className="info-item-value">{userBranch}</span></li><li><span className="info-item-label">Email</span><span className="info-item-value">{profile.email}</span></li><li><span className="info-item-label">Phone</span><span className="info-item-value">{profile.phone || '—'}</span></li></ul>}
       </section>
       <div className="flex justify-end gap-2 mt-4">
         <button className="button ghost" type="button" onClick={() => requestLogout()}>Logout</button>
-        <button className="button ghost" type="button" onClick={() => navigate('/branch-manager/audit-log')}>Audit Log</button>
-        <button className="button ghost" type="button" onClick={() => navigate('/branch-manager/approval-center')}>Approval Center</button>
-        <button className="button secondary" type="button" onClick={() => showToast('Change Password opened.', 'success')}>Change Password</button>
-        <button className="button" type="button" onClick={() => showToast('Update Profile opened.', 'success')}>Update Profile</button>
+        <button className="button ghost" type="button" onClick={() => navigate(`${opsBase}/audit-log`)}>Audit Log</button>
+        <button className="button ghost" type="button" onClick={() => navigate(`${opsBase}/approval-center`)}>Approval Center</button>
+        {editing ? <>
+            <button className="button ghost" type="button" onClick={() => setEditing(false)}>Cancel</button>
+            <button className="button" type="button" onClick={saveProfile}>Save Profile</button>
+          </> : <>
+            <button className="button secondary" type="button" onClick={() => setEditing(true)}>Update Profile</button>
+          </>}
       </div>
     </div>;
 }
 function ApprovalCenterPage({
   navigate,
-  showToast
+  showToast,
+  opsBase
 }) {
   const [tab, setTab] = useState('ci');
-  const [ciList, setCiList] = useState(CI_QUEUE);
-  const [transferList, setTransferList] = useState([{
-    id: 'TRF-301',
-    product: '3-Seater Fabric Sofa (Beige)',
-    qty: 4,
-    from: 'Davao Oriental Branch',
-    to: 'Davao City Branch',
-    requestedBy: 'Ana Reyes',
-    date: '2026-06-25',
-    status: 'Pending Approval',
-    value: 114000
-  }, {
-    id: 'TRF-300',
-    product: '6-Seater Dining Table Set (Narra)',
-    qty: 2,
-    from: 'Davao Oriental Branch',
-    to: 'General Santos Branch',
-    requestedBy: 'Ana Reyes',
-    date: '2026-06-24',
-    status: 'Pending Approval',
-    value: 84000
-  }, {
-    id: 'TRF-297',
-    product: 'Coffee Table (Tempered Glass & Steel)',
-    qty: 5,
-    from: 'Davao Oriental Branch',
-    to: 'General Santos Branch',
-    requestedBy: 'Ana Reyes',
-    date: '2026-06-25',
-    status: 'Pending Approval',
-    value: 37500
-  }]);
-  const [specialList, setSpecialList] = useState([{
-    id: 'SC-001',
-    customerName: 'Mabuhay Sala Sets',
-    accountNumber: 'ACC-1006',
-    requestType: 'Extended Payment Term',
-    requestedBy: 'John Dela Cruz',
-    date: '2026-06-24',
-    amount: 38000,
-    status: 'Pending',
-    notes: 'Customer requested 90-day extension due to business slowdown.'
-  }, {
-    id: 'SC-002',
-    customerName: 'Hardin ng Bahay Home Store',
-    accountNumber: 'ACC-1003',
-    requestType: 'Partial Collection',
-    requestedBy: 'Maria Dela Cruz',
-    date: '2026-06-23',
-    amount: 10000,
-    status: 'Pending',
-    notes: 'Customer can only settle ₱10,000 of ₱15,800 balance this week.'
-  }]);
+  const [ciList, setCiList] = useState([]);
+  const [transferList, setTransferList] = useState([]);
+  const [specialList, setSpecialList] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const reload = async () => {
+    setLoading(true);
+    const [ciRes, trRes, scRes] = await Promise.all([
+      fetchCreditInvestigations(),
+      fetchInventoryTransfers(),
+      fetchSpecialCollectionRequests(),
+    ]);
+    if (ciRes.success) setCiList((ciRes.data || []).map(mapCreditInvestigationRow));
+    if (trRes.success) {
+      const pending = (trRes.data || []).filter(t => ['Pending Approval', 'Submitted'].includes(t.status));
+      setTransferList(pending.map(mapInventoryTransferRow));
+    }
+    if (scRes.success) setSpecialList((scRes.data || []).map(mapSpecialCollectionRow));
+    setLoading(false);
+  };
+  useEffect(() => {
+    reload();
+  }, []);
   const tabs = [{
     key: 'ci',
     label: `Credit Investigations (${ciList.filter(c => c.status === 'Pending').length})`
@@ -1775,47 +1938,60 @@ function ApprovalCenterPage({
     label: `Special Collections (${specialList.filter(s => s.status === 'Pending').length})`
   }];
   const totalPending = ciList.filter(c => c.status === 'Pending').length + transferList.filter(t => t.status === 'Pending Approval').length + specialList.filter(s => s.status === 'Pending').length;
-  const approveCI = id => {
-    setCiList(p => p.map(c => c.id === id ? {
-      ...c,
-      status: 'Approved'
-    } : c));
-    showToast('CI approved successfully.', 'success');
+  const approveCI = async (ciId) => {
+    const result = await patchCreditInvestigation(ciId, { status: 'Approved' });
+    if (result.success) {
+      showToast('CI approved successfully.', 'success');
+      reload();
+    } else showToast(result.message || 'Approve failed.', 'error');
   };
-  const rejectCI = id => {
-    setCiList(p => p.map(c => c.id === id ? {
-      ...c,
-      status: 'Rejected'
-    } : c));
-    showToast('CI rejected.', 'success');
+  const rejectCI = async (ciId) => {
+    const reason = window.prompt('Rejection reason (required):');
+    if (!reason?.trim()) {
+      showToast('Reason required.', 'error');
+      return;
+    }
+    const result = await patchCreditInvestigation(ciId, { status: 'Rejected', rejection_reason: reason.trim() });
+    if (result.success) {
+      showToast('CI rejected.', 'success');
+      reload();
+    } else showToast(result.message || 'Reject failed.', 'error');
   };
-  const approveTransfer = id => {
-    setTransferList(p => p.map(t => t.id === id ? {
-      ...t,
-      status: 'Approved'
-    } : t));
-    showToast('Transfer approved.', 'success');
+  const approveTransfer = async (transferId) => {
+    const result = await patchInventoryTransfer(transferId, { status: 'Approved' });
+    if (result.success) {
+      showToast('Transfer approved.', 'success');
+      reload();
+    } else showToast(result.message || 'Approve failed.', 'error');
   };
-  const rejectTransfer = id => {
-    setTransferList(p => p.map(t => t.id === id ? {
-      ...t,
-      status: 'Rejected'
-    } : t));
-    showToast('Transfer rejected.', 'success');
+  const rejectTransfer = async (transferId) => {
+    const reason = window.prompt('Rejection reason (required):');
+    if (!reason?.trim()) {
+      showToast('Reason required.', 'error');
+      return;
+    }
+    const result = await patchInventoryTransfer(transferId, {
+      status: 'Rejected',
+      approval_info: reason.trim(),
+    });
+    if (result.success) {
+      showToast('Transfer rejected.', 'success');
+      reload();
+    } else showToast(result.message || 'Reject failed.', 'error');
   };
-  const approveSpecial = id => {
-    setSpecialList(p => p.map(s => s.id === id ? {
-      ...s,
-      status: 'Approved'
-    } : s));
-    showToast('Special collection approved.', 'success');
+  const approveSpecial = async (requestId) => {
+    const result = await patchSpecialCollectionRequest(requestId, { status: 'Approved' });
+    if (result.success) {
+      showToast('Special collection approved.', 'success');
+      reload();
+    } else showToast(result.message || 'Approve failed.', 'error');
   };
-  const rejectSpecial = id => {
-    setSpecialList(p => p.map(s => s.id === id ? {
-      ...s,
-      status: 'Rejected'
-    } : s));
-    showToast('Special collection rejected.', 'success');
+  const rejectSpecial = async (requestId) => {
+    const result = await patchSpecialCollectionRequest(requestId, { status: 'Rejected' });
+    if (result.success) {
+      showToast('Special collection rejected.', 'success');
+      reload();
+    } else showToast(result.message || 'Reject failed.', 'error');
   };
   const RiskBadge = ({
     score
@@ -1832,6 +2008,9 @@ function ApprovalCenterPage({
   const paginated_ciList = pagination_ciList.paginatedData;
   const pagination_transferList = usePagination(transferList);
   const paginated_transferList = pagination_transferList.paginatedData;
+  if (loading && !ciList.length && !transferList.length && !specialList.length) {
+    return <LoadingState message="Loading approval center..." />;
+  }
   return <div className="relative z-10 grid gap-[22px] w-full">
       {/* Summary bar */}
       <section className="stats-grid">
@@ -1869,7 +2048,7 @@ function ApprovalCenterPage({
       {tab === 'ci' && <section className="panel content-panel relative overflow-hidden">
           <div className="flex flex-col md:flex-row justify-between gap-4 items-start md:items-center mb-4">
             <h3>Credit Investigation Queue</h3>
-            <button className="inline-flex justify-center items-center gap-2 px-5 py-2.5 rounded-md bg-transparent text-blue border-[1.5px] border-blue-30 shadow-none hover:bg-blue-08 transition-all duration-160 cursor-pointer" type="button" onClick={() => navigate('/branch-manager/ci-approvals')}>Open Full CI Queue</button>
+            <button className="inline-flex justify-center items-center gap-2 px-5 py-2.5 rounded-md bg-transparent text-blue border-[1.5px] border-blue-30 shadow-none hover:bg-blue-08 transition-all duration-160 cursor-pointer" type="button" onClick={() => navigate(`${opsBase}/ci-approvals`)}>Open Full CI Queue</button>
           </div>
           {ciList.length ? <><div className="corvex-table-wrapper">
               <table className="corvex-table">
@@ -1885,17 +2064,17 @@ function ApprovalCenterPage({
                       <td>{ci.submittedBy}<span className="text-ink/70" style={{
                     display: 'block',
                     fontSize: '0.8rem'
-                  }}>{ci.submissionDate}</span></td>
+                  }}>{formatDisplayDate(ci.submissionDate)}</span></td>
                       <td>{ci.purpose}</td>
                       <td>{formatCurrency(ci.monthlyIncome)}</td>
                       <td><RiskBadge score={ci.riskScore} /></td>
                       <td><StatusBadge status={ci.delinquencyStatus} /></td>
                       <td><StatusBadge status={ci.status} /></td>
                       <td className="table-actions">
-                        <button className="icon-action-button" type="button" title="View" onClick={() => navigate(`/branch-manager/ci-approvals/${ci.id}`)}><NavIcon name="view" /></button>
+                        <button className="icon-action-button" type="button" title="View" onClick={() => navigate(`${opsBase}/ci-approvals/${ci.id}`)}><NavIcon name="view" /></button>
                         {ci.status === 'Pending' && <>
-                          <button className="icon-action-button" type="button" title="Approve" onClick={() => approveCI(ci.id)}><NavIcon name="check" /></button>
-                          <button className="icon-action-button danger" type="button" title="Reject" onClick={() => rejectCI(ci.id)}><NavIcon name="close" /></button>
+                          <button className="icon-action-button" type="button" title="Approve" onClick={() => approveCI(ci.ciId)}><NavIcon name="check" /></button>
+                          <button className="icon-action-button danger" type="button" title="Reject" onClick={() => rejectCI(ci.ciId)}><NavIcon name="close" /></button>
                         </>}
                       </td>
                     </tr>)}
@@ -1920,7 +2099,7 @@ function ApprovalCenterPage({
                 </thead>
                 <tbody>
                   {paginated_transferList.map(t => <tr key={t.id}>
-                      <td><strong>{t.id}</strong></td>
+                      <td><strong>{t.ref || t.id}</strong></td>
                       <td>{t.product}</td>
                       <td>{t.qty} units</td>
                       <td style={{
@@ -1933,10 +2112,10 @@ function ApprovalCenterPage({
                   fontWeight: 600
                 }}>{formatCurrency(t.value)}</td>
                       <td>{t.requestedBy}</td>
-                      <td>{t.date}</td>
+                      <td>{formatDisplayDate(t.date)}</td>
                       <td><StatusBadge status={t.status} /></td>
                       <td className="table-actions">
-                        {t.status === 'Pending Approval' && <>
+                        {['Pending Approval', 'Submitted'].includes(t.status) && <>
                           <button className="icon-action-button" type="button" title="Approve" onClick={() => approveTransfer(t.id)}><NavIcon name="check" /></button>
                           <button className="icon-action-button danger" type="button" title="Reject" onClick={() => rejectTransfer(t.id)}><NavIcon name="close" /></button>
                         </>}
@@ -2018,8 +2197,8 @@ function ApprovalCenterPage({
             display: 'flex',
             gap: 10
           }}>
-                      <button className="inline-flex justify-center items-center gap-2 px-5 py-2.5 rounded-md border-0 bg-blue text-white font-semibold cursor-pointer transition-all duration-160 hover:-translate-y-[1px] hover:shadow-[0_4px_16px_rgba(37,99,235,0.35)] hover:brightness-105 active:translate-y-0" type="button" onClick={() => approveSpecial(s.id)}>Approve Request</button>
-                      <button className="inline-flex justify-center items-center gap-2 px-5 py-2.5 rounded-md bg-mint text-ink border-[1.5px] border-surface-3 shadow-none hover:border-blue hover:text-blue transition-all duration-160 cursor-pointer" type="button" onClick={() => rejectSpecial(s.id)}>Reject</button>
+                      <button className="inline-flex justify-center items-center gap-2 px-5 py-2.5 rounded-md border-0 bg-blue text-white font-semibold cursor-pointer transition-all duration-160 hover:-translate-y-[1px] hover:shadow-[0_4px_16px_rgba(37,99,235,0.35)] hover:brightness-105 active:translate-y-0" type="button" onClick={() => approveSpecial(s.requestId)}>Approve Request</button>
+                      <button className="inline-flex justify-center items-center gap-2 px-5 py-2.5 rounded-md bg-mint text-ink border-[1.5px] border-surface-3 shadow-none hover:border-blue hover:text-blue transition-all duration-160 cursor-pointer" type="button" onClick={() => rejectSpecial(s.requestId)}>Reject</button>
                     </div>}
                 </article>)}
             </div> : <EmptyState title="No special collection requests" description="All requests have been processed." />}
@@ -2029,15 +2208,92 @@ function ApprovalCenterPage({
 function AuditLogPage({
   navigate
 }) {
-  const pagination_AUDIT_LOGS = usePagination(AUDIT_LOGS);
+  const [logs, setLogs] = useState([]);
+  const [loading, setLoading] = useState(true);
+  useEffect(() => {
+    async function load() {
+      setLoading(true);
+      const result = await getBranchAuditLogs({ limit: 200 });
+      if (result.success) setLogs(result.data || []);
+      setLoading(false);
+    }
+    load();
+  }, []);
+  const pagination_AUDIT_LOGS = usePagination(logs);
   const paginated_AUDIT_LOGS = pagination_AUDIT_LOGS.paginatedData;
   return <div className="relative z-10 grid gap-[22px] w-full">
       <section className="panel content-panel relative overflow-hidden">
         <div className="flex flex-col md:flex-row justify-between gap-4 items-start md:items-center mb-4"><h3>Audit Log</h3></div>
-        <><div className="corvex-table-wrapper"><table className="corvex-table"><thead><tr><th>Action</th><th>Detail</th><th>Timestamp</th></tr></thead><tbody>{paginated_AUDIT_LOGS.map(l => <tr key={l.id}><td>{l.action}</td><td>{l.detail}</td><td>{l.timestamp}</td></tr>)}</tbody></table></div><Pagination {...pagination_AUDIT_LOGS} /></>
+        {loading ? <LoadingState message="Loading audit log…" /> : <><div className="corvex-table-wrapper"><table className="corvex-table"><thead><tr><th>User</th><th>Action</th><th>Details</th><th>IP</th><th>Timestamp</th></tr></thead><tbody>{paginated_AUDIT_LOGS.length ? paginated_AUDIT_LOGS.map(l => <tr key={l.audit_id ?? l.id}><td>{l.user_name || '—'}</td><td>{l.action}</td><td>{l.status_details || l.detail || '—'}</td><td>{l.ip_address || '—'}</td><td>{formatDisplayDateTime(l.created_at || l.timestamp)}</td></tr>) : <tr><td colSpan={5}><EmptyState title="No audit entries" /></td></tr>}</tbody></table></div><Pagination {...pagination_AUDIT_LOGS} /></>}
       </section>
-      <div className="flex justify-end gap-2 mt-4">
-        <button className="button ghost" type="button" onClick={() => navigate('/branch-manager/profile')}>Back to Profile</button>
+    </div>;
+}
+
+function SettingsPage({
+  navigate,
+  opsBase
+}) {
+  return <div className="relative z-10 grid gap-[22px] w-full">
+      <section className="panel content-panel relative overflow-hidden">
+        <h3>Branch Settings</h3>
+        <p className="text-ink/70">Manage your profile, approvals, and audit history for this branch.</p>
+        <div className="flex flex-wrap gap-2 mt-4">
+          <button className="button" type="button" onClick={() => navigate(`${opsBase}/profile`)}>Profile</button>
+          <button className="button secondary" type="button" onClick={() => navigate(`${opsBase}/approval-center`)}>Approval Center</button>
+          <button className="button secondary" type="button" onClick={() => navigate(`${opsBase}/audit-log`)}>Audit Log</button>
+          <button className="button ghost" type="button" onClick={() => navigate(`${opsBase}/notifications`)}>Notifications</button>
+        </div>
+      </section>
+    </div>;
+}
+
+function AccountLocationDetailPage({
+  accountId,
+  navigate,
+  opsBase,
+  branchName
+}) {
+  const [customer, setCustomer] = useState(null);
+  const [loading, setLoading] = useState(true);
+  useEffect(() => {
+    async function load() {
+      setLoading(true);
+      const res = await getBranchCustomerById(accountId);
+      if (res.success) setCustomer(res.data);
+      setLoading(false);
+    }
+    load();
+  }, [accountId]);
+  if (loading) return <LoadingState message="Loading account location..." />;
+  if (!customer) {
+    return <EmptyState title="Account not found" actionLabel="Back to map" onAction={() => navigate(`${opsBase}/leaflet`)} />;
+  }
+  const name = `${customer.first_name} ${customer.last_name}`;
+  const lat = Number(customer.latitude);
+  const lng = Number(customer.longitude);
+  return <div className="relative z-10 grid gap-[22px] w-full">
+      <Stats stats={[{
+      label: 'Customer',
+      value: name
+    }, {
+      label: 'Branch',
+      value: customer.branch_name || branchName
+    }, {
+      label: 'Outstanding',
+      value: formatCurrency(Number(customer.activity?.outstanding_balance || 0))
+    }]} />
+      {lat && lng ? <section className="panel content-panel relative overflow-hidden">
+          <LeafletMap center={[lat, lng]} zoom={15} height={360} markers={[{
+        id: customer.customer_id,
+        position: [lat, lng],
+        label: name.substring(0, 2).toUpperCase(),
+        color: '#093850',
+        popup: name
+      }]} />
+        </section> : <EmptyState title="No coordinates" description="This customer has no map pin on file." />}
+      <div className="flex justify-end gap-2">
+        <button className="button ghost" type="button" onClick={() => navigate(`${opsBase}/leaflet`)}>Back to Map</button>
+        <button className="button" type="button" onClick={() => navigate(`${opsBase}/customers/${customer.customer_id}`)}>Open Customer</button>
       </div>
     </div>;
 }
@@ -2057,6 +2313,7 @@ export function BranchManagerPageBody({
       </section>;
   }
   const branchName = currentUser?.branch?.name || 'All Branches';
+  const opsBase = isOperatingManager ? '/operating-manager/operations' : '/branch-manager';
   if (!page) return <EmptyState title="Page not found" description="Use the sidebar to open a supported screen." />;
   const p = {
     collectorId: page.params?.collectorId,
@@ -2064,11 +2321,16 @@ export function BranchManagerPageBody({
     ciId: page.params?.ciId,
     accountId: page.params?.accountId,
     customerId: page.params?.customerId,
+    pageType: page.pageType,
     navigate,
     showToast,
-    branchName
+    branchName,
+    opsBase,
+    currentUser,
   };
   switch (page.pageType) {
+    case 'settings':
+      return <SettingsPage {...p} />;
     case 'dashboard':
       return <DashboardPage {...p} />;
     case 'customers':
@@ -2095,6 +2357,8 @@ export function BranchManagerPageBody({
     case 'leafletDelinquency':
     case 'leafletProfitability':
       return <LeafletPage pageType={page.pageType} {...p} />;
+    case 'accountLocationDetail':
+      return <AccountLocationDetailPage {...p} />;
     case 'reports':
     case 'reportCollection':
     case 'reportSales':
@@ -2109,9 +2373,9 @@ export function BranchManagerPageBody({
     case 'alerts':
       return <AlertsPage {...p} />;
     case 'creditHistory':
-      return <CreditHistoryListPage navigate={navigate} showToast={showToast} basePath="/branch-manager/credit-history" userBranch={currentUser?.branch?.name} />;
+      return <CreditHistoryListPage navigate={navigate} showToast={showToast} basePath={`${opsBase}/credit-history`} userBranch={currentUser?.branch?.name} />;
     case 'creditDetail':
-      return <CreditHistoryDetailPage creditId={page.params?.creditId} navigate={navigate} basePath="/branch-manager/credit-history" />;
+      return <CreditHistoryDetailPage creditId={page.params?.creditId} navigate={navigate} basePath={`${opsBase}/credit-history`} />;
     case 'notifications':
       return <NotificationsPage {...p} />;
     case 'approvalCenter':

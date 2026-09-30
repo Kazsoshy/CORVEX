@@ -28,6 +28,12 @@ export async function ensureSchema(client) {
     ALTER TABLE field_activity_reports ADD COLUMN IF NOT EXISTS photo TEXT;
 
     ALTER TABLE product_categories ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP;
+
+    ALTER TABLE customers ADD COLUMN IF NOT EXISTS portal_email VARCHAR(150);
+    ALTER TABLE customers ADD COLUMN IF NOT EXISTS portal_status VARCHAR(30) NOT NULL DEFAULT 'none';
+    ALTER TABLE customers ADD COLUMN IF NOT EXISTS assigned_sales_agent_id INTEGER;
+
+    ALTER TABLE purchase_requests ADD COLUMN IF NOT EXISTS sales_invoices_id INTEGER;
   `);
 
   await client.query(`

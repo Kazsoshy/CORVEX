@@ -38,6 +38,25 @@ router.get('/', async (req, res) => {
   }
 });
 
+// PATCH /api/notifications/read-all
+router.patch('/read-all', async (req, res) => {
+  try {
+    const pool = req.app.locals.pool;
+    const userId = req.currentUser?.id;
+    if (!userId) {
+      return res.status(401).json({ success: false, message: 'Unauthorized.' });
+    }
+    await pool.query(
+      `UPDATE notifications SET status = 'Read' WHERE user_id = $1 AND status <> 'Read'`,
+      [userId]
+    );
+    return res.status(200).json({ success: true, message: 'All notifications marked read.' });
+  } catch (err) {
+    console.error('[Notifications] PATCH /read-all error:', err.message);
+    return res.status(500).json({ success: false, message: 'Failed to mark notifications read.' });
+  }
+});
+
 // PATCH /api/notifications/:id/read
 router.patch('/:id/read', async (req, res) => {
   try {

@@ -1,8 +1,8 @@
-import { getReceiptById, getStatementById } from '../data/customerMockData';
 
 const ROUTE_DEFINITIONS = [
   { pattern: /^\/customer\/login$/, pageType: 'login' },
   { pattern: /^\/customer\/home$/, pageType: 'home' },
+  { pattern: /^\/customer\/purchase-requests$/, pageType: 'purchaseRequests' },
   { pattern: /^\/customer\/account-details$/, pageType: 'accountDetails' },
   { pattern: /^\/customer\/payment-history$/, pageType: 'paymentHistory' },
   { pattern: /^\/customer\/receipts$/, pageType: 'receipts' },
@@ -28,14 +28,15 @@ export function matchCustomerRoute(pathname) {
 
 export function buildCustomerBreadcrumbs(pageType, params = {}) {
   const crumbs = [{ label: 'Home', to: '/customer/home' }];
-  const receipt = params.receiptId ? getReceiptById(params.receiptId) : null;
-  const statement = params.statementId ? getStatementById(params.statementId) : null;
+  const receiptLabel = params.receiptId ? `Receipt #${params.receiptId}` : 'Receipt';
 
   switch (pageType) {
     case 'login':
       return [{ label: 'Login', to: '/customer/login' }];
     case 'home':
       return [{ label: 'Home', to: '/customer/home' }];
+    case 'purchaseRequests':
+      return [...crumbs, { label: 'Purchase Requests', to: '/customer/purchase-requests' }];
     case 'accountDetails':
       return [...crumbs, { label: 'Account Details', to: '/customer/account-details' }];
     case 'paymentHistory':
@@ -43,11 +44,11 @@ export function buildCustomerBreadcrumbs(pageType, params = {}) {
     case 'receipts':
       return [...crumbs, { label: 'Digital Receipts', to: '/customer/receipts' }];
     case 'receiptDetail':
-      return [...crumbs, { label: 'Digital Receipts', to: '/customer/receipts' }, { label: receipt?.receiptNumber ?? 'Receipt', to: `/customer/receipts/${params.receiptId}` }];
+      return [...crumbs, { label: 'Digital Receipts', to: '/customer/receipts' }, { label: receiptLabel, to: `/customer/receipts/${params.receiptId}` }];
     case 'statements':
       return [...crumbs, { label: 'Statements', to: '/customer/statements' }];
     case 'statementDetail':
-      return [...crumbs, { label: 'Statements', to: '/customer/statements' }, { label: statement?.month ?? 'Statement', to: `/customer/statements/${params.statementId}` }];
+      return [...crumbs, { label: 'Statements', to: '/customer/statements' }, { label: 'Statement', to: `/customer/statements/${params.statementId}` }];
     case 'notifications':
       return [...crumbs, { label: 'Notifications', to: '/customer/notifications' }];
     case 'profile':
@@ -64,6 +65,7 @@ export function resolveCustomerPage(pathname) {
   const titles = {
     login: 'Customer Login',
     home: 'Home',
+    purchaseRequests: 'Purchase Requests',
     accountDetails: 'Account Details',
     paymentHistory: 'Payment History',
     receipts: 'Digital Receipts',

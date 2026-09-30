@@ -205,3 +205,62 @@ export async function submitFieldActivityReport(payload) {
     };
   }
 }
+
+export async function fetchCollectorDashboard() {
+  try {
+    const response = await apiClient.get('/collector/dashboard');
+    return response.data;
+  } catch (error) {
+    console.error('Failed to fetch collector dashboard:', error);
+    return { success: false, data: null, message: error.response?.data?.message || 'Failed to load dashboard.' };
+  }
+}
+
+export async function fetchCollectorPaymentMethods() {
+  try {
+    const response = await apiClient.get('/collector/payment-methods');
+    return response.data;
+  } catch (error) {
+    console.error('Failed to fetch payment methods:', error);
+    return { success: false, data: [] };
+  }
+}
+
+export async function submitCollectionPayment(body) {
+  try {
+    const response = await apiClient.post('/collector/payments', body);
+    return response.data;
+  } catch (error) {
+    console.error('Failed to submit collection payment:', error);
+    return {
+      success: false,
+      message: error.response?.data?.message || 'Failed to log collection.',
+    };
+  }
+}
+
+export async function submitCollectorCreditInvestigation(body) {
+  try {
+    const response = await apiClient.post('/collector/credit-investigations', body);
+    return response.data;
+  } catch (error) {
+    console.error('Failed to submit CI:', error);
+    return {
+      success: false,
+      message: error.response?.data?.message || 'Failed to submit credit investigation.',
+    };
+  }
+}
+
+export async function submitCollectorIncident(body) {
+  try {
+    const response = await apiClient.post('/collector/incidents', body);
+    return response.data;
+  } catch (error) {
+    console.error('Failed to submit incident:', error);
+    return {
+      success: false,
+      message: error.response?.data?.message || 'Failed to submit incident report.',
+    };
+  }
+}

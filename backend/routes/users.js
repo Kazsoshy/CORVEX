@@ -115,6 +115,7 @@ router.get('/:id', async (req, res) => {
          u.first_name,
          u.last_name,
          u.email,
+         u.phone,
          u.status,
          u.created_at,
          u.updated_at,
@@ -239,7 +240,7 @@ router.put('/:id', async (req, res) => {
     const pool = req.app.locals.pool;
     const userId = Number(req.params.id);
     const {
-      first_name, middle_name, last_name, email, password, role_id,
+      first_name, middle_name, last_name, email, phone, password, role_id,
       branch_id, status,
     } = req.body;
 
@@ -272,6 +273,10 @@ router.put('/:id', async (req, res) => {
     if (middle_name !== undefined) { updates.push(`middle_name = $${pIdx++}`); params.push(middle_name ? middle_name.trim() : null); }
     if (last_name)        { updates.push(`last_name = $${pIdx++}`);        params.push(last_name.trim()); }
     if (email)           { updates.push(`email = $${pIdx++}`);           params.push(email.toLowerCase().trim()); }
+    if (phone !== undefined) {
+      updates.push(`phone = $${pIdx++}`);
+      params.push(phone ? String(phone).trim() : null);
+    }
     if (role_id)         { updates.push(`role_id = $${pIdx++}`);         params.push(Number(role_id)); }
     if (branch_id !== undefined) { updates.push(`branch_id = $${pIdx++}`); params.push(branch_id ? Number(branch_id) : null); }
     if (status)          { updates.push(`status = $${pIdx++}`);          params.push(status); }
@@ -303,6 +308,7 @@ router.put('/:id', async (req, res) => {
          u.first_name,
          u.last_name,
          u.email,
+         u.phone,
          u.status,
          u.created_at,
          u.updated_at,
@@ -369,6 +375,7 @@ function formatUser(row) {
     middle_name:   row.middle_name || null,
     last_name:     row.last_name,
     email:         row.email,
+    phone:         row.phone || null,
     status:        row.status,
     created_at:    row.created_at,
     updated_at:    row.updated_at,

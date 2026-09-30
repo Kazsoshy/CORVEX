@@ -53,6 +53,13 @@ const MIGRATIONS = [
   { file: '029_customer_middle_names.sql',                label: '029_customer_middle_names.sql' },
   { file: '030_field_activity_report_photo.sql',        label: '030_field_activity_report_photo.sql' },
   { file: '031_product_categories_updated_at.sql',      label: '031_product_categories_updated_at.sql' },
+  { file: '032_customer_portal.sql',                    label: '032_customer_portal.sql' },
+  { file: '033_purchase_request_invoice_link.sql',      label: '033_purchase_request_invoice_link.sql' },
+  { file: '034_customers_assigned_sales_agent.sql',     label: '034_customers_assigned_sales_agent.sql' },
+  { file: '035_operations_approvals_alerts.sql',      label: '035_operations_approvals_alerts.sql' },
+  { file: '036_branch_manager_notifications.sql',     label: '036_branch_manager_notifications.sql' },
+  { file: '037_seed_password_and_davao_city.sql',     label: '037_seed_password_and_davao_city.sql' },
+  { file: '038_sales_agent_notifications.sql',        label: '038_sales_agent_notifications.sql' },
 ];
 
 async function ensureMigrationsTable() {

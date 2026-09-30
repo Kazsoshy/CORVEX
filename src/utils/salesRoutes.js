@@ -1,5 +1,3 @@
-import { getCustomerById, getProductById } from '../data/salesMockData';
-
 const ROUTE_DEFINITIONS = [
   { pattern: /^\/sales\/dashboard$/, pageType: 'dashboard' },
   { pattern: /^\/sales\/settings$/, pageType: 'settings' },
@@ -7,11 +5,14 @@ const ROUTE_DEFINITIONS = [
   { pattern: /^\/sales\/schedule$/, pageType: 'scheduleList' },
   { pattern: /^\/sales\/customers$/, pageType: 'customers' },
   { pattern: /^\/sales\/customers\/new$/, pageType: 'customerForm' },
+  { pattern: /^\/sales\/purchase-requests$/, pageType: 'purchaseRequests' },
   { pattern: /^\/sales\/customer-detail\/([^/]+)$/, pageType: 'customerDetail', params: ['customerId'] },
   { pattern: /^\/sales\/visit-log\/(\d+)$/, pageType: 'visitLog', params: ['visitId'] },
   { pattern: /^\/sales\/log-sale\/(\d+)$/, pageType: 'logSale', params: ['customerId'] },
   { pattern: /^\/sales\/log-sale$/, pageType: 'logSale' },
   { pattern: /^\/sales\/ci-form\/(\d+)$/, pageType: 'ciForm', params: ['customerId'] },
+  { pattern: /^\/sales\/credit-investigations$/, pageType: 'ciSubmissions' },
+  { pattern: /^\/sales\/credit-investigations\/(\d+)$/, pageType: 'ciSubmissionDetail', params: ['ciId'] },
   { pattern: /^\/sales\/history$/, pageType: 'history' },
   { pattern: /^\/sales\/invoices\/([^/]+)$/, pageType: 'invoiceDetails', params: ['invoiceId'] },
   { pattern: /^\/sales\/history\/([^/]+)$/, pageType: 'invoiceDetails', params: ['invoiceId'] },
@@ -50,9 +51,8 @@ export function getParentContext(search) {
 
 export function buildSalesBreadcrumbs(pageType, params = {}, parentContext = 'customers') {
   const crumbs = [{ label: 'Dashboard', to: '/sales/dashboard' }];
-  const customer = params.customerId ? getCustomerById(params.customerId) : null;
-  const customerLabel = customer ? `${customer.first_name} ${customer.last_name}` : 'Customer Detail';
-  const product = params.productId ? getProductById(params.productId) : null;
+  const customerLabel = params.customerId ? `Customer #${params.customerId}` : 'Customer Detail';
+  const productLabel = params.productId ? `Product #${params.productId}` : 'Product Details';
 
   const creditCrumbs = [{ label: 'Customer Credit History', to: '/sales/credit-history' }];
 
@@ -101,6 +101,19 @@ export function buildSalesBreadcrumbs(pageType, params = {}, parentContext = 'cu
         },
       ];
 
+    case 'purchaseRequests':
+      return [...crumbs, { label: 'Purchase Requests', to: '/sales/purchase-requests' }];
+
+    case 'ciSubmissions':
+      return [...crumbs, { label: 'Credit Investigations', to: '/sales/credit-investigations' }];
+
+    case 'ciSubmissionDetail':
+      return [
+        ...crumbs,
+        { label: 'Credit Investigations', to: '/sales/credit-investigations' },
+        { label: `CI #${params.ciId}`, to: `/sales/credit-investigations/${params.ciId}` },
+      ];
+
     case 'ciForm':
       return [
         ...buildSalesBreadcrumbs('customerDetail', params, parentContext).slice(0, -1),
@@ -125,7 +138,7 @@ export function buildSalesBreadcrumbs(pageType, params = {}, parentContext = 'cu
       return [
         ...crumbs,
         { label: 'Inventory', to: '/sales/inventory' },
-        { label: product?.name ?? 'Product Details', to: `/sales/inventory/${params.productId}` },
+        { label: productLabel, to: `/sales/inventory/${params.productId}` },
       ];
 
     case 'creditHistory':
@@ -165,10 +178,13 @@ export function resolveSalesPage(pathname, search = '') {
     scheduleMap: 'Territory Map',
     customers: 'Customers',
     customerForm: 'Add Customer',
+    purchaseRequests: 'Purchase Requests',
     customerDetail: 'Customer Detail',
     visitLog: 'Field Visit Log',
     logSale: 'Log a Sale',
     ciForm: 'Credit Investigation Form',
+    ciSubmissions: 'Credit Investigations',
+    ciSubmissionDetail: 'Credit Investigation Detail',
     history: 'Sales History',
     invoiceDetails: 'Invoice Details',
     inventory: 'Inventory',
@@ -181,10 +197,14 @@ export function resolveSalesPage(pathname, search = '') {
     creditDetail: 'Credit Record',
   };
 
+  const searchParams = new URLSearchParams(search);
+  const purchaseRequestId = searchParams.get('purchaseRequestId') || null;
+
   return {
     pageType: match.pageType,
     params: match.params,
     parentContext,
+    purchaseRequestId,
     breadcrumbs,
     title: titles[match.pageType] ?? 'Sales Agent',
     badge: 'Sales agent',
@@ -205,6 +225,9 @@ export function isSalesNavActive(fullPath, navTo) {
   if (navTo === '/sales/inventory') return pathname.startsWith('/sales/inventory');
   if (navTo === '/sales/notifications') return pathname === '/sales/notifications';
   if (navTo === '/sales/credit-history') return pathname.startsWith('/sales/credit-history');
+  if (navTo === '/sales/credit-investigations') {
+    return pathname.startsWith('/sales/credit-investigations') || pathname.startsWith('/sales/ci-form');
+  }
   if (navTo === '/sales/profile') return pathname === '/sales/profile';
   return pathname === navTo || pathname.startsWith(`${navTo}/`);
 }

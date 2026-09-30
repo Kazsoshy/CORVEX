@@ -10,6 +10,8 @@ export const salesRole = {
     { label: "Today's Schedule", to: '/sales/schedule' },
     { label: 'Log a Sale', to: '/sales/log-sale' },
     { label: 'Customers', to: '/sales/customers' },
+    { label: 'Credit Investigations', to: '/sales/credit-investigations' },
+    { label: 'Purchase Requests', to: '/sales/purchase-requests' },
     { label: 'Customer Credit History', to: '/sales/credit-history' },
     { label: 'Sales History', to: '/sales/history' },
     { label: 'Inventory', to: '/sales/inventory' },
