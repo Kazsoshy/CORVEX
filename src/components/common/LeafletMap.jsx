@@ -1,6 +1,19 @@
-import React from 'react';
-import { MapContainer, TileLayer, Marker, Popup, Polyline } from 'react-leaflet';
+import React, { useEffect } from 'react';
+import { MapContainer, TileLayer, Marker, Popup, Polyline, useMap } from 'react-leaflet';
 import L from 'leaflet';
+
+function FitBounds({ bounds, padding = [36, 36] }) {
+  const map = useMap();
+  useEffect(() => {
+    if (!bounds?.length) return;
+    try {
+      map.fitBounds(bounds, { padding });
+    } catch {
+      /* ignore invalid bounds */
+    }
+  }, [bounds, map, padding]);
+  return null;
+}
 
 // Fix for default marker icon in leaflet
 delete L.Icon.Default.prototype._getIconUrl;
@@ -47,15 +60,17 @@ export default function LeafletMap({
   polylines = [], 
   center = [12.8797, 121.7740], // Default center: Philippines
   zoom = 5,
-  height = 560
+  height = 560,
+  fitBounds = null,
 }) {
   return (
     <div style={{ height, width: '100%', borderRadius: '8px', overflow: 'hidden', border: '1px solid var(--surface-3)' }}>
       <MapContainer center={center} zoom={zoom} style={{ height: '100%', width: '100%' }}>
         <TileLayer
-          attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors, Domina Temp'
+          attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
           url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
         />
+        {fitBounds?.length ? <FitBounds bounds={fitBounds} /> : null}
         
         {markers.map((marker) => (
           <Marker 
@@ -63,10 +78,10 @@ export default function LeafletMap({
             position={marker.position}
             icon={marker.icon || (marker.color ? createCustomIcon(marker.color, marker.label) : new L.Icon.Default())}
           >
-            {marker.popup && (
+            {(marker.popupContent || marker.popup) && (
               <Popup>
-                <div style={{ padding: '4px' }}>
-                  {marker.popup}
+                <div style={{ padding: '4px', minWidth: 160 }}>
+                  {marker.popupContent || marker.popup}
                 </div>
               </Popup>
             )}
@@ -78,8 +93,9 @@ export default function LeafletMap({
             key={line.id} 
             positions={line.positions} 
             color={line.color || '#093850'}
-            weight={3}
-            opacity={0.7}
+            weight={line.weight ?? 3}
+            opacity={line.opacity ?? 0.7}
+            dashArray={line.dashArray}
           />
         ))}
       </MapContainer>

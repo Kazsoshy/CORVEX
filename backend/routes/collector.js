@@ -1,6 +1,14 @@
 import express from 'express';
 import { requireRole } from '../middleware/auth.js';
 import { notifyCreditInvestigationSubmitted } from '../lib/creditInvestigationNotifications.js';
+import {
+  computeCollectorSawPriority,
+  computeAssignedSawRoute,
+  mapSawPriorityRow,
+  persistSawResults,
+} from '../lib/sawCollectionData.js';
+import { osrmDrivingRoute, osrmDrivingTrip } from '../lib/osrm.js';
+import { nearestNeighborOrder, sortStopsBySaw } from '../lib/routeOrder.js';
 
 const router = express.Router();
 
@@ -76,6 +84,244 @@ function mapIncidentSeverity(severity) {
 
 // All routes here require the collector role
 router.use(requireRole(['collector']));
+
+// GET /api/collector/saw-priority — today's BM-assigned customers, SAW-ordered (sawmodel.ipynb)
+router.get('/saw-priority', async (req, res) => {
+  const pool = req.app.locals.pool;
+  const userId = req.currentUser.id;
+  const branchId = req.currentUser.branchId;
+  const persist = req.query.persist === 'true' || req.query.persist === '1';
+  const fullList = req.query.full === 'true' || req.query.full === '1';
+
+  try {
+    let asOf;
+    let ranked;
+    let stats;
+    let assignmentMode = false;
+    let scheduledDate;
+
+    if (fullList) {
+      ({ asOf, ranked, stats } = await computeCollectorSawPriority(pool, {
+        collectorId: userId,
+        branchId,
+      }));
+    } else {
+      ({
+        asOf,
+        ranked,
+        stats,
+        assignmentMode,
+        scheduledDate,
+      } = await computeAssignedSawRoute(pool, {
+        collectorId: userId,
+        branchId,
+      }));
+    }
+
+    if (persist && ranked.length) {
+      await persistSawResults(pool, ranked);
+    }
+
+    return res.status(200).json({
+      success: true,
+      data: ranked.map(mapSawPriorityRow),
+      meta: {
+        asOf,
+        stats,
+        persisted: Boolean(persist && ranked.length),
+        assignmentMode,
+        scheduledDate,
+      },
+    });
+  } catch (error) {
+    console.error('[Collector] GET /saw-priority error:', error);
+    return res.status(500).json({ success: false, message: 'Failed to compute SAW priority list.' });
+  }
+});
+
+// POST /api/collector/saw/recompute — recompute and save to saw_results
+router.post('/saw/recompute', async (req, res) => {
+  const pool = req.app.locals.pool;
+  const userId = req.currentUser.id;
+  const branchId = req.currentUser.branchId;
+
+  try {
+    const { asOf, ranked, stats } = await computeCollectorSawPriority(pool, {
+      collectorId: userId,
+      branchId,
+    });
+    const saved = ranked.length ? await persistSawResults(pool, ranked) : 0;
+
+    return res.status(200).json({
+      success: true,
+      message: saved
+        ? `SAW priority updated for ${saved} customer(s).`
+        : 'No eligible customers for SAW ranking.',
+      data: ranked.map(mapSawPriorityRow),
+      meta: { asOf, stats, saved },
+    });
+  } catch (error) {
+    console.error('[Collector] POST /saw/recompute error:', error);
+    return res.status(500).json({ success: false, message: 'Failed to recompute SAW results.' });
+  }
+});
+
+// GET /api/collector/route/depot — branch start point for road routing
+router.get('/route/depot', async (req, res) => {
+  const pool = req.app.locals.pool;
+  const branchId = req.currentUser.branchId;
+  if (branchId == null) {
+    return res.status(400).json({ success: false, message: 'Collector is not assigned to a branch.' });
+  }
+  try {
+    const result = await pool.query(
+      `SELECT id, name, address, latitude::float AS latitude, longitude::float AS longitude
+       FROM branches WHERE id = $1`,
+      [branchId]
+    );
+    const row = result.rows[0];
+    if (!row?.latitude || !row?.longitude) {
+      return res.status(404).json({ success: false, message: 'Branch location not configured.' });
+    }
+    return res.status(200).json({
+      success: true,
+      data: {
+        branchId: row.id,
+        name: row.name,
+        address: row.address,
+        latitude: row.latitude,
+        longitude: row.longitude,
+      },
+    });
+  } catch (error) {
+    console.error('[Collector] GET /route/depot error:', error);
+    return res.status(500).json({ success: false, message: 'Failed to load branch depot.' });
+  }
+});
+
+/**
+ * POST /api/collector/route/driving
+ * Body: { order_mode: 'saw' | 'travel', stops: [{ id, latitude, longitude, rank?, ... }] }
+ * SAW = collection priority order on roads; travel = OSRM trip optimization (minimize driving).
+ */
+router.post('/route/driving', async (req, res) => {
+  const pool = req.app.locals.pool;
+  const branchId = req.currentUser.branchId;
+  const orderMode = req.body?.order_mode === 'travel' ? 'travel' : 'saw';
+  const rawStops = Array.isArray(req.body?.stops) ? req.body.stops : [];
+
+  if (!rawStops.length) {
+    return res.status(400).json({ success: false, message: 'Provide at least one stop.' });
+  }
+
+  const stops = rawStops
+    .map((s) => ({
+      ...s,
+      id: String(s.id ?? s.customer_id ?? ''),
+      lat: Number(s.latitude),
+      lon: Number(s.longitude),
+      rank: Number(s.rank) || null,
+    }))
+    .filter((s) => Number.isFinite(s.lat) && Number.isFinite(s.lon));
+
+  if (!stops.length) {
+    return res.status(400).json({ success: false, message: 'Stops need valid coordinates.' });
+  }
+
+  try {
+    const branchRes = await pool.query(
+      `SELECT name, address, latitude::float AS latitude, longitude::float AS longitude
+       FROM branches WHERE id = $1`,
+      [branchId]
+    );
+    const depot = branchRes.rows[0];
+    if (!depot?.latitude || !depot?.longitude) {
+      return res.status(400).json({ success: false, message: 'Branch depot coordinates missing.' });
+    }
+
+    const depotPoint = { lat: depot.latitude, lon: depot.longitude };
+    let orderedStops;
+    let optimizer = orderMode;
+
+    if (orderMode === 'saw') {
+      orderedStops = sortStopsBySaw(stops);
+    } else {
+      orderedStops = nearestNeighborOrder(depotPoint, stops);
+    }
+
+    const depotLonLat = [depot.longitude, depot.latitude];
+    const stopLonLat = orderedStops.map((s) => [s.lon, s.lat]);
+    let waypointsLonLat = [depotLonLat, ...stopLonLat];
+    let osrmResult;
+    let osrmError = null;
+
+    try {
+      if (orderMode === 'travel' && stopLonLat.length >= 2) {
+        const trip = await osrmDrivingTrip(waypointsLonLat, { roundtrip: false, destination: 'any' });
+        if (trip.waypoints?.length > 1) {
+          const reordered = [...trip.waypoints]
+            .map((wp, inputIndex) => ({ inputIndex, order: wp.waypoint_index ?? inputIndex }))
+            .sort((a, b) => a.order - b.order)
+            .filter((w) => w.inputIndex > 0)
+            .map((w) => orderedStops[w.inputIndex - 1]);
+          if (reordered.length === orderedStops.length) {
+            orderedStops = reordered;
+          }
+        }
+        osrmResult = trip.positions?.length
+          ? trip
+          : await osrmDrivingRoute([depotLonLat, ...orderedStops.map((s) => [s.lon, s.lat])]);
+        optimizer = 'travel';
+      } else {
+        osrmResult = await osrmDrivingRoute(waypointsLonLat);
+        optimizer = orderMode;
+      }
+    } catch (err) {
+      osrmError = err.message || 'OSRM unavailable';
+      osrmResult = {
+        positions: waypointsLonLat.map(([lon, lat]) => [lat, lon]),
+        distanceKm: null,
+        durationMin: null,
+      };
+    }
+
+    const orderedWithIndex = orderedStops.map((stop, i) => ({
+      ...stop,
+      routeIndex: i + 1,
+      sawRank: stop.rank,
+    }));
+
+    return res.status(200).json({
+      success: true,
+      data: {
+        orderMode: optimizer,
+        depot: {
+          name: depot.name,
+          address: depot.address,
+          latitude: depot.latitude,
+          longitude: depot.longitude,
+        },
+        orderedStops: orderedWithIndex,
+        road: {
+          positions: osrmResult.positions || [],
+          distanceKm: osrmResult.distanceKm,
+          durationMin: osrmResult.durationMin,
+          provider: osrmError ? 'straight-line-fallback' : 'osrm',
+          error: osrmError,
+        },
+        legend: {
+          saw:
+            'SAW order: visit higher collection-priority customers first (balance, overdue, straight-line distance). Roads follow this sequence.',
+          travel:
+            'Travel order: OSRM minimizes driving time between stops. Collection priority (SAW rank) may differ.',
+        },
+      },
+    });
+  } catch (error) {
+    console.error('[Collector] POST /route/driving error:', error);
+    return res.status(500).json({ success: false, message: 'Failed to build driving route.' });
+  }
+});
 
 // ──────────────────────────────────────────────────────────────────────────────
 // GET /api/collector/payments

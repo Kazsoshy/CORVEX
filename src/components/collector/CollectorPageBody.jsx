@@ -11,6 +11,8 @@ import {
   fetchDigitalReceipts,
   fetchDigitalReceiptById,
   fetchTodayFieldVisits,
+  fetchSawPriority,
+  mapSawRowToRouteStop,
   fetchFieldActivityReports,
   submitFieldActivityReport,
   fetchCollectorDashboard,
@@ -23,13 +25,15 @@ import { fetchNotifications } from '../../api/notificationService.js';
 import { fetchMyProfile, updateMyProfile } from '../../api/profileService.js';
 import { getCurrentUser, persistCurrentUserFromProfile, requestLogout } from '../../api/authService.js';
 import { downloadCsv } from '../../utils/csvExport';
-import { openPhoneCall } from '../../utils/mapsNavigation';
+import { collectorMapPath, openPhoneCall } from '../../utils/mapsNavigation';
 import { NotificationsInbox } from '../shared/NotificationsInbox';
 import { AccountCard } from './AccountCard';
 import { EmptyState } from '../shared/EmptyState';
 import { LoadingState } from '../shared/LoadingState';
 import { NavIcon } from '../../navIcons';
 import LeafletMap from '../common/LeafletMap';
+import CollectionRouteMap from './CollectionRouteMap';
+import { fetchDrivingRoute, fetchRouteDepot } from '../../api/routingService';
 import { StatusBadge } from '../StatusBadge';
 function StatsGrid({
   stats
@@ -88,8 +92,8 @@ function collectorCall(account, showToast) {
 }
 
 function collectorOpenMap(account, navigate, parentContext = 'accounts') {
-  if (!account?.id) return;
-  navigate(`/collector/map/${account.id}?from=${parentContext}`);
+  const path = collectorMapPath(account?.id, parentContext);
+  if (path) navigate(path);
 }
 
 function resolveCollectorNotificationPath(category) {
@@ -451,48 +455,63 @@ function RoutePage({
   showToast
 }) {
   const [customers, setCustomers] = useState([]);
+  const [sawMeta, setSawMeta] = useState(null);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState('All');
   const [showMap, setShowMap] = useState(pageType === 'routeMap');
+  const [roadStats, setRoadStats] = useState(null);
   useEffect(() => {
     async function load() {
       setLoading(true);
-      const [accountsRes, visitsRes] = await Promise.all([fetchAccounts(), fetchTodayFieldVisits()]);
-      const accountMap = new Map();
-      if (accountsRes.success) {
-        accountsRes.data.filter(a => a.rawStatus === 'Active').forEach(a => accountMap.set(String(a.id), a));
+      const [sawRes, visitsRes] = await Promise.all([fetchSawPriority(), fetchTodayFieldVisits()]);
+      setSawMeta(sawRes.meta || null);
+      const visitByCustomer = new Map();
+      if (visitsRes.success) {
+        (visitsRes.data || [])
+          .filter((v) => v.visit_type === 'Collection')
+          .forEach((v) => visitByCustomer.set(String(v.customer_id), v));
       }
+      const assignmentMode = Boolean(sawRes.meta?.assignmentMode);
       let stops = [];
-      if (visitsRes.success && (visitsRes.data || []).length) {
-        stops = visitsRes.data.map((v, i) => {
-          const acct = accountMap.get(String(v.customer_id)) || {
-            id: String(v.customer_id),
-            customerName: v.customer_name,
-            address: '—',
-            outstandingBalance: 0,
-            status: 'Pending',
-          };
-          const visitDone = v.status === 'Completed';
-          return {
-            ...acct,
-            visitId: v.visit_id,
-            visitType: v.visit_type,
-            visitStatus: v.status,
-            status: visitDone ? 'Completed' : (acct.status === 'Overdue' ? 'Overdue' : 'Pending'),
-            rank: i + 1,
-          };
-        });
-      } else if (accountsRes.success) {
-        stops = accountsRes.data
-          .filter(a => a.rawStatus === 'Active')
-          .sort((a, b) => (b.outstandingBalance || 0) - (a.outstandingBalance || 0))
-          .map((a, i) => ({ ...a, rank: i + 1 }));
+      if (sawRes.success && (sawRes.data || []).length) {
+        stops = sawRes.data.map((row) => mapSawRowToRouteStop(row, visitByCustomer));
+      } else if (assignmentMode) {
+        stops = [];
+      } else {
+        const accountsRes = await fetchAccounts();
+        if (accountsRes.success) {
+          stops = accountsRes.data
+            .filter((a) => a.rawStatus === 'Active')
+            .sort((a, b) => (b.outstandingBalance || 0) - (a.outstandingBalance || 0))
+            .map((a, i) => ({ ...a, rank: i + 1 }));
+        }
+        if (!sawRes.success && showToast) {
+          showToast('SAW priority unavailable — showing balance order.', 'error');
+        }
       }
       setCustomers(stops);
       setLoading(false);
     }
     load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  useEffect(() => {
+    if (pageType !== 'routeSummary' || !customers.length) return;
+    const payload = customers
+      .filter((s) => accountMapPosition(s).hasCoords)
+      .map((s) => ({
+        id: s.id,
+        latitude: s.latitude,
+        longitude: s.longitude,
+        rank: s.rank,
+      }));
+    if (!payload.length) return;
+    fetchDrivingRoute('saw', payload).then((res) => {
+      if (res.success) setRoadStats(res.data?.road || null);
+    });
+  }, [pageType, customers]);
+
   const filteredStops = useMemo(() => {
     if (filter === 'All') return customers;
     if (filter === 'Pending') return customers.filter(s => s.status === 'Pending' || s.status === 'Overdue');
@@ -513,6 +532,9 @@ function RoutePage({
   }];
   const pagination_filteredStops = usePagination(filteredStops);
   const paginated_filteredStops = pagination_filteredStops.paginatedData;
+  const assignmentMode = Boolean(sawMeta?.assignmentMode);
+  const noAssignedRoute = assignmentMode && customers.length === 0;
+
   if (loading) return <LoadingState message="Loading route..." />;
   if (pageType === 'routeSummary') {
     return <div className="relative z-10 grid gap-[22px] w-full">
@@ -526,11 +548,15 @@ function RoutePage({
         label: 'Overdue Customers',
         value: String(customers.filter(s => s.status === 'Overdue').length)
       }, {
-        label: 'Distance Planned',
-        value: '—'
+        label: 'Road distance',
+        value: roadStats?.distanceKm != null
+          ? `${roadStats.distanceKm} km (OSRM)`
+          : customers.length
+            ? `${customers.reduce((s, c) => s + (Number(c.distanceKm) || 0), 0).toFixed(1)} km est.`
+            : '—'
       }, {
-        label: 'Estimated Time',
-        value: '—'
+        label: 'SAW as of',
+        value: sawMeta?.asOf || '—'
       }]} />
         <section className="panel content-panel relative overflow-hidden">
           <div className="flex flex-col md:flex-row justify-between gap-4 items-start md:items-center mb-4">
@@ -555,8 +581,8 @@ function RoutePage({
       label: 'Overdue Customers',
       value: String(customers.filter(s => s.status === 'Overdue').length)
     }, {
-      label: 'Distance Planned',
-      value: '—'
+      label: 'Road distance',
+      value: roadStats?.distanceKm != null ? `${roadStats.distanceKm} km` : '—'
     }]} />
       <section className="panel content-panel relative overflow-hidden" style={{
       padding: '14px 20px'
@@ -568,12 +594,28 @@ function RoutePage({
       }}>
           <strong style={{
           color: '#1e293b'
-        }}>Customer Priority List</strong> — Customers are ordered by outstanding balance and urgency.
+        }}>Today&apos;s collection route</strong>
+        {' '}
+        {assignmentMode
+          ? '— BM assigns today’s stops; SAW sets collection priority; OSRM (OpenStreetMap roads) draws the driving path on the map.'
+          : '— Customers are ordered by outstanding balance and urgency.'}
         </p>
       </section>
+      {noAssignedRoute ? (
+        <EmptyState
+          title="No route assigned for today"
+          description="Ask your branch manager to assign collection customers for today from Field Operations → collector detail."
+        />
+      ) : null}
       <section className="panel content-panel relative overflow-hidden">
         <div className="flex flex-col md:flex-row justify-between gap-4 items-start md:items-center mb-4">
-          <h3>{showMap || pageType === 'routeMap' ? 'Route Map View' : 'Customer Priority List'}</h3>
+          <h3>{showMap || pageType === 'routeMap' ? 'Route Map View' : 'SAW Customer Priority List'}</h3>
+          {!showMap && pageType !== 'routeMap' && sawMeta && !noAssignedRoute ? (
+            <p className="muted" style={{ marginTop: 4 }}>
+              SAW order · {customers.length} stop{customers.length === 1 ? '' : 's'}
+              {sawMeta.scheduledDate ? ` · ${sawMeta.scheduledDate}` : ''}
+            </p>
+          ) : null}
           <div className="inline-toolbar">
             <div className="segmented-control">
               {['All', 'Pending', 'Completed'].map(item => <button key={item} className={filter === item ? 'segment active' : 'segment'} type="button" onClick={() => setFilter(item)}>
@@ -585,30 +627,14 @@ function RoutePage({
               </button> : null}
           </div>
         </div>
-        {showMap || pageType === 'routeMap' ? <div style={{
-        marginTop: 16
-      }}>
-            <LeafletMap
-            center={[7.1907, 125.4553]}
-            zoom={13}
-            height={500}
-            markers={customers.map((stop) => {
-              const { center: pos } = accountMapPosition(stop);
-              return {
-                id: stop.id,
-                position: pos,
-                label: (stop.customerName || 'CU').substring(0, 2).toUpperCase(),
-                color: stop.status === 'Completed' ? '#10b981' : '#093850',
-                popup: `${stop.customerName} - ${stop.status}`,
-              };
-            })}
-            polylines={customers.length > 1 ? [{
-              id: 'route',
-              positions: customers.map((stop) => accountMapPosition(stop).center),
-              color: '#093850',
-            }] : []}
+        {noAssignedRoute ? null : showMap || pageType === 'routeMap' ? (
+          <CollectionRouteMap
+            stops={filteredStops.filter((s) => accountMapPosition(s).hasCoords)}
+            showToast={showToast}
+            navigate={navigate}
+            onRoadStats={setRoadStats}
           />
-          </div> : filteredStops.length ? <><div className="corvex-table-wrapper">
+        ) : filteredStops.length ? <><div className="corvex-table-wrapper">
             <table className="corvex-table">
               <thead>
                 <tr>
@@ -616,16 +642,22 @@ function RoutePage({
                   <th>Customer</th>
                   <th>Address</th>
                   <th>Balance</th>
+                  <th>Days overdue</th>
+                  <th>Distance</th>
+                  <th>SAW</th>
                   <th>Status</th>
                   <th>Actions</th>
                 </tr>
               </thead>
               <tbody>
-                {paginated_filteredStops.map((stop, idx) => <tr key={stop.id}>
-                    <td><strong>#{idx + 1}</strong></td>
+                {paginated_filteredStops.map((stop) => <tr key={stop.id}>
+                    <td><strong>#{stop.rank ?? '—'}</strong></td>
                     <td>{stop.customerName}</td>
                     <td>{stop.address}</td>
                     <td>{formatCurrency(stop.outstandingBalance || 0)}</td>
+                    <td>{stop.daysOverdue ?? 0}</td>
+                    <td>{Number(stop.distanceKm) ? `${Number(stop.distanceKm).toFixed(1)} km` : '—'}</td>
+                    <td>{stop.sawScore != null ? Number(stop.sawScore).toFixed(3) : '—'}</td>
                     <td><StatusBadge status={stop.status} /></td>
                     <td className="table-actions">
                       <button className="icon-action-button" type="button" title="View" onClick={() => navigate(`/collector/account-detail/${stop.id}?from=route`)}><NavIcon name="view" /></button>
@@ -652,9 +684,12 @@ function CustomerMapPage({
   navigate,
 }) {
   const [account, setAccount] = useState(null);
+  const [depot, setDepot] = useState(null);
+  const [roadLeg, setRoadLeg] = useState(null);
   const [loading, setLoading] = useState(true);
   const contextQuery = `?from=${parentContext}`;
   const backTo = parentContext === 'route' ? '/collector/route/map' : `/collector/account-detail/${accountId}${contextQuery}`;
+  const isRouteNav = parentContext === 'route';
 
   useEffect(() => {
     async function load() {
@@ -666,19 +701,68 @@ function CustomerMapPage({
     load();
   }, [accountId]);
 
+  useEffect(() => {
+    if (!isRouteNav || !account) return;
+    const { hasCoords } = accountMapPosition(account);
+    if (!hasCoords) return;
+    let cancelled = false;
+    (async () => {
+      const [depotRes, routeRes] = await Promise.all([
+        fetchRouteDepot(),
+        fetchDrivingRoute('saw', [{
+          id: account.id,
+          latitude: account.latitude,
+          longitude: account.longitude,
+          rank: 1,
+        }]),
+      ]);
+      if (cancelled) return;
+      if (depotRes.success) setDepot(depotRes.data);
+      if (routeRes.success) setRoadLeg(routeRes.data?.road || null);
+    })();
+    return () => { cancelled = true; };
+  }, [isRouteNav, account]);
+
   if (loading) return <LoadingState message="Loading map..." />;
   if (!account) {
     return <EmptyState title="Customer not found" actionLabel="Back" onAction={() => navigate('/collector/accounts')} />;
   }
 
   const { center, hasCoords } = accountMapPosition(account);
+  const markers = [];
+  if (depot?.latitude != null && depot?.longitude != null && isRouteNav) {
+    markers.push({
+      id: 'depot',
+      position: [depot.latitude, depot.longitude],
+      label: 'B',
+      color: '#10b981',
+      popup: `<strong>${depot.name || 'Branch'}</strong><br/>Start here`,
+    });
+  }
+  markers.push({
+    id: account.id,
+    position: center,
+    label: isRouteNav ? '1' : (account.customerName || 'CU').substring(0, 2).toUpperCase(),
+    color: '#093850',
+    popup: `<strong>${account.customerName}</strong><br/>${account.address || ''}`,
+  });
+  const fitBounds = markers.map((m) => m.position);
+  const polylines = roadLeg?.positions?.length
+    ? [{ id: 'nav-leg', positions: roadLeg.positions, color: '#093850', weight: 4 }]
+    : [];
 
   return <div className="relative z-10 grid gap-[22px] w-full">
       <section className="panel content-panel relative overflow-hidden">
         <div className="flex flex-col md:flex-row justify-between gap-4 items-start md:items-center mb-4">
           <div>
-            <h3>{account.customerName}</h3>
+            <h3>{isRouteNav ? `Navigate to ${account.customerName}` : account.customerName}</h3>
             <p className="text-ink/70" style={{ margin: '4px 0 0' }}>{account.address}</p>
+            {isRouteNav && roadLeg?.distanceKm != null ? (
+              <p className="muted" style={{ margin: '8px 0 0', fontSize: '0.85rem' }}>
+                Branch to customer · {roadLeg.distanceKm} km road
+                {roadLeg.durationMin != null ? ` · ~${roadLeg.durationMin} min` : ''} (OSRM)
+              </p>
+            ) : null}
             {!hasCoords ? <p className="text-ink/60" style={{ margin: '8px 0 0', fontSize: '0.85rem' }}>
                 Exact GPS is not on file — map is centered on the branch area. Address shown above.
               </p> : null}
@@ -688,13 +772,9 @@ function CustomerMapPage({
           center={center}
           zoom={hasCoords ? 16 : 12}
           height={520}
-          markers={[{
-            id: account.id,
-            position: center,
-            label: (account.customerName || 'CU').substring(0, 2).toUpperCase(),
-            color: '#093850',
-            popup: `<strong>${account.customerName}</strong><br/>${account.address || ''}`,
-          }]}
+          markers={markers}
+          polylines={polylines}
+          fitBounds={fitBounds.length >= 2 ? fitBounds : null}
         />
       </section>
       <div className="flex flex-wrap justify-end gap-2 mt-2">

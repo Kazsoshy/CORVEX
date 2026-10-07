@@ -1,7 +1,16 @@
 import axios from 'axios';
 
-// Base URL for all API calls — reads from Vite env if available, fallback to localhost
-const BASE_URL = import.meta.env?.VITE_API_URL || '/api';
+// Base URL for all API calls — must resolve to .../api (e.g. /api or http://localhost:5000/api)
+function resolveApiBaseUrl() {
+  const raw = import.meta.env?.VITE_API_URL || '/api';
+  if (!raw.startsWith('http')) {
+    return raw.startsWith('/') ? raw : `/${raw}`;
+  }
+  const trimmed = raw.replace(/\/$/, '');
+  return trimmed.endsWith('/api') ? trimmed : `${trimmed}/api`;
+}
+
+const BASE_URL = resolveApiBaseUrl();
 
 const apiClient = axios.create({
   baseURL: BASE_URL,

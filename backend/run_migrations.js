@@ -60,6 +60,7 @@ const MIGRATIONS = [
   { file: '036_branch_manager_notifications.sql',     label: '036_branch_manager_notifications.sql' },
   { file: '037_seed_password_and_davao_city.sql',     label: '037_seed_password_and_davao_city.sql' },
   { file: '038_sales_agent_notifications.sql',        label: '038_sales_agent_notifications.sql' },
+  { file: '039_seed_davao_saw_collection.sql',        label: '039_seed_davao_saw_collection.sql' },
 ];
 
 async function ensureMigrationsTable() {
@@ -93,8 +94,7 @@ async function runMigrations() {
 
     if (!pending.length) {
       console.log('No pending migrations. All up to date.');
-      process.exit(0);
-    }
+    } else {
 
     for (const { file, label } of pending) {
       const filePath = path.join(MIGRATIONS_DIR, file);
@@ -119,7 +119,17 @@ async function runMigrations() {
       }
     }
 
-    console.log(`All migrations completed successfully (${pending.length} processed).`);
+      console.log(`All migrations completed successfully (${pending.length} processed).`);
+    }
+
+    try {
+      const { seedDavaoSawCollection } = await import('./scripts/seed_davao_saw_collection.js');
+      await seedDavaoSawCollection(pool);
+    } catch (seedErr) {
+      console.warn('Optional Davao SAW seed skipped or failed:', seedErr.message);
+    }
+
+    await pool.end();
     process.exit(0);
   } catch (err) {
     console.error('Migration failed:', err.message);

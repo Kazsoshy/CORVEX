@@ -6,6 +6,12 @@ export function openPhoneCall(phone) {
   return true;
 }
 
+/** In-app collector map (OSRM road context when opened from route). */
+export function collectorMapPath(accountId, parentContext = 'accounts') {
+  if (accountId == null || accountId === '') return null;
+  return `/collector/map/${accountId}?from=${parentContext}`;
+}
+
 /** Open Google Maps directions or search in a new tab. */
 export function openExternalNavigation({ latitude, longitude, address } = {}) {
   const lat = Number(latitude);

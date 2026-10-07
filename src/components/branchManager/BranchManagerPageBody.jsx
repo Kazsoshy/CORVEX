@@ -33,6 +33,8 @@ import {
   getBranchAuditLogs,
   getBranchCollectorDetail,
   getBranchSalesAgentDetail,
+  fetchCollectorSawPriority,
+  assignCollectorCollectionRoute,
 } from '../../api/branchManagerService.js';
 import { getReportCollection, getReportSales, getReportInventory, getReportDelinquency, getReportCompliance, getReportKPI, getReportInvoices } from '../../api/reportsService.js';
 import { CreditHistoryListPage, CreditHistoryDetailPage } from '../shared/CreditHistoryPages';
@@ -465,35 +467,97 @@ function FieldOperationsHub({
         </section>}
     </div>;
 }
+function manilaDateInputValue() {
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Manila',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(new Date());
+}
+
 function CollectorDetailPage({
   collectorId,
   navigate,
-  opsBase
+  opsBase,
+  showToast,
 }) {
   const [staff, setStaff] = useState({
     collectors: [],
     salesAgents: []
   });
   const [routeDetail, setRouteDetail] = useState(null);
+  const [sawRows, setSawRows] = useState([]);
+  const [sawMeta, setSawMeta] = useState(null);
+  const [assignedIds, setAssignedIds] = useState(() => new Set());
+  const [selectedIds, setSelectedIds] = useState(() => new Set());
+  const [scheduledDate, setScheduledDate] = useState(manilaDateInputValue);
+  const [assignBusy, setAssignBusy] = useState(false);
   const [loading, setLoading] = useState(true);
+  async function reloadSaw(date) {
+    const sawRes = await fetchCollectorSawPriority(collectorId, { scheduled_date: date });
+    if (sawRes.success) {
+      setSawRows(sawRes.data || []);
+      setSawMeta(sawRes.meta || null);
+      setAssignedIds(new Set((sawRes.meta?.assignedCustomerIds || []).map(String)));
+    }
+  }
   useEffect(() => {
     async function load() {
       setLoading(true);
-      const [staffResult, detailResult] = await Promise.all([
+      const date = scheduledDate;
+      const [staffResult, detailResult, sawRes] = await Promise.all([
         getBranchStaff(),
         getBranchCollectorDetail(collectorId),
+        fetchCollectorSawPriority(collectorId, { scheduled_date: date }),
       ]);
       if (staffResult.success) setStaff(staffResult.data);
       if (detailResult.success) setRouteDetail(detailResult.data);
+      if (sawRes.success) {
+        setSawRows(sawRes.data || []);
+        setSawMeta(sawRes.meta || null);
+        setAssignedIds(new Set((sawRes.meta?.assignedCustomerIds || []).map(String)));
+      }
       setLoading(false);
     }
     load();
-  }, [collectorId]);
+  }, [collectorId, scheduledDate]);
   const c = staff.collectors.find(x => x.id === String(collectorId));
   const route = routeDetail?.route || c?.route || [];
   const pagination_c_route = usePagination(route);
   const paginated_c_route = pagination_c_route.paginatedData;
+  const pagination_saw = usePagination(sawRows);
+  const paginated_saw = pagination_saw.paginatedData;
   const mapCenter = routeDetail?.mapMarkers?.[0]?.position || [7.1907, 125.4553];
+
+  function toggleSelected(customerId) {
+    const id = String(customerId);
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  async function submitAssignment(payload) {
+    setAssignBusy(true);
+    const res = await assignCollectorCollectionRoute(collectorId, {
+      scheduled_date: scheduledDate,
+      ...payload,
+    });
+    setAssignBusy(false);
+    if (res.success) {
+      showToast?.(res.message || 'Collection visits scheduled.', 'success');
+      setSelectedIds(new Set());
+      await reloadSaw(scheduledDate);
+      const detailResult = await getBranchCollectorDetail(collectorId);
+      if (detailResult.success) setRouteDetail(detailResult.data);
+    } else {
+      showToast?.(res.message || 'Could not assign visits.', 'error');
+    }
+  }
+
   if (loading) return <LoadingState />;
   if (!c) return <EmptyState title="Collector not found" actionLabel="Back" onAction={() => navigate(`${opsBase}/field-operations`)} />;
   return <div className="relative z-10 grid gap-[22px] w-full">
@@ -510,6 +574,95 @@ function CollectorDetailPage({
       label: 'Recovery',
       value: `${c.recoveryRate}%`
     }]} />
+      <section className="panel content-panel relative overflow-hidden">
+        <div className="flex flex-col md:flex-row justify-between gap-4 items-start md:items-center mb-4">
+          <div>
+            <h3>Assign today&apos;s collection route</h3>
+            <p className="muted" style={{ marginTop: 4, marginBottom: 0 }}>
+              SAW ranking (balance 40%, overdue 30%, distance 30%) · {sawMeta?.stats?.ranked ?? sawRows.length} eligible
+            </p>
+          </div>
+          <div className="flex flex-wrap gap-2 items-center">
+            <label className="flex items-center gap-2 text-sm">
+              Date
+              <input
+                type="date"
+                className="input"
+                value={scheduledDate}
+                onChange={(e) => setScheduledDate(e.target.value)}
+              />
+            </label>
+            <button
+              className="button secondary"
+              type="button"
+              disabled={assignBusy}
+              onClick={() => submitAssignment({ assign_top_n: 5 })}
+            >
+              Assign top 5
+            </button>
+            <button
+              className="button"
+              type="button"
+              disabled={assignBusy || selectedIds.size === 0}
+              onClick={() => submitAssignment({ customer_ids: [...selectedIds].map(Number) })}
+            >
+              Assign selected ({selectedIds.size})
+            </button>
+          </div>
+        </div>
+        {sawRows.length ? (
+          <>
+            <div className="corvex-table-wrapper">
+              <table className="corvex-table">
+                <thead>
+                  <tr>
+                    <th aria-label="Select" />
+                    <th>Rank</th>
+                    <th>Customer</th>
+                    <th>Balance</th>
+                    <th>Days overdue</th>
+                    <th>Distance</th>
+                    <th>SAW</th>
+                    <th>Scheduled</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {paginated_saw.map((row) => {
+                    const id = String(row.customer_id);
+                    const already = assignedIds.has(id);
+                    return (
+                      <tr key={id}>
+                        <td>
+                          <input
+                            type="checkbox"
+                            checked={selectedIds.has(id)}
+                            disabled={already}
+                            onChange={() => toggleSelected(id)}
+                            aria-label={`Select ${row.customer_name}`}
+                          />
+                        </td>
+                        <td><strong>#{row.rank}</strong></td>
+                        <td>{row.customer_name}</td>
+                        <td>{formatCurrency(row.outstanding_balance || 0)}</td>
+                        <td>{row.days_overdue ?? 0}</td>
+                        <td>{Number(row.distance_km) ? `${Number(row.distance_km).toFixed(1)} km` : '—'}</td>
+                        <td>{row.score != null ? Number(row.score).toFixed(3) : '—'}</td>
+                        <td>{already ? <StatusBadge status="Pending" /> : '—'}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+            <Pagination {...pagination_saw} />
+          </>
+        ) : (
+          <EmptyState
+            title="No SAW-eligible customers"
+            description="Active accounts with balance, coordinates, and open invoices will appear here."
+          />
+        )}
+      </section>
       <section className="panel content-panel relative overflow-hidden">
         <div className="flex flex-col md:flex-row justify-between gap-4 items-start md:items-center mb-4"><h3>Route Timeline</h3><span className="text-ink/70">GPS: {routeDetail?.gpsAttendance ?? c.gpsAttendance ? 'Active' : 'Off'}</span></div>
         {route.length ? <><div className="corvex-table-wrapper"><table className="corvex-table"><thead><tr><th>Account</th><th>Status</th><th>Time</th><th>Amount</th></tr></thead><tbody>{paginated_c_route.map(r => <tr key={`${r.account}-${r.time}`}><td>{r.account}</td><td><StatusBadge status={r.status} /></td><td>{formatDisplayDate(r.time)}</td><td>{r.amount ? formatCurrency(r.amount) : '—'}</td></tr>)}</tbody></table></div><Pagination {...pagination_c_route} /></> : <EmptyState title="No route data" description="Collection visits will appear here once scheduled." />}

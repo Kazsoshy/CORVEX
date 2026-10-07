@@ -183,6 +183,62 @@ export async function fetchTodayFieldVisits() {
   }
 }
 
+/** SAW-ranked collection priority (Simple Additive Weighting — matches sawmodel.ipynb). */
+export async function fetchSawPriority(params = {}) {
+  try {
+    const response = await apiClient.get('/collector/saw-priority', { params });
+    return response.data;
+  } catch (error) {
+    console.error('Failed to fetch SAW priority:', error);
+    return { success: false, data: [], meta: null };
+  }
+}
+
+export async function recomputeSawPriority() {
+  try {
+    const response = await apiClient.post('/collector/saw/recompute');
+    return response.data;
+  } catch (error) {
+    console.error('Failed to recompute SAW:', error);
+    return { success: false, message: error.response?.data?.message || 'Failed to recompute SAW.' };
+  }
+}
+
+export function mapSawRowToRouteStop(row, visitByCustomer = new Map()) {
+  const id = String(row.customer_id);
+  const visit = visitByCustomer.get(id) || (row.visit_id
+    ? { visit_id: row.visit_id, status: row.visit_status, visit_type: 'Collection' }
+    : null);
+  const visitDone = visit?.status === 'Completed';
+  const daysOverdue = Number(row.days_overdue) || 0;
+  const outstandingBalance = Number(row.outstanding_balance) || 0;
+  const collectorStatus = outstandingBalance > 0
+    ? (daysOverdue > 0 ? 'Overdue' : 'Pending')
+    : 'Current';
+
+  return {
+    id,
+    customerName: row.customer_name || 'Customer',
+    accountNumber: `ACC-${row.customer_id}`,
+    address: row.address || '—',
+    phone: row.phone || '—',
+    outstandingBalance,
+    daysOverdue,
+    distanceKm: Number(row.distance_km) || 0,
+    sawScore: Number(row.score) || 0,
+    rank: row.rank,
+    status: visitDone ? 'Completed' : collectorStatus,
+    visitId: visit?.visit_id,
+    visitType: visit?.visit_type,
+    visitStatus: visit?.status,
+    rawStatus: 'Active',
+    latitude: row.latitude,
+    longitude: row.longitude,
+    invoiceStatus: row.invoice_status,
+    dueDate: row.due_date,
+  };
+}
+
 export async function fetchFieldActivityReports() {
   try {
     const response = await apiClient.get('/collector/field-reports');

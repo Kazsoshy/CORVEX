@@ -28,6 +28,7 @@ import approvalsRouter from './routes/approvals.js';
 import operationalAlertsRouter from './routes/operationalAlerts.js';
 import { requireAuth, requireBranchScope } from './middleware/auth.js';
 import { ensureSchema } from './lib/ensureSchema.js';
+import { isMailConfigured } from './lib/mail.js';
 
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -133,7 +134,7 @@ app.get('/api/health', (req, res) => {
   res.json({
     success: true,
     message: 'CORVEX API is healthy.',
-    features: ['territories-assignable-users', 'users-middle-name'],
+    features: ['territories-assignable-users', 'users-middle-name', 'collector-saw-priority', 'collector-osrm-routing'],
   });
 });
 
@@ -210,6 +211,11 @@ async function startServer() {
   app.listen(PORT, () => {
     console.log(`🚀 CORVEX API running at http://localhost:${PORT}`);
     console.log(`   Environment: ${process.env.NODE_ENV || 'development'}`);
+    if (isMailConfigured()) {
+      console.log('   ✉️  Customer portal email: ON (invitations sent via SMTP to the customer inbox)');
+    } else {
+      console.warn('   ⚠️  Customer portal email: OFF — set SMTP_* in .env (Gmail) so sales can email activation links');
+    }
   });
 }
 

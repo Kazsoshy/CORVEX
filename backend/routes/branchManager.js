@@ -1,5 +1,12 @@
 import express from 'express';
 import { requireAuth, requireRole, requireAssignedBranch, isUnscoped, ROLE_SETS } from '../middleware/auth.js';
+import {
+  computeCollectorSawPriority,
+  assignCollectionVisits,
+  getCollectionAssignmentsForDate,
+  mapSawPriorityRow,
+} from '../lib/sawCollectionData.js';
+import { manilaDateString } from '../lib/sawCollection.js';
 
 const router = express.Router();
 router.use(requireRole(ROLE_SETS.branchOps), requireAssignedBranch);
@@ -582,6 +589,104 @@ router.get('/audit-logs', requireAuth, async (req, res) => {
   } catch (err) {
     console.error('[Branch Manager] GET /audit-logs error:', err.message);
     return res.status(500).json({ success: false, message: 'Failed to fetch audit logs.' });
+  }
+});
+
+// GET /api/branch-manager/staff/collectors/:id/saw-priority — SAW list for assigning today's route
+router.get('/staff/collectors/:id/saw-priority', requireAuth, async (req, res) => {
+  try {
+    const pool = req.app.locals.pool;
+    const user = req.currentUser;
+    const collectorId = Number(req.params.id);
+    if (!Number.isFinite(collectorId)) {
+      return res.status(400).json({ success: false, message: 'Invalid collector ID.' });
+    }
+    const allowed = await assertStaffInBranch(pool, user, collectorId, 'collector');
+    if (!allowed) {
+      return res.status(404).json({ success: false, message: 'Collector not found.' });
+    }
+
+    const branchRow = await pool.query(`SELECT branch_id FROM users WHERE id = $1`, [collectorId]);
+    const branchId = branchRow.rows[0]?.branch_id ?? user.branchId;
+    const scheduledDate = req.query.scheduled_date || manilaDateString();
+
+    const { asOf, ranked, stats } = await computeCollectorSawPriority(pool, {
+      collectorId,
+      branchId,
+    });
+
+    const assignments = await getCollectionAssignmentsForDate(pool, collectorId, scheduledDate);
+    const assignedIds = new Set(assignments.map((a) => Number(a.customer_id)));
+
+    return res.status(200).json({
+      success: true,
+      data: ranked.map(mapSawPriorityRow),
+      meta: {
+        asOf,
+        stats,
+        scheduledDate,
+        assignedCustomerIds: [...assignedIds],
+      },
+    });
+  } catch (err) {
+    console.error('[Branch Manager] GET /staff/collectors/:id/saw-priority error:', err.message);
+    return res.status(500).json({ success: false, message: 'Failed to load SAW priority list.' });
+  }
+});
+
+// POST /api/branch-manager/staff/collectors/:id/collection-assignments
+router.post('/staff/collectors/:id/collection-assignments', requireAuth, async (req, res) => {
+  try {
+    const pool = req.app.locals.pool;
+    const user = req.currentUser;
+    const collectorId = Number(req.params.id);
+    if (!Number.isFinite(collectorId)) {
+      return res.status(400).json({ success: false, message: 'Invalid collector ID.' });
+    }
+    const allowed = await assertStaffInBranch(pool, user, collectorId, 'collector');
+    if (!allowed) {
+      return res.status(404).json({ success: false, message: 'Collector not found.' });
+    }
+
+    const branchRow = await pool.query(`SELECT branch_id FROM users WHERE id = $1`, [collectorId]);
+    const branchId = branchRow.rows[0]?.branch_id ?? user.branchId;
+    if (branchId == null) {
+      return res.status(400).json({ success: false, message: 'Collector has no branch assignment.' });
+    }
+
+    const scheduledDate = req.body.scheduled_date || manilaDateString();
+    let customerIds = Array.isArray(req.body.customer_ids) ? req.body.customer_ids : [];
+
+    const topN = Number(req.body.assign_top_n);
+    if (Number.isFinite(topN) && topN > 0) {
+      const { ranked } = await computeCollectorSawPriority(pool, { collectorId, branchId });
+      customerIds = ranked.slice(0, topN).map((r) => r.customer_id);
+    }
+
+    if (!customerIds.length) {
+      return res.status(400).json({
+        success: false,
+        message: 'Provide customer_ids or assign_top_n.',
+      });
+    }
+
+    const result = await assignCollectionVisits(pool, {
+      collectorId,
+      branchId,
+      customerIds,
+      scheduledDate,
+    });
+
+    return res.status(201).json({
+      success: true,
+      message: result.created.length
+        ? `Scheduled ${result.created.length} collection visit(s) for ${result.scheduledDate}.`
+        : 'No new visits created (all selected customers were already scheduled).',
+      data: result,
+    });
+  } catch (err) {
+    console.error('[Branch Manager] POST collection-assignments error:', err.message);
+    return res.status(500).json({ success: false, message: 'Failed to assign collection visits.' });
   }
 });
 

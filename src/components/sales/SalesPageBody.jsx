@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useLocation } from 'react-router-dom';
 import {
   createCustomer,
   createSalesInvoice,
@@ -652,10 +652,10 @@ function CustomerFormPage({
     if (form.secondary_contact_fname && form.secondary_contact_phone && primaryKey === secondaryKey) {
       nextErrors.secondary_contact_phone = 'Secondary contact must be different from the primary contact.';
     }
-    setErrors(nextErrors);
     if (form.create_portal_account && !form.portal_email.trim()) {
       nextErrors.portal_email = 'Portal email is required when creating a customer login.';
     }
+    setErrors(nextErrors);
     if (Object.keys(nextErrors).length) {
       showToast('Please complete all required fields.', 'error');
       return;
@@ -686,8 +686,20 @@ function CustomerFormPage({
       showToast(result.message || 'Failed to create customer.', 'error');
       return;
     }
-    showToast(result.message || 'Customer created successfully.', 'success');
-    navigate(`/sales/customer-detail/${result.data.customer_id}?from=customers`);
+    const portal = result.portal;
+    if (portal?.emailSent === false && portal?.email) {
+      showToast(
+        result.message || `Customer saved but email was not delivered to ${portal.email}. Use Resend Invitation on the customer page.`,
+        'error'
+      );
+    } else {
+      showToast(result.message || 'Customer created successfully.', 'success');
+    }
+    navigate(`/sales/customer-detail/${result.data.customer_id}?from=customers`, {
+      state: portal?.emailSent === false && portal?.activationUrl
+        ? { portalActivationUrl: portal.activationUrl, portalEmail: portal.email }
+        : undefined,
+    });
   };
   if (loading) return <LoadingState message="Loading customer form..." />;
   return <div className="page">
@@ -779,7 +791,7 @@ function CustomerFormPage({
       <section className="panel form-panel content-panel">
         <div className="panel-section-header">
           <h3>Customer Portal Access</h3>
-          <p className="muted">The customer sets their own password using an activation link. You only provide their verified email.</p>
+          <p className="muted">When you save, Corvex sends an official activation email to the customer&apos;s inbox (e.g. Gmail). They set their own password from that link (expires in 24 hours by default).</p>
         </div>
         <label className="toggle-label">
           <input
@@ -866,11 +878,19 @@ function CustomerDetailPage({
   navigate,
   showToast
 }) {
+  const location = useLocation();
   const [customer, setCustomer] = useState(null);
   const [loading, setLoading] = useState(true);
   const [portalEmail, setPortalEmail] = useState('');
   const [lastActivationUrl, setLastActivationUrl] = useState('');
   const [resending, setResending] = useState(false);
+  useEffect(() => {
+    const pending = location.state?.portalActivationUrl;
+    if (pending) {
+      setLastActivationUrl(pending);
+      navigate(location.pathname + location.search, { replace: true, state: {} });
+    }
+  }, [location.pathname, location.search, location.state, navigate]);
   useEffect(() => {
     async function load() {
       setLoading(true);
@@ -895,8 +915,12 @@ function CustomerDetailPage({
       showToast(result.message || 'Failed to resend invitation.', 'error');
       return;
     }
-    setLastActivationUrl(result.portal?.activationUrl || '');
-    showToast('Portal invitation sent.', 'success');
+    if (result.portal?.emailSent) {
+      setLastActivationUrl('');
+    } else {
+      setLastActivationUrl(result.portal?.activationUrl || '');
+    }
+    showToast(result.message || 'Portal invitation sent.', 'success');
     const refreshed = await fetchCustomerById(customerId);
     if (refreshed.success && refreshed.data) setCustomer(refreshed.data);
   };
@@ -978,7 +1002,7 @@ function CustomerDetailPage({
       {customer.portal_status !== 'active' ? (
         <section className="panel content-panel account-detail-panel">
           <div className="panel-section-header"><h3>Customer Portal Invitation</h3></div>
-          <p className="muted">Share the activation link with the customer (email/SMS in production). The sales agent never sets the customer password.</p>
+          <p className="muted">Sends the activation email automatically when SMTP is configured. The sales agent never sets the customer password.</p>
           <div className="form-group">
             <label htmlFor="detail-portal-email">Portal email</label>
             <input id="detail-portal-email" type="email" value={portalEmail} onChange={(e) => setPortalEmail(e.target.value)} />
@@ -988,7 +1012,7 @@ function CustomerDetailPage({
           </button>
           {lastActivationUrl ? (
             <p className="muted" style={{ marginTop: 12, wordBreak: 'break-all' }}>
-              Activation link (dev): {lastActivationUrl}
+              Email not sent — copy this activation link for the customer: {lastActivationUrl}
             </p>
           ) : null}
         </section>

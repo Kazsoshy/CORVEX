@@ -1,7 +1,13 @@
 import crypto from 'crypto';
 import bcrypt from 'bcryptjs';
+import { sendPortalActivationEmail } from './customerPortalEmail.js';
 
-const INVITE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+/** Default 24 hours — override with PORTAL_INVITE_TTL_HOURS in .env */
+const INVITE_TTL_MS = (Number(process.env.PORTAL_INVITE_TTL_HOURS) || 24) * 60 * 60 * 1000;
+
+export function portalInviteTtlHours() {
+  return Number(process.env.PORTAL_INVITE_TTL_HOURS) || 24;
+}
 
 export function generatePortalToken() {
   return crypto.randomBytes(32).toString('hex');
@@ -203,4 +209,50 @@ export async function activatePortalAccount(pool, { token, password }) {
     email: invite.email,
     customerId: invite.customer_id,
   };
+}
+
+/**
+ * Send activation email after invitation is committed. Does not throw — returns { sent, ... }.
+ */
+export async function dispatchPortalActivationEmail(pool, {
+  portalMeta,
+  customerFirstName,
+  salesAgentName,
+  salesAgentEmail,
+  branchId,
+}) {
+  if (!portalMeta?.portalEmail || !portalMeta?.activationUrl) {
+    return { sent: false, skipped: true, reason: 'missing_portal_meta' };
+  }
+
+  let supportEmail = process.env.SUPPORT_EMAIL || '';
+  let supportPhone = process.env.SUPPORT_PHONE || '';
+  const companyName = process.env.COMPANY_NAME || 'Corvex';
+
+  if (branchId != null) {
+    try {
+      const branch = await pool.query(
+        `SELECT name, email, phone FROM branches WHERE id = $1`,
+        [branchId]
+      );
+      if (branch.rows[0]) {
+        supportEmail = branch.rows[0].email || supportEmail;
+        supportPhone = branch.rows[0].phone || supportPhone;
+      }
+    } catch (err) {
+      console.warn('[CustomerPortal] Branch lookup for email footer failed:', err.message);
+    }
+  }
+
+  return sendPortalActivationEmail({
+    to: portalMeta.portalEmail,
+    customerFirstName,
+    salesAgentName,
+    salesAgentEmail,
+    activationUrl: portalMeta.activationUrl,
+    expiresHours: portalInviteTtlHours(),
+    companyName,
+    supportEmail,
+    supportPhone,
+  });
 }

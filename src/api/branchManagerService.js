@@ -70,6 +70,35 @@ export async function getBranchCollectorDetail(collectorId) {
   }
 }
 
+export async function fetchCollectorSawPriority(collectorId, params = {}) {
+  try {
+    const response = await apiClient.get(
+      `/branch-manager/staff/collectors/${collectorId}/saw-priority`,
+      { params }
+    );
+    return response.data;
+  } catch (error) {
+    console.error('Failed to fetch collector SAW priority:', error);
+    return { success: false, data: [], meta: null };
+  }
+}
+
+export async function assignCollectorCollectionRoute(collectorId, body) {
+  try {
+    const response = await apiClient.post(
+      `/branch-manager/staff/collectors/${collectorId}/collection-assignments`,
+      body
+    );
+    return response.data;
+  } catch (error) {
+    console.error('Failed to assign collection route:', error);
+    return {
+      success: false,
+      message: error.response?.data?.message || 'Failed to assign collection visits.',
+    };
+  }
+}
+
 export async function getBranchSalesAgentDetail(agentId) {
   try {
     const response = await apiClient.get(`/branch-manager/staff/sales/${agentId}`);

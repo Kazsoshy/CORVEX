@@ -1,6 +1,51 @@
 import express from 'express';
 import { allow, assertSameBranch, ROLE_SETS } from '../middleware/auth.js';
-import { createPortalInvitation, resendPortalInvitation } from '../lib/customerPortal.js';
+import {
+  createPortalInvitation,
+  resendPortalInvitation,
+  dispatchPortalActivationEmail,
+} from '../lib/customerPortal.js';
+import { isMailConfigured } from '../lib/mail.js';
+
+function salesAgentDisplayName(user) {
+  if (!user) return 'Sales Agent';
+  return user.fullName
+    || user.full_name
+    || [user.first_name, user.last_name].filter(Boolean).join(' ')
+    || 'Sales Agent';
+}
+
+function wantsPortalAccount(flag) {
+  return flag === true || flag === 'true';
+}
+
+const PORTAL_EMAIL_NOT_CONFIGURED = 'Portal invitations are sent by email. Gmail (SMTP) is not configured on the server yet — ask your administrator to set SMTP in .env and restart the API.';
+
+function buildPortalApiPayload(portalMeta, emailResult) {
+  const emailSent = Boolean(emailResult?.sent);
+  return {
+    status: 'invited',
+    email: portalMeta.portalEmail,
+    expiresAt: portalMeta.expiresAt,
+    emailSent,
+    emailSkipped: Boolean(emailResult?.skipped),
+    ...(emailSent ? {} : { activationUrl: portalMeta.activationUrl }),
+    ...(emailResult?.error ? { emailError: emailResult.error } : {}),
+  };
+}
+
+async function loadSalesAgentContact(pool, userId) {
+  if (!userId) return { name: null, email: null };
+  const result = await pool.query(
+    `SELECT email,
+            COALESCE(NULLIF(TRIM(full_name), ''), CONCAT_WS(' ', first_name, last_name)) AS display_name
+     FROM users WHERE id = $1`,
+    [userId]
+  );
+  const row = result.rows[0];
+  if (!row) return { name: null, email: null };
+  return { name: row.display_name, email: row.email };
+}
 
 const router = express.Router();
 router.use(allow(ROLE_SETS.customerRead, ROLE_SETS.customerWrite));
@@ -276,6 +321,10 @@ router.post('/', async (req, res) => {
     return res.status(400).json({ success: false, message: 'branch_id is required to create a customer.' });
   }
 
+  if (wantsPortalAccount(create_portal_account) && !isMailConfigured()) {
+    return res.status(503).json({ success: false, message: PORTAL_EMAIL_NOT_CONFIGURED });
+  }
+
   const client = await req.app.locals.pool.connect();
 
   try {
@@ -342,7 +391,7 @@ router.post('/', async (req, res) => {
     );
 
     let portalMeta = null;
-    if (create_portal_account === true || create_portal_account === 'true') {
+    if (wantsPortalAccount(create_portal_account)) {
       portalMeta = await createPortalInvitation(client, {
         customerId,
         branchId: resolvedBranchId,
@@ -360,6 +409,18 @@ router.post('/', async (req, res) => {
 
     await client.query('COMMIT');
 
+    let emailResult = null;
+    if (portalMeta) {
+      const agentContact = await loadSalesAgentContact(req.app.locals.pool, req.currentUser?.id);
+      emailResult = await dispatchPortalActivationEmail(req.app.locals.pool, {
+        portalMeta,
+        customerFirstName: contact_person_fname,
+        salesAgentName: agentContact.name || salesAgentDisplayName(req.currentUser),
+        salesAgentEmail: agentContact.email || undefined,
+        branchId: resolvedBranchId,
+      });
+    }
+
     const detail = await req.app.locals.pool.query(
       `SELECT ${CUSTOMER_SELECT_CORE}
        FROM customers c
@@ -371,18 +432,24 @@ router.post('/', async (req, res) => {
       [customerId]
     );
 
+    const portalPayload = portalMeta ? buildPortalApiPayload(portalMeta, emailResult) : null;
+
+    let createMessage = 'Customer created.';
+    if (portalMeta) {
+      const inbox = portalMeta.portalEmail;
+      createMessage = emailResult?.sent
+        ? `Customer created. Activation email sent to ${inbox} — the customer can open it in Gmail (or their inbox) to activate their account.`
+        : `Customer created, but the activation email could not be delivered to ${inbox}. Share the activation link manually or use Resend Invitation.`;
+      if (emailResult?.error) {
+        createMessage += ` (${emailResult.error})`;
+      }
+    }
+
     return res.status(201).json({
       success: true,
-      message: portalMeta
-        ? 'Customer created. Portal invitation is pending activation.'
-        : 'Customer created.',
+      message: createMessage,
       data: detail.rows[0],
-      portal: portalMeta ? {
-        status: 'invited',
-        email: portalMeta.portalEmail,
-        activationUrl: portalMeta.activationUrl,
-        expiresAt: portalMeta.expiresAt,
-      } : null,
+      portal: portalPayload,
     });
   } catch (err) {
     await client.query('ROLLBACK');
@@ -415,6 +482,10 @@ router.post('/:id/portal/resend', async (req, res) => {
       return res.status(400).json({ success: false, message: 'Portal email is required to send an invitation.' });
     }
 
+    if (!isMailConfigured()) {
+      return res.status(503).json({ success: false, message: PORTAL_EMAIL_NOT_CONFIGURED });
+    }
+
     await client.query('BEGIN');
 
     if (customer.portal_status === 'active') {
@@ -425,15 +496,35 @@ router.post('/:id/portal/resend', async (req, res) => {
     const portalMeta = await resendPortalInvitation(client, { customerId, portalEmail });
 
     await client.query('COMMIT');
+
+    const agentRow = await req.app.locals.pool.query(
+      `SELECT agent.email AS agent_email,
+              COALESCE(NULLIF(TRIM(agent.full_name), ''), CONCAT_WS(' ', agent.first_name, agent.last_name)) AS agent_name
+       FROM customers c
+       LEFT JOIN users agent ON agent.id = c.assigned_sales_agent_id
+       WHERE c.customer_id = $1`,
+      [customerId]
+    );
+    const emailResult = await dispatchPortalActivationEmail(req.app.locals.pool, {
+      portalMeta,
+      customerFirstName: customer.contact_person_fname,
+      salesAgentName: agentRow.rows[0]?.agent_name || salesAgentDisplayName(req.currentUser),
+      salesAgentEmail: agentRow.rows[0]?.agent_email || undefined,
+      branchId: customer.branch_id,
+    });
+
+    const inbox = portalMeta.portalEmail;
+    let resendMessage = emailResult?.sent
+      ? `Activation email sent to ${inbox}.`
+      : `Invitation renewed but email could not be delivered to ${inbox} — share the activation link manually.`;
+    if (emailResult?.error) {
+      resendMessage += ` (${emailResult.error})`;
+    }
+
     return res.status(200).json({
       success: true,
-      message: 'Portal invitation resent.',
-      portal: {
-        status: 'invited',
-        email: portalMeta.portalEmail,
-        activationUrl: portalMeta.activationUrl,
-        expiresAt: portalMeta.expiresAt,
-      },
+      message: resendMessage,
+      portal: buildPortalApiPayload(portalMeta, emailResult),
     });
   } catch (err) {
     await client.query('ROLLBACK');

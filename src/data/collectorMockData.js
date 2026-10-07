@@ -112,18 +112,17 @@ export const ACCOUNTS = [
   },
 ];
 
-// SAW (Simple Additive Weighting) scoring for collection prioritization
-// Criteria: outstanding balance (weight 0.45), days overdue (weight 0.35), distance km (weight 0.20)
-// Higher score = higher priority (lower rank number = visit first)
+// SAW (Simple Additive Weighting) — matches sawmodel.ipynb (0.40 / 0.30 / 0.30)
 function computeSAWScore(account) {
   const maxBalance = 48500;
   const maxOverdue = 28;
+  const minDistance = 1.8;
   const maxDistance = 6.8;
-  const normBalance  = maxBalance  > 0 ? account.outstandingBalance / maxBalance  : 0;
-  const normOverdue  = maxOverdue  > 0 ? account.daysOverdue         / maxOverdue  : 0;
-  // For distance, closer is better, so invert the normalisation
-  const normDistance = maxDistance > 0 ? 1 - (account.distanceKm / maxDistance)   : 0;
-  return (normBalance * 0.45) + (normOverdue * 0.35) + (normDistance * 0.20);
+  const normBalance = maxBalance > 0 ? account.outstandingBalance / maxBalance : 0;
+  const normOverdue = maxOverdue > 0 ? account.daysOverdue / maxOverdue : 0;
+  const dist = Math.max(account.distanceKm || maxDistance, minDistance);
+  const normDistance = minDistance / dist;
+  return (normBalance * 0.4) + (normOverdue * 0.3) + (normDistance * 0.3);
 }
 
 export const ROUTE_STOPS = ACCOUNTS
