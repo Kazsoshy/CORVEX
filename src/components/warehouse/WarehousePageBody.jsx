@@ -35,7 +35,7 @@ function isTransferPendingApproval(status) {
   return status === 'Pending Approval' || status === 'Submitted';
 }
 import apiClient from '../../api/apiClient.js';
-import { downloadCsv } from '../../utils/csvExport';
+import { downloadPdf } from '../../utils/dataExport';
 import { getReportInventory } from '../../api/reportsService.js';
 import { NotificationsInbox } from '../shared/NotificationsInbox';
 import { EmptyState } from '../shared/EmptyState';
@@ -72,19 +72,7 @@ function StockStatusBadge({
   }[status] ?? '';
   return <span className={`stock-status ${cls}`}>{status}</span>;
 }
-function LocalPagination({
-  page,
-  totalPages,
-  onPageChange
-}) {
-  if (totalPages <= 1) return null;
-  return <div className="pagination">
-      <button className="inline-flex justify-center items-center gap-2 px-5 py-2.5 rounded-md bg-transparent text-blue border-[1.5px] border-blue-30 shadow-none hover:bg-blue-08 transition-all duration-160 cursor-pointer" type="button" disabled={page <= 1} onClick={() => onPageChange(page - 1)}>Previous</button>
-      <span className="text-ink/70">Page {page} of {totalPages}</span>
-      <button className="inline-flex justify-center items-center gap-2 px-5 py-2.5 rounded-md bg-transparent text-blue border-[1.5px] border-blue-30 shadow-none hover:bg-blue-08 transition-all duration-160 cursor-pointer" type="button" disabled={page >= totalPages} onClick={() => onPageChange(page + 1)}>Next</button>
-    </div>;
-}
-const PAGE_SIZE = 5;
+const PAGE_SIZE = 10;
 function DashboardPage({
   navigate,
   showToast
@@ -261,11 +249,11 @@ function InventoryPage({
                   unit_price: p.unit_price,
                   status: p.status,
                 }));
-                if (downloadCsv(rows, 'warehouse-products.csv')) showToast('Products exported.', 'success');
+                if (downloadPdf(rows, { filename: 'warehouse-products.pdf', title: 'Warehouse Products' })) showToast('Products exported as PDF.', 'success');
                 else showToast('Nothing to export.', 'error');
               }}
             >
-              Export CSV
+              Export PDF
             </button>
             <button className="button" type="button" onClick={() => navigate('/warehouse/add-product')}>Add Product</button>
           </div>
@@ -348,7 +336,7 @@ function InventoryPage({
               </tbody>
             </table>
             </div>
-            <LocalPagination page={page} totalPages={totalPages} onPageChange={setPage} /></>
+            <Pagination currentPage={page} totalPages={Math.max(1, totalPages)} totalRecords={filtered.length} pageSize={PAGE_SIZE} startRecord={filtered.length ? (page - 1) * PAGE_SIZE + 1 : 0} endRecord={Math.min(page * PAGE_SIZE, filtered.length)} prevPage={() => setPage((p) => Math.max(1, p - 1))} nextPage={() => setPage((p) => Math.min(Math.max(1, totalPages), p + 1))} goToPage={setPage} /></>
         : <EmptyState title="No products found" description="Adjust your search or filters." actionLabel="Clear filters" onAction={() => {
       setSearch('');
       setCategory('All');
@@ -510,7 +498,7 @@ function ProductDetailPage({
                   </tr>)}
               </tbody>
             </table>
-          </div><LocalPagination {...pagination_inventory} /></>
+          </div><Pagination {...pagination_inventory} /></>
         </section>}
 
       {/* Stock movements — from stock_movements table with movement_ref */}
@@ -555,7 +543,7 @@ function ProductDetailPage({
                   </tr>)}
               </tbody>
             </table>
-          </div><LocalPagination {...pagination_movements} /></> : <EmptyState title="No movement history" description="Stock movements for this product will appear here." />}
+          </div><Pagination {...pagination_movements} /></> : <EmptyState title="No movement history" description="Stock movements for this product will appear here." />}
       </section>
 
       <div className="flex flex-wrap justify-end gap-2 mt-4">
@@ -1252,7 +1240,7 @@ function MovementsPage({
                   </tr>)}
               </tbody>
             </table>
-          </div><LocalPagination {...pagination_filtered} /></>
+          </div><Pagination {...pagination_filtered} /></>
         : <EmptyState title="No movements found" description="Adjust your filters or record stock activity to populate this list." />}
       </section>
     </div>;
@@ -1558,7 +1546,7 @@ function TransfersPage({
                       </tr>)}
                   </tbody>
                 </table>
-              </div><LocalPagination {...pagination_requests} /></>
+              </div><Pagination {...pagination_requests} /></>
             : <EmptyState
                 title="No requests in this view"
                 description={requestSegment === 'Action required'
@@ -1604,7 +1592,7 @@ function TransfersPage({
                       </tr>)}
                   </tbody>
                 </table>
-              </div><LocalPagination {...pagination_history} /></>
+              </div><Pagination {...pagination_history} /></>
             : <EmptyState title="No transfers found" description="Adjust your filters." />}
           </>}
       </section>
@@ -1811,7 +1799,7 @@ function RestockHistoryPage({
                   </tr>)}
               </tbody>
             </table>
-          </div><LocalPagination {...pagination_filtered} /></>
+          </div><Pagination {...pagination_filtered} /></>
         : <EmptyState title="No restock records found" description="Adjust your filters." />}
       </section>
     </div>;
@@ -1966,7 +1954,7 @@ function AuditLogPage({
             <thead><tr><th>Action</th><th>Detail</th><th>Timestamp</th></tr></thead>
             <tbody>{paginated_logs.map(log => <tr key={log.log_id}><td>{log.action}</td><td>{log.detail}</td><td>{formatDisplayDateTime(log.timestamp)}</td></tr>)}</tbody>
           </table>
-        </div><LocalPagination {...pagination_logs} /></> : <EmptyState title="No audit entries" description="Actions you take will appear here." />}
+        </div><Pagination {...pagination_logs} /></> : <EmptyState title="No audit entries" description="Actions you take will appear here." />}
       </section>
       <div className="flex justify-end mt-4">
         <button className="button ghost" type="button" onClick={() => navigate('/warehouse/profile')}>Back to Profile</button>
@@ -2001,11 +1989,11 @@ function ReportsPage({
       reorder: r.reorder_level,
       status: r.status,
     }));
-    if (downloadCsv(rows, 'warehouse-low-stock.csv')) showToast('Report exported.', 'success');
+    if (downloadPdf(rows, { filename: 'warehouse-low-stock.pdf', title: 'Low Stock Report' })) showToast('Report exported as PDF.', 'success');
   };
   const reports = [
     { label: 'Inventory Report', action: loadInventoryReport },
-    { label: 'Export Low Stock CSV', action: exportReport },
+    { label: 'Export Low Stock PDF', action: exportReport },
   ];
   return <div className="relative z-10 grid gap-[22px] w-full">
       <section className="panel content-panel relative overflow-hidden">
@@ -2025,11 +2013,21 @@ function ReportsPage({
 function SettingsPage({
   navigate
 }) {
+  const [prefs, setPrefs] = useState(() => ({
+    barcode: localStorage.getItem('corvex_warehouse_barcode') !== '0',
+    lowStock: localStorage.getItem('corvex_warehouse_low_stock') !== '0',
+  }));
+  const save = (next) => {
+    setPrefs(next);
+    localStorage.setItem('corvex_warehouse_barcode', next.barcode ? '1' : '0');
+    localStorage.setItem('corvex_warehouse_low_stock', next.lowStock ? '1' : '0');
+  };
   return <div className="relative z-10 grid gap-[22px] w-full">
       <section className="panel form-panel content-panel">
         <div className="flex flex-col md:flex-row justify-between gap-4 items-start md:items-center mb-4"><h3>Settings</h3></div>
-        <div className="form-group"><label className="toggle-label"><input type="checkbox" defaultChecked />Enable barcode scanning</label></div>
-        <div className="form-group"><label className="toggle-label"><input type="checkbox" defaultChecked />Low stock alert notifications</label></div>
+        <p className="text-ink/70">These preferences are saved on this device.</p>
+        <div className="form-group"><label className="toggle-label"><input type="checkbox" checked={prefs.barcode} onChange={(e) => save({ ...prefs, barcode: e.target.checked })} />Enable barcode scanning</label></div>
+        <div className="form-group"><label className="toggle-label"><input type="checkbox" checked={prefs.lowStock} onChange={(e) => save({ ...prefs, lowStock: e.target.checked })} />Low stock alert notifications</label></div>
       </section>
       <div className="flex justify-end mt-4">
         <button className="button ghost" type="button" onClick={() => navigate('/warehouse/dashboard')}>Back to Dashboard</button>
@@ -2149,7 +2147,7 @@ function SuppliersPage({
         <div className="list-section-header">
           <h3>Suppliers</h3>
           <div className="list-section-actions">
-            <button className="inline-flex justify-center items-center gap-2 px-5 py-2.5 rounded-md border-0 bg-blue text-white font-semibold cursor-pointer transition-all duration-160 hover:-translate-y-[1px] hover:shadow-[0_4px_16px_rgba(37,99,235,0.35)] hover:brightness-105 active:translate-y-0" type="button" onClick={handleAdd}>Add Supplier</button>
+            <button className="button" type="button" onClick={handleAdd}>Add Supplier</button>
           </div>
         </div>
         <div className="list-section-toolbar" style={{
@@ -2198,7 +2196,7 @@ function SuppliersPage({
               </tbody>
             </table>
             </div>
-            <LocalPagination page={page} totalPages={totalPages} onPageChange={setPage} /></>
+            <Pagination currentPage={page} totalPages={Math.max(1, totalPages)} totalRecords={filtered.length} pageSize={PAGE_SIZE} startRecord={filtered.length ? (page - 1) * PAGE_SIZE + 1 : 0} endRecord={Math.min(page * PAGE_SIZE, filtered.length)} prevPage={() => setPage((p) => Math.max(1, p - 1))} nextPage={() => setPage((p) => Math.min(Math.max(1, totalPages), p + 1))} goToPage={setPage} /></>
         : <EmptyState title="No suppliers found" description="Adjust your search or filters." actionLabel="Add Supplier" onAction={handleAdd} />}
       </section>
 
@@ -2258,11 +2256,11 @@ function SuppliersPage({
                 </select>
               </div>
               <div className="modal-actions">
-                <button type="button" className="inline-flex justify-center items-center gap-2 px-5 py-2.5 rounded-md bg-mint text-ink border-[1.5px] border-surface-3 shadow-none hover:border-blue hover:text-blue transition-all duration-160 cursor-pointer" onClick={() => {
+                <button type="button" className="button secondary" onClick={() => {
               setShowAddModal(false);
               setEditingSupplier(null);
             }}>Cancel</button>
-                <button type="submit" className="inline-flex justify-center items-center gap-2 px-5 py-2.5 rounded-md border-0 bg-blue text-white font-semibold cursor-pointer transition-all duration-160 hover:-translate-y-[1px] hover:shadow-[0_4px_16px_rgba(37,99,235,0.35)] hover:brightness-105 active:translate-y-0">{editingSupplier ? 'Update' : 'Create'}</button>
+                <button type="submit" className="button">{editingSupplier ? 'Update' : 'Create'}</button>
               </div>
             </form>
           </div>
@@ -2412,35 +2410,21 @@ function BranchInventoryPage({
               </thead>
               <tbody>
                 {paginated_filtered.map(r => <tr key={r.branch_inventory_id} className="clickable-row" onClick={() => navigate(`/warehouse/product/${r.product_id}`)}>
-                    <td><span style={{
-                    fontFamily: 'monospace',
-                    fontSize: '0.82rem'
-                  }}>{r.branch_inventory_id}</span></td>
-                    <td>{r.branch_name}</td>
-                    <td><strong>{r.product_name}</strong></td>
+                    <td>{r.branch_inventory_id}</td>
+                    <td>{r.branch_name || '—'}</td>
+                    <td>{r.product_name || '—'}</td>
                     <td>{r.category_name || '—'}</td>
-                    <td style={{
-                  fontWeight: 600,
-                  color: r.available_stock <= 0 ? '#dc2626' : r.available_stock <= r.reorder_level ? '#d97706' : '#059669'
-                }}>
-                      {r.available_stock}
-                    </td>
+                    <td>{r.available_stock}</td>
                     <td>{r.reorder_level}</td>
                     <td>
                       <StatusBadge status={r.stock_status || '—'} />
                     </td>
-                    <td style={{
-                  fontFamily: 'monospace',
-                  fontSize: '0.78rem'
-                }}>{formatDisplayDateTime(r.created_at)}</td>
-                    <td style={{
-                  fontFamily: 'monospace',
-                  fontSize: '0.78rem'
-                }}>{formatDisplayDateTime(r.updated_at)}</td>
+                    <td>{formatDisplayDateTime(r.created_at)}</td>
+                    <td>{formatDisplayDateTime(r.updated_at)}</td>
                   </tr>)}
               </tbody>
             </table>
-          </div><LocalPagination {...pagination_filtered} /></>
+          </div><Pagination {...pagination_filtered} /></>
         : <EmptyState title="No records found" description="Adjust your search or filters." />}
       </section>
     </div>;

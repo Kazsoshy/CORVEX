@@ -37,6 +37,18 @@ export async function fetchCustomerPortalMe() {
   }
 }
 
+export async function updateCustomerPortalContact({ contact_phone, portal_email }) {
+  try {
+    const response = await apiClient.put('/customer-portal/me', { contact_phone, portal_email });
+    return response.data;
+  } catch (error) {
+    return {
+      success: false,
+      message: error.response?.data?.message || 'Failed to update contact information.',
+    };
+  }
+}
+
 export async function fetchCustomerPortalProducts() {
   try {
     const response = await apiClient.get('/customer-portal/products');

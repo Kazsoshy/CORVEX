@@ -654,8 +654,8 @@ export function TerritoriesPage({ showToast }) {
               {errors.submit && <p className="form-error" role="alert">{errors.submit}</p>}
 
               <div className="modal-actions">
-                <button type="button" className="inline-flex justify-center items-center gap-2 px-5 py-2.5 rounded-md bg-transparent text-blue border-[1.5px] border-blue-30 shadow-none hover:bg-blue-08 transition-all duration-160 cursor-pointer" onClick={closeForm} disabled={submitting}>Cancel</button>
-                <button type="submit" className="inline-flex justify-center items-center gap-2 px-5 py-2.5 rounded-md border-0 bg-blue text-white font-semibold cursor-pointer transition-all duration-160 hover:-translate-y-[1px] hover:shadow-[0_4px_16px_rgba(37,99,235,0.35)] hover:brightness-105 active:translate-y-0" disabled={submitting}>
+                <button type="button" className="button ghost" onClick={closeForm} disabled={submitting}>Cancel</button>
+                <button type="submit" className="button" disabled={submitting}>
                   {submitting ? 'Saving...' : editing ? 'Save Changes' : 'Add Territory'}
                 </button>
               </div>

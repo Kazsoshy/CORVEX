@@ -1,6 +1,6 @@
 import express from 'express';
 import { requireRole } from '../middleware/auth.js';
-import { notifyCreditInvestigationSubmitted } from '../lib/creditInvestigationNotifications.js';
+import { insertUserNotification, notifyCreditInvestigationSubmitted } from '../lib/creditInvestigationNotifications.js';
 
 const router = express.Router();
 
@@ -411,6 +411,49 @@ router.get('/receipts/:id', async (req, res) => {
       success: false,
       message: 'Failed to fetch receipt',
     });
+  }
+});
+
+router.post('/receipts/:id/send', async (req, res) => {
+  const pool = req.app.locals.pool;
+  const userId = req.currentUser.id;
+  const id = Number(req.params.id);
+  if (!Number.isFinite(id)) {
+    return res.status(400).json({ success: false, message: 'Invalid receipt ID.' });
+  }
+  try {
+    const result = await pool.query(
+      `SELECT dr.receipt_number, cp.amount, c.user_id AS customer_user_id,
+              COALESCE(NULLIF(CONCAT_WS(' ', c.first_name, c.last_name), ''), 'Customer') AS customer_name
+       FROM digital_receipts dr
+       JOIN collection_payment cp ON cp.collectionpayment_id = dr.collection_id
+       JOIN customers c ON c.customer_id = cp.customer_id
+       WHERE dr.receipts_id = $1 AND dr.generated_by = $2`,
+      [id, userId]
+    );
+    if (!result.rows.length) {
+      return res.status(404).json({ success: false, message: 'Receipt not found.' });
+    }
+    const receipt = result.rows[0];
+    if (!receipt.customer_user_id) {
+      return res.status(400).json({
+        success: false,
+        message: `${receipt.customer_name} does not have a portal account, so the receipt cannot be sent.`,
+      });
+    }
+    await insertUserNotification(pool, {
+      userId: receipt.customer_user_id,
+      title: `Receipt ${receipt.receipt_number}`,
+      message: `Your collector sent receipt ${receipt.receipt_number} for PHP ${Number(receipt.amount).toFixed(2)}. Open Digital Receipts to view it.`,
+      category: 'Receipt',
+    });
+    return res.status(200).json({
+      success: true,
+      message: `Receipt ${receipt.receipt_number} sent to ${receipt.customer_name}.`,
+    });
+  } catch (error) {
+    console.error('[Collector] POST /receipts/:id/send error:', error);
+    return res.status(500).json({ success: false, message: 'Failed to send receipt.' });
   }
 });
 

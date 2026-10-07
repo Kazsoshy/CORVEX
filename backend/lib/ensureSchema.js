@@ -48,4 +48,22 @@ export async function ensureSchema(client) {
     CREATE INDEX IF NOT EXISTS idx_territory_assignments_territory ON territory_assignments(territory_id);
     CREATE INDEX IF NOT EXISTS idx_territory_assignments_user ON territory_assignments(user_id);
   `);
+
+  await client.query(`
+    CREATE TABLE IF NOT EXISTS system_settings (
+      setting_key   VARCHAR(80) PRIMARY KEY,
+      setting_value TEXT,
+      updated_at    TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+
+    CREATE TABLE IF NOT EXISTS system_backups (
+      backup_id   SERIAL PRIMARY KEY,
+      backup_type VARCHAR(30) NOT NULL DEFAULT 'Manual',
+      status      VARCHAR(30) NOT NULL DEFAULT 'Completed',
+      size_bytes  INTEGER,
+      created_by  INTEGER REFERENCES users(id),
+      file_name   VARCHAR(200) NOT NULL,
+      created_at  TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+  `);
 }

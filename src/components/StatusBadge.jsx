@@ -18,22 +18,31 @@ const SUCCESS_TERMS = [
   'received',
 ];
 
-export function getStatusTextClass(status) {
+export function getStatusTone(status) {
   const normalized = String(status ?? '').trim().toLowerCase();
 
-  // Check negative states before "active" so "inactive" is never green.
-  if (ERROR_TERMS.some(term => normalized.includes(term))) return 'text-red-700';
-  if (WARNING_TERMS.some(term => normalized.includes(term))) return 'text-amber-700';
-  if (SUCCESS_TERMS.some(term => normalized.includes(term))) return 'text-emerald-700';
-  if (normalized.includes('informational') || normalized.includes('info')) return 'text-blue-700';
-  return 'text-slate-600';
+  if (ERROR_TERMS.some(term => normalized.includes(term))) return 'danger';
+  if (WARNING_TERMS.some(term => normalized.includes(term))) return 'warning';
+  if (SUCCESS_TERMS.some(term => normalized.includes(term))) return 'success';
+  if (normalized.includes('informational') || normalized.includes('info')) return 'info';
+  return 'neutral';
 }
 
-export function StatusBadge({ status, className = '' }) {
+export function getStatusTextClass(status) {
+  const tone = getStatusTone(status);
+  return `status-text-${tone}`;
+}
+
+export function StatusBadge({ status, className = '', variant = 'text' }) {
   if (status === null || status === undefined || status === '') return null;
 
+  const tone = getStatusTone(status);
+  const classes = variant === 'pill'
+    ? (tone === 'neutral' ? 'badge' : `badge badge-${tone}`)
+    : getStatusTextClass(status);
+
   return (
-    <span className={`${getStatusTextClass(status)} font-medium whitespace-nowrap ${className}`.trim()}>
+    <span className={`${classes} font-medium whitespace-nowrap ${className}`.trim()}>
       {status}
     </span>
   );

@@ -1,14 +1,18 @@
 import { Pagination } from '../shared/Pagination';
-import { usePagination } from '../../hooks/usePagination';
+import { usePagination, useServerPagination, DEFAULT_PAGE_SIZE } from '../../hooks/usePagination';
 import { useEffect, useMemo, useState, useCallback } from 'react';
 import apiClient from '../../api/apiClient';
 import { AreaChart, Area, BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
-import { ADMIN_BRANCHES, ADMIN_INVENTORY, ADMIN_PROFILE, BRANCH_PERFORMANCE_CHART, RESTOCK_REQUESTS, SYSTEM_MONTHLY_COLLECTIONS, SYSTEM_MONTHLY_SALES, TRANSFER_REQUESTS, USER_GROWTH, USER_STATS, USERS, getBranchById, getUserById } from '../../data/adminMockData';
+import { ADMIN_BRANCHES, ADMIN_INVENTORY, ADMIN_PROFILE, BRANCH_PERFORMANCE_CHART, TRANSFER_REQUESTS, USER_GROWTH, USER_STATS } from '../../data/adminMockData';
 import { fetchAuditLogs } from '../../api/adminService';
 import { EmptyState } from '../shared/EmptyState';
 import { LoadingState } from '../shared/LoadingState';
 import { NavIcon } from '../../navIcons';
-import { formatDisplayDate, formatDisplayDateTime } from '../../utils/formatters.js';
+import { formatCurrency, formatDisplayDate, formatDisplayDateTime } from '../../utils/formatters.js';
+import { exportRows } from '../../utils/dataExport.js';
+import { getOperatingManagerAnalytics } from '../../api/reportsService.js';
+import { NotificationsInbox } from '../shared/NotificationsInbox';
+import { AccountProfilePanel } from '../shared/AccountProfilePanel';
 import { StatusBadge } from '../StatusBadge';
 function btn(v) {
   if (v === 'secondary') return 'button secondary';
@@ -63,7 +67,7 @@ function Card({
           margin: '2px 0 0',
           fontSize: '0.85rem'
         }}>{sub}</p>}</div>
-        {action && <button className="inline-flex justify-center items-center gap-2 px-5 py-2.5 rounded-md bg-transparent text-blue border-[1.5px] border-blue-30 shadow-none hover:bg-blue-08 transition-all duration-160 cursor-pointer" type="button" onClick={onAction}>{action}</button>}
+        {action && <button className="button ghost" type="button" onClick={onAction}>{action}</button>}
       </div>
       {children}
     </section>;
@@ -239,68 +243,84 @@ function UserListPage({
   const [users, setUsers] = useState([]);
   const [roles, setRoles] = useState([]);
   const [branches, setBranches] = useState([]);
+  const [totalRecords, setTotalRecords] = useState(0);
   const [loading, setLoading] = useState(true);
   const [showAddUserModal, setShowAddUserModal] = useState(false);
+  const filterResetKey = `${search}|${roleFilter}|${branchFilter}|${statusFilter}`;
+  const pagination = useServerPagination({
+    totalRecords,
+    pageSize: DEFAULT_PAGE_SIZE,
+    resetKey: filterResetKey,
+  });
+
   useEffect(() => {
-    async function loadData() {
-      setLoading(true);
+    async function loadMeta() {
       try {
-        const [usersRes, rolesRes, branchesRes] = await Promise.allSettled([
-          apiClient.get('/users'),
+        const [rolesRes, branchesRes] = await Promise.allSettled([
           apiClient.get('/roles'),
           apiClient.get('/branches'),
         ]);
-        const failures = [];
-        if (usersRes.status === 'fulfilled' && usersRes.value.data?.success) {
-          setUsers(usersRes.value.data.data || []);
-        } else {
-          failures.push('users');
-        }
         if (rolesRes.status === 'fulfilled' && rolesRes.value.data?.success) {
           setRoles(rolesRes.value.data.data.roles || []);
-        } else {
-          failures.push('roles');
         }
         if (branchesRes.status === 'fulfilled' && branchesRes.value.data?.success) {
           setBranches(branchesRes.value.data.data || []);
-        } else {
-          failures.push('branches');
-        }
-        if (failures.length) {
-          console.error('Error loading admin data:', failures, {
-            users: usersRes.status === 'rejected' ? usersRes.reason : null,
-            roles: rolesRes.status === 'rejected' ? rolesRes.reason : null,
-            branches: branchesRes.status === 'rejected' ? branchesRes.reason : null,
-          });
-          showToast(`Failed to load: ${failures.join(', ')}. Restart the API on port 5000 if this persists.`, 'error');
         }
       } catch (err) {
-        console.error('Error loading data:', err);
-        showToast('Failed to load admin data.', 'error');
+        console.error('Error loading admin metadata:', err);
       }
-      setLoading(false);
     }
-    loadData();
+    loadMeta();
   }, []);
-  const filtered = useMemo(() => users.filter(u => {
-    const q = search.toLowerCase();
-    const fullName = `${u.first_name} ${u.last_name}`.toLowerCase();
-    if (q && !fullName.includes(q) && !u.email.toLowerCase().includes(q)) return false;
-    if (roleFilter !== 'All' && u.role?.slug !== roleFilter) return false;
-    if (branchFilter !== 'All' && u.branch?.id !== Number(branchFilter)) return false;
-    if (statusFilter !== 'All' && u.status !== statusFilter) return false;
-    return true;
-  }), [users, search, roleFilter, branchFilter, statusFilter]);
-  const pagination = usePagination(filtered);
-  const paginatedUsers = pagination.paginatedData;
+
+  useEffect(() => {
+    let active = true;
+    async function loadUsers() {
+      setLoading(true);
+      try {
+        const params = {
+          page: pagination.currentPage,
+          limit: DEFAULT_PAGE_SIZE,
+        };
+        if (search.trim()) params.search = search.trim();
+        if (roleFilter !== 'All') params.role = roleFilter;
+        if (branchFilter !== 'All') params.branch_id = branchFilter;
+        if (statusFilter !== 'All') params.status = statusFilter;
+        const usersRes = await apiClient.get('/users', { params });
+        if (!active) return;
+        if (usersRes.data?.success) {
+          setUsers(usersRes.data.data || []);
+          setTotalRecords(Number(usersRes.data.pagination?.total) || (usersRes.data.data || []).length);
+        } else {
+          setUsers([]);
+          setTotalRecords(0);
+          showToast('Failed to load users.', 'error');
+        }
+      } catch (err) {
+        if (!active) return;
+        console.error('Error loading users:', err);
+        setUsers([]);
+        setTotalRecords(0);
+        showToast('Failed to load users. Restart the API on port 5000 if this persists.', 'error');
+      }
+      if (active) setLoading(false);
+    }
+    loadUsers();
+    return () => { active = false; };
+  }, [pagination.currentPage, search, roleFilter, branchFilter, statusFilter, showToast]);
+
   const handleDisable = async user => {
     try {
       await apiClient.delete(`/users/${user.user_id}`);
       showToast(`${user.first_name} ${user.last_name} disabled.`, 'success');
       setConfirmDisable(null);
-      // Reload users
-      const usersRes = await apiClient.get('/users');
-      if (usersRes.data.success) setUsers(usersRes.data.data || []);
+      const usersRes = await apiClient.get('/users', {
+        params: { page: pagination.currentPage, limit: DEFAULT_PAGE_SIZE },
+      });
+      if (usersRes.data.success) {
+        setUsers(usersRes.data.data || []);
+        setTotalRecords(Number(usersRes.data.pagination?.total) || 0);
+      }
     } catch (err) {
       console.error('Error disabling user:', err);
       showToast('Failed to disable user.', 'error');
@@ -308,8 +328,13 @@ function UserListPage({
   };
   const refreshUsers = async () => {
     try {
-      const usersRes = await apiClient.get('/users');
-      if (usersRes.data.success) setUsers(usersRes.data.data || []);
+      const usersRes = await apiClient.get('/users', {
+        params: { page: pagination.currentPage, limit: DEFAULT_PAGE_SIZE },
+      });
+      if (usersRes.data.success) {
+        setUsers(usersRes.data.data || []);
+        setTotalRecords(Number(usersRes.data.pagination?.total) || 0);
+      }
     } catch (err) {
       console.error('Error refreshing users:', err);
       showToast('User was created, but the list could not be refreshed.', 'error');
@@ -323,57 +348,32 @@ function UserListPage({
       marginBottom: 24
     }}>
           <p>Disable <strong>{confirmDisable.first_name} {confirmDisable.last_name}</strong>? They will lose system access immediately.</p>
-          <div style={{
-        display: 'flex',
-        gap: 10,
-        marginTop: 12
-      }}>
-            <button className="inline-flex justify-center items-center gap-2 px-5 py-2.5 rounded-md border-0 bg-blue text-white font-semibold cursor-pointer transition-all duration-160 hover:-translate-y-[1px] hover:shadow-[0_4px_16px_rgba(37,99,235,0.35)] hover:brightness-105 active:translate-y-0" type="button" style={{
-          background: '#dc2626'
-        }} onClick={() => handleDisable(confirmDisable)}>Confirm Disable</button>
-            <button className="inline-flex justify-center items-center gap-2 px-5 py-2.5 rounded-md bg-mint text-ink border-[1.5px] border-surface-3 shadow-none hover:border-blue hover:text-blue transition-all duration-160 cursor-pointer" type="button" onClick={() => setConfirmDisable(null)}>Cancel</button>
+          <div style={{ display: 'flex', gap: 10, marginTop: 12 }}>
+            <button className="button danger" type="button" onClick={() => handleDisable(confirmDisable)}>Confirm Disable</button>
+            <button className="button secondary" type="button" onClick={() => setConfirmDisable(null)}>Cancel</button>
           </div>
         </section>}
 
       <section className="panel content-panel relative overflow-hidden">
         <div className="list-section-header">
-          <h3 style={{
-          margin: 0
-        }}>Users <span className="text-ink/70" style={{
-            fontWeight: 400,
-            fontSize: '0.88rem'
-          }}>({filtered.length})</span></h3>
+          <h3 style={{ margin: 0 }}>Users <span className="text-ink/70" style={{ fontWeight: 400, fontSize: '0.88rem' }}>({totalRecords})</span></h3>
         </div>
 
-        <div className="list-section-controls" style={{
-        marginBottom: 16
-      }}>
-            <input className="filter-input search" style={{
-          flex: '1 1 320px',
-          height: 40
-        }} type="search" placeholder="Search by name or email…" value={search} onChange={e => setSearch(e.target.value)} />
-            <select className="filter-select" style={{
-          flex: '0 1 180px',
-          height: 40
-        }} value={statusFilter} onChange={e => setStatusFilter(e.target.value)}>
+        <div className="list-section-controls" style={{ marginBottom: 16 }}>
+            <input className="filter-input search" style={{ flex: '1 1 320px', height: 40 }} type="search" placeholder="Search by name or email…" value={search} onChange={e => setSearch(e.target.value)} />
+            <select className="filter-select" style={{ flex: '0 1 180px', height: 40 }} value={statusFilter} onChange={e => setStatusFilter(e.target.value)}>
               {['All', 'Active', 'Inactive'].map(s => <option key={s}>{s}</option>)}
             </select>
-            <select className="filter-select" style={{
-          flex: '0 1 180px',
-          height: 40
-        }} value={roleFilter} onChange={e => setRoleFilter(e.target.value)}>
+            <select className="filter-select" style={{ flex: '0 1 180px', height: 40 }} value={roleFilter} onChange={e => setRoleFilter(e.target.value)}>
               <option value="All">All Roles</option>
               {roles.map(r => <option key={r.id ?? r.role_id} value={r.slug}>{r.name ?? r.role_name}</option>)}
             </select>
-            <select className="filter-select" style={{
-          flex: '0 1 180px',
-          height: 40
-        }} value={branchFilter} onChange={e => setBranchFilter(e.target.value)}>
+            <select className="filter-select" style={{ flex: '0 1 180px', height: 40 }} value={branchFilter} onChange={e => setBranchFilter(e.target.value)}>
               <option value="All">All Branches</option>
-              {branches.map(b => <option key={b.branch_id} value={b.branch_id}>{b.branch_name}</option>)}
+              {branches.map(b => <option key={b.branch_id ?? b.id} value={b.branch_id ?? b.id}>{b.branch_name ?? b.name}</option>)}
             </select>
             <button
-              className="inline-flex justify-center items-center gap-2 px-5 py-2.5 rounded-md border-0 bg-blue text-white font-semibold cursor-pointer transition-all duration-160 hover:-translate-y-[1px] hover:shadow-[0_4px_16px_rgba(37,99,235,0.35)] hover:brightness-105 active:translate-y-0"
+              className="button"
               style={{ flex: '0 0 auto', height: 40, whiteSpace: 'nowrap' }}
               type="button"
               onClick={() => setShowAddUserModal(true)}
@@ -382,13 +382,13 @@ function UserListPage({
             </button>
         </div>
 
-        {filtered.length ? <><div className="corvex-table-wrapper">
+        {totalRecords ? <><div className="corvex-table-wrapper">
             <table className="corvex-table">
               <thead>
               <tr><th>User ID</th><th>First Name</th><th>Middle Name</th><th>Last Name</th><th>Email</th><th>Role</th><th>Branch</th><th>Status</th><th>Created At</th><th>Updated At</th><th>Actions</th></tr>
               </thead>
               <tbody>
-                {paginatedUsers.map(u => <tr key={u.user_id} className="clickable-row" onClick={() => navigate(`/operating-manager/admin/users/${u.user_id}`)}>
+                {users.map(u => <tr key={u.user_id} className="clickable-row" onClick={() => navigate(`/operating-manager/admin/users/${u.user_id}`)}>
                     <td>{u.user_id}</td>
                     <td>{u.first_name}</td>
                     <td>{u.middle_name || '—'}</td>
@@ -408,37 +408,20 @@ function UserListPage({
           </div><Pagination {...pagination} /></> : <EmptyState title="No users found" description="Adjust your search or filters." />}
       </section>
 
-      {showAddUserModal && (
-        <div className="modal-overlay" onClick={() => setShowAddUserModal(false)}>
-          <div
-            className="modal-content"
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="add-user-modal-title"
-            onClick={e => e.stopPropagation()}
-            style={{ maxWidth: 820 }}
-          >
-            <div className="modal-header">
-              <h3 id="add-user-modal-title">Add User</h3>
-              <button className="icon-action-button" type="button" title="Close" aria-label="Close add user modal" onClick={() => setShowAddUserModal(false)}>
-                <NavIcon name="close" />
-              </button>
-            </div>
+      {showAddUserModal ? <div className="modal-overlay" onClick={() => setShowAddUserModal(false)}>
+          <div className="modal-content" style={{ maxWidth: 720 }} onClick={e => e.stopPropagation()}>
             <UserFormPage
               navigate={navigate}
               showToast={showToast}
               isModal
               onCancel={() => setShowAddUserModal(false)}
-              onSuccess={() => {
-                setShowAddUserModal(false);
-                refreshUsers();
-              }}
+              onSuccess={() => { setShowAddUserModal(false); refreshUsers(); }}
             />
           </div>
-        </div>
-      )}
+        </div> : null}
     </div>;
 }
+
 function UserFormPage({
   userId,
   navigate,
@@ -838,10 +821,10 @@ function BranchListPage({
         gap: 10,
         marginTop: 12
       }}>
-            <button className="inline-flex justify-center items-center gap-2 px-5 py-2.5 rounded-md border-0 bg-blue text-white font-semibold cursor-pointer transition-all duration-160 hover:-translate-y-[1px] hover:shadow-[0_4px_16px_rgba(37,99,235,0.35)] hover:brightness-105 active:translate-y-0" type="button" style={{
+            <button className="button" type="button" style={{
           background: '#dc2626'
         }} onClick={disableBranch}>Confirm Disable</button>
-            <button className="inline-flex justify-center items-center gap-2 px-5 py-2.5 rounded-md bg-mint text-ink border-[1.5px] border-surface-3 shadow-none hover:border-blue hover:text-blue transition-all duration-160 cursor-pointer" type="button" onClick={() => setConfirmDisable(null)}>Cancel</button>
+            <button className="button secondary" type="button" onClick={() => setConfirmDisable(null)}>Cancel</button>
           </div>
         </section>}
     </div>;
@@ -1239,10 +1222,49 @@ function InventoryPage({
 }
 
 // ── System Reports ────────────────────────────────────────────────────────────
+function reportRows(tab, analytics, users) {
+  if (tab === 'collections') {
+    return (analytics?.trends?.collections || []).map((row) => ({
+      day: row.day,
+      amount: row.amount,
+    }));
+  }
+  if (tab === 'sales') {
+    return (analytics?.topProducts || []).map((row) => ({
+      product: row.productName,
+      category: row.categoryName,
+      quantity: row.quantitySold,
+      revenue: row.revenue,
+    }));
+  }
+  if (tab === 'branches') {
+    return (analytics?.branchSummary || []).map((row) => ({
+      branch: row.branchName,
+      collections: row.totalCollections,
+      sales: row.totalSales,
+      compliance: row.routeCompliance,
+      inventory_health: row.inventoryHealth,
+    }));
+  }
+  const counts = {};
+  (users || []).forEach((user) => {
+    const role = user.role?.name || 'Unassigned';
+    if (!counts[role]) counts[role] = { role, count: 0, active: 0, inactive: 0 };
+    counts[role].count += 1;
+    if (user.status === 'Active') counts[role].active += 1;
+    else counts[role].inactive += 1;
+  });
+  return Object.values(counts);
+}
+
 function ReportsPage({
   showToast
 }) {
   const [tab, setTab] = useState('collections');
+  const [analytics, setAnalytics] = useState(null);
+  const [users, setUsers] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
   const tabs = [{
     key: 'collections',
     label: 'Collections'
@@ -1256,12 +1278,41 @@ function ReportsPage({
     key: 'employees',
     label: 'Employee Performance'
   }];
+  useEffect(() => {
+    let active = true;
+    async function load() {
+      setLoading(true);
+      setError('');
+      const [report, userRes] = await Promise.all([
+        getOperatingManagerAnalytics({}),
+        apiClient.get('/users?limit=200').then((res) => res.data).catch(() => ({ success: false, data: [] })),
+      ]);
+      if (!active) return;
+      if (report.success) setAnalytics(report.data);
+      else setError(report.message || 'Failed to load reports.');
+      if (userRes.success) setUsers(userRes.data || []);
+      setLoading(false);
+    }
+    load();
+    return () => { active = false; };
+  }, []);
+  const exportCurrent = (format) => {
+    const rows = reportRows(tab, analytics, users);
+    const ok = exportRows(rows, {
+      format,
+      filename: `admin-${tab}-report`,
+      title: `CORVEX ${tabs.find((item) => item.key === tab)?.label || 'Report'}`,
+    });
+    if (ok) showToast(format === 'pdf' ? 'Report exported as PDF.' : 'Excel file downloaded.', 'success');
+    else showToast('Nothing to export.', 'error');
+  };
   const exportRow = <div className="flex justify-end gap-2 mb-4">
-      <button className="button secondary" type="button" onClick={() => showToast('Export Excel started.', 'success')}>Export Excel</button>
-      <button className="button" type="button" onClick={() => showToast('Export PDF started.', 'success')}>Export PDF</button>
+      <button className="button secondary" type="button" onClick={() => exportCurrent('excel')}>Export Excel</button>
+      <button className="button" type="button" onClick={() => exportCurrent('pdf')}>Export PDF</button>
     </div>;
-  const pagination___Operating_Manager____Branch_Manager____Collector____Sales_Agent____Warehouse_Staff____Customer__ = usePagination(['Operating Manager', 'Branch Manager', 'Collector', 'Sales Agent', 'Warehouse Staff', 'Customer']);
-  const paginated___Operating_Manager____Branch_Manager____Collector____Sales_Agent____Warehouse_Staff____Customer__ = pagination___Operating_Manager____Branch_Manager____Collector____Sales_Agent____Warehouse_Staff____Customer__.paginatedData;
+  if (loading) return <LoadingState message="Loading system reports..." />;
+  if (error || !analytics) return <EmptyState title="Reports unavailable" description={error || 'No report data is available.'} />;
+  const employeeRows = reportRows('employees', analytics, users);
   return <div className="relative z-10 grid gap-[22px] w-full">
       <div className="segmented-control">
         {tabs.map(t => <button key={t.key} className={tab === t.key ? 'segment active' : 'segment'} type="button" onClick={() => setTab(t.key)}>{t.label}</button>)}
@@ -1269,23 +1320,23 @@ function ReportsPage({
 
       {tab === 'collections' && <>
         <Stats stats={[{
-        label: 'Total Collections (Jun)',
-        value: '₱12.04M'
+        label: 'Collections',
+        value: formatCurrency(analytics.summary?.totalCollections || 0)
       }, {
-        label: 'Growth MoM',
-        value: '+3.3%'
+        label: 'Growth',
+        value: analytics.summary?.collectionGrowthRate == null ? '—' : `${analytics.summary.collectionGrowthRate}%`
       }]} />
-        <Card title="System-wide Monthly Collections" sub="All branches combined">
+        <Card title="Collections Trend" sub={analytics.scope || 'All branches'}>
           <ResponsiveContainer width="100%" height={240}>
-            <AreaChart data={SYSTEM_MONTHLY_COLLECTIONS}>
+            <AreaChart data={analytics.trends?.collections || []}>
               <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
-              <XAxis dataKey="month" tick={{
+              <XAxis dataKey="day" tick={{
               fontSize: 12
             }} /><YAxis tick={{
               fontSize: 11
-            }} tickFormatter={v => `${(v / 1000000).toFixed(1)}M`} />
-              <Tooltip formatter={v => `₱${(v / 1000000).toFixed(2)}M`} />
-              <Area type="monotone" dataKey="total" name="Collections" stroke="#093850" fill="#093850" fillOpacity={0.1} strokeWidth={2} />
+            }} tickFormatter={v => `${(v / 1000).toFixed(0)}k`} />
+              <Tooltip formatter={v => formatCurrency(v)} />
+              <Area type="monotone" dataKey="amount" name="Collections" stroke="#093850" fill="#093850" fillOpacity={0.1} strokeWidth={2} />
             </AreaChart>
           </ResponsiveContainer>
         </Card>
@@ -1294,33 +1345,35 @@ function ReportsPage({
 
       {tab === 'sales' && <>
         <Stats stats={[{
-        label: 'Total Sales (Jun)',
-        value: '₱10.30M'
+        label: 'Sales',
+        value: formatCurrency(analytics.summary?.totalSales || 0)
       }, {
-        label: 'Growth MoM',
-        value: '+4.7%'
+        label: 'Growth',
+        value: analytics.summary?.salesGrowthRate == null ? '—' : `${analytics.summary.salesGrowthRate}%`
       }]} />
-        <Card title="System-wide Monthly Sales" sub="All branches combined">
-          <ResponsiveContainer width="100%" height={240}>
-            <AreaChart data={SYSTEM_MONTHLY_SALES}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
-              <XAxis dataKey="month" tick={{
-              fontSize: 12
-            }} /><YAxis tick={{
-              fontSize: 11
-            }} tickFormatter={v => `${(v / 1000000).toFixed(1)}M`} />
-              <Tooltip formatter={v => `₱${(v / 1000000).toFixed(2)}M`} />
-              <Area type="monotone" dataKey="total" name="Sales" stroke="#06b6d4" fill="#06b6d4" fillOpacity={0.1} strokeWidth={2} />
-            </AreaChart>
-          </ResponsiveContainer>
+        <Card title="Top Products" sub="Current reporting period">
+          <div className="corvex-table-wrapper">
+            <table className="corvex-table">
+              <thead><tr><th>Product</th><th>Category</th><th>Qty</th><th>Revenue</th></tr></thead>
+              <tbody>
+                {(analytics.topProducts || []).length ? analytics.topProducts.map((row) => <tr key={row.productId}>
+                  <td>{row.productName}</td><td>{row.categoryName}</td><td>{row.quantitySold}</td><td>{formatCurrency(row.revenue)}</td>
+                </tr>) : <tr><td colSpan="4">No sales in this period.</td></tr>}
+              </tbody>
+            </table>
+          </div>
         </Card>
         {exportRow}
       </>}
 
       {tab === 'branches' && <>
-        <Card title="Branch Performance Scores">
+        <Card title="Branch Performance">
           <ResponsiveContainer width="100%" height={240}>
-            <BarChart data={BRANCH_PERFORMANCE_CHART}>
+            <BarChart data={(analytics.branchSummary || []).map((row) => ({
+              branch: row.branchName,
+              compliance: row.routeCompliance,
+              inventory: row.inventoryHealth,
+            }))}>
               <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
               <XAxis dataKey="branch" tick={{
               fontSize: 12
@@ -1328,8 +1381,8 @@ function ReportsPage({
               fontSize: 12
             }} />
               <Tooltip /><Legend />
-              <Bar dataKey="performance" name="Performance" fill="#093850" radius={[4, 4, 0, 0]} />
-              <Bar dataKey="risk" name="Risk Score" fill="#ef4444" radius={[4, 4, 0, 0]} />
+              <Bar dataKey="compliance" name="Route Compliance" fill="#093850" radius={[4, 4, 0, 0]} />
+              <Bar dataKey="inventory" name="Inventory Health" fill="#06b6d4" radius={[4, 4, 0, 0]} />
             </BarChart>
           </ResponsiveContainer>
         </Card>
@@ -1338,17 +1391,14 @@ function ReportsPage({
 
       {tab === 'employees' && <>
         <Card title="Employee Distribution by Role">
-          <><div className="corvex-table-wrapper">
+          <div className="corvex-table-wrapper">
             <table className="corvex-table">
               <thead><tr><th>Role</th><th>Count</th><th>Active</th><th>Inactive</th></tr></thead>
               <tbody>
-                {paginated___Operating_Manager____Branch_Manager____Collector____Sales_Agent____Warehouse_Staff____Customer__.map(role => {
-                  const all = USERS.filter(u => u.role === role);
-                  return <tr key={role}><td>{role}</td><td>{all.length}</td><td>{all.filter(u => u.status === 'Active').length}</td><td>{all.filter(u => u.status === 'Inactive').length}</td></tr>;
-                })}
+                {employeeRows.length ? employeeRows.map((row) => <tr key={row.role}><td>{row.role}</td><td>{row.count}</td><td>{row.active}</td><td>{row.inactive}</td></tr>) : <tr><td colSpan="4">No users found.</td></tr>}
               </tbody>
             </table>
-          </div><Pagination {...pagination___Operating_Manager____Branch_Manager____Collector____Sales_Agent____Warehouse_Staff____Customer__} /></>
+          </div>
         </Card>
         {exportRow}
       </>}
@@ -1415,7 +1465,18 @@ function AuditLogsPage({
             fontWeight: 400,
             fontSize: '0.88rem'
           }}>({filtered.length} entries)</span></h3>
-          <button className="button" type="button" onClick={() => showToast('Logs exported.', 'success')}>Export Logs</button>
+          <button className="button" type="button" onClick={() => {
+            const rows = filtered.map((l) => ({
+              log_id: l.log_id,
+              user: l.user_name || `User #${l.user_id}`,
+              action: l.action,
+              ip_address: l.ip_address,
+              status_details: l.status_details,
+              created_at: l.created_at,
+            }));
+            if (exportRows(rows, { format: 'pdf', filename: 'admin-audit-logs.pdf', title: 'Audit Logs' })) showToast('Logs exported as PDF.', 'success');
+            else showToast('Nothing to export.', 'error');
+          }}>Export PDF</button>
         </div>
         <div className="list-section-controls" style={{ marginBottom: 12 }}>
           <input className="filter-input search" type="search" placeholder="Search by action or status..." value={searchFilter} onChange={e => setSearchFilter(e.target.value)} />
@@ -1445,37 +1506,15 @@ function AuditLogsPage({
 
 // ── Notifications & Profile ───────────────────────────────────────────────────
 function NotificationsPage({
-  showToast
-}) {
-  return <div className="relative z-10 grid gap-[22px] w-full">
-      <section className="panel content-panel relative overflow-hidden">
-        <EmptyState title="No new notifications" description="System notifications will appear here." />
-      </section>
-    </div>;
-}
-function ProfilePage({
   navigate,
   showToast
 }) {
-  return <div className="relative z-10 grid gap-[22px] w-full">
-      <section className="panel content-panel relative overflow-hidden">
-        <div className="flex flex-col md:flex-row justify-between gap-4 items-start md:items-center mb-4"><h3>Admin Profile</h3></div>
-        <ul className="info-grid">
-          <li><span className="info-item-label">Name</span><span className="info-item-value">{ADMIN_PROFILE.name}</span></li>
-          <li><span className="info-item-label">Employee ID</span><span className="info-item-value">{ADMIN_PROFILE.employeeId}</span></li>
-          <li><span className="info-item-label">Email</span><span className="info-item-value">{ADMIN_PROFILE.email}</span></li>
-          <li><span className="info-item-label">Phone</span><span className="info-item-value">{ADMIN_PROFILE.phone}</span></li>
-          <li><span className="info-item-label">Role</span><span className="info-item-value">{ADMIN_PROFILE.role}</span></li>
-        </ul>
-        <div className="flex justify-end gap-2 mt-6">
-          <button className="button ghost" type="button" onClick={() => {
-          /* requestLogout() */showToast('Logout clicked.', 'success');
-        }}>Logout</button>
-          <button className="button secondary" type="button" onClick={() => showToast('Change Password opened.', 'success')}>Change Password</button>
-          <button className="button" type="button" onClick={() => showToast('Update Profile opened.', 'success')}>Update Profile</button>
-        </div>
-      </section>
-    </div>;
+  return <NotificationsInbox navigate={navigate} showToast={showToast} />;
+}
+function ProfilePage({
+  showToast
+}) {
+  return <AccountProfilePanel showToast={showToast} title="Admin Profile" />;
 }
 
 // ── Product Categories (Admin) ────────────────────────────────────────────────

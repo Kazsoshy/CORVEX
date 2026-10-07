@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
+import { Pagination } from '../shared/Pagination';
+import { usePagination, useServerPagination, DEFAULT_PAGE_SIZE } from '../../hooks/usePagination';
 import {
   createCustomer,
   createSalesInvoice,
@@ -27,10 +29,9 @@ import { fetchMyProfile, updateMyProfile } from '../../api/profileService.js';
 import { getCurrentUser, persistCurrentUserFromProfile, requestLogout } from '../../api/authService.js';
 import apiClient from '../../api/apiClient.js';
 import { CONTACT_RELATIONSHIP_OPTIONS, formatContactPersonName, formatCustomerDisplayId, formatCustomerFullName, formatMiddleNameDisplay, formatPurchaseVolumeUnits, formatSecondaryContactName } from '../../utils/customerDisplay';
-import { downloadCsv } from '../../utils/csvExport';
+import { downloadPdf } from '../../utils/dataExport';
 import { openExternalNavigation } from '../../utils/mapsNavigation';
 import { formatCurrency, formatDisplayDate, formatDisplayDateTime } from '../../data/salesMockData';
-import { CustomerCard } from './CustomerCard';
 import { InvoiceDetailsPage } from './InvoiceDetailsPage';
 import { EmptyState } from '../shared/EmptyState';
 import { LoadingState } from '../shared/LoadingState';
@@ -415,58 +416,60 @@ function CustomersPage({
   const [search, setSearch] = useState('');
   const [filter, setFilter] = useState('Active Customers');
   const [sortBy, setSortBy] = useState('Name');
-  const [viewMode, setViewMode] = useState('cards');
   const [loading, setLoading] = useState(true);
   const [customersData, setCustomersData] = useState([]);
+  const [totalRecords, setTotalRecords] = useState(0);
+  const filterResetKey = `${search}|${filter}`;
+  const pagination = useServerPagination({
+    totalRecords,
+    pageSize: DEFAULT_PAGE_SIZE,
+    resetKey: filterResetKey,
+  });
+
   useEffect(() => {
+    let active = true;
     async function load() {
       setLoading(true);
-      const res = await fetchCustomers({
-        limit: 200
-      });
+      const params = {
+        page: pagination.currentPage,
+        limit: DEFAULT_PAGE_SIZE,
+      };
+      if (search.trim()) params.search = search.trim();
+      if (filter === 'Active Customers') params.status = 'Active';
+      else if (filter === 'Inactive Customers') params.status = 'Inactive';
+      const res = await fetchCustomers(params);
+      if (!active) return;
       if (res.success) {
-        setCustomersData(res.data);
+        const rows = [...(res.data || [])];
+        if (sortBy === 'Name') {
+          rows.sort((a, b) => (`${a.first_name} ${a.last_name}`).localeCompare(`${b.first_name} ${b.last_name}`));
+        }
+        setCustomersData(rows);
+        setTotalRecords(Number(res.pagination?.total) || rows.length);
+      } else {
+        setCustomersData([]);
+        setTotalRecords(0);
+        if (showToast) showToast(res.message || 'Failed to load customers.', 'error');
       }
       setLoading(false);
     }
     load();
-  }, []);
-  const filteredCustomers = useMemo(() => {
-    let results = [...customersData];
-    const query = search.trim().toLowerCase();
-    if (query) {
-      results = results.filter(c => formatCustomerDisplayId(c).toLowerCase().includes(query) || (c.first_name + ' ' + c.last_name).toLowerCase().includes(query) || (c.contact_person_fname + ' ' + c.contact_person_lname).toLowerCase().includes(query) || (c.secondary_contact_fname + ' ' + c.secondary_contact_lname).toLowerCase().includes(query) || (c.contact_phone || '').includes(query) || (c.territory_name || '').toLowerCase().includes(query));
-    }
-    switch (filter) {
-      case 'Active Customers':
-        results = results.filter(c => c.status === 'Active');
-        break;
-      case 'Inactive Customers':
-        results = results.filter(c => c.status !== 'Active');
-        break;
-      default:
-        break;
-    }
-    switch (sortBy) {
-      case 'Name':
-      default:
-        results.sort((a, b) => (a.first_name + ' ' + a.last_name).localeCompare(b.first_name + ' ' + b.last_name));
-        break;
-    }
-    return results;
-  }, [customersData, search, filter, sortBy]);
+    return () => { active = false; };
+  }, [pagination.currentPage, search, filter, sortBy, showToast]);
+
+  const rows = customersData;
   if (loading) return <LoadingState message="Loading customers..." />;
   return <div className="page">
       <section className="panel content-panel relative overflow-hidden">
         <div className="list-section-header">
-          <h3>Customer List</h3>
+          <h3>Customer List <span className="text-ink/70">({totalRecords})</span></h3>
           <div className="list-section-actions">
             <button className="button" type="button" onClick={() => navigate('/sales/customers/new')}>Add Customer</button>
             <button
               className="button secondary"
               type="button"
               onClick={() => {
-                const rows = filteredCustomers.map((c) => ({
+                const exportRows = rows.map((c) => ({
                   customer_id: formatCustomerDisplayId(c),
                   name: formatCustomerFullName(c),
                   territory: c.territory_name || '',
@@ -474,11 +477,11 @@ function CustomersPage({
                   status: c.status || '',
                   address: c.address || '',
                 }));
-                if (downloadCsv(rows, 'sales-customers.csv')) showToast('Customer list exported.', 'success');
+                if (downloadPdf(exportRows, { filename: 'sales-customers.pdf', title: 'Sales Customers' })) showToast('Customer list exported as PDF.', 'success');
                 else showToast('Nothing to export.', 'error');
               }}
             >
-              Export Data
+              Export PDF
             </button>
           </div>
         </div>
@@ -510,22 +513,10 @@ function CustomersPage({
           }}>
               {['Name'].map(o => <option key={o} value={o}>Sort: {o}</option>)}
             </select>
-            <div className="segmented-control">
-              <button type="button" className={viewMode === 'cards' ? 'segment active' : 'segment'} onClick={() => setViewMode('cards')}>Cards</button>
-              <button type="button" className={viewMode === 'table' ? 'segment active' : 'segment'} onClick={() => setViewMode('table')}>Table</button>
-            </div>
           </div>
         </div>
-        {filteredCustomers.length ? viewMode === 'cards' ? <div className="account-card-grid">
-            {filteredCustomers.map(customer => <CustomerCard key={customer.customer_id} customer={{
-        ...customer,
-        id: String(customer.customer_id),
-        lastVisitDate: customer.lastVisitDate || customer.lastvisitdate || 'N/A',
-        purchaseVolumeUnits: resolvePurchaseVolumeUnits(customer),
-        activityUpdatedAt: customer.activityUpdatedAt || customer.activityupdatedat,
-        phone: customer.contact_phone || customer.phone || '—'
-      }} onViewDetails={c => navigate(`/sales/customer-detail/${c.id || c.customer_id}?from=customers`)} onNavigate={c => handleCustomerNavigate(c, showToast)} />)}
-          </div> : <div className="corvex-table-wrapper">
+        {totalRecords ? <>
+          <div className="corvex-table-wrapper">
               <table className="corvex-table">
                 <thead>
                   <tr>
@@ -542,7 +533,7 @@ function CustomersPage({
                   </tr>
                 </thead>
                 <tbody>
-                  {filteredCustomers.map(customer => {
+                  {rows.map(customer => {
               const primaryName = formatContactPersonName(customer);
               const secondaryName = formatSecondaryContactName(customer) || '—';
               const activityUpdated = customer.activityUpdatedAt || customer.activityupdatedat || customer.activity?.updated_at;
@@ -563,12 +554,17 @@ function CustomersPage({
                           <button className="icon-action-button" type="button" title="View" onClick={() => navigate(`/sales/customer-detail/${customer.customer_id}?from=customers`)}>
                             <NavIcon name="view" />
                           </button>
+                          <button className="icon-action-button" type="button" title="Open Map" onClick={() => handleCustomerNavigate(customer, showToast)}>
+                            <NavIcon name="map" />
+                          </button>
                         </td>
                       </tr>;
             })}
                 </tbody>
               </table>
-            </div> : <EmptyState title="No customers found" description="Adjust your search or filters." actionLabel="Clear filters" onAction={() => {
+            </div>
+          <Pagination {...pagination} />
+        </> : <EmptyState title="No customers found" description="Adjust your search or filters." actionLabel="Clear filters" onAction={() => {
       setSearch('');
       setFilter('Active Customers');
     }} />}
@@ -1556,6 +1552,8 @@ function SalesCISubmissionsPage({
     reload();
   }, [filter]);
   if (loading && !items.length) return <LoadingState message="Loading credit investigations..." />;
+  const pagination = usePagination(items);
+  const rows = pagination.paginatedData;
   return <div className="page">
       <section className="panel content-panel">
         <div className="list-section-header">
@@ -1569,13 +1567,14 @@ function SalesCISubmissionsPage({
             ))}
           </div>
         </div>
-        {items.length ? <div className="corvex-table-wrapper">
+        {items.length ? <>
+          <div className="corvex-table-wrapper">
             <table className="corvex-table">
               <thead>
                 <tr><th>CI #</th><th>Customer</th><th>Purpose</th><th>Submitted</th><th>Status</th><th>Actions</th></tr>
               </thead>
               <tbody>
-                {items.map(ci => <tr key={ci.id} className="clickable-row" onClick={() => navigate(`/sales/credit-investigations/${ci.ciId}`)}>
+                {rows.map(ci => <tr key={ci.id} className="clickable-row" onClick={() => navigate(`/sales/credit-investigations/${ci.ciId}`)}>
                     <td>{ci.ciId}</td>
                     <td>{ci.customerName}</td>
                     <td>{ci.purpose || '—'}</td>
@@ -1592,7 +1591,9 @@ function SalesCISubmissionsPage({
                   </tr>)}
               </tbody>
             </table>
-          </div> : <EmptyState title="No credit investigations" description="Request a CI from a customer profile, or adjust the status filter." actionLabel="Browse customers" onAction={() => navigate('/sales/customers')} />}
+          </div>
+          <Pagination {...pagination} />
+        </> : <EmptyState title="No credit investigations" description="Request a CI from a customer profile, or adjust the status filter." actionLabel="Browse customers" onAction={() => navigate('/sales/customers')} />}
       </section>
     </div>;
 }
@@ -1778,11 +1779,11 @@ function InventoryPage({
                   unit_price: p.unit_price,
                   status: p.status || '',
                 }));
-                if (downloadCsv(rows, 'sales-inventory.csv')) showToast('Inventory exported.', 'success');
+                if (downloadPdf(rows, { filename: 'sales-inventory.pdf', title: 'Sales Inventory' })) showToast('Inventory exported as PDF.', 'success');
                 else showToast('Nothing to export.', 'error');
               }}
             >
-              Export Data
+              Export PDF
             </button>
           </div>
         </div>
@@ -1915,15 +1916,25 @@ export function SalesHistoryPage({
   const [dateTo, setDateTo] = useState('');
   const [productFilter, setProductFilter] = useState('All');
   const [invoices, setInvoices] = useState([]);
-  const [pagination, setPagination] = useState(null);
+  const [serverTotal, setServerTotal] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const filterResetKey = `${statusFilter}|${dateFrom}|${dateTo}`;
+  const serverPager = useServerPagination({
+    totalRecords: serverTotal,
+    pageSize: DEFAULT_PAGE_SIZE,
+    resetKey: filterResetKey,
+  });
+
   useEffect(() => {
     let active = true;
     async function load() {
       setLoading(true);
       setError(null);
-      const params = { limit: 100 };
+      const params = {
+        page: serverPager.currentPage,
+        limit: DEFAULT_PAGE_SIZE,
+      };
       if (statusFilter && statusFilter !== 'All') params.status = statusFilter;
       if (dateFrom) params.start_date = dateFrom;
       if (dateTo) params.end_date = dateTo;
@@ -1931,7 +1942,7 @@ export function SalesHistoryPage({
       if (!active) return;
       if (result.success) {
         setInvoices(result.data || []);
-        setPagination(result.pagination || null);
+        setServerTotal(Number(result.pagination?.total) || (result.data || []).length);
       } else {
         setError(result.message || 'Failed to load sales history.');
         if (showToast) showToast(result.message || 'Failed to load sales history.', 'error');
@@ -1942,7 +1953,8 @@ export function SalesHistoryPage({
     return () => {
       active = false;
     };
-  }, [showToast, statusFilter, dateFrom, dateTo]);
+  }, [showToast, statusFilter, dateFrom, dateTo, serverPager.currentPage]);
+
   const productNames = useMemo(() => Array.from(new Set(invoices.flatMap(item => item.product_names || []))).sort(), [invoices]);
   const filtered = useMemo(() => {
     const query = search.trim().toLowerCase();
@@ -1953,6 +1965,11 @@ export function SalesHistoryPage({
       return matchesSearch && matchesProduct;
     });
   }, [search, productFilter, invoices]);
+  const clientPager = usePagination(filtered, { pageSize: DEFAULT_PAGE_SIZE, resetKey: `${search}|${productFilter}` });
+  const useClientSlice = Boolean(search.trim() || productFilter !== 'All');
+  const pager = useClientSlice ? clientPager : serverPager;
+  const rows = useClientSlice ? clientPager.paginatedData : invoices;
+
   if (loading) return <LoadingState message="Loading sales history..." />;
   if (error && !invoices.length) {
     return <EmptyState title="Unable to load sales history" description={error} actionLabel="Retry" onAction={() => window.location.reload()} />;
@@ -1966,68 +1983,36 @@ export function SalesHistoryPage({
               className="button secondary"
               type="button"
               onClick={() => {
-                const rows = filtered.map((item) => ({
+                const exportRows = rows.map((item) => ({
                   invoice_number: item.invoice_number,
                   customer: item.customer_name || `${item.first_name || ''} ${item.last_name || ''}`.trim(),
                   date: item.invoice_date || item.created_at || '',
                   total: item.total_amount,
                   status: item.status || '',
                 }));
-                if (downloadCsv(rows, 'sales-history.csv')) showToast('Sales history exported.', 'success');
+                if (downloadPdf(exportRows, { filename: 'sales-history.pdf', title: 'Sales History' })) showToast('Sales history exported as PDF.', 'success');
                 else showToast('Nothing to export.', 'error');
               }}
             >
-              Export Data
+              Export PDF
             </button>
           </div>
         </div>
-        <div className="list-section-toolbar" style={{
-        marginBottom: 12
-      }}>
+        <div className="list-section-toolbar" style={{ marginBottom: 12 }}>
           <div className="list-section-controls">
-            <input className="filter-input search" type="search" placeholder="Search by customer or invoice number" value={search} onChange={e => setSearch(e.target.value)} style={{
-            padding: '8px 12px',
-            borderRadius: '6px',
-            border: '1px solid #e2e8f0',
-            fontSize: '0.9rem',
-            flex: 1,
-            minWidth: '200px'
-          }} />
-            <select className="filter-select" value={statusFilter} onChange={e => setStatusFilter(e.target.value)} style={{
-            padding: '8px 12px',
-            borderRadius: '6px',
-            border: '1px solid #e2e8f0',
-            fontSize: '0.9rem'
-          }}>{['All', 'Confirmed', 'Pending Review', 'Draft', 'Cancelled'].map(o => <option key={o}>{o}</option>)}</select>
-            <select className="filter-select" value={productFilter} onChange={e => setProductFilter(e.target.value)} style={{
-            padding: '8px 12px',
-            borderRadius: '6px',
-            border: '1px solid #e2e8f0',
-            fontSize: '0.9rem'
-          }}><option value="All">All Products</option>{productNames.map(name => <option key={name} value={name}>{name}</option>)}</select>
-            <input className="filter-input" type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)} aria-label="From date" style={{
-            padding: '8px 12px',
-            borderRadius: '6px',
-            border: '1px solid #e2e8f0',
-            fontSize: '0.9rem'
-          }} />
-            <input className="filter-input" type="date" value={dateTo} onChange={e => setDateTo(e.target.value)} aria-label="To date" style={{
-            padding: '8px 12px',
-            borderRadius: '6px',
-            border: '1px solid #e2e8f0',
-            fontSize: '0.9rem'
-          }} />
+            <input className="filter-input search" type="search" placeholder="Search by customer or invoice number" value={search} onChange={e => setSearch(e.target.value)} />
+            <select className="filter-select" value={statusFilter} onChange={e => setStatusFilter(e.target.value)}>{['All', 'Confirmed', 'Pending Review', 'Draft', 'Cancelled'].map(o => <option key={o}>{o}</option>)}</select>
+            <select className="filter-select" value={productFilter} onChange={e => setProductFilter(e.target.value)}><option value="All">All Products</option>{productNames.map(name => <option key={name} value={name}>{name}</option>)}</select>
+            <input className="filter-input" type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)} aria-label="From date" />
+            <input className="filter-input" type="date" value={dateTo} onChange={e => setDateTo(e.target.value)} aria-label="To date" />
           </div>
-          {pagination ? <span className="muted" style={{
-            fontWeight: 'normal',
-            fontSize: '0.85rem'
-          }}>Showing {filtered.length} of {pagination.total} invoices</span> : null}
         </div>
-        {filtered.length ? <div className="corvex-table-wrapper">
+        {rows.length ? <>
+          <div className="corvex-table-wrapper">
             <table className="corvex-table">
               <thead><tr><th>Invoice Number</th><th>Customer Name</th><th>Total Amount</th><th>Date</th><th>Status</th><th>Actions</th></tr></thead>
               <tbody>
-                {filtered.map(item => <tr key={item.invoice_number || item.sales_invoices_id} className="clickable-row" onClick={() => navigate(getInvoiceDetailPath(item.invoice_number))}>
+                {rows.map(item => <tr key={item.invoice_number || item.sales_invoices_id} className="clickable-row" onClick={() => navigate(getInvoiceDetailPath(item.invoice_number))}>
                     <td>{item.invoice_number}</td>
                     <td>{item.customer_name || item.first_name + ' ' + item.last_name}</td>
                     <td>{formatCurrency(item.total_amount)}</td>
@@ -2041,7 +2026,9 @@ export function SalesHistoryPage({
                   </tr>)}
               </tbody>
             </table>
-          </div> : <EmptyState title="No sales records found" description="Adjust your search or filters." />}
+          </div>
+          <Pagination {...pager} />
+        </> : <EmptyState title="No sales records found" description="Adjust your search or filters." />}
       </section>
     </div>;
 }
@@ -2225,10 +2212,30 @@ function RouteTrackingPage({
       </section>
       <section className="panel content-panel">
         <div className="panel-section-header"><h3>Visit Verification</h3></div>
-        <ul className="widget-list">
-          {completed.map(v => <li key={v.visit_id}><div><strong>{v.customer_name}</strong><span className="muted">Completed · {formatDisplayDate(v.scheduled_date)}</span></div><StatusBadge status="Verified" /></li>)}
-          {!completed.length ? <li className="muted">No completed visits yet today.</li> : null}
-        </ul>
+        {completed.length ? (
+          <div className="corvex-table-wrapper">
+            <table className="corvex-table">
+              <thead>
+                <tr>
+                  <th>Customer</th>
+                  <th>Scheduled Date</th>
+                  <th>Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                {completed.map(v => (
+                  <tr key={v.visit_id}>
+                    <td><strong>{v.customer_name}</strong></td>
+                    <td>{formatDisplayDate(v.scheduled_date)}</td>
+                    <td><StatusBadge status="Verified" /></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : (
+          <EmptyState title="No completed visits" description="No completed visits yet today." />
+        )}
       </section>
       <div className="flex justify-end mt-4">
         <button className="button ghost" type="button" onClick={() => navigate('/sales/dashboard')}>Back to Dashboard</button>
@@ -2261,6 +2268,8 @@ function SalesPurchaseRequestsPage({ navigate, showToast }) {
     load();
   };
   if (loading) return <LoadingState message="Loading purchase requests…" />;
+  const pagination = usePagination(requests);
+  const rows = pagination.paginatedData;
   return <div className="page">
       <section className="panel content-panel">
         <div className="panel-section-header">
@@ -2268,6 +2277,7 @@ function SalesPurchaseRequestsPage({ navigate, showToast }) {
           <p className="muted">Review requests from the customer portal before creating a sales order or invoice.</p>
         </div>
         {!requests.length ? <EmptyState title="No purchase requests" description="Requests from customer portal accounts will appear here." /> : (
+          <>
           <div className="corvex-table-wrapper">
             <table className="corvex-table">
               <thead>
@@ -2281,7 +2291,7 @@ function SalesPurchaseRequestsPage({ navigate, showToast }) {
                 </tr>
               </thead>
               <tbody>
-                {requests.map((req) => <tr key={req.request_id}>
+                {rows.map((req) => <tr key={req.request_id}>
                     <td>{req.request_id}</td>
                     <td>{req.customer_name} ({req.customer_code || req.customer_id})</td>
                     <td><StatusBadge status={req.status} /></td>
@@ -2306,6 +2316,8 @@ function SalesPurchaseRequestsPage({ navigate, showToast }) {
               </tbody>
             </table>
           </div>
+          <Pagination {...pagination} />
+          </>
         )}
       </section>
       <div className="flex justify-end mt-4">

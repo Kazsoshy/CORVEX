@@ -50,7 +50,9 @@ export function CreditHistoryListPage({
       return matchSearch && matchStatus && matchFrom && matchTo;
     });
   }, [records, search, statusFilter, dateFrom, dateTo]);
-  const pagination_filtered = usePagination(filtered);
+  const pagination_filtered = usePagination(filtered, {
+    resetKey: `${search}|${statusFilter}|${dateFrom}|${dateTo}`,
+  });
   const paginated_filtered = pagination_filtered.paginatedData;
   if (loading) return <LoadingState message="Loading credit history..." />;
   if (error && !records.length) {

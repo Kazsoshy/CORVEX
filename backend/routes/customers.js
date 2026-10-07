@@ -63,7 +63,16 @@ router.get('/', async (req, res) => {
     if (branch_id) { conditions.push(`c.branch_id = $${pIdx++}`); params.push(Number(branch_id)); }
     if (status)    { conditions.push(`c.status = $${pIdx++}`);    params.push(status); }
     if (search) {
-      conditions.push(`(c.first_name ILIKE $${pIdx} OR c.last_name ILIKE $${pIdx} OR c.address ILIKE $${pIdx} OR c.contact_phone ILIKE $${pIdx})`);
+      conditions.push(`(
+        c.first_name ILIKE $${pIdx}
+        OR c.last_name ILIKE $${pIdx}
+        OR c.customer_code ILIKE $${pIdx}
+        OR c.address ILIKE $${pIdx}
+        OR c.contact_phone ILIKE $${pIdx}
+        OR t.territory_name ILIKE $${pIdx}
+        OR CONCAT(COALESCE(c.first_name, ''), ' ', COALESCE(c.last_name, '')) ILIKE $${pIdx}
+        OR CONCAT(COALESCE(c.contact_person_fname, ''), ' ', COALESCE(c.contact_person_lname, '')) ILIKE $${pIdx}
+      )`);
       params.push(`%${search}%`);
       pIdx += 1;
     }
@@ -72,7 +81,9 @@ router.get('/', async (req, res) => {
     const offset = (Number(page) - 1) * Number(limit);
 
     const countResult = await pool.query(
-      `SELECT COUNT(*) FROM customers c ${where}`,
+      `SELECT COUNT(*) FROM customers c
+       LEFT JOIN territories t ON t.territory_id = c.territory_id
+       ${where}`,
       params
     );
     const total = Number(countResult.rows[0].count);

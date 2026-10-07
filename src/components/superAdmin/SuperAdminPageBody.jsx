@@ -1,8 +1,20 @@
 import { Pagination } from '../shared/Pagination';
 import { usePagination } from '../../hooks/usePagination';
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import apiClient from '../../api/apiClient';
-import { AUDIT_LOGS, BACKUP_HISTORY, SYSTEM_SETTINGS, SUPER_ADMIN_PROFILE } from '../../data/adminMockData';
+import { fetchAuditLogs } from '../../api/adminService';
+import { exportRows } from '../../utils/dataExport';
+import { NotificationsInbox } from '../shared/NotificationsInbox';
+import { AccountProfilePanel } from '../shared/AccountProfilePanel';
+import {
+  createSystemBackup,
+  downloadSystemBackup,
+  fetchSystemBackups,
+  fetchSystemSettings,
+  resetSystemSettings,
+  restoreSystemBackup,
+  saveSystemSettings,
+} from '../../api/systemService';
 import { EmptyState } from '../shared/EmptyState';
 import { LoadingState } from '../shared/LoadingState';
 import { NavIcon } from '../../navIcons';
@@ -61,7 +73,7 @@ function Card({
           margin: '2px 0 0',
           fontSize: '0.85rem'
         }}>{sub}</p>}</div>
-        {action && <button className="inline-flex justify-center items-center gap-2 px-5 py-2.5 rounded-md bg-transparent text-blue border-[1.5px] border-blue-30 shadow-none hover:bg-blue-08 transition-all duration-160 cursor-pointer" type="button" onClick={onAction}>{action}</button>}
+        {action && <button className="button ghost" type="button" onClick={onAction}>{action}</button>}
       </div>
       {children}
     </section>;
@@ -245,7 +257,7 @@ function DashboardPage({
         <div style={{
         padding: '8px 0'
       }}>
-          {health?.memoryUsage != null ? <MetricBar label="Memory Usage" value={health.memoryUsage} color="#8b5cf6" /> : null}
+          {health?.memoryUsage != null ? <MetricBar label="Memory Usage" value={health.memoryUsage} color="#093850" /> : null}
           <MetricBar label="API Response" value={health?.apiResponseMs || 0} max={500} color="#f59e0b" />
         </div>
       </Card>
@@ -617,8 +629,8 @@ function RolesPage({
             justifyContent: 'flex-end',
             marginTop: 16
           }}>
-                <button className="inline-flex justify-center items-center gap-2 px-5 py-2.5 rounded-md bg-mint text-ink border-[1.5px] border-surface-3 shadow-none hover:border-blue hover:text-blue transition-all duration-160 cursor-pointer" type="button" onClick={() => setModalType(null)}>Cancel</button>
-                <button className="inline-flex justify-center items-center gap-2 px-5 py-2.5 rounded-md border-0 bg-blue text-white font-semibold cursor-pointer transition-all duration-160 hover:-translate-y-[1px] hover:shadow-[0_4px_16px_rgba(37,99,235,0.35)] hover:brightness-105 active:translate-y-0" type="submit">Save</button>
+                <button className="button secondary" type="button" onClick={() => setModalType(null)}>Cancel</button>
+                <button className="button" type="submit">Save</button>
               </div>
             </form>
           </div>
@@ -664,8 +676,8 @@ function RolesPage({
             justifyContent: 'flex-end',
             marginTop: 16
           }}>
-                <button className="inline-flex justify-center items-center gap-2 px-5 py-2.5 rounded-md bg-mint text-ink border-[1.5px] border-surface-3 shadow-none hover:border-blue hover:text-blue transition-all duration-160 cursor-pointer" type="button" onClick={() => setModalType(null)}>Cancel</button>
-                <button className="inline-flex justify-center items-center gap-2 px-5 py-2.5 rounded-md border-0 bg-blue text-white font-semibold cursor-pointer transition-all duration-160 hover:-translate-y-[1px] hover:shadow-[0_4px_16px_rgba(37,99,235,0.35)] hover:brightness-105 active:translate-y-0" type="submit">Save</button>
+                <button className="button secondary" type="button" onClick={() => setModalType(null)}>Cancel</button>
+                <button className="button" type="submit">Save</button>
               </div>
             </form>
           </div>
@@ -674,24 +686,72 @@ function RolesPage({
 }
 
 // â”€â”€ System Settings â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+function asBool(value) {
+  return value === true || value === 'true';
+}
+function formatBytes(size) {
+  const bytes = Number(size || 0);
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
 function SettingsPage({
   showToast
 }) {
-  const [settings, setSettings] = useState({
-    ...SYSTEM_SETTINGS
-  });
+  const [settings, setSettings] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
   const set = (k, v) => setSettings(p => ({
     ...p,
     [k]: v
   }));
   const [confirmReset, setConfirmReset] = useState(false);
+  useEffect(() => {
+    let active = true;
+    async function load() {
+      const result = await fetchSystemSettings();
+      if (!active) return;
+      if (result.success) setSettings(result.data);
+      else showToast(result.message || 'Failed to load settings.', 'error');
+      setLoading(false);
+    }
+    load();
+    return () => { active = false; };
+  }, [showToast]);
+  const onLogo = (file) => {
+    if (!file) return;
+    if (file.size > 150000) {
+      showToast('Logo must be smaller than 150 KB.', 'error');
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => set('logoDataUrl', String(reader.result || ''));
+    reader.readAsDataURL(file);
+  };
+  const save = async () => {
+    setSaving(true);
+    const result = await saveSystemSettings({
+      ...settings,
+      smsEnabled: String(asBool(settings.smsEnabled)),
+      otpEnabled: String(asBool(settings.otpEnabled)),
+      notificationsEmail: String(asBool(settings.notificationsEmail)),
+      notificationsSms: String(asBool(settings.notificationsSms)),
+    });
+    setSaving(false);
+    if (result.success) {
+      setSettings(result.data);
+      showToast('Settings saved.', 'success');
+    } else showToast(result.message || 'Failed to save settings.', 'error');
+  };
+  if (loading) return <LoadingState message="Loading settings..." />;
+  if (!settings) return <EmptyState title="Settings unavailable" description="Company settings could not be loaded." />;
   return <div className="relative z-10 grid gap-[22px] w-full">
       <section className="panel form-panel content-panel">
         <div className="flex flex-col md:flex-row justify-between gap-4 items-start md:items-center mb-4"><h3>Company Information</h3></div>
         <div className="grid two-up">
           <div className="form-group"><label>Company Name</label><input value={settings.companyName} onChange={e => set('companyName', e.target.value)} /></div>
           <div className="form-group"><label>Company Email</label><input type="email" value={settings.companyEmail} onChange={e => set('companyEmail', e.target.value)} /></div>
-          <div className="form-group"><label>Logo Upload</label><input type="file" accept="image/*" /></div>
+          <div className="form-group"><label>Logo Upload</label><input type="file" accept="image/*" onChange={(e) => onLogo(e.target.files?.[0])} />{settings.logoDataUrl ? <img src={settings.logoDataUrl} alt="Company logo" style={{ marginTop: 8, maxHeight: 48 }} /> : null}</div>
         </div>
       </section>
 
@@ -709,9 +769,9 @@ function SettingsPage({
         display: 'flex',
         gap: 24
       }}>
-          <label className="toggle-label"><input type="checkbox" checked={settings.notificationsEmail} onChange={e => set('notificationsEmail', e.target.checked)} />Email Notifications</label>
-          <label className="toggle-label"><input type="checkbox" checked={settings.notificationsSms} onChange={e => set('notificationsSms', e.target.checked)} />SMS Notifications</label>
-          <label className="toggle-label"><input type="checkbox" checked={settings.smsEnabled} onChange={e => set('smsEnabled', e.target.checked)} />SMS / OTP Enabled</label>
+          <label className="toggle-label"><input type="checkbox" checked={asBool(settings.notificationsEmail)} onChange={e => set('notificationsEmail', String(e.target.checked))} />Email Notifications</label>
+          <label className="toggle-label"><input type="checkbox" checked={asBool(settings.notificationsSms)} onChange={e => set('notificationsSms', String(e.target.checked))} />SMS Notifications</label>
+          <label className="toggle-label"><input type="checkbox" checked={asBool(settings.smsEnabled)} onChange={e => set('smsEnabled', String(e.target.checked))} />SMS / OTP Enabled</label>
         </div>
       </section>
 
@@ -725,22 +785,21 @@ function SettingsPage({
         gap: 10,
         marginTop: 12
       }}>
-            <button className="inline-flex justify-center items-center gap-2 px-5 py-2.5 rounded-md border-0 bg-blue text-white font-semibold cursor-pointer transition-all duration-160 hover:-translate-y-[1px] hover:shadow-[0_4px_16px_rgba(37,99,235,0.35)] hover:brightness-105 active:translate-y-0" type="button" style={{
-          background: '#dc2626'
-        }} onClick={() => {
-          showToast('Settings restored to defaults.', 'success');
-          setSettings({
-            ...SYSTEM_SETTINGS
-          });
+            <button className="button danger" type="button" onClick={async () => {
+          const result = await resetSystemSettings();
+          if (result.success) {
+            setSettings(result.data);
+            showToast('Settings restored to defaults.', 'success');
+          } else showToast(result.message || 'Failed to restore defaults.', 'error');
           setConfirmReset(false);
         }}>Confirm Reset</button>
-            <button className="inline-flex justify-center items-center gap-2 px-5 py-2.5 rounded-md bg-mint text-ink border-[1.5px] border-surface-3 shadow-none hover:border-blue hover:text-blue transition-all duration-160 cursor-pointer" type="button" onClick={() => setConfirmReset(false)}>Cancel</button>
+            <button className="button secondary" type="button" onClick={() => setConfirmReset(false)}>Cancel</button>
           </div>
         </section>}
 
       <div className="flex justify-end gap-2 mt-2">
         <button className="button secondary" type="button" onClick={() => setConfirmReset(true)}>Restore Defaults</button>
-        <button className="button" type="button" onClick={() => showToast('Settings saved.', 'success')}>Save Settings</button>
+        <button className="button" type="button" onClick={save} disabled={saving}>{saving ? 'Saving…' : 'Save Settings'}</button>
       </div>
     </div>;
 }
@@ -749,61 +808,89 @@ function SettingsPage({
 function BackupPage({
   showToast
 }) {
+  const [backups, setBackups] = useState([]);
+  const [schedule, setSchedule] = useState('Daily at 02:00 AM');
+  const [loading, setLoading] = useState(true);
+  const [creating, setCreating] = useState(false);
   const [confirmRestore, setConfirmRestore] = useState(null);
-  const pagination_BACKUP_HISTORY = usePagination(BACKUP_HISTORY);
+  const load = useCallback(async () => {
+    setLoading(true);
+    const [backupRes, settingsRes] = await Promise.all([fetchSystemBackups(), fetchSystemSettings()]);
+    if (backupRes.success) setBackups(backupRes.data || []);
+    else showToast(backupRes.message || 'Failed to load backups.', 'error');
+    if (settingsRes.success && settingsRes.data?.backupSchedule) setSchedule(settingsRes.data.backupSchedule);
+    setLoading(false);
+  }, [showToast]);
+  useEffect(() => { load(); }, [load]);
+  const pagination_BACKUP_HISTORY = usePagination(backups);
   const paginated_BACKUP_HISTORY = pagination_BACKUP_HISTORY.paginatedData;
+  const createBackup = async () => {
+    setCreating(true);
+    const result = await createSystemBackup();
+    setCreating(false);
+    if (result.success) {
+      showToast(result.message || 'Backup created.', 'success');
+      load();
+    } else showToast(result.message || 'Failed to create backup.', 'error');
+  };
+  const confirm = async () => {
+    const result = await restoreSystemBackup(confirmRestore.backup_id);
+    if (result.success) showToast(result.message || 'Settings restored from backup.', 'success');
+    else showToast(result.message || 'Restore failed.', 'error');
+    setConfirmRestore(null);
+  };
+  if (loading) return <LoadingState message="Loading backups..." />;
   return <div className="relative z-10 grid gap-[22px] w-full">
       <Stats stats={[{
       label: 'Total Backups',
-      value: String(BACKUP_HISTORY.length)
+      value: String(backups.length)
     }, {
       label: 'Latest Backup',
-      value: BACKUP_HISTORY[0]?.date ?? 'â€”'
+      value: backups[0] ? formatDisplayDateTime(backups[0].created_at) : '—'
     }, {
       label: 'Latest Size',
-      value: BACKUP_HISTORY[0]?.size ?? 'â€”'
+      value: backups[0] ? formatBytes(backups[0].size_bytes) : '—'
     }, {
       label: 'Schedule',
-      value: 'Daily 02:00 AM'
+      value: schedule
     }]} />
 
       {confirmRestore && <section className="panel content-panel relative overflow-hidden" style={{
       borderColor: '#fca5a5',
       background: 'rgba(220,38,38,0.04)'
     }}>
-          <p><strong>Warning:</strong> Restoring backup from <strong>{confirmRestore.date}</strong> will replace all current data. This cannot be undone.</p>
+          <p><strong>Warning:</strong> Restoring the backup from <strong>{formatDisplayDateTime(confirmRestore.created_at)}</strong> replaces company settings with the saved values. Transactions, users, and payments are not overwritten.</p>
           <div style={{
         display: 'flex',
         gap: 10,
         marginTop: 12
       }}>
-            <button className="inline-flex justify-center items-center gap-2 px-5 py-2.5 rounded-md border-0 bg-blue text-white font-semibold cursor-pointer transition-all duration-160 hover:-translate-y-[1px] hover:shadow-[0_4px_16px_rgba(37,99,235,0.35)] hover:brightness-105 active:translate-y-0" type="button" style={{
-          background: '#dc2626'
-        }} onClick={() => {
-          showToast(`Database restored from ${confirmRestore.date}.`, 'success');
-          setConfirmRestore(null);
-        }}>Confirm Restore</button>
-            <button className="inline-flex justify-center items-center gap-2 px-5 py-2.5 rounded-md bg-mint text-ink border-[1.5px] border-surface-3 shadow-none hover:border-blue hover:text-blue transition-all duration-160 cursor-pointer" type="button" onClick={() => setConfirmRestore(null)}>Cancel</button>
+            <button className="button danger" type="button" onClick={confirm}>Confirm Restore</button>
+            <button className="button secondary" type="button" onClick={() => setConfirmRestore(null)}>Cancel</button>
           </div>
         </section>}
 
       <section className="panel content-panel relative overflow-hidden">
         <div className="flex flex-col md:flex-row justify-between gap-4 items-start md:items-center mb-4">
           <h3>Backup History</h3>
-          <button className="button" type="button" onClick={() => showToast('Manual backup started. This may take a few minutes.', 'success')}>Create Manual Backup</button>
+          <button className="button" type="button" onClick={createBackup} disabled={creating}>{creating ? 'Creating…' : 'Create Manual Backup'}</button>
         </div>
         <><div className="corvex-table-wrapper">
           <table className="corvex-table">
             <thead><tr><th>Type</th><th>Date</th><th>Size</th><th>Created By</th><th>Status</th><th>Actions</th></tr></thead>
             <tbody>
-              {paginated_BACKUP_HISTORY.map(b => <tr key={b.id}>
-                  <td>{b.type}</td><td>{b.date}</td><td>{b.size}</td><td>{b.by}</td>
+              {paginated_BACKUP_HISTORY.length ? paginated_BACKUP_HISTORY.map(b => <tr key={b.backup_id}>
+                  <td>{b.backup_type}</td><td>{formatDisplayDateTime(b.created_at)}</td><td>{formatBytes(b.size_bytes)}</td><td>{b.created_by_name || '—'}</td>
                   <td><StatusBadge status={b.status} /></td>
                   <td className="table-actions">
-                    <button className="icon-action-button" type="button" title="Download" onClick={() => showToast(`Downloading ${b.date} backup.`, 'success')}><NavIcon name="download" /></button>
+                    <button className="icon-action-button" type="button" title="Download" onClick={async () => {
+                      const result = await downloadSystemBackup(b.backup_id, b.file_name);
+                      if (result.success) showToast('Backup downloaded.', 'success');
+                      else showToast(result.message || 'Download failed.', 'error');
+                    }}><NavIcon name="download" /></button>
                     <button className="icon-action-button" type="button" title="Restore" onClick={() => setConfirmRestore(b)}><NavIcon name="history" /></button>
                   </td>
-                </tr>)}
+                </tr>) : <tr><td colSpan="6">No backups yet. Create a manual backup to download company settings and catalog data.</td></tr>}
             </tbody>
           </table>
         </div><Pagination {...pagination_BACKUP_HISTORY} /></>
@@ -866,22 +953,58 @@ function MonitoringPage({
 function AuditLogsPage({
   showToast
 }) {
-  const pagination_AUDIT_LOGS = usePagination(AUDIT_LOGS);
+  const [logs, setLogs] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+  const [search, setSearch] = useState('');
+  useEffect(() => {
+    let active = true;
+    async function load() {
+      const result = await fetchAuditLogs();
+      if (!active) return;
+      if (result.success) setLogs(result.data || []);
+      else setError(result.message || 'Failed to load audit logs.');
+      setLoading(false);
+    }
+    load();
+    return () => { active = false; };
+  }, []);
+  const filtered = useMemo(() => logs.filter((log) => {
+    const q = search.trim().toLowerCase();
+    if (!q) return true;
+    return [log.action, log.status_details, log.user_name, log.ip_address].some((value) => String(value || '').toLowerCase().includes(q));
+  }), [logs, search]);
+  const pagination_AUDIT_LOGS = usePagination(filtered);
   const paginated_AUDIT_LOGS = pagination_AUDIT_LOGS.paginatedData;
+  const exportLogs = () => {
+    const rows = filtered.map((log) => ({
+      log_id: log.log_id,
+      user: log.user_name || `User #${log.user_id}`,
+      action: log.action,
+      ip_address: log.ip_address,
+      status_details: log.status_details,
+      created_at: log.created_at,
+    }));
+    if (exportRows(rows, { format: 'pdf', filename: 'super-admin-audit-logs.pdf', title: 'Audit Logs' })) showToast('Logs exported as PDF.', 'success');
+    else showToast('Nothing to export.', 'error');
+  };
+  if (loading) return <LoadingState message="Loading audit logs..." />;
+  if (error) return <EmptyState title="Audit logs unavailable" description={error} />;
   return <div className="relative z-10 grid gap-[22px] w-full">
       <section className="panel content-panel relative overflow-hidden">
         <div className="flex flex-col md:flex-row justify-between gap-4 items-start md:items-center mb-4">
           <h3>System Audit Log</h3>
-          <button className="button" type="button" onClick={() => showToast('Logs exported.', 'success')}>Export Logs</button>
+          <button className="button" type="button" onClick={exportLogs}>Export PDF</button>
         </div>
+        <input className="filter-input search" type="search" placeholder="Search by user, action, or status" value={search} onChange={(e) => setSearch(e.target.value)} style={{ marginBottom: 12 }} />
         <><div className="corvex-table-wrapper">
           <table className="corvex-table">
-            <thead><tr><th>Timestamp</th><th>User</th><th>Action</th><th>Module</th><th>IP Address</th><th>Status</th></tr></thead>
+            <thead><tr><th>Timestamp</th><th>User</th><th>Action</th><th>IP Address</th><th>Status</th></tr></thead>
             <tbody>
-              {paginated_AUDIT_LOGS.map(l => <tr key={l.id}>
-                  <td>{l.timestamp}</td><td>{l.user}</td><td>{l.action}</td><td>{l.module}</td><td>{l.ip}</td>
-                  <td><StatusBadge status={l.status} /></td>
-                </tr>)}
+              {paginated_AUDIT_LOGS.length ? paginated_AUDIT_LOGS.map(l => <tr key={l.log_id}>
+                  <td>{formatDisplayDateTime(l.created_at)}</td><td>{l.user_name || `User #${l.user_id}`}</td><td>{l.action}</td><td>{l.ip_address || '—'}</td>
+                  <td>{l.status_details || '—'}</td>
+                </tr>) : <tr><td colSpan="5">No audit logs match this search.</td></tr>}
             </tbody>
           </table>
         </div><Pagination {...pagination_AUDIT_LOGS} /></>
@@ -889,28 +1012,9 @@ function AuditLogsPage({
     </div>;
 }
 function ProfilePage({
-  navigate,
   showToast
 }) {
-  return <div className="relative z-10 grid gap-[22px] w-full">
-      <section className="panel content-panel relative overflow-hidden">
-        <div className="flex flex-col md:flex-row justify-between gap-4 items-start md:items-center mb-4"><h3>Super Admin Profile</h3></div>
-        <ul className="info-grid">
-          <li><span className="info-item-label">Name</span><span className="info-item-value">{SUPER_ADMIN_PROFILE.name}</span></li>
-          <li><span className="info-item-label">Employee ID</span><span className="info-item-value">{SUPER_ADMIN_PROFILE.employeeId}</span></li>
-          <li><span className="info-item-label">Email</span><span className="info-item-value">{SUPER_ADMIN_PROFILE.email}</span></li>
-          <li><span className="info-item-label">Phone</span><span className="info-item-value">{SUPER_ADMIN_PROFILE.phone}</span></li>
-          <li><span className="info-item-label">Role</span><span className="info-item-value">{SUPER_ADMIN_PROFILE.role}</span></li>
-        </ul>
-        <div className="flex justify-end gap-2 mt-6">
-          <button className="button ghost" type="button" onClick={() => {
-          /* requestLogout() is not defined here but simulating logic */showToast('Logout clicked.', 'success');
-        }}>Logout</button>
-          <button className="button secondary" type="button" onClick={() => showToast('Change Password opened.', 'success')}>Change Password</button>
-          <button className="button" type="button" onClick={() => showToast('Update Profile opened.', 'success')}>Update Profile</button>
-        </div>
-      </section>
-    </div>;
+  return <AccountProfilePanel showToast={showToast} title="Super Admin Profile" />;
 }
 
 // â”€â”€ Users Management (API-Backed) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -1199,8 +1303,8 @@ function UsersPage({
             gap: 10,
             justifyContent: 'flex-end'
           }}>
-                <button className="inline-flex justify-center items-center gap-2 px-5 py-2.5 rounded-md bg-mint text-ink border-[1.5px] border-surface-3 shadow-none hover:border-blue hover:text-blue transition-all duration-160 cursor-pointer" type="button" onClick={() => setShowModal(false)}>Cancel</button>
-                <button className="inline-flex justify-center items-center gap-2 px-5 py-2.5 rounded-md border-0 bg-blue text-white font-semibold cursor-pointer transition-all duration-160 hover:-translate-y-[1px] hover:shadow-[0_4px_16px_rgba(37,99,235,0.35)] hover:brightness-105 active:translate-y-0" type="submit">Save</button>
+                <button className="button secondary" type="button" onClick={() => setShowModal(false)}>Cancel</button>
+                <button className="button" type="submit">Save</button>
               </div>
             </form>
           </div>
@@ -1235,7 +1339,7 @@ export function SuperAdminPageBody({
     case 'auditLogs':
       return <AuditLogsPage {...p} />;
     case 'notifications':
-      return <EmptyState title="No notifications" description="System notifications will appear here." />;
+      return <NotificationsInbox navigate={navigate} showToast={showToast} />;
     case 'profile':
       return <ProfilePage {...p} />;
     default:

@@ -26,6 +26,7 @@ import notificationsRouter from './routes/notifications.js';
 import customerPortalRouter from './routes/customerPortal.js';
 import approvalsRouter from './routes/approvals.js';
 import operationalAlertsRouter from './routes/operationalAlerts.js';
+import systemRouter from './routes/system.js';
 import { requireAuth, requireBranchScope } from './middleware/auth.js';
 import { ensureSchema } from './lib/ensureSchema.js';
 
@@ -128,6 +129,7 @@ app.use('/api/operational-alerts', requireAuth, operationalAlertsRouter);
 
 // Admin routes — identify required
 app.use('/api/admin', requireAuth, adminRouter);
+app.use('/api/system', requireAuth, systemRouter);
 
 app.get('/api/health', (req, res) => {
   res.json({

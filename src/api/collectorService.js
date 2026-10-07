@@ -112,9 +112,10 @@ export async function fetchAccounts(params = {}) {
     return {
       success: true,
       data: result.data.map(transformCustomerToAccount),
+      pagination: result.pagination || null,
     };
   }
-  return { success: false, data: [] };
+  return { success: false, data: [], pagination: { total: 0, page: 1, limit: 10, totalPages: 0 } };
 }
 
 export async function fetchAccountById(id) {
@@ -150,6 +151,18 @@ export async function fetchDigitalReceipts() {
   } catch (error) {
     console.error('Failed to fetch digital receipts:', error);
     return { success: false, data: [], count: 0 };
+  }
+}
+
+export async function sendReceiptToCustomer(receiptId) {
+  try {
+    const response = await apiClient.post(`/collector/receipts/${receiptId}/send`);
+    return response.data;
+  } catch (error) {
+    return {
+      success: false,
+      message: error.response?.data?.message || 'Failed to send receipt.',
+    };
   }
 }
 
