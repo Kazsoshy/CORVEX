@@ -1,11 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
-<<<<<<< HEAD
 import { Link, useLocation } from 'react-router-dom';
-=======
-import { Link } from 'react-router-dom';
 import { Pagination } from '../shared/Pagination';
 import { usePagination, useServerPagination, DEFAULT_PAGE_SIZE } from '../../hooks/usePagination';
->>>>>>> c5d45bfcdf69c05890fde70d0eac579871ddec05
 import {
   createCustomer,
   createSalesInvoice,
@@ -1579,9 +1575,9 @@ function SalesCISubmissionsPage({
   useEffect(() => {
     reload();
   }, [filter]);
-  if (loading && !items.length) return <LoadingState message="Loading credit investigations..." />;
   const pagination = usePagination(items);
   const rows = pagination.paginatedData;
+  if (loading && !items.length) return <LoadingState message="Loading credit investigations..." />;
   return <div className="page">
       <section className="panel content-panel">
         <div className="list-section-header">
@@ -2295,9 +2291,9 @@ function SalesPurchaseRequestsPage({ navigate, showToast }) {
     }
     load();
   };
-  if (loading) return <LoadingState message="Loading purchase requests…" />;
   const pagination = usePagination(requests);
   const rows = pagination.paginatedData;
+  if (loading) return <LoadingState message="Loading purchase requests…" />;
   return <div className="page">
       <section className="panel content-panel">
         <div className="panel-section-header">

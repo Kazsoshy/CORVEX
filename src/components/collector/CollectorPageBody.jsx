@@ -25,13 +25,8 @@ import {
 import { fetchNotifications } from '../../api/notificationService.js';
 import { fetchMyProfile, updateMyProfile } from '../../api/profileService.js';
 import { getCurrentUser, persistCurrentUserFromProfile, requestLogout } from '../../api/authService.js';
-<<<<<<< HEAD
-import { downloadCsv } from '../../utils/csvExport';
-import { collectorMapPath, openPhoneCall } from '../../utils/mapsNavigation';
-=======
 import { downloadPdf } from '../../utils/dataExport';
-import { openPhoneCall } from '../../utils/mapsNavigation';
->>>>>>> c5d45bfcdf69c05890fde70d0eac579871ddec05
+import { collectorMapPath, openPhoneCall } from '../../utils/mapsNavigation';
 import { NotificationsInbox } from '../shared/NotificationsInbox';
 import { EmptyState } from '../shared/EmptyState';
 import { LoadingState } from '../shared/LoadingState';
@@ -620,7 +615,6 @@ function RoutePage({
       label: 'Road distance',
       value: roadStats?.distanceKm != null ? `${roadStats.distanceKm} km` : '—'
     }]} />
-<<<<<<< HEAD
       <section className="panel content-panel relative overflow-hidden" style={{
       padding: '14px 20px'
     }}>
@@ -644,8 +638,6 @@ function RoutePage({
           description="Ask your branch manager to assign collection customers for today from Field Operations → collector detail."
         />
       ) : null}
-=======
->>>>>>> c5d45bfcdf69c05890fde70d0eac579871ddec05
       <section className="panel content-panel relative overflow-hidden">
         <div className="flex flex-col md:flex-row justify-between gap-4 items-start md:items-center mb-4">
           <h3>{showMap || pageType === 'routeMap' ? 'Route Map View' : 'SAW Customer Priority List'}</h3>

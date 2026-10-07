@@ -1,7 +1,6 @@
 import express from 'express';
 import { requireRole } from '../middleware/auth.js';
-<<<<<<< HEAD
-import { notifyCreditInvestigationSubmitted } from '../lib/creditInvestigationNotifications.js';
+import { insertUserNotification, notifyCreditInvestigationSubmitted } from '../lib/creditInvestigationNotifications.js';
 import {
   computeCollectorSawPriority,
   computeAssignedSawRoute,
@@ -10,9 +9,6 @@ import {
 } from '../lib/sawCollectionData.js';
 import { osrmDrivingRoute, osrmDrivingTrip } from '../lib/osrm.js';
 import { nearestNeighborOrder, sortStopsBySaw } from '../lib/routeOrder.js';
-=======
-import { insertUserNotification, notifyCreditInvestigationSubmitted } from '../lib/creditInvestigationNotifications.js';
->>>>>>> c5d45bfcdf69c05890fde70d0eac579871ddec05
 
 const router = express.Router();
 
