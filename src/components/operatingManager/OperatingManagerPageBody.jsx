@@ -1,5 +1,5 @@
 import { Pagination } from '../shared/Pagination';
-import { usePagination } from '../../hooks/usePagination';
+import { usePagination, DEFAULT_PAGE_SIZE } from '../../hooks/usePagination';
 import { StatusBadge } from '../../components/StatusBadge';
 import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
@@ -16,6 +16,7 @@ import { formatDisplayDate, formatDisplayDateTime } from '../../utils/formatters
 import { getPresetDateRange } from '../../utils/analyticsDateRange.js';
 import { formatMiddleNameDisplay } from '../../utils/customerDisplay.js';
 import { getExecutiveDashboard, getOperatingManagerAnalytics, getPerformanceHistory } from '../../api/reportsService';
+import { exportRows } from '../../utils/dataExport';
 import apiClient from '../../api/apiClient';
 import { fetchCustomers, fetchCustomerById } from '../../api/salesService';
 import { EmptyState } from '../shared/EmptyState';
@@ -643,7 +644,7 @@ function PerformanceHistoryPanel() {
     });
   });
   const chartData = Object.values(periodMap);
-  const PALETTE = ['#2563eb', '#06b6d4', '#10b981', '#ef4444', '#f59e0b', '#8b5cf6'];
+  const PALETTE = ['#093850', '#06b6d4', '#10b981', '#ef4444', '#f59e0b', '#1e5a7a'];
   const lineKeys = [];
   perfData.byBranch.forEach((branch, i) => {
     lineKeys.push({
@@ -1072,325 +1073,6 @@ function BranchDetailPage({
     }]} onAction={a => navigate(a.to)} />
     </div>;
 }
-function ReportsHubPage({
-  navigate,
-  showToast
-}) {
-  const [activeTab, setActiveTab] = useState('collections');
-  const tabDefs = [{
-    key: 'collections',
-    label: 'Collections'
-  }, {
-    key: 'sales',
-    label: 'Sales'
-  }, {
-    key: 'inventory',
-    label: 'Inventory'
-  }, {
-    key: 'delinquency',
-    label: 'Payments & Delinquency'
-  }, {
-    key: 'executive',
-    label: 'Executive'
-  }];
-  const exportRow = <PageToolbar actions={[{
-    label: 'Export PDF',
-    action: 'pdf'
-  }, {
-    label: 'Export Excel',
-    action: 'excel',
-    variant: 'secondary'
-  }]} onAction={a => showToast(`${a.label} started.`, 'success')} />;
-  return <div className="page">
-      <div className="segmented-control">
-        {tabDefs.map(t => <button key={t.key} className={activeTab === t.key ? 'segment active' : 'segment'} type="button" onClick={() => setActiveTab(t.key)}>
-            {t.label}
-          </button>)}
-      </div>
-
-      {activeTab === 'collections' && <>
-          <div className="grid two-up">
-            <ChartCard title="Monthly Collections by Branch" subtitle="6-month trend">
-              <ResponsiveContainer width="100%" height={230}>
-                <AreaChart data={MONTHLY_COLLECTIONS}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
-                  <XAxis dataKey="month" tick={{
-                fontSize: 12
-              }} />
-                  <YAxis tick={{
-                fontSize: 11
-              }} tickFormatter={v => `${(v / 1000000).toFixed(1)}M`} />
-                  <Tooltip formatter={v => formatCurrency(v)} />
-                  <Legend />
-                  {Object.keys(BRANCH_COLORS).map(b => <Area key={b} type="monotone" dataKey={b} stroke={BRANCH_COLORS[b]} fill={BRANCH_COLORS[b]} fillOpacity={0.08} strokeWidth={2} />)}
-                </AreaChart>
-              </ResponsiveContainer>
-            </ChartCard>
-
-            <ChartCard title="Collection Rate by Branch" subtitle="Weekly %">
-              <ResponsiveContainer width="100%" height={230}>
-                <LineChart data={WEEKLY_COLLECTION_RATE}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
-                  <XAxis dataKey="week" tick={{
-                fontSize: 12
-              }} />
-                  <YAxis domain={[75, 100]} tick={{
-                fontSize: 12
-              }} unit="%" />
-                  <Tooltip formatter={v => `${v}%`} />
-                  <Legend />
-                  {Object.keys(BRANCH_COLORS).map(b => <Line key={b} type="monotone" dataKey={b} stroke={BRANCH_COLORS[b]} strokeWidth={2} dot={false} />)}
-                </LineChart>
-              </ResponsiveContainer>
-            </ChartCard>
-          </div>
-
-          <ChartCard title="Branch Collection Summary">
-            <div className="table-shell">
-              <table className="corvex-table">
-                <thead><tr><th>Branch</th><th>Collections</th><th>Rate</th><th>Overdue</th><th>Compliance</th></tr></thead>
-                <tbody>
-                  {BRANCHES.map(b => <tr key={b.id}><td>{b.name}</td><td>{formatCurrency(b.collections)}</td><td>{b.collectionRate}%</td><td>{b.overdueAccounts}</td><td>{b.routeCompliance}%</td></tr>)}
-                </tbody>
-              </table>
-            </div>
-          </ChartCard>
-          {exportRow}
-        </>}
-
-      {activeTab === 'sales' && <>
-          <StatsGrid stats={[{
-        label: 'Sales Today',
-        value: formatCurrency(SALES_ANALYTICS.salesToday)
-      }, {
-        label: 'Total Sales (YTD)',
-        value: formatCurrency(ENTERPRISE_KPIS.totalSales)
-      }, {
-        label: 'Total Revenue (YTD)',
-        value: formatCurrency(ENTERPRISE_KPIS.totalRevenue)
-      }]} />
-
-          <div className="grid two-up">
-            <ChartCard title="Monthly Revenue by Branch" subtitle="6-month trend">
-              <ResponsiveContainer width="100%" height={230}>
-                <AreaChart data={MONTHLY_REVENUE}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
-                  <XAxis dataKey="month" tick={{
-                fontSize: 12
-              }} />
-                  <YAxis tick={{
-                fontSize: 11
-              }} tickFormatter={v => `${(v / 1000000).toFixed(1)}M`} />
-                  <Tooltip formatter={v => formatCurrency(v)} />
-                  <Legend />
-                  {Object.keys(BRANCH_COLORS).map(b => <Area key={b} type="monotone" dataKey={b} stroke={BRANCH_COLORS[b]} fill={BRANCH_COLORS[b]} fillOpacity={0.08} strokeWidth={2} />)}
-                </AreaChart>
-              </ResponsiveContainer>
-            </ChartCard>
-
-            <ChartCard title="Sales Completion Rate" subtitle="Weekly %">
-              <ResponsiveContainer width="100%" height={230}>
-                <LineChart data={WEEKLY_SALES_RATE}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
-                  <XAxis dataKey="week" tick={{
-                fontSize: 12
-              }} />
-                  <YAxis domain={[65, 100]} tick={{
-                fontSize: 12
-              }} unit="%" />
-                  <Tooltip formatter={v => `${v}%`} />
-                  <Legend />
-                  {Object.keys(BRANCH_COLORS).map(b => <Line key={b} type="monotone" dataKey={b} stroke={BRANCH_COLORS[b]} strokeWidth={2} dot={false} />)}
-                </LineChart>
-              </ResponsiveContainer>
-            </ChartCard>
-          </div>
-
-          <ChartCard title="Top-Selling Products">
-            <div className="table-shell">
-              <table className="corvex-table">
-                <thead><tr><th>Product Name</th><th>Category</th><th>Qty Sold</th><th>Revenue</th></tr></thead>
-                <tbody>
-                  {SALES_ANALYTICS.topSellingProducts.map(p => <tr key={p.id}>
-                      <td>{p.name}</td><td>{p.category}</td><td>{p.quantitySold}</td><td>{formatCurrency(p.revenue)}</td>
-                    </tr>)}
-                </tbody>
-              </table>
-            </div>
-          </ChartCard>
-
-          <ChartCard title="Sales Summary">
-            <div className="table-shell">
-              <table className="corvex-table">
-                <thead><tr><th>Branch</th><th>Sales Volume</th><th>Revenue</th><th>Completion Rate</th><th>Agents</th></tr></thead>
-                <tbody>
-                  {BRANCHES.map(b => <tr key={b.id}><td>{b.name}</td><td>{formatCurrency(b.sales)}</td><td>{formatCurrency(b.revenue)}</td><td>{b.salesCompletionRate}%</td><td>{b.salesAgents}</td></tr>)}
-                </tbody>
-              </table>
-            </div>
-          </ChartCard>
-          {exportRow}
-        </>}
-
-      {activeTab === 'inventory' && <>
-          <StatsGrid stats={[{
-        label: 'Current Stock Levels',
-        value: INVENTORY_ANALYTICS.currentStockLevels.toLocaleString()
-      }, {
-        label: 'Inbound Stock',
-        value: INVENTORY_ANALYTICS.stockMovement.inbound.toLocaleString()
-      }, {
-        label: 'Outbound Stock',
-        value: INVENTORY_ANALYTICS.stockMovement.outbound.toLocaleString()
-      }, {
-        label: 'Sync Status',
-        value: INVENTORY_ANALYTICS.syncStatus.status
-      }]} />
-
-          <div className="grid two-up">
-            <ChartCard title="Inventory Health by Branch" subtitle="Current health scores">
-              <ResponsiveContainer width="100%" height={230}>
-                <BarChart data={BRANCHES.map(b => ({
-              name: b.name,
-              health: b.inventoryHealth,
-              value: b.inventoryValue / 1000000
-            }))}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
-                  <XAxis dataKey="name" tick={{
-                fontSize: 12
-              }} />
-                  <YAxis yAxisId="left" domain={[0, 100]} tick={{
-                fontSize: 12
-              }} unit="%" />
-                  <YAxis yAxisId="right" orientation="right" tick={{
-                fontSize: 11
-              }} tickFormatter={v => `${v.toFixed(1)}M`} />
-                  <Tooltip />
-                  <Legend />
-                  <Bar yAxisId="left" dataKey="health" name="Health %" fill="#2563eb" radius={[4, 4, 0, 0]} />
-                  <Bar yAxisId="right" dataKey="value" name="Value (M PHP)" fill="#06b6d4" radius={[4, 4, 0, 0]} />
-                </BarChart>
-              </ResponsiveContainer>
-            </ChartCard>
-
-            <ChartCard title="Low Stock Items" subtitle="Requires immediate attention">
-              <div className="table-shell">
-                <table className="corvex-table">
-                  <thead><tr><th>Product Name</th><th>Branch</th><th>Current Stock</th><th>Status</th></tr></thead>
-                  <tbody>
-                    {INVENTORY_ANALYTICS.lowStockItems.map(item => <tr key={item.id}>
-                        <td>{item.name}</td><td>{item.branch}</td><td>{item.currentStock}</td>
-                        <td><SeverityBadge severity={item.status} /></td>
-                      </tr>)}
-                  </tbody>
-                </table>
-              </div>
-            </ChartCard>
-          </div>
-          {exportRow}
-        </>}
-
-      {activeTab === 'delinquency' && <>
-          <StatsGrid stats={[{
-        label: 'Outstanding Receivables',
-        value: formatCurrency(PAYMENT_ANALYTICS.outstandingReceivables)
-      }, {
-        label: 'Current Accounts',
-        value: PAYMENT_ANALYTICS.currentAccountsCount.toLocaleString()
-      }, {
-        label: 'Credit Utilization',
-        value: `${PAYMENT_ANALYTICS.creditUtilizationRate}%`
-      }]} />
-
-          <div className="grid two-up">
-            <ChartCard title="Aging of Receivables" subtitle="Amount by age bucket">
-              <ResponsiveContainer width="100%" height={230}>
-                <BarChart data={PAYMENT_ANALYTICS.agingOfReceivables}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
-                  <XAxis dataKey="bucket" tick={{
-                fontSize: 12
-              }} />
-                  <YAxis tick={{
-                fontSize: 11
-              }} tickFormatter={v => `${(v / 1000).toFixed(0)}k`} />
-                  <Tooltip formatter={v => formatCurrency(v)} />
-                  <Bar dataKey="amount" name="Amount" fill="#2563eb" radius={[4, 4, 0, 0]} />
-                </BarChart>
-              </ResponsiveContainer>
-            </ChartCard>
-            <ChartCard title="Monthly Delinquency Trend" subtitle="Overdue accounts per branch">
-              <ResponsiveContainer width="100%" height={230}>
-                <AreaChart data={MONTHLY_DELINQUENCY}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
-                  <XAxis dataKey="month" tick={{
-                fontSize: 12
-              }} />
-                  <YAxis tick={{
-                fontSize: 12
-              }} />
-                  <Tooltip />
-                  <Legend />
-                  {Object.keys(BRANCH_COLORS).map(b => <Area key={b} type="monotone" dataKey={b} stroke={BRANCH_COLORS[b]} fill={BRANCH_COLORS[b]} fillOpacity={0.1} strokeWidth={2} />)}
-                </AreaChart>
-              </ResponsiveContainer>
-            </ChartCard>
-
-            <ChartCard title="Delinquency by Branch" subtitle="Current overdue counts">
-              <ResponsiveContainer width="100%" height={230}>
-                <BarChart data={BRANCHES.map(b => ({
-              name: b.name,
-              overdue: b.overdueAccounts,
-              risk: b.riskScore
-            }))}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
-                  <XAxis dataKey="name" tick={{
-                fontSize: 12
-              }} />
-                  <YAxis tick={{
-                fontSize: 12
-              }} />
-                  <Tooltip />
-                  <Legend />
-                  <Bar dataKey="overdue" name="Overdue Accounts" fill="#ef4444" radius={[4, 4, 0, 0]} />
-                  <Bar dataKey="risk" name="Risk Score" fill="#f59e0b" radius={[4, 4, 0, 0]} />
-                </BarChart>
-              </ResponsiveContainer>
-            </ChartCard>
-          </div>
-          {exportRow}
-        </>}
-
-      {activeTab === 'executive' && <>
-          <StatsGrid stats={[{
-        label: 'Total Revenue',
-        value: formatCurrency(ENTERPRISE_KPIS.totalRevenue)
-      }, {
-        label: 'Total Collections',
-        value: formatCurrency(ENTERPRISE_KPIS.totalCollections)
-      }, {
-        label: 'Total Sales',
-        value: formatCurrency(ENTERPRISE_KPIS.totalSales)
-      }, {
-        label: 'Total Delinquencies',
-        value: formatCurrency(ENTERPRISE_KPIS.totalDelinquencies)
-      }]} />
-          <ChartCard title="Branch Performance Radar" subtitle="Multi-dimensional comparison">
-            <ResponsiveContainer width="100%" height={300}>
-              <RadarChart data={BRANCH_RADAR}>
-                <PolarGrid stroke="#e2e8f0" />
-                <PolarAngleAxis dataKey="metric" tick={{
-              fontSize: 12
-            }} />
-                {Object.keys(BRANCH_COLORS).map(b => <Radar key={b} name={b} dataKey={b} stroke={BRANCH_COLORS[b]} fill={BRANCH_COLORS[b]} fillOpacity={0.1} />)}
-                <Legend />
-                <Tooltip formatter={v => `${v}%`} />
-              </RadarChart>
-            </ResponsiveContainer>
-          </ChartCard>
-          {exportRow}
-        </>}
-    </div>;
-}
 function LeafletPage({
   navigate,
   subPage
@@ -1598,8 +1280,8 @@ function CustomerRecordsPage({
   useEffect(() => {
     async function load() {
       setLoading(true);
-      const result = await fetchCustomers();
-      if (result.success) setCustomers(result.data);
+      const result = await fetchCustomers({ limit: 200, page: 1 });
+      if (result.success) setCustomers(result.data || []);
       setLoading(false);
     }
     load();
@@ -1613,6 +1295,11 @@ function CustomerRecordsPage({
       return matchSearch && matchBranch && matchStatus;
     });
   }, [search, branchFilter, statusFilter, customers]);
+  const pagination = usePagination(filtered, {
+    pageSize: DEFAULT_PAGE_SIZE,
+    resetKey: `${search}|${branchFilter}|${statusFilter}`,
+  });
+  const rows = pagination.paginatedData;
   if (loading) return <LoadingState message="Loading customer records..." />;
   return <div className="page">
       <StatsGrid stats={[{
@@ -1627,7 +1314,7 @@ function CustomerRecordsPage({
     }]} />
 
       <section className="panel content-panel">
-        <div className="list-section-header"><h3>All Customer Accounts</h3></div>
+        <div className="list-section-header"><h3>All Customer Accounts <span className="text-ink/70">({filtered.length})</span></h3></div>
         <div className="list-section-toolbar" style={{
         marginBottom: 12
       }}>
@@ -1651,13 +1338,14 @@ function CustomerRecordsPage({
         </div>
 
         {filtered.length ? (
+          <>
           <div className="corvex-table-wrapper">
             <table className="corvex-table">
               <thead>
                 <tr><th>Name</th><th>Branch</th><th>Address</th><th>Contact Phone</th><th>Status</th><th>Actions</th></tr>
               </thead>
               <tbody>
-                {filtered.map(r => <tr key={r.customer_id}>
+                {rows.map(r => <tr key={r.customer_id}>
                     <td><strong>{r.first_name} {r.last_name}</strong></td>
                     <td>{r.branch_name}</td>
                     <td>{r.address}</td>
@@ -1670,6 +1358,8 @@ function CustomerRecordsPage({
               </tbody>
             </table>
           </div>
+          <Pagination {...pagination} />
+          </>
         ) : (
           <EmptyState title="No records found" description="Adjust your search or filters." />
         )}
@@ -2602,7 +2292,7 @@ function LiveOperationsDashboardPage({
             <NavIcon name="bar-chart-3" style={{
             width: 18,
             height: 18,
-            color: '#8b5cf6'
+            color: '#1e5a7a'
           }} />
             <div>
               <h3>Branch Comparison</h3>
@@ -2988,6 +2678,47 @@ function LiveReportsPage({
   } = useOperatingManagerAnalytics(filters);
   if (loading) return <LoadingState message="Loading reports…" />;
   if (error || !data) return <EmptyState title="Reports unavailable" description={error || 'No report data available.'} />;
+  const exportLiveReport = (format) => {
+    let rows = [];
+    if (activeTab === 'collections') {
+      rows = (data.branchSummary || []).map((branch) => ({
+        branch: branch.branchName,
+        collections: branch.totalCollections,
+        compliance: branch.routeCompliance,
+      }));
+    } else if (activeTab === 'sales') {
+      rows = (data.topProducts || []).map((product) => ({
+        product: product.productName,
+        category: product.categoryName,
+        quantity: product.quantitySold,
+        revenue: product.revenue,
+      }));
+    } else if (activeTab === 'inventory') {
+      rows = (data.lowStockItems || []).map((item) => ({
+        product: item.productName,
+        branch: item.branchName,
+        available: item.availableStock,
+        status: item.status,
+      }));
+    } else if (activeTab === 'delinquency') {
+      rows = (data.topCustomers || []).map((customer) => ({
+        customer: customer.customerName,
+        branch: customer.branchName,
+        outstanding: customer.outstandingBalance,
+        days_since_collection: customer.daysSinceCollection,
+      }));
+    } else {
+      rows = (data.branchSummary || []).map((branch) => ({
+        branch: branch.branchName,
+        collections: branch.totalCollections,
+        sales: branch.totalSales,
+        compliance: branch.routeCompliance,
+      }));
+    }
+    const ok = exportRows(rows, { format, filename: `operations-${activeTab}-report`, title: `Operations ${activeTab} Report` });
+    if (ok) showToast(format === 'pdf' ? 'Report exported as PDF.' : 'Excel file downloaded.', 'success');
+    else showToast('Nothing to export.', 'error');
+  };
   return <div className="page">
       <AnalyticsFilterBar filters={filters} setFilters={setFilters} branchOptions={data.branchSummary || []} />
       <div className="segmented-control">
@@ -3139,11 +2870,13 @@ function LiveReportsPage({
 
       <PageToolbar actions={[{
       label: 'Export PDF',
+      action: 'pdf',
       variant: 'secondary'
     }, {
       label: 'Export Excel',
+      action: 'excel',
       variant: 'secondary'
-    }]} onAction={action => showToast(`${action.label} started.`, 'success')} />
+    }]} onAction={action => exportLiveReport(action.action)} />
       <PageToolbar actions={[{
       label: 'Back to Dashboard',
       to: '/operating-manager/dashboard',

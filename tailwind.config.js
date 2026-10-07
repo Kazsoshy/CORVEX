@@ -6,7 +6,15 @@ export default {
   ],
   theme: {
     extend: {
+      fontFamily: {
+        sans: ['var(--font-sans)'],
+      },
       colors: {
+        brand: {
+          DEFAULT: 'var(--brand)',
+          dark: 'var(--brand-dark)',
+          hover: 'var(--brand-hover)',
+        },
         sidebar: 'var(--sidebar-bg)',
         navy: {
           DEFAULT: 'var(--navy)',

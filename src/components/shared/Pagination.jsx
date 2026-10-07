@@ -1,64 +1,105 @@
-import React from 'react';
+import React, { useMemo } from 'react';
+
+function buildPageList(currentPage, totalPages) {
+  if (totalPages <= 7) {
+    return Array.from({ length: totalPages }, (_, i) => i + 1);
+  }
+
+  const pages = new Set([1, totalPages, currentPage, currentPage - 1, currentPage + 1, currentPage - 2, currentPage + 2]);
+  const sorted = [...pages].filter((p) => p >= 1 && p <= totalPages).sort((a, b) => a - b);
+  const result = [];
+
+  for (let i = 0; i < sorted.length; i += 1) {
+    if (i > 0 && sorted[i] - sorted[i - 1] > 1) result.push('ellipsis');
+    result.push(sorted[i]);
+  }
+  return result;
+}
 
 export function Pagination({
   currentPage,
   totalPages,
   totalRecords,
+  startRecord,
+  endRecord,
+  pageSize = 10,
   nextPage,
-  prevPage
+  prevPage,
+  goToPage,
 }) {
-  if (totalRecords === 0) return null;
+  const pages = useMemo(
+    () => buildPageList(currentPage || 1, totalPages || 1),
+    [currentPage, totalPages]
+  );
+
+  if (!totalRecords) return null;
+
+  const start = startRecord ?? ((currentPage - 1) * pageSize + 1);
+  const end = endRecord ?? Math.min(currentPage * pageSize, totalRecords);
 
   return (
-    <div className="flex items-center justify-between px-4 py-3 border-t border-slate-200/60 bg-white rounded-b-xl" style={{ marginTop: '-1px' }}>
-      <div className="flex flex-1 justify-between sm:hidden">
+    <div className="pagination-bar">
+      <div className="pagination-bar-mobile">
         <button
           onClick={prevPage}
           disabled={currentPage === 1}
-          className="relative inline-flex items-center rounded-md border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50 disabled:cursor-not-allowed"
+          className="button secondary"
+          type="button"
         >
           Previous
         </button>
+        <span className="pagination-summary-compact">
+          {currentPage} / {totalPages}
+        </span>
         <button
           onClick={nextPage}
           disabled={currentPage === totalPages}
-          className="relative ml-3 inline-flex items-center rounded-md border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50 disabled:cursor-not-allowed"
+          className="button secondary"
+          type="button"
         >
           Next
         </button>
       </div>
-      <div className="hidden sm:flex sm:flex-1 sm:items-center sm:justify-between">
-        <div>
-          <p className="text-sm text-slate-700 m-0">
-            Showing page <span className="font-semibold">{currentPage}</span> of{' '}
-            <span className="font-semibold">{totalPages}</span>
-            {' '}(<span className="font-medium">{totalRecords}</span> total records)
-          </p>
-        </div>
-        <div>
-          <nav className="isolate inline-flex -space-x-px rounded-md shadow-sm" aria-label="Pagination">
-            <button
-              onClick={prevPage}
-              disabled={currentPage === 1}
-              className="relative inline-flex items-center rounded-l-md px-2 py-2 text-slate-400 ring-1 ring-inset ring-slate-300 hover:bg-slate-50 focus:z-20 focus:outline-offset-0 disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              <span className="sr-only">Previous</span>
-              <svg className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
-                <path fillRule="evenodd" d="M12.79 5.23a.75.75 0 01-.02 1.06L8.832 10l3.938 3.71a.75.75 0 11-1.04 1.08l-4.5-4.25a.75.75 0 010-1.08l4.5-4.25a.75.75 0 011.06.02z" clipRule="evenodd" />
-              </svg>
-            </button>
-            <button
-              onClick={nextPage}
-              disabled={currentPage === totalPages}
-              className="relative inline-flex items-center rounded-r-md px-2 py-2 text-slate-400 ring-1 ring-inset ring-slate-300 hover:bg-slate-50 focus:z-20 focus:outline-offset-0 disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              <span className="sr-only">Next</span>
-              <svg className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
-                <path fillRule="evenodd" d="M7.21 14.77a.75.75 0 01.02-1.06L11.168 10 7.23 6.29a.75.75 0 111.04-1.08l4.5 4.25a.75.75 0 010 1.08l-4.5 4.25a.75.75 0 01-1.06-.02z" clipRule="evenodd" />
-              </svg>
-            </button>
-          </nav>
-        </div>
+
+      <div className="pagination-bar-desktop">
+        <p className="pagination-summary">
+          Showing <strong>{start}</strong>–<strong>{end}</strong> of{' '}
+          <strong>{totalRecords}</strong> records
+        </p>
+        <nav className="pagination-nav" aria-label="Pagination">
+          <button
+            onClick={prevPage}
+            disabled={currentPage === 1}
+            type="button"
+            aria-label="Previous page"
+          >
+            Previous
+          </button>
+          {pages.map((page, index) => (
+            page === 'ellipsis' ? (
+              <span key={`e-${index}`} className="pagination-ellipsis" aria-hidden="true">…</span>
+            ) : (
+              <button
+                key={page}
+                type="button"
+                className={page === currentPage ? 'pagination-page is-active' : 'pagination-page'}
+                onClick={() => goToPage?.(page)}
+                aria-current={page === currentPage ? 'page' : undefined}
+                disabled={!goToPage}
+              >
+                {page}
+              </button>
+            )
+          ))}
+          <button
+            onClick={nextPage}
+            disabled={currentPage === totalPages}
+            type="button"
+            aria-label="Next page"
+          >
+            Next
+          </button>
+        </nav>
       </div>
     </div>
   );

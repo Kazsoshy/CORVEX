@@ -40,15 +40,11 @@ import { getReportCollection, getReportSales, getReportInventory, getReportDelin
 import { CreditHistoryListPage, CreditHistoryDetailPage } from '../shared/CreditHistoryPages';
 import { TerritoriesPage } from '../territories/TerritoriesPage';
 import { formatMiddleNameDisplay } from '../../utils/customerDisplay.js';
+import { downloadPdf, exportRows } from '../../utils/dataExport.js';
 
 // Re-export for use in other components
 export { getBranchAnalytics, getBranchStaff, getBranchCustomers, getBranchAlerts };
 const C = ['#093850', '#06b6d4', '#10b981', '#f59e0b', '#ef4444'];
-function cls(v) {
-  if (v === 'secondary') return 'button secondary';
-  if (v === 'ghost') return 'button ghost';
-  return 'button';
-}
 function Stats({
   stats
 }) {
@@ -82,22 +78,6 @@ function Card({
       </div>
       {children}
     </section>;
-}
-function StaffCard({
-  title,
-  metrics,
-  actions,
-  onAction
-}) {
-  return <article className="account-card">
-      <div className="account-card-header"><h4>{title}</h4></div>
-      <div className="account-metrics">
-        {metrics.map(m => <div key={m.label}><span className="metric-label">{m.label}</span><strong>{m.value}</strong></div>)}
-      </div>
-      <div className="account-card-actions">
-        {actions.map(a => <button key={a.label} className={cls(a.variant)} type="button" onClick={() => onAction(a)}>{a.label}</button>)}
-      </div>
-    </article>;
 }
 
 // ── Dashboard ─────────────────────────────────────────────────────────────────
@@ -240,7 +220,7 @@ function DashboardPage({
         <section className="panel content-panel relative overflow-hidden">
           <div className="flex flex-col md:flex-row justify-between gap-4 items-start md:items-center mb-4">
             <h3>Critical Alerts</h3>
-            <button className="inline-flex justify-center items-center gap-2 px-5 py-2.5 rounded-md bg-transparent text-blue border-[1.5px] border-blue-30 shadow-none hover:bg-blue-08 transition-all duration-160 cursor-pointer" type="button" onClick={() => navigate(`${opsBase}/alerts`)}>View All</button>
+            <button className="button ghost" type="button" onClick={() => navigate(`${opsBase}/alerts`)}>View All</button>
           </div>
           <ul className="list-none p-0 m-0 flex flex-col gap-3">
             {critical.slice(0, 4).map(a => <li key={a.id}><div><strong>{a.title}</strong><span className="text-ink/70">{a.category}</span></div><Severity severity={a.severity} /></li>)}
@@ -315,6 +295,8 @@ function FieldOperationsHub({
   }));
   const pagination_staff_collectors = usePagination(staff.collectors);
   const paginated_staff_collectors = pagination_staff_collectors.paginatedData;
+  const pagination_staff_sales = usePagination(staff.salesAgents);
+  const paginated_staff_sales = pagination_staff_sales.paginatedData;
   if (loading) return <LoadingState />;
   return <div className="relative z-10 grid gap-[22px] w-full">
       <div className="segmented-control">
@@ -359,7 +341,7 @@ function FieldOperationsHub({
               }} /><YAxis domain={[0, 100]} unit="%" tick={{
                 fontSize: 12
               }} /><Tooltip formatter={v => `${v}%`} /><Legend />
-                <Bar dataKey="visits" name="Visit Completion" fill="#8b5cf6" radius={[4, 4, 0, 0]} />
+                <Bar dataKey="visits" name="Visit Completion" fill="#1e5a7a" radius={[4, 4, 0, 0]} />
                 <Bar dataKey="conversion" name="Conversion" fill="#10b981" radius={[4, 4, 0, 0]} />
               </BarChart>
             </ResponsiveContainer>
@@ -400,58 +382,75 @@ function FieldOperationsHub({
         </Card>
       </>}
 
-      {tab === 'collectors' && <div className="account-card-grid">
-          {staff.collectors.map(c => <StaffCard key={c.id} title={c.name} metrics={[{
-        label: 'Assigned',
-        value: c.accountsAssigned
-      }, {
-        label: 'Visited',
-        value: c.accountsVisited
-      }, {
-        label: 'Pending',
-        value: c.accountsPending
-      }, {
-        label: 'Compliance',
-        value: `${c.complianceScore}%`
-      }, {
-        label: 'Collected',
-        value: formatCurrency(c.collectionAmount)
-      }]} actions={[{
-        label: 'Expand Route',
-        action: 'detail'
-      }, {
-        label: 'View on Map',
-        action: 'map',
-        variant: 'ghost'
-      }]} onAction={a => {
-        if (a.action === 'detail') navigate(`${opsBase}/field-operations/collectors/${c.id}`);else navigate(`${opsBase}/leaflet`);
-      }} />)}
-        </div>}
+      {tab === 'collectors' && <section className="panel content-panel relative overflow-hidden">
+          <div className="list-section-header"><h3>Collectors <span className="text-ink/70">({staff.collectors.length})</span></h3></div>
+          {staff.collectors.length ? <>
+            <div className="corvex-table-wrapper">
+              <table className="corvex-table">
+                <thead>
+                  <tr>
+                    <th>Name</th>
+                    <th>Assigned</th>
+                    <th>Visited</th>
+                    <th>Pending</th>
+                    <th>Compliance</th>
+                    <th>Collected</th>
+                    <th>Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {paginated_staff_collectors.map(c => <tr key={c.id} className="clickable-row" onClick={() => navigate(`${opsBase}/field-operations/collectors/${c.id}`)}>
+                      <td><strong>{c.name}</strong></td>
+                      <td>{c.accountsAssigned}</td>
+                      <td>{c.accountsVisited}</td>
+                      <td>{c.accountsPending}</td>
+                      <td>{c.complianceScore}%</td>
+                      <td>{formatCurrency(c.collectionAmount)}</td>
+                      <td className="table-actions" onClick={e => e.stopPropagation()}>
+                        <button className="icon-action-button" type="button" title="Expand Route" onClick={() => navigate(`${opsBase}/field-operations/collectors/${c.id}`)}><NavIcon name="view" /></button>
+                        <button className="icon-action-button" type="button" title="View on Map" onClick={() => navigate(`${opsBase}/leaflet`)}><NavIcon name="map" /></button>
+                      </td>
+                    </tr>)}
+                </tbody>
+              </table>
+            </div>
+            <Pagination {...pagination_staff_collectors} />
+          </> : <EmptyState title="No collectors" description="Collectors assigned to this branch will appear here." />}
+        </section>}
 
-      {tab === 'sales' && <div className="account-card-grid">
-          {staff.salesAgents.map(a => <StaffCard key={a.id} title={a.name} metrics={[{
-        label: 'Customers',
-        value: a.customersAssigned
-      }, {
-        label: 'Visits',
-        value: a.visitsCompleted
-      }, {
-        label: 'Sales',
-        value: a.salesLogged
-      }, {
-        label: 'Revenue',
-        value: formatCurrency(a.totalSalesAmount)
-      }]} actions={[{
-        label: 'Expand Schedule',
-        action: 'detail'
-      }, {
-        label: 'View on Map',
-        action: 'map',
-        variant: 'ghost'
-      }]} onAction={act => {
-        if (act.action === 'detail') navigate(`${opsBase}/field-operations/sales/${a.id}`);else navigate(`${opsBase}/leaflet`);
-      }} />)}
-        </div>}
+      {tab === 'sales' && <section className="panel content-panel relative overflow-hidden">
+          <div className="list-section-header"><h3>Sales Agents <span className="text-ink/70">({staff.salesAgents.length})</span></h3></div>
+          {staff.salesAgents.length ? <>
+            <div className="corvex-table-wrapper">
+              <table className="corvex-table">
+                <thead>
+                  <tr>
+                    <th>Name</th>
+                    <th>Customers</th>
+                    <th>Visits</th>
+                    <th>Sales</th>
+                    <th>Revenue</th>
+                    <th>Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {paginated_staff_sales.map(a => <tr key={a.id} className="clickable-row" onClick={() => navigate(`${opsBase}/field-operations/sales/${a.id}`)}>
+                      <td><strong>{a.name}</strong></td>
+                      <td>{a.customersAssigned}</td>
+                      <td>{a.visitsCompleted}</td>
+                      <td>{a.salesLogged}</td>
+                      <td>{formatCurrency(a.totalSalesAmount)}</td>
+                      <td className="table-actions" onClick={e => e.stopPropagation()}>
+                        <button className="icon-action-button" type="button" title="Expand Schedule" onClick={() => navigate(`${opsBase}/field-operations/sales/${a.id}`)}><NavIcon name="view" /></button>
+                        <button className="icon-action-button" type="button" title="View on Map" onClick={() => navigate(`${opsBase}/leaflet`)}><NavIcon name="map" /></button>
+                      </td>
+                    </tr>)}
+                </tbody>
+              </table>
+            </div>
+            <Pagination {...pagination_staff_sales} />
+          </> : <EmptyState title="No sales agents" description="Sales agents assigned to this branch will appear here." />}
+        </section>}
 
       {tab === 'performance' && <section className="panel content-panel relative overflow-hidden">
           <div className="flex flex-col md:flex-row justify-between gap-4 items-start md:items-center mb-4"><h3>Route Performance Summary</h3></div>
@@ -705,6 +704,8 @@ function SalesAgentDetailPage({
   const a = staff.salesAgents.find(x => x.id === String(agentId));
   const customers = detail.customers?.length ? detail.customers : a?.customers || [];
   const productPerformance = detail.productPerformance?.length ? detail.productPerformance : a?.productPerformance || [];
+  const pagination_customers = usePagination(customers);
+  const pagination_products = usePagination(productPerformance);
   if (loading) return <LoadingState />;
   if (!a) return <EmptyState title="Agent not found" actionLabel="Back" onAction={() => navigate(`${opsBase}/field-operations`)} />;
   return <div className="relative z-10 grid gap-[22px] w-full">
@@ -722,22 +723,32 @@ function SalesAgentDetailPage({
       value: String(a.newCustomersAcquired)
     }]} />
       <section className="panel content-panel relative overflow-hidden">
-        {customers.length ? <><h4 className="subsection-title">Customers</h4><div style={{
-          display: 'flex',
-          flexWrap: 'wrap',
-          gap: 8,
-          marginTop: 8
-        }}>{customers.map(c => <span key={c} style={{
-            padding: '5px 12px',
-            borderRadius: 999,
-            background: 'var(--surface)',
-            border: '1px solid var(--surface-3)',
-            fontSize: '0.88rem',
-            fontWeight: 500
-          }}>{c}</span>)}</div></> : null}
-        {productPerformance.length ? <><h4 className="subsection-title" style={{
-          marginTop: 16
-        }}>Product Performance</h4><ul className="list-none p-0 m-0 flex flex-col gap-3">{productPerformance.map(p => <li key={p.product}><div><strong>{p.product}</strong></div><span>{p.units} units</span></li>)}</ul></> : null}
+        {customers.length ? <>
+          <div className="list-section-header"><h3>Customers <span className="text-ink/70">({customers.length})</span></h3></div>
+          <div className="corvex-table-wrapper">
+            <table className="corvex-table">
+              <thead><tr><th>Customer</th></tr></thead>
+              <tbody>
+                {pagination_customers.paginatedData.map(c => <tr key={c}><td>{c}</td></tr>)}
+              </tbody>
+            </table>
+          </div>
+          <Pagination {...pagination_customers} />
+        </> : null}
+        {productPerformance.length ? <>
+          <div className="list-section-header" style={{ marginTop: customers.length ? 16 : 0 }}>
+            <h3>Product Performance <span className="text-ink/70">({productPerformance.length})</span></h3>
+          </div>
+          <div className="corvex-table-wrapper">
+            <table className="corvex-table">
+              <thead><tr><th>Product</th><th>Units</th></tr></thead>
+              <tbody>
+                {pagination_products.paginatedData.map(p => <tr key={p.product}><td><strong>{p.product}</strong></td><td>{p.units} units</td></tr>)}
+              </tbody>
+            </table>
+          </div>
+          <Pagination {...pagination_products} />
+        </> : null}
         {!customers.length && !productPerformance.length ? <EmptyState title="No activity yet" description="Customers and sales mix will appear after visits and invoices are logged." /> : null}
       </section>
       <div className="flex justify-end gap-2 mt-4">
@@ -822,6 +833,17 @@ function ReportsHubPage({
   const pagination_invoices = usePagination(invoices || []);
   const paginated_invoices = pagination_invoices.paginatedData;
   if (loading) return <LoadingState message="Loading reports..." />;
+  const exportBranchReport = (format) => {
+    let rows = [];
+    if (tab === 'collection') rows = (collectionData?.daily || []).map((row) => ({ day: row.day, collected: row.amount, target: row.target }));
+    else if (tab === 'sales') rows = (salesData?.weekly || []).map((row) => ({ day: row.day, actual: row.actual, target: row.target, invoices: row.invoices }));
+    else if (tab === 'inventory') rows = (inventoryData?.lowStockItems || []).map((row) => ({ product: row.product_name, sku: row.sku, stock: row.available_stock, status: row.status }));
+    else if (tab === 'delinquency') rows = (delinquencyData?.delinquency || []).map((row) => ({ week: row.week, accounts: row.accounts, rate: row.rate }));
+    else rows = (invoices || []).map((row) => ({ invoice: row.invoice_number, customer: row.customer_name, amount: row.total_amount, date: row.invoices_date, status: row.status }));
+    const ok = exportRows(rows, { format, filename: `branch-${tab}-report`, title: `Branch ${tab} Report` });
+    if (ok) showToast(format === 'pdf' ? 'Report exported as PDF.' : 'Excel file downloaded.', 'success');
+    else showToast('Nothing to export.', 'error');
+  };
   return <div className="relative z-10 grid gap-[22px] w-full">
       <div className="segmented-control">
         {tabs.map(t => <button key={t.key} className={tab === t.key ? 'segment active' : 'segment'} type="button" onClick={() => setTab(t.key)}>{t.label}</button>)}
@@ -832,8 +854,8 @@ function ReportsHubPage({
       gap: 8,
       marginBottom: 20
     }}>
-        <button className="inline-flex justify-center items-center gap-2 px-5 py-2.5 rounded-md bg-mint text-ink border-[1.5px] border-surface-3 shadow-none hover:border-blue hover:text-blue transition-all duration-160 cursor-pointer" type="button" onClick={() => showToast('Export PDF initiated.', 'success')}>Export PDF</button>
-        <button className="inline-flex justify-center items-center gap-2 px-5 py-2.5 rounded-md bg-mint text-ink border-[1.5px] border-surface-3 shadow-none hover:border-blue hover:text-blue transition-all duration-160 cursor-pointer" type="button" onClick={() => showToast('Export Excel initiated.', 'success')}>Export Excel</button>
+        <button className="button secondary" type="button" onClick={() => exportBranchReport('pdf')}>Export PDF</button>
+        <button className="button secondary" type="button" onClick={() => exportBranchReport('excel')}>Export Excel</button>
       </div>
 
       {tab === 'collection' && <>
@@ -935,7 +957,7 @@ function ReportsHubPage({
               }} />
                   <Tooltip />
                   <Legend />
-                  <Bar yAxisId="l" dataKey="revenue" name="Revenue" fill="#8b5cf6" radius={[4, 4, 0, 0]} />
+                  <Bar yAxisId="l" dataKey="revenue" name="Revenue" fill="#1e5a7a" radius={[4, 4, 0, 0]} />
                   <Bar yAxisId="r" dataKey="visits" name="Visit %" fill="#10b981" radius={[4, 4, 0, 0]} />
                 </BarChart>
               </ResponsiveContainer>
@@ -1205,7 +1227,7 @@ function ReportsHubPage({
             }}>{kpi?.activeCollectors || 0}</div></div>
               <div><strong>Active Sales Agents</strong><div style={{
               fontSize: '1.5rem',
-              color: '#8b5cf6'
+              color: '#1e5a7a'
             }}>{kpi?.activeSalesAgents || 0}</div></div>
               <div><strong>Total Customers</strong><div style={{
               fontSize: '1.5rem'
@@ -1309,6 +1331,8 @@ function StaffPerformancePage({
   const paginated_____staff_collectors__sort__a_b___b_complianceScore_a_complianceScore_ = pagination_____staff_collectors__sort__a_b___b_complianceScore_a_complianceScore_.paginatedData;
   const pagination_____staff_salesAgents__sort__a_b___b_totalSalesAmount_a_totalSalesAmount_ = usePagination([...staff.salesAgents].sort((a, b) => b.totalSalesAmount - a.totalSalesAmount));
   const paginated_____staff_salesAgents__sort__a_b___b_totalSalesAmount_a_totalSalesAmount_ = pagination_____staff_salesAgents__sort__a_b___b_totalSalesAmount_a_totalSalesAmount_.paginatedData;
+  const pagination_scorecards = usePagination(combined);
+  const paginated_scorecards = pagination_scorecards.paginatedData;
   return <div className="relative z-10 grid gap-[22px] w-full">
       <div className="segmented-control">
         {tabs.map(t => <button key={t.key} className={tab === t.key ? 'segment active' : 'segment'} type="button" onClick={() => setTab(t.key)}>{t.label}</button>)}
@@ -1350,7 +1374,7 @@ function StaffPerformancePage({
               }} /><YAxis domain={[0, 100]} unit="%" tick={{
                 fontSize: 12
               }} /><Tooltip formatter={v => `${v}%`} /><Legend />
-                <Bar dataKey="visits" name="Visit Completion" fill="#8b5cf6" radius={[4, 4, 0, 0]} />
+                <Bar dataKey="visits" name="Visit Completion" fill="#1e5a7a" radius={[4, 4, 0, 0]} />
                 <Bar dataKey="conversion" name="Conversion" fill="#10b981" radius={[4, 4, 0, 0]} />
               </BarChart>
             </ResponsiveContainer>
@@ -1405,42 +1429,32 @@ function StaffPerformancePage({
         </section>}
 
       {tab === 'scorecards' && <section className="panel content-panel relative overflow-hidden">
-          <div className="flex flex-col md:flex-row justify-between gap-4 items-start md:items-center mb-4"><h3>Overall Rankings</h3></div>
-          <ul className="list-none p-0 m-0 flex flex-col gap-3">
-            {combined.map((s, i) => <li key={s.name}>
-                <div style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: 12
-          }}>
-                  <span style={{
-              width: 28,
-              height: 28,
-              borderRadius: '50%',
-              background: '#093850',
-              color: '#fff',
-              display: 'grid',
-              placeItems: 'center',
-              fontSize: '0.75rem',
-              fontWeight: 700,
-              flexShrink: 0
-            }}>#{i + 1}</span>
-                  <div><strong>{s.name}</strong><span className="text-ink/70" style={{
-                display: 'block',
-                fontSize: '0.82rem'
-              }}>{s.role}</span></div>
-                </div>
-                <div style={{
-            textAlign: 'right'
-          }}>
-                  <strong>{s.score}%</strong>
-                  <span className="text-ink/70" style={{
-              display: 'block',
-              fontSize: '0.82rem'
-            }}>{s.metric}</span>
-                </div>
-              </li>)}
-          </ul>
+          <div className="list-section-header"><h3>Overall Rankings <span className="text-ink/70">({combined.length})</span></h3></div>
+          {combined.length ? <>
+            <div className="corvex-table-wrapper">
+              <table className="corvex-table">
+                <thead>
+                  <tr>
+                    <th>Rank</th>
+                    <th>Name</th>
+                    <th>Role</th>
+                    <th>Score</th>
+                    <th>Metric</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {paginated_scorecards.map((s, i) => <tr key={`${s.role}-${s.name}`}>
+                      <td>#{(pagination_scorecards.currentPage - 1) * 10 + i + 1}</td>
+                      <td><strong>{s.name}</strong></td>
+                      <td>{s.role}</td>
+                      <td>{s.score}%</td>
+                      <td>{s.metric}</td>
+                    </tr>)}
+                </tbody>
+              </table>
+            </div>
+            <Pagination {...pagination_scorecards} />
+          </> : <EmptyState title="No rankings yet" description="Staff scorecards will appear once performance data is available." />}
         </section>}
     </div>;
 }
@@ -1585,7 +1599,8 @@ function CIDetailPage({
 function CustomersPage({
   navigate,
   branchName,
-  opsBase
+  opsBase,
+  showToast
 }) {
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('All');
@@ -1633,7 +1648,18 @@ function CustomersPage({
         <div className="list-section-header">
           <h3>Branch Customers</h3>
           <div className="list-section-actions">
-            <button className="button secondary" type="button" onClick={() => {}}>Export Data</button>
+            <button className="button secondary" type="button" onClick={() => {
+              const rows = filtered.map((c) => ({
+                customer: c.customerName,
+                address: c.address || '',
+                phone: c.contact_phone || '',
+                outstanding: c.outstanding_balance || 0,
+                payment: c.paymentStatus || '',
+                status: c.status || '',
+              }));
+              if (downloadPdf(rows, { filename: 'branch-customers.pdf', title: 'Branch Customers' })) showToast('Customer list exported as PDF.', 'success');
+              else showToast('Nothing to export.', 'error');
+            }}>Export PDF</button>
           </div>
         </div>
         <div className="list-section-toolbar" style={{
@@ -1902,6 +1928,8 @@ function AlertsPage({
     if (filter === 'All') return alerts;
     return alerts.filter(a => (a.category || '').toLowerCase().includes(filter.toLowerCase()));
   }, [alerts, filter]);
+  const pagination = usePagination(filtered);
+  const rows = pagination.paginatedData;
   const assignAlert = async (alertId) => {
     const result = await patchOperationalAlert(alertId, { assigned_to: currentUser?.id });
     if (result.success) {
@@ -1919,16 +1947,47 @@ function AlertsPage({
   if (loading && !alerts.length) return <LoadingState message="Loading alerts..." />;
   return <div className="relative z-10 grid gap-[22px] w-full">
       <section className="panel content-panel relative overflow-hidden">
-        <div className="segmented-control">
-          {['All', 'Collection', 'Sales', 'Inventory', 'Route'].map(f => <button key={f} className={filter === f ? 'segment active' : 'segment'} type="button" onClick={() => setFilter(f)}>{f}</button>)}
+        <div className="list-section-header"><h3>Alerts <span className="text-ink/70">({filtered.length})</span></h3></div>
+        <div className="list-section-toolbar" style={{ marginBottom: 12 }}>
+          <div className="segmented-control">
+            {['All', 'Collection', 'Sales', 'Inventory', 'Route'].map(f => <button key={f} className={filter === f ? 'segment active' : 'segment'} type="button" onClick={() => setFilter(f)}>{f}</button>)}
+          </div>
         </div>
+        {filtered.length ? <>
+          <div className="corvex-table-wrapper">
+            <table className="corvex-table">
+              <thead>
+                <tr>
+                  <th>Title</th>
+                  <th>Category</th>
+                  <th>Message</th>
+                  <th>Severity</th>
+                  <th>Date</th>
+                  <th>Status</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map(a => <tr key={a.id}>
+                    <td><strong>{a.title}</strong></td>
+                    <td>{a.category || a.type || '—'}</td>
+                    <td>{a.message}</td>
+                    <td><Severity severity={a.severity} /></td>
+                    <td>{formatDisplayDateTime(a.time || a.date)}</td>
+                    <td><StatusBadge status={a.resolved || a.status === 'Resolved' ? 'Resolved' : (a.status || 'Open')} /></td>
+                    <td className="table-actions">
+                      {!a.resolved && a.status !== 'Resolved' ? <>
+                        <button className="icon-action-button" type="button" title="Assign" onClick={() => assignAlert(a.id)}><NavIcon name="user" /></button>
+                        <button className="icon-action-button" type="button" title="Resolve" onClick={() => resolveAlert(a.id)}><NavIcon name="check" /></button>
+                      </> : <span className="muted">—</span>}
+                    </td>
+                  </tr>)}
+              </tbody>
+            </table>
+          </div>
+          <Pagination {...pagination} />
+        </> : <EmptyState title="No alerts" description="No alerts match this filter." />}
       </section>
-      <div className="notification-list">
-        {filtered.map(a => <article key={a.id} className="notification-item">
-            <div><h4>{a.title}</h4><p className="text-ink/70">{a.message}</p><span className="notification-time">{a.category} · {formatDisplayDateTime(a.time)}</span></div>
-            <div className="notification-actions"><Severity severity={a.severity} /><button className="inline-flex justify-center items-center gap-2 px-5 py-2.5 rounded-md bg-transparent text-blue border-[1.5px] border-blue-30 shadow-none hover:bg-blue-08 transition-all duration-160 cursor-pointer" type="button" onClick={() => assignAlert(a.id)}>Assign</button><button className="inline-flex justify-center items-center gap-2 px-5 py-2.5 rounded-md border-0 bg-blue text-white font-semibold cursor-pointer transition-all duration-160 hover:-translate-y-[1px] hover:shadow-[0_4px_16px_rgba(37,99,235,0.35)] hover:brightness-105 active:translate-y-0" type="button" onClick={() => resolveAlert(a.id)}>Resolve</button></div>
-          </article>)}
-      </div>
     </div>;
 }
 function NotificationsPage({
@@ -1972,11 +2031,11 @@ function NotificationsPage({
           {filtered.map(item => <article key={item.id} className={`notification-item${item.read ? '' : ' unread'}`}>
               <div><h4>{item.title}</h4><p className="text-ink/70">{item.message}</p><span className="notification-time">{formatDisplayDateTime(item.time)}</span></div>
               <div className="notification-actions">
-                {!item.read && <button className="inline-flex justify-center items-center gap-2 px-5 py-2.5 rounded-md bg-transparent text-blue border-[1.5px] border-blue-30 shadow-none hover:bg-blue-08 transition-all duration-160 cursor-pointer" type="button" onClick={async () => {
+                {!item.read && <button className="button ghost" type="button" onClick={async () => {
             const res = await markNotificationRead(item.id);
             if (res.success) load();
           }}>Mark Read</button>}
-                {item.relatedTo ? <button className="inline-flex justify-center items-center gap-2 px-5 py-2.5 rounded-md bg-mint text-ink border-[1.5px] border-surface-3 shadow-none hover:border-blue hover:text-blue transition-all duration-160 cursor-pointer" type="button" onClick={() => navigate(item.relatedTo)}>Open</button> : null}
+                {item.relatedTo ? <button className="button secondary" type="button" onClick={() => navigate(item.relatedTo)}>Open</button> : null}
               </div>
             </article>)}
         </div> : <EmptyState title="No notifications" description="You're all caught up." />}
@@ -2161,6 +2220,8 @@ function ApprovalCenterPage({
   const paginated_ciList = pagination_ciList.paginatedData;
   const pagination_transferList = usePagination(transferList);
   const paginated_transferList = pagination_transferList.paginatedData;
+  const pagination_specialList = usePagination(specialList);
+  const paginated_specialList = pagination_specialList.paginatedData;
   if (loading && !ciList.length && !transferList.length && !specialList.length) {
     return <LoadingState message="Loading approval center..." />;
   }
@@ -2201,7 +2262,7 @@ function ApprovalCenterPage({
       {tab === 'ci' && <section className="panel content-panel relative overflow-hidden">
           <div className="flex flex-col md:flex-row justify-between gap-4 items-start md:items-center mb-4">
             <h3>Credit Investigation Queue</h3>
-            <button className="inline-flex justify-center items-center gap-2 px-5 py-2.5 rounded-md bg-transparent text-blue border-[1.5px] border-blue-30 shadow-none hover:bg-blue-08 transition-all duration-160 cursor-pointer" type="button" onClick={() => navigate(`${opsBase}/ci-approvals`)}>Open Full CI Queue</button>
+            <button className="button ghost" type="button" onClick={() => navigate(`${opsBase}/ci-approvals`)}>Open Full CI Queue</button>
           </div>
           {ciList.length ? <><div className="corvex-table-wrapper">
               <table className="corvex-table">
@@ -2281,80 +2342,48 @@ function ApprovalCenterPage({
 
       {/* ── Special Collections ── */}
       {tab === 'special' && <section className="panel content-panel relative overflow-hidden">
-          <div className="flex flex-col md:flex-row justify-between gap-4 items-start md:items-center mb-4">
-            <h3>Special Collection Requests</h3>
-            <p className="text-ink/70" style={{
-          margin: 0,
-          fontSize: '0.85rem'
-        }}>Extended terms and partial collection approvals submitted by field collectors.</p>
+          <div className="list-section-header">
+            <h3>Special Collection Requests <span className="text-ink/70">({specialList.length})</span></h3>
+            <p className="list-section-subtitle">Extended terms and partial collection approvals submitted by field collectors.</p>
           </div>
-          {specialList.length ? <div className="grid" style={{
-        gap: 16
-      }}>
-              {specialList.map(s => <article key={s.id} className="panel content-panel relative overflow-hidden" style={{
-          padding: 20
-        }}>
-                  <div style={{
-            display: 'flex',
-            justifyContent: 'space-between',
-            alignItems: 'flex-start',
-            gap: 16,
-            marginBottom: 12
-          }}>
-                    <div>
-                      <h4 style={{
-                margin: 0,
-                fontSize: '1rem'
-              }}>{s.customerName}</h4>
-                      <span className="text-ink/70" style={{
-                fontSize: '0.82rem'
-              }}>{s.accountNumber} · submitted by {s.requestedBy} on {s.date}</span>
-                    </div>
-                    <StatusBadge status={s.status} />
-                  </div>
-                  <div style={{
-            display: 'grid',
-            gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))',
-            gap: 12,
-            marginBottom: 14
-          }}>
-                    <div><span className="metric-label" style={{
-                fontSize: '0.75rem',
-                textTransform: 'uppercase',
-                letterSpacing: '0.06em',
-                color: '#64748b'
-              }}>Request Type</span><strong style={{
-                display: 'block',
-                marginTop: 2
-              }}>{s.requestType}</strong></div>
-                    <div><span className="metric-label" style={{
-                fontSize: '0.75rem',
-                textTransform: 'uppercase',
-                letterSpacing: '0.06em',
-                color: '#64748b'
-              }}>Amount Involved</span><strong style={{
-                display: 'block',
-                marginTop: 2
-              }}>{formatCurrency(s.amount)}</strong></div>
-                  </div>
-                  <p style={{
-            margin: '0 0 14px',
-            fontSize: '0.88rem',
-            color: '#475569',
-            padding: '10px 14px',
-            background: '#f8fafc',
-            borderRadius: 8,
-            border: '1px solid #e2e8f0'
-          }}>{s.notes}</p>
-                  {s.status === 'Pending' && <div style={{
-            display: 'flex',
-            gap: 10
-          }}>
-                      <button className="inline-flex justify-center items-center gap-2 px-5 py-2.5 rounded-md border-0 bg-blue text-white font-semibold cursor-pointer transition-all duration-160 hover:-translate-y-[1px] hover:shadow-[0_4px_16px_rgba(37,99,235,0.35)] hover:brightness-105 active:translate-y-0" type="button" onClick={() => approveSpecial(s.requestId)}>Approve Request</button>
-                      <button className="inline-flex justify-center items-center gap-2 px-5 py-2.5 rounded-md bg-mint text-ink border-[1.5px] border-surface-3 shadow-none hover:border-blue hover:text-blue transition-all duration-160 cursor-pointer" type="button" onClick={() => rejectSpecial(s.requestId)}>Reject</button>
-                    </div>}
-                </article>)}
-            </div> : <EmptyState title="No special collection requests" description="All requests have been processed." />}
+          {specialList.length ? <>
+            <div className="corvex-table-wrapper">
+              <table className="corvex-table">
+                <thead>
+                  <tr>
+                    <th>Customer</th>
+                    <th>Account</th>
+                    <th>Requested By</th>
+                    <th>Date</th>
+                    <th>Request Type</th>
+                    <th>Amount</th>
+                    <th>Notes</th>
+                    <th>Status</th>
+                    <th>Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {paginated_specialList.map(s => <tr key={s.id}>
+                      <td><strong>{s.customerName}</strong></td>
+                      <td><span style={{ fontFamily: 'monospace', fontSize: '0.82rem' }}>{s.accountNumber || '—'}</span></td>
+                      <td>{s.requestedBy || '—'}</td>
+                      <td>{formatDisplayDate(s.date)}</td>
+                      <td>{s.requestType || '—'}</td>
+                      <td style={{ fontWeight: 600 }}>{formatCurrency(s.amount)}</td>
+                      <td>{s.notes || '—'}</td>
+                      <td><StatusBadge status={s.status} /></td>
+                      <td className="table-actions">
+                        {s.status === 'Pending' ? <>
+                          <button className="icon-action-button" type="button" title="Approve" onClick={() => approveSpecial(s.requestId)}><NavIcon name="check" /></button>
+                          <button className="icon-action-button danger" type="button" title="Reject" onClick={() => rejectSpecial(s.requestId)}><NavIcon name="close" /></button>
+                        </> : <span className="muted">—</span>}
+                      </td>
+                    </tr>)}
+                </tbody>
+              </table>
+            </div>
+            <Pagination {...pagination_specialList} />
+          </> : <EmptyState title="No special collection requests" description="All requests have been processed." />}
         </section>}
     </div>;
 }

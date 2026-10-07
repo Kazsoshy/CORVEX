@@ -1,5 +1,5 @@
 import { Pagination } from '../shared/Pagination';
-import { usePagination } from '../../hooks/usePagination';
+import { usePagination, DEFAULT_PAGE_SIZE } from '../../hooks/usePagination';
 import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { formatCurrency, formatDisplayDate, formatDisplayDateTime, formatPaymentTimestamp } from '../../utils/formatters.js';
@@ -10,6 +10,7 @@ import {
   fetchCollectionPaymentById,
   fetchDigitalReceipts,
   fetchDigitalReceiptById,
+  sendReceiptToCustomer,
   fetchTodayFieldVisits,
   fetchSawPriority,
   mapSawRowToRouteStop,
@@ -24,10 +25,14 @@ import {
 import { fetchNotifications } from '../../api/notificationService.js';
 import { fetchMyProfile, updateMyProfile } from '../../api/profileService.js';
 import { getCurrentUser, persistCurrentUserFromProfile, requestLogout } from '../../api/authService.js';
+<<<<<<< HEAD
 import { downloadCsv } from '../../utils/csvExport';
 import { collectorMapPath, openPhoneCall } from '../../utils/mapsNavigation';
+=======
+import { downloadPdf } from '../../utils/dataExport';
+import { openPhoneCall } from '../../utils/mapsNavigation';
+>>>>>>> c5d45bfcdf69c05890fde70d0eac579871ddec05
 import { NotificationsInbox } from '../shared/NotificationsInbox';
-import { AccountCard } from './AccountCard';
 import { EmptyState } from '../shared/EmptyState';
 import { LoadingState } from '../shared/LoadingState';
 import { NavIcon } from '../../navIcons';
@@ -175,32 +180,63 @@ function DashboardPage({
 
       <div className="dashboard-widgets grid two-up">
         <section className="panel content-panel relative overflow-hidden">
-          <div className="flex flex-col md:flex-row justify-between gap-4 items-start md:items-center mb-4">
+          <div className="list-section-header">
             <h3>Recent Collections</h3>
           </div>
-          {recentCollections.length ? <ul className="list-none p-0 m-0 flex flex-col gap-3">
-              {recentCollections.map(item => <li key={item.collectionpayment_id}>
-                  <div>
-                    <strong>{item.customer_name}</strong>
-                    <span className="text-ink/70">{formatDisplayDate(item.payment_date)}</span>
-                  </div>
-                  <span>{formatCurrency(Number(item.amount))}</span>
-                </li>)}
-            </ul> : <EmptyState title="No collections yet" description="Collections logged today will appear here." />}
+          {recentCollections.length ? (
+            <div className="corvex-table-wrapper">
+              <table className="corvex-table">
+                <thead>
+                  <tr>
+                    <th>Name</th>
+                    <th>Date</th>
+                    <th>Amount</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {recentCollections.map(item => (
+                    <tr key={item.collectionpayment_id}>
+                      <td><strong>{item.customer_name || '—'}</strong></td>
+                      <td>{formatDisplayDate(item.payment_date)}</td>
+                      <td style={{ fontWeight: 600 }}>{formatCurrency(Number(item.amount))}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ) : (
+            <EmptyState title="No collections yet" description="Collections logged today will appear here." />
+          )}
         </section>
 
         <section className="panel content-panel relative overflow-hidden">
-          <div className="flex flex-col md:flex-row justify-between gap-4 items-start md:items-center mb-4">
+          <div className="list-section-header">
             <h3>Recent Field Reports</h3>
           </div>
-          {recentFieldReports.length ? <ul className="list-none p-0 m-0 flex flex-col gap-3">
-              {recentFieldReports.map(item => <li key={item.report_id}>
-                  <div>
-                    <strong>{item.activity_type}</strong>
-                    <span className="text-ink/70">{item.customer_name} · {formatDisplayDateTime(item.created_at)}</span>
-                  </div>
-                </li>)}
-            </ul> : <EmptyState title="No field reports yet" description="Submit field activity from the Field Reports page." actionLabel="Field Reports" onAction={() => navigate('/collector/field-reports')} />}
+          {recentFieldReports.length ? (
+            <div className="corvex-table-wrapper">
+              <table className="corvex-table">
+                <thead>
+                  <tr>
+                    <th>Type</th>
+                    <th>Name</th>
+                    <th>Date / Time</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {recentFieldReports.map(item => (
+                    <tr key={item.report_id}>
+                      <td><strong>{item.activity_type || '—'}</strong></td>
+                      <td>{item.customer_name || '—'}</td>
+                      <td>{formatDisplayDateTime(item.created_at)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ) : (
+            <EmptyState title="No field reports yet" description="Submit field activity from the Field Reports page." actionLabel="Field Reports" onAction={() => navigate('/collector/field-reports')} />
+          )}
         </section>
       </div>
 
@@ -584,6 +620,7 @@ function RoutePage({
       label: 'Road distance',
       value: roadStats?.distanceKm != null ? `${roadStats.distanceKm} km` : '—'
     }]} />
+<<<<<<< HEAD
       <section className="panel content-panel relative overflow-hidden" style={{
       padding: '14px 20px'
     }}>
@@ -607,6 +644,8 @@ function RoutePage({
           description="Ask your branch manager to assign collection customers for today from Field Operations → collector detail."
         />
       ) : null}
+=======
+>>>>>>> c5d45bfcdf69c05890fde70d0eac579871ddec05
       <section className="panel content-panel relative overflow-hidden">
         <div className="flex flex-col md:flex-row justify-between gap-4 items-start md:items-center mb-4">
           <h3>{showMap || pageType === 'routeMap' ? 'Route Map View' : 'SAW Customer Priority List'}</h3>
@@ -622,7 +661,7 @@ function RoutePage({
                   {item}
                 </button>)}
             </div>
-            {pageType !== 'routeMap' ? <button className="inline-flex justify-center items-center gap-2 px-5 py-2.5 rounded-md bg-mint text-ink border-[1.5px] border-surface-3 shadow-none hover:border-blue hover:text-blue transition-all duration-160 cursor-pointer" type="button" onClick={() => setShowMap(!showMap)}>
+            {pageType !== 'routeMap' ? <button className="button secondary" type="button" onClick={() => setShowMap(!showMap)}>
                 {showMap ? 'Show List View' : 'Show Map View'}
               </button> : null}
           </div>
@@ -797,7 +836,7 @@ function AccountsPage({
   useEffect(() => {
     async function load() {
       setLoading(true);
-      const result = await fetchAccounts();
+      const result = await fetchAccounts({ limit: 200, page: 1 });
       if (result.success) setCustomers(result.data);
       setLoading(false);
     }
@@ -844,11 +883,16 @@ function AccountsPage({
     }
     return results;
   }, [customers, search, filter, sortBy]);
+  const pagination = usePagination(filteredCustomers, {
+    pageSize: DEFAULT_PAGE_SIZE,
+    resetKey: `${search}|${filter}|${sortBy}`,
+  });
+  const rows = pagination.paginatedData;
   if (loading) return <LoadingState message="Loading customers..." />;
   return <div className="relative z-10 grid gap-[22px] w-full">
       <section className="panel content-panel relative overflow-hidden">
         <div className="list-section-header">
-          <h3>Customer List</h3>
+          <h3>Customer List <span className="text-ink/70">({filteredCustomers.length})</span></h3>
         </div>
         <div className="list-section-toolbar" style={{
         marginBottom: 12
@@ -880,9 +924,45 @@ function AccountsPage({
             </select>
           </div>
         </div>
-        {filteredCustomers.length ? <div className="account-card-grid">
-          {filteredCustomers.map(customer => <AccountCard key={customer.id} account={customer} onViewDetails={item => navigate(`/collector/account-detail/${item.id}?from=accounts`)} onCall={() => collectorCall(customer, showToast)} onNavigate={() => collectorOpenMap(customer, navigate, 'accounts')} />)}
-        </div> : <EmptyState title="No customers found" description="Adjust your search or filters to find customers." actionLabel="Clear search" onAction={() => {
+        {filteredCustomers.length ? <>
+          <div className="corvex-table-wrapper">
+            <table className="corvex-table">
+              <thead>
+                <tr>
+                  <th>Customer</th>
+                  <th>Account</th>
+                  <th>Address</th>
+                  <th>Outstanding</th>
+                  <th>Days Overdue</th>
+                  <th>Status</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map(customer => <tr key={customer.id} className="clickable-row" onClick={() => navigate(`/collector/account-detail/${customer.id}?from=accounts`)}>
+                    <td><strong>{customer.customerName}</strong></td>
+                    <td><span style={{ fontFamily: 'monospace', fontSize: '0.82rem' }}>{customer.accountNumber || '—'}</span></td>
+                    <td>{customer.address || '—'}</td>
+                    <td style={{ fontWeight: 600 }}>{formatCurrency(customer.outstandingBalance)}</td>
+                    <td>{customer.daysOverdue ?? '—'}</td>
+                    <td><StatusBadge status={customer.status} /></td>
+                    <td className="table-actions" onClick={e => e.stopPropagation()}>
+                      <button className="icon-action-button" type="button" title="View Details" onClick={() => navigate(`/collector/account-detail/${customer.id}?from=accounts`)}>
+                        <NavIcon name="view" />
+                      </button>
+                      <button className="icon-action-button" type="button" title="Call Customer" onClick={() => collectorCall(customer, showToast)}>
+                        <NavIcon name="user" />
+                      </button>
+                      <button className="icon-action-button" type="button" title="Open Map" onClick={() => collectorOpenMap(customer, navigate, 'accounts')}>
+                        <NavIcon name="map" />
+                      </button>
+                    </td>
+                  </tr>)}
+              </tbody>
+            </table>
+          </div>
+          <Pagination {...pagination} />
+        </> : <EmptyState title="No customers found" description="Adjust your search or filters to find customers." actionLabel="Clear search" onAction={() => {
       setSearch('');
       setFilter('All Customers');
     }} />}
@@ -1216,11 +1296,11 @@ function ReceiptsListPage({
                   status: r.payment_status,
                   date: r.receipt_date,
                 }));
-                if (downloadCsv(rows, 'collector-receipts.csv')) showToast('Receipts exported.', 'success');
+                if (downloadPdf(rows, { filename: 'collector-receipts.pdf', title: 'Collector Receipts' })) showToast('Receipts exported as PDF.', 'success');
                 else showToast('Nothing to export.', 'error');
               }}
             >
-              Export CSV
+              Export PDF
             </button>
           </div>
         </div>
@@ -1402,7 +1482,11 @@ function DigitalReceiptPage({
 
       <div className="flex flex-wrap justify-end gap-2 mt-4">
         <button className="button ghost" type="button" onClick={() => navigate('/collector/receipts')}>Back to Receipts</button>
-        <button className="button secondary" type="button" onClick={() => showToast(`Receipt ${receipt.receipt_number} sent to ${receipt.customer_name}${receipt.customer_phone ? ` (${receipt.customer_phone})` : ''}.`, 'success')}>
+        <button className="button secondary" type="button" onClick={async () => {
+          const result = await sendReceiptToCustomer(receipt.receipts_id);
+          if (result.success) showToast(result.message || 'Receipt sent.', 'success');
+          else showToast(result.message || 'Could not send receipt.', 'error');
+        }}>
           Send to (Customer)
         </button>
         <button
@@ -1418,10 +1502,10 @@ function DigitalReceiptPage({
               payment_date: receipt.payment_date,
               branch: receipt.branch_name,
             };
-            if (downloadCsv([row], `receipt-${receipt.receipt_number}.csv`)) showToast('Receipt exported.', 'success');
+            if (downloadPdf([row], { filename: `receipt-${receipt.receipt_number}.pdf`, title: 'Receipt Details' })) showToast('Receipt exported as PDF.', 'success');
           }}
         >
-          Download CSV
+          Export PDF
         </button>
       </div>
     </div>;
@@ -1694,11 +1778,11 @@ function CollectionHistoryPage({
                   status: p.status,
                   date: p.payment_date,
                 }));
-                if (downloadCsv(rows, 'collector-payments.csv')) showToast('Payments exported.', 'success');
+                if (downloadPdf(rows, { filename: 'collector-payments.pdf', title: 'Collector Payments' })) showToast('Payments exported as PDF.', 'success');
                 else showToast('Nothing to export.', 'error');
               }}
             >
-              Export CSV
+              Export PDF
             </button>
           </div>
         </div>
@@ -1934,27 +2018,39 @@ function ProfilePage({
 function SettingsPage({
   navigate
 }) {
+  const [prefs, setPrefs] = useState(() => ({
+    language: localStorage.getItem('corvex_collector_language') || 'English',
+    push: localStorage.getItem('corvex_collector_push') !== '0',
+    autosync: localStorage.getItem('corvex_collector_autosync') !== '0',
+  }));
+  const save = (next) => {
+    setPrefs(next);
+    localStorage.setItem('corvex_collector_language', next.language);
+    localStorage.setItem('corvex_collector_push', next.push ? '1' : '0');
+    localStorage.setItem('corvex_collector_autosync', next.autosync ? '1' : '0');
+  };
   return <div className="relative z-10 grid gap-[22px] w-full">
       <section className="panel form-panel content-panel">
         <div className="flex flex-col md:flex-row justify-between gap-4 items-start md:items-center mb-4">
           <h3>Settings</h3>
         </div>
+        <p className="text-ink/70">These preferences are saved on this device.</p>
         <div className="form-group">
           <label>Language</label>
-          <select className="filter-select" defaultValue="English">
+          <select className="filter-select" value={prefs.language} onChange={(e) => save({ ...prefs, language: e.target.value })}>
             <option>English</option>
             <option>Filipino</option>
           </select>
         </div>
         <div className="form-group">
           <label className="toggle-label">
-            <input type="checkbox" defaultChecked />
+            <input type="checkbox" checked={prefs.push} onChange={(e) => save({ ...prefs, push: e.target.checked })} />
             Enable push notifications
           </label>
         </div>
         <div className="form-group">
           <label className="toggle-label">
-            <input type="checkbox" defaultChecked />
+            <input type="checkbox" checked={prefs.autosync} onChange={(e) => save({ ...prefs, autosync: e.target.checked })} />
             Auto-sync route data
           </label>
         </div>

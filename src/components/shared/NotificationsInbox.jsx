@@ -3,6 +3,8 @@ import { fetchNotifications, markNotificationRead } from '../../api/notification
 import { formatDisplayDate } from '../../utils/formatters';
 import { EmptyState } from './EmptyState';
 import { LoadingState } from './LoadingState';
+import { Pagination } from './Pagination';
+import { usePagination } from '../../hooks/usePagination';
 import { StatusBadge } from '../StatusBadge';
 
 /**
@@ -46,6 +48,8 @@ export function NotificationsInbox({
     if (filter === 'All') return notifications;
     return notifications.filter((n) => n.category === filter);
   }, [notifications, filter]);
+  const pagination = usePagination(filtered, { resetKey: filter });
+  const pageItems = pagination.paginatedData;
 
   const markAllRead = async () => {
     const unread = notifications.filter((n) => n.status === 'Unread');
@@ -89,8 +93,9 @@ export function NotificationsInbox({
       </section>
 
       {filtered.length ? (
+        <>
         <div className="notification-list">
-          {filtered.map((item) => {
+          {pageItems.map((item) => {
             const isUnread = item.status === 'Unread';
             const relatedPath = resolveRelatedPath?.(item);
             return (
@@ -103,7 +108,7 @@ export function NotificationsInbox({
                     <h4 style={{ margin: 0 }}>{item.title}</h4>
                     {item.category ? <StatusBadge status={item.category} /> : null}
                   </div>
-                  <p className="text-ink/70">{item.message}</p>
+                  <p className="muted">{item.message}</p>
                   <span className="notification-time">
                     {[item.category, formatDisplayDate(item.created_at)].filter(Boolean).join(' · ')}
                     {isUnread ? ' · Unread' : ''}
@@ -113,7 +118,7 @@ export function NotificationsInbox({
                   {isUnread ? (
                     <button
                       type="button"
-                      className="inline-flex justify-center items-center gap-2 px-5 py-2.5 rounded-md bg-transparent text-blue border-[1.5px] border-blue-30 shadow-none hover:bg-blue-08 transition-all duration-160 cursor-pointer"
+                      className="button ghost"
                       onClick={() => markOneRead(item.notification_id)}
                     >
                       Mark Read
@@ -122,7 +127,7 @@ export function NotificationsInbox({
                   {relatedPath && navigate ? (
                     <button
                       type="button"
-                      className="inline-flex justify-center items-center gap-2 px-5 py-2.5 rounded-md bg-mint text-ink border-[1.5px] border-surface-3 shadow-none hover:border-blue hover:text-blue transition-all duration-160 cursor-pointer"
+                      className="button secondary"
                       onClick={() => navigate(relatedPath)}
                     >
                       Open
@@ -133,6 +138,8 @@ export function NotificationsInbox({
             );
           })}
         </div>
+        <Pagination {...pagination} />
+        </>
       ) : (
         <EmptyState title="No notifications" description="You're all caught up." />
       )}

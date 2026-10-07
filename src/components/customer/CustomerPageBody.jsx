@@ -2,8 +2,8 @@ import { Pagination } from '../shared/Pagination';
 import { usePagination } from '../../hooks/usePagination';
 import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { NOTIFICATIONS } from '../../data/customerMockData';
-import { login as apiLogin, getEntryPathForRole } from '../../api/authService.js';
+import { login as apiLogin, getEntryPathForRole, requestLogout } from '../../api/authService.js';
+import { updateMyProfile } from '../../api/profileService.js';
 import {
   fetchCustomerPortalMe,
   fetchCustomerPortalPayments,
@@ -13,10 +13,15 @@ import {
   fetchCustomerPurchaseRequests,
   fetchCustomerStatementSummary,
   submitCustomerPurchaseRequest,
+  updateCustomerPortalContact,
 } from '../../api/customerPortalService.js';
+import { downloadPdf } from '../../utils/dataExport.js';
+import { NotificationsInbox } from '../shared/NotificationsInbox';
+import { fetchNotifications } from '../../api/notificationService.js';
 import { formatDisplayDate, formatDisplayDateTime, formatCurrency } from '../../utils/formatters.js';
 import { EmptyState } from '../shared/EmptyState';
 import { LoadingState } from '../shared/LoadingState';
+import { StatusBadge } from '../StatusBadge';
 import { NavIcon } from '../../navIcons';
 function StatsGrid({
   stats
@@ -116,6 +121,7 @@ function HomePage({
 }) {
   const [account, setAccount] = useState(null);
   const [recentPayments, setRecentPayments] = useState([]);
+  const [unread, setUnread] = useState(0);
   const [loading, setLoading] = useState(true);
   useEffect(() => {
     async function load() {
@@ -132,7 +138,13 @@ function HomePage({
     }
     loadPayments();
   }, []);
-  const unread = NOTIFICATIONS.filter(n => !n.read).length;
+  useEffect(() => {
+    async function loadUnread() {
+      const res = await fetchNotifications();
+      if (res.success) setUnread((res.data || []).filter((n) => n.status !== 'Read').length);
+    }
+    loadUnread();
+  }, []);
   const paidTotal = recentPayments.reduce((s, p) => s + Number(p.amount || 0), 0);
   const outstanding = Number(account?.outstanding_balance || 0);
   const progressPct = Math.min(100, Math.round(paidTotal / (paidTotal + outstanding) * 100) || 0);
@@ -162,14 +174,6 @@ function HomePage({
       label: 'Account Status',
       value: account?.status || '—'
     }]} />
-
-      <section className="panel content-panel relative overflow-hidden">
-        <p>
-          {outstanding > 0
-            ? `Your current outstanding balance is ${formatCurrency(outstanding)}.`
-            : 'Your account has no outstanding balance recorded.'}
-        </p>
-      </section>
 
       <div className="flex flex-wrap gap-2 justify-end mt-4 mb-4">
         <button className="button secondary" type="button" onClick={() => navigate('/customer/statements')}>Statements</button>
@@ -213,6 +217,9 @@ function AccountDetailsPage({
   const [account, setAccount] = useState(null);
   const [loading, setLoading] = useState(true);
   const [contact, setContact] = useState({ contactNumber: '', email: '' });
+  const [password, setPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
+  const [saving, setSaving] = useState(false);
   useEffect(() => {
     async function load() {
       const res = await fetchCustomerPortalMe();
@@ -231,15 +238,43 @@ function AccountDetailsPage({
   if (!account) return <EmptyState title="Account unavailable" description="Could not load your customer record." />;
   return <div className="page customer-page">
       <section className="panel content-panel relative overflow-hidden">
-        <div className="flex flex-col md:flex-row justify-between gap-4 items-start md:items-center mb-4"><h3>Account Information</h3></div>
-        <ul className="detail-list">
-          <li><span>Customer Name</span><strong>{`${account.first_name || ''} ${account.last_name || ''}`.trim()}</strong></li>
-          <li><span>Account Number</span><strong>{account.customer_code || account.customer_id}</strong></li>
-          <li><span>Address</span><strong>{account.address || '—'}</strong></li>
-          <li><span>Branch</span><strong>{account.branch_name || '—'}</strong></li>
-          <li><span>Account Status</span><strong>{account.status || '—'}</strong></li>
-          <li><span>Portal Status</span><strong>{account.portal_status || '—'}</strong></li>
-        </ul>
+        <div className="list-section-header"><h3>Account Information</h3></div>
+        <div className="corvex-table-wrapper">
+          <table className="corvex-table">
+            <thead>
+              <tr>
+                <th>Field</th>
+                <th>Details</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>Customer Name</td>
+                <td><strong>{`${account.first_name || ''} ${account.last_name || ''}`.trim() || '—'}</strong></td>
+              </tr>
+              <tr>
+                <td>Account Number</td>
+                <td><span style={{ fontFamily: 'monospace', fontSize: '0.82rem' }}>{account.customer_code || account.customer_id || '—'}</span></td>
+              </tr>
+              <tr>
+                <td>Address</td>
+                <td>{account.address || '—'}</td>
+              </tr>
+              <tr>
+                <td>Branch</td>
+                <td>{account.branch_name || '—'}</td>
+              </tr>
+              <tr>
+                <td>Account Status</td>
+                <td><StatusBadge status={account.status || '—'} /></td>
+              </tr>
+              <tr>
+                <td>Portal Status</td>
+                <td><StatusBadge status={account.portal_status || '—'} /></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
       </section>
 
       <section className="panel form-panel content-panel">
@@ -254,9 +289,40 @@ function AccountDetailsPage({
         }))} /></label>
       </section>
 
+      {showPassword ? <section className="panel form-panel content-panel">
+        <label>New password<input type="password" value={password} onChange={e => setPassword(e.target.value)} placeholder="Min. 8 characters" /></label>
+      </section> : null}
       <div className="flex justify-end gap-2 mt-4">
-        <button className="button secondary" type="button" onClick={() => showToast('Change Password saved.', 'success')}>Change Password</button>
-        <button className="button" type="button" onClick={() => showToast('Update Contact Information saved.', 'success')}>Update Contact Information</button>
+        <button className="button secondary" type="button" disabled={saving} onClick={async () => {
+          if (!showPassword) {
+            setShowPassword(true);
+            return;
+          }
+          if (password.trim().length < 8) {
+            showToast('Password must be at least 8 characters.', 'error');
+            return;
+          }
+          setSaving(true);
+          const result = await updateMyProfile({ password: password.trim() });
+          setSaving(false);
+          if (result.success) {
+            setPassword('');
+            setShowPassword(false);
+            showToast('Password updated.', 'success');
+          } else showToast(result.message || 'Failed to change password.', 'error');
+        }}>{showPassword ? 'Save Password' : 'Change Password'}</button>
+        <button className="button" type="button" disabled={saving} onClick={async () => {
+          setSaving(true);
+          const result = await updateCustomerPortalContact({
+            contact_phone: contact.contactNumber,
+            portal_email: contact.email,
+          });
+          setSaving(false);
+          if (result.success) {
+            setAccount(result.data);
+            showToast('Contact information updated.', 'success');
+          } else showToast(result.message || 'Failed to update contact information.', 'error');
+        }}>Update Contact Information</button>
       </div>
     </div>;
 }
@@ -337,7 +403,17 @@ function PaymentHistoryPage({
       </section>
 
       <div className="flex justify-end mt-4">
-        <button className="button secondary" type="button" onClick={() => showToast('Statement download started.', 'success')}>Download Statement</button>
+        <button className="button secondary" type="button" onClick={() => {
+          const rows = filtered.map((p) => ({
+            date: p.payment_date,
+            amount: p.amount,
+            method: p.payment_method,
+            collector: p.collector_name || '',
+            receipt: p.receipt_number || '',
+          }));
+          if (downloadPdf(rows, { filename: 'payment-statement.pdf', title: 'Payment Statement' })) showToast('Statement exported as PDF.', 'success');
+          else showToast('Nothing to export.', 'error');
+        }}>Export PDF</button>
       </div>
     </div>;
 }
@@ -455,7 +531,15 @@ function StatementsPage({
                       <button className="icon-action-button" type="button" title="View" onClick={() => navigate(`/customer/statements/${encodeURIComponent(id)}`)}>
                         <NavIcon name="view" />
                       </button>
-                      <button className="icon-action-button" type="button" title="Download" onClick={() => showToast(`Downloading ${label} summary.`, 'success')}>
+                      <button className="icon-action-button" type="button" title="Export PDF" onClick={() => {
+                        const ok = downloadPdf([{
+                          month: label,
+                          total_paid: s.total_paid,
+                          outstanding_balance: summary?.outstanding_balance || 0,
+                        }], { filename: `statement-${id}.pdf`, title: `${label} Statement` });
+                        if (ok) showToast('Statement exported as PDF.', 'success');
+                        else showToast('Nothing to export.', 'error');
+                      }}>
                         <NavIcon name="download" />
                       </button>
                     </td>
@@ -506,7 +590,16 @@ function StatementDetailPage({
         </ul>
       </section>
       <div className="flex justify-end mt-4">
-        <button className="button" type="button" onClick={() => showToast(`Downloading ${label} summary.`, 'success')}>Download PDF Statement</button>
+        <button className="button" type="button" onClick={() => {
+          const ok = downloadPdf([{
+            period: label,
+            total_paid: monthRow.total_paid,
+            outstanding_balance: account?.outstanding_balance || 0,
+            account: account?.customer_code || '',
+          }], { filename: `statement-${monthKey}.pdf`, title: `${label} Statement` });
+          if (ok) showToast('Statement exported as PDF.', 'success');
+          else showToast('Nothing to export.', 'error');
+        }}>Export PDF</button>
       </div>
     </div>;
 }
@@ -514,22 +607,12 @@ function NotificationsPage({
   navigate,
   showToast
 }) {
-  const [items, setItems] = useState(NOTIFICATIONS);
-  const markRead = id => setItems(prev => prev.map(n => n.id === id ? {
-    ...n,
-    read: true
-  } : n));
-  return <div className="page customer-page">
-      {items.length === 0 ? <EmptyState title="No notifications" description="Payment reminders and updates will appear here." /> : <ul className="notification-list">
-          {items.map(n => <li key={n.id} className={`notification-item${n.read ? '' : ' unread'}`}>
-              <div><strong>{n.type}</strong><p className="text-ink/70">{n.message}</p></div>
-              <div className="notification-actions">
-                {!n.read ? <button className="inline-flex justify-center items-center gap-2 px-5 py-2.5 rounded-md bg-transparent text-blue border-[1.5px] border-blue-30 shadow-none hover:bg-blue-08 transition-all duration-160 cursor-pointer" type="button" onClick={() => markRead(n.id)}>Mark as Read</button> : null}
-                {n.relatedTo ? <button className="inline-flex justify-center items-center gap-2 px-5 py-2.5 rounded-md bg-transparent text-blue border-[1.5px] border-blue-30 shadow-none hover:bg-blue-08 transition-all duration-160 cursor-pointer" type="button" onClick={() => navigate(n.relatedTo)}>Open</button> : null}
-              </div>
-            </li>)}
-        </ul>}
-    </div>;
+  return <NotificationsInbox navigate={navigate} showToast={showToast} resolveRelatedPath={(item) => {
+    const category = String(item.category || '').toLowerCase();
+    if (category.includes('receipt')) return '/customer/receipts';
+    if (category.includes('payment')) return '/customer/payment-history';
+    return null;
+  }} />;
 }
 function ProfilePage({
   navigate,
@@ -537,7 +620,10 @@ function ProfilePage({
 }) {
   const [account, setAccount] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [otpEnabled, setOtpEnabled] = useState(true);
+  const [otpEnabled, setOtpEnabled] = useState(() => localStorage.getItem('corvex_customer_otp') !== '0');
+  const [showPassword, setShowPassword] = useState(false);
+  const [password, setPassword] = useState('');
+  const [saving, setSaving] = useState(false);
   useEffect(() => {
     async function load() {
       const res = await fetchCustomerPortalMe();
@@ -551,34 +637,95 @@ function ProfilePage({
   const customerName = `${account.first_name || ''} ${account.last_name || ''}`.trim() || '—';
   return <div className="page customer-page">
       <section className="panel content-panel relative overflow-hidden">
-        <div className="flex flex-col md:flex-row justify-between gap-4 items-start md:items-center mb-4"><h3>Personal Information</h3></div>
-        <ul className="detail-list">
-          <li><span>Name</span><strong>{customerName}</strong></li>
-          <li><span>Account Number</span><strong>{account.customer_code || account.customer_id}</strong></li>
-          <li><span>Branch</span><strong>{account.branch_name || '—'}</strong></li>
-        </ul>
+        <div className="list-section-header"><h3>Personal Information</h3></div>
+        <div className="corvex-table-wrapper">
+          <table className="corvex-table">
+            <thead>
+              <tr>
+                <th>Field</th>
+                <th>Details</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>Name</td>
+                <td><strong>{customerName}</strong></td>
+              </tr>
+              <tr>
+                <td>Account Number</td>
+                <td><span style={{ fontFamily: 'monospace', fontSize: '0.82rem' }}>{account.customer_code || account.customer_id || '—'}</span></td>
+              </tr>
+              <tr>
+                <td>Branch</td>
+                <td>{account.branch_name || '—'}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
       </section>
 
       <section className="panel content-panel relative overflow-hidden">
-        <div className="flex flex-col md:flex-row justify-between gap-4 items-start md:items-center mb-4"><h3>Contact Information</h3></div>
-        <ul className="detail-list">
-          <li><span>Phone</span><strong>{account.contact_phone || '—'}</strong></li>
-          <li><span>Email</span><strong>{account.portal_email || '—'}</strong></li>
-          <li><span>Address</span><strong>{account.address || '—'}</strong></li>
-        </ul>
+        <div className="list-section-header"><h3>Contact Information</h3></div>
+        <div className="corvex-table-wrapper">
+          <table className="corvex-table">
+            <thead>
+              <tr>
+                <th>Field</th>
+                <th>Details</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>Phone</td>
+                <td>{account.contact_phone || '—'}</td>
+              </tr>
+              <tr>
+                <td>Email</td>
+                <td>{account.portal_email || '—'}</td>
+              </tr>
+              <tr>
+                <td>Address</td>
+                <td>{account.address || '—'}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
       </section>
 
       <section className="panel form-panel content-panel">
         <div className="flex flex-col md:flex-row justify-between gap-4 items-start md:items-center mb-4"><h3>Security Settings</h3></div>
         <label className="toggle-label">
-          <input type="checkbox" checked={otpEnabled} onChange={e => setOtpEnabled(e.target.checked)} />
+          <input type="checkbox" checked={otpEnabled} onChange={e => {
+            setOtpEnabled(e.target.checked);
+            localStorage.setItem('corvex_customer_otp', e.target.checked ? '1' : '0');
+          }} />
           Enable OTP for login
         </label>
       </section>
 
+      {showPassword ? <section className="panel form-panel content-panel">
+        <label>New password<input type="password" value={password} onChange={e => setPassword(e.target.value)} placeholder="Min. 8 characters" /></label>
+      </section> : null}
       <div className="flex justify-end gap-2 mt-4">
         <button className="button ghost" type="button" onClick={() => requestLogout()}>Logout</button>
-        <button className="button secondary" type="button" onClick={() => showToast('Change Password action recorded.', 'success')}>Change Password</button>
+        <button className="button secondary" type="button" disabled={saving} onClick={async () => {
+          if (!showPassword) {
+            setShowPassword(true);
+            return;
+          }
+          if (password.trim().length < 8) {
+            showToast('Password must be at least 8 characters.', 'error');
+            return;
+          }
+          setSaving(true);
+          const result = await updateMyProfile({ password: password.trim() });
+          setSaving(false);
+          if (result.success) {
+            setPassword('');
+            setShowPassword(false);
+            showToast('Password updated.', 'success');
+          } else showToast(result.message || 'Failed to change password.', 'error');
+        }}>{showPassword ? 'Save Password' : 'Change Password'}</button>
       </div>
     </div>;
 }

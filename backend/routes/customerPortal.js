@@ -39,6 +39,40 @@ router.get('/me', async (req, res) => {
   }
 });
 
+router.put('/me', async (req, res) => {
+  try {
+    const pool = req.app.locals.pool;
+    const customer = await getLinkedCustomer(pool, req.currentUser.id);
+    if (!customer) {
+      return res.status(404).json({ success: false, message: 'No customer record is linked to this account.' });
+    }
+
+    const contactPhone = req.body.contact_phone !== undefined
+      ? String(req.body.contact_phone || '').trim()
+      : customer.contact_phone;
+    const portalEmail = req.body.portal_email !== undefined
+      ? String(req.body.portal_email || '').trim().toLowerCase()
+      : customer.portal_email;
+
+    if (portalEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(portalEmail)) {
+      return res.status(400).json({ success: false, message: 'Enter a valid email address.' });
+    }
+
+    await pool.query(
+      `UPDATE customers
+       SET contact_phone = $1, portal_email = $2, updated_at = CURRENT_TIMESTAMP
+       WHERE customer_id = $3`,
+      [contactPhone, portalEmail || null, customer.customer_id]
+    );
+
+    const updated = await getLinkedCustomer(pool, req.currentUser.id);
+    return res.status(200).json({ success: true, message: 'Contact information updated.', data: updated });
+  } catch (err) {
+    console.error('[CustomerPortal] PUT /me error:', err.message);
+    return res.status(500).json({ success: false, message: 'Failed to update contact information.' });
+  }
+});
+
 router.get('/products', async (req, res) => {
   try {
     const pool = req.app.locals.pool;
