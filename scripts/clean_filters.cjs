@@ -14,7 +14,7 @@ const filesToUpdate = [
 let updatedCount = 0;
 
 for (const file of filesToUpdate) {
-  const filePath = path.join('c:/Users/ASUS/OneDrive/Documents/CORVEX', file);
+  const filePath = path.join(__dirname, '..', file);
   if (!fs.existsSync(filePath)) continue;
   
   let content = fs.readFileSync(filePath, 'utf8');

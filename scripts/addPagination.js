@@ -1,4 +1,5 @@
 const fs = require('fs');
+const path = require('path');
 
 const files = [
   'src/components/admin/AdminPageBody.jsx',
@@ -14,8 +15,9 @@ const files = [
 ];
 
 files.forEach(file => {
-  if (!fs.existsSync(file)) return;
-  let content = fs.readFileSync(file, 'utf8');
+  const filePath = path.join(__dirname, '..', file);
+  if (!fs.existsSync(filePath)) return;
+  let content = fs.readFileSync(filePath, 'utf8');
 
   // Add imports if not present
   if (!content.includes('usePagination')) {

@@ -2,7 +2,7 @@ const fs = require('fs');
 const path = require('path');
 
 const file = 'src/components/branchManager/BranchManagerPageBody.jsx';
-const filePath = path.join(__dirname, file);
+const filePath = path.join(__dirname, '..', file);
 
 let code = fs.readFileSync(filePath, 'utf8');
 let originalCode = code;

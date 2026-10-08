@@ -16,7 +16,7 @@ function walk(dir) {
   return results;
 }
 
-const files = walk('c:/Users/ASUS/OneDrive/Documents/CORVEX/src/components');
+const files = walk(path.join(__dirname, '..', 'src', 'components'));
 let updatedCount = 0;
 files.forEach(file => {
   let content = fs.readFileSync(file, 'utf8');

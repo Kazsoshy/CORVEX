@@ -3,7 +3,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import pkg from 'pg';
 
-const root = path.join(path.dirname(fileURLToPath(import.meta.url)));
+const root = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 dotenv.config({ path: path.join(root, '.env') });
 
 const pool = new pkg.Pool({

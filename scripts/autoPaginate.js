@@ -15,7 +15,7 @@ const files = [
 ];
 
 files.forEach(file => {
-  const filePath = path.join(__dirname, file);
+  const filePath = path.join(__dirname, '..', file);
   if (!fs.existsSync(filePath)) {
     console.log(`Skipping ${file}`);
     return;

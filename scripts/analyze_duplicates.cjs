@@ -9,7 +9,7 @@ function walkDir(dir, callback) {
   });
 }
 
-walkDir('src/components', (filePath) => {
+walkDir(path.join(__dirname, '..', 'src', 'components'), (filePath) => {
   if (filePath.endsWith('.jsx')) {
     let content = fs.readFileSync(filePath, 'utf8');
     

@@ -20,7 +20,7 @@ const files = [
 ];
 
 files.forEach(file => {
-  const filePath = path.join(__dirname, file);
+  const filePath = path.join(__dirname, '..', file);
   if (!fs.existsSync(filePath)) return;
   const code = fs.readFileSync(filePath, 'utf8');
 

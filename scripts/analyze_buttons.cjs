@@ -16,7 +16,7 @@ let totalButtons = 0;
 let filesWithIssues = new Set();
 let allButtonLabels = {};
 
-walkDir('src/components', (filePath) => {
+walkDir(path.join(__dirname, '..', 'src', 'components'), (filePath) => {
   if (filePath.endsWith('.jsx')) {
     let content = fs.readFileSync(filePath, 'utf8');
     

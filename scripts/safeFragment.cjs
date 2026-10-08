@@ -15,36 +15,24 @@ const files = [
 ];
 
 files.forEach(file => {
-  const filePath = path.join(__dirname, file);
+  const filePath = path.join(__dirname, '..', file);
   if (!fs.existsSync(filePath)) return;
   
   let code = fs.readFileSync(filePath, 'utf8');
   let originalCode = code;
 
-  // We want to find:
-  // <div className="corvex-table-wrapper">
-  // ...
-  // </div>
-  // <Pagination {...pagination_XYZ} />
+  // We want to safely wrap ONLY the table and its adjacent Pagination.
+  // Using a negative lookahead ensures we don't swallow multiple tables.
+  const safePattern = /(<div className="corvex-table-wrapper">(?:(?!<div className="corvex-table-wrapper">)[\s\S])*?<\/div>\s*<Pagination \{\.\.\.pagination_[a-zA-Z0-9_]+\} \/>)/g;
   
-  // Regex explanation:
-  // <div className="corvex-table-wrapper">
-  // any characters (non-greedy) until
-  // </div>
-  // whitespace
-  // <Pagination {...pagination_[a-zA-Z0-9_]+} />
-  
-  const pattern = /(<div className="corvex-table-wrapper">[\s\S]*?<\/div>\s*<Pagination \{\.\.\.pagination_[a-zA-Z0-9_]+\} \/>)/g;
-  
-  code = code.replace(pattern, (match) => {
-    // Wrap it in a fragment!
-    // But check if we already wrapped it to avoid <><><div
+  code = code.replace(safePattern, (match) => {
+    // Avoid double wrapping
     if (match.includes('<><div')) return match;
     return `<>${match}</>`;
   });
 
   if (code !== originalCode) {
     fs.writeFileSync(filePath, code);
-    console.log(`Wrapped fragments in ${file}`);
+    console.log(`Safely wrapped fragments in ${file}`);
   }
 });

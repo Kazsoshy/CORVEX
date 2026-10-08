@@ -11,6 +11,9 @@
     "seed:saw-davao": "node backend/scripts/seed_davao_saw_collection.js",
     "seed:reset-passwords": "node backend/reset_passwords.js",
     "saw:csv": "node backend/scripts/run_saw_from_csv.js",
+    "check:schema": "node scripts/check_schema.mjs",
+    "check:suppliers": "node scripts/check_suppliers.js",
+    "check:territories": "node scripts/check_territories.js",
     "build": "vite build",
     "preview": "vite preview"
   },

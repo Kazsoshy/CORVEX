@@ -1,5 +1,6 @@
 const fs = require('fs');
-const cssPath = 'c:\\Users\\ASUS\\CORVEX\\src\\styles.css';
+const path = require('path');
+const cssPath = path.join(__dirname, '..', 'src', 'styles.css');
 
 const newCss = `
 /* --- Modern UI Redesign Overrides --- */

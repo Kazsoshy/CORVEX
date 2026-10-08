@@ -1,15 +1,16 @@
 const fs = require('fs');
 const path = require('path');
 
+const root = path.join(__dirname, '..');
 const files = [
-  'c:\\Users\\ASUS\\CORVEX\\src\\components\\admin\\AdminPageBody.jsx',
-  'c:\\Users\\ASUS\\CORVEX\\src\\components\\branchManager\\BranchManagerPageBody.jsx',
-  'c:\\Users\\ASUS\\CORVEX\\src\\components\\collector\\CollectorPageBody.jsx',
-  'c:\\Users\\ASUS\\CORVEX\\src\\components\\customer\\CustomerPageBody.jsx',
-  'c:\\Users\\ASUS\\CORVEX\\src\\components\\operatingManager\\OperatingManagerPageBody.jsx',
-  'c:\\Users\\ASUS\\CORVEX\\src\\components\\sales\\SalesPageBody.jsx',
-  'c:\\Users\\ASUS\\CORVEX\\src\\components\\superAdmin\\SuperAdminPageBody.jsx',
-  'c:\\Users\\ASUS\\CORVEX\\src\\components\\warehouse\\WarehousePageBody.jsx'
+  path.join(root, 'src/components/admin/AdminPageBody.jsx'),
+  path.join(root, 'src/components/branchManager/BranchManagerPageBody.jsx'),
+  path.join(root, 'src/components/collector/CollectorPageBody.jsx'),
+  path.join(root, 'src/components/customer/CustomerPageBody.jsx'),
+  path.join(root, 'src/components/operatingManager/OperatingManagerPageBody.jsx'),
+  path.join(root, 'src/components/sales/SalesPageBody.jsx'),
+  path.join(root, 'src/components/superAdmin/SuperAdminPageBody.jsx'),
+  path.join(root, 'src/components/warehouse/WarehousePageBody.jsx')
 ];
 
 const actionMap = {
