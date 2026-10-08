@@ -142,6 +142,8 @@ export function buildWarehouseBreadcrumbs(pageType, params = {}) {
         { label: 'Suppliers', to: '/warehouse/suppliers' },
         { label: params.supplierId ? `Supplier #${params.supplierId}` : 'Supplier Detail', to: `/warehouse/suppliers/${params.supplierId}` },
       ];
+    case 'productCategories':
+      return [...crumbs, { label: 'Product Categories', to: '/warehouse/product-categories' }];
     default:
       return crumbs;
   }
@@ -186,6 +188,7 @@ export function resolveWarehousePage(pathname, search = '') {
     reports: 'Reports',
     suppliers: 'Suppliers',
     supplierDetail: 'Supplier Detail',
+    productCategories: 'Product Categories',
   };
 
   return {
@@ -219,6 +222,7 @@ export function isWarehouseNavActive(fullPath, navTo) {
   }
   if (navTo === '/warehouse/restock-history') return pathname.startsWith('/warehouse/restock-history');
   if (navTo === '/warehouse/suppliers') return pathname.startsWith('/warehouse/suppliers');
+  if (navTo === '/warehouse/product-categories') return pathname.startsWith('/warehouse/product-categories');
   if (navTo === '/warehouse/credit-history') return pathname.startsWith('/warehouse/credit-history');
   if (navTo === '/warehouse/notifications') return pathname === '/warehouse/notifications';
   if (navTo === '/warehouse/profile') return pathname === '/warehouse/profile';

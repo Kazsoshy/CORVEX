@@ -1,4 +1,5 @@
 import { Pagination } from '../shared/Pagination';
+import { StatsGrid, Stats } from '../shared/StatsGrid';
 import { usePagination, DEFAULT_PAGE_SIZE } from '../../hooks/usePagination';
 import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
@@ -35,23 +36,6 @@ import LeafletMap from '../common/LeafletMap';
 import CollectionRouteMap from './CollectionRouteMap';
 import { fetchDrivingRoute, fetchRouteDepot } from '../../api/routingService';
 import { StatusBadge } from '../StatusBadge';
-function StatsGrid({
-  stats
-}) {
-  if (!stats?.length) return null;
-  return <section className="stats-grid">
-      {stats.map((stat, index) => <article key={stat.label} className="stat-card" style={{
-      '--stat-index': index
-    }}>
-          <div className="stat-card-top">
-            <span className="stat-index">{String(index + 1).padStart(2, '0')}</span>
-            <span className="stat-dot" aria-hidden="true" />
-          </div>
-          <span className="stat-label">{stat.label}</span>
-          <strong className="stat-value">{stat.value}</strong>
-        </article>)}
-    </section>;
-}
 function FormPanel({
   title,
   fields,
@@ -416,7 +400,7 @@ function FieldActivityReportsPage({
             <img
               src={form.photo}
               alt="Report preview"
-              style={{ marginTop: 8, maxWidth: 200, maxHeight: 140, borderRadius: 8, border: '1px solid #e2e8f0' }}
+              style={{ marginTop: 8, maxWidth: 200, maxHeight: 140, borderRadius: 8, border: '1px solid #c5c8d0' }}
             />
           ) : null}
           {errors.photo ? <p className="form-error">{errors.photo}</p> : null}
@@ -462,7 +446,7 @@ function FieldActivityReportsPage({
                     <td>
                       {r.photo ? (
                         <a href={r.photo} target="_blank" rel="noreferrer">
-                          <img src={r.photo} alt="Report" style={{ width: 48, height: 48, objectFit: 'cover', borderRadius: 6, border: '1px solid #e2e8f0' }} />
+                          <img src={r.photo} alt="Report" style={{ width: 48, height: 48, objectFit: 'cover', borderRadius: 6, border: '1px solid #c5c8d0' }} />
                         </a>
                       ) : '—'}
                     </td>
@@ -621,10 +605,10 @@ function RoutePage({
         <p style={{
         margin: 0,
         fontSize: '0.85rem',
-        color: '#64748b'
+        color: '#818697'
       }}>
           <strong style={{
-          color: '#1e293b'
+          color: '#0c1031'
         }}>Today&apos;s collection route</strong>
         {' '}
         {assignmentMode
@@ -766,7 +750,7 @@ function CustomerMapPage({
       id: 'depot',
       position: [depot.latitude, depot.longitude],
       label: 'B',
-      color: '#10b981',
+      color: '#255684',
       popup: `<strong>${depot.name || 'Branch'}</strong><br/>Start here`,
     });
   }
@@ -774,12 +758,12 @@ function CustomerMapPage({
     id: account.id,
     position: center,
     label: isRouteNav ? '1' : (account.customerName || 'CU').substring(0, 2).toUpperCase(),
-    color: '#093850',
+    color: '#0c1031',
     popup: `<strong>${account.customerName}</strong><br/>${account.address || ''}`,
   });
   const fitBounds = markers.map((m) => m.position);
   const polylines = roadLeg?.positions?.length
-    ? [{ id: 'nav-leg', positions: roadLeg.positions, color: '#093850', weight: 4 }]
+    ? [{ id: 'nav-leg', positions: roadLeg.positions, color: '#0c1031', weight: 4 }]
     : [];
 
   return <div className="relative z-10 grid gap-[22px] w-full">
@@ -893,7 +877,7 @@ function AccountsPage({
             <input className="filter-input search" type="search" placeholder="Search by customer name, account number, or phone" value={search} onChange={e => setSearch(e.target.value)} style={{
             padding: '8px 12px',
             borderRadius: '6px',
-            border: '1px solid #e2e8f0',
+            border: '1px solid #c5c8d0',
             fontSize: '0.9rem',
             flex: 1,
             minWidth: '200px'
@@ -901,7 +885,7 @@ function AccountsPage({
             <select className="filter-select" value={filter} onChange={e => setFilter(e.target.value)} style={{
             padding: '8px 12px',
             borderRadius: '6px',
-            border: '1px solid #e2e8f0',
+            border: '1px solid #c5c8d0',
             fontSize: '0.9rem'
           }}>
               {['All Customers', 'Assigned Today', 'Pending', 'Completed', 'Overdue', 'Blacklisted'].map(option => <option key={option} value={option}>{option}</option>)}
@@ -909,7 +893,7 @@ function AccountsPage({
             <select className="filter-select" value={sortBy} onChange={e => setSortBy(e.target.value)} style={{
             padding: '8px 12px',
             borderRadius: '6px',
-            border: '1px solid #e2e8f0',
+            border: '1px solid #c5c8d0',
             fontSize: '0.9rem'
           }}>
               {['Name', 'Outstanding Balance', 'Days Overdue', 'Distance'].map(option => <option key={option} value={option}>Sort: {option}</option>)}
@@ -1030,7 +1014,7 @@ function AccountDetailPage({
             id: account.id,
             position: account.latitude && account.longitude ? [account.latitude, account.longitude] : [7.1907, 125.4553],
             label: (account.customerName || 'CU').substring(0, 2).toUpperCase(),
-            color: '#093850',
+            color: '#0c1031',
             popup: account.customerName
           }]} />
           </div>
@@ -1303,7 +1287,7 @@ function ReceiptsListPage({
             <input className="filter-input search" type="search" placeholder="Search by receipt number, customer, or ID" value={search} onChange={e => setSearch(e.target.value)} style={{
             padding: '8px 12px',
             borderRadius: '6px',
-            border: '1px solid #e2e8f0',
+            border: '1px solid #c5c8d0',
             fontSize: '0.9rem',
             flex: 1,
             minWidth: '200px'
@@ -1311,13 +1295,13 @@ function ReceiptsListPage({
             <input className="filter-input" type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)} aria-label="From date" style={{
             padding: '8px 12px',
             borderRadius: '6px',
-            border: '1px solid #e2e8f0',
+            border: '1px solid #c5c8d0',
             fontSize: '0.9rem'
           }} />
             <input className="filter-input" type="date" value={dateTo} onChange={e => setDateTo(e.target.value)} aria-label="To date" style={{
             padding: '8px 12px',
             borderRadius: '6px',
-            border: '1px solid #e2e8f0',
+            border: '1px solid #c5c8d0',
             fontSize: '0.9rem'
           }} />
           </div>
@@ -1457,7 +1441,7 @@ function DigitalReceiptPage({
           <li><span className="info-item-label">Amount</span>
               <span className="info-item-value" style={{
             fontWeight: 700,
-            color: '#093850'
+            color: '#0c1031'
           }}>{formatCurrency(Number(receipt.amount))}</span></li>
           <li><span className="info-item-label">Payment Method</span>
               <span className="info-item-value">{receipt.payment_method || '—'}</span></li>
@@ -1785,7 +1769,7 @@ function CollectionHistoryPage({
             <input className="filter-input search" type="search" placeholder="Search by customer, receipt number, or ID" value={search} onChange={e => setSearch(e.target.value)} style={{
             padding: '8px 12px',
             borderRadius: '6px',
-            border: '1px solid #e2e8f0',
+            border: '1px solid #c5c8d0',
             fontSize: '0.9rem',
             flex: 1,
             minWidth: '200px'
@@ -1793,7 +1777,7 @@ function CollectionHistoryPage({
             <select className="filter-select" value={statusFilter} onChange={e => setStatusFilter(e.target.value)} style={{
             padding: '8px 12px',
             borderRadius: '6px',
-            border: '1px solid #e2e8f0',
+            border: '1px solid #c5c8d0',
             fontSize: '0.9rem'
           }}>
               {['All', 'Pending', 'Completed', 'Cancelled'].map(option => <option key={option} value={option}>Status: {option}</option>)}
@@ -1801,13 +1785,13 @@ function CollectionHistoryPage({
             <input className="filter-input" type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)} aria-label="From date" style={{
             padding: '8px 12px',
             borderRadius: '6px',
-            border: '1px solid #e2e8f0',
+            border: '1px solid #c5c8d0',
             fontSize: '0.9rem'
           }} />
             <input className="filter-input" type="date" value={dateTo} onChange={e => setDateTo(e.target.value)} aria-label="To date" style={{
             padding: '8px 12px',
             borderRadius: '6px',
-            border: '1px solid #e2e8f0',
+            border: '1px solid #c5c8d0',
             fontSize: '0.9rem'
           }} />
           </div>

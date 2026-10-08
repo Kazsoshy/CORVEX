@@ -14,6 +14,7 @@ import { LoginPage } from './components/auth/LoginPage';
 import { ActivatePortalPage } from './components/auth/ActivatePortalPage';
 import { NavIcon } from './navIcons';
 import { StatusBadge } from './components/StatusBadge';
+import { StatsGrid } from './components/shared/StatsGrid';
 import LeafletMap from './components/common/LeafletMap';
 import { LogoutConfirmDialog } from './components/LogoutConfirmDialog';
 import { collectorRole } from './rolePages/collector';
@@ -454,20 +455,7 @@ function PageBody({ showMap, setShowMap, filter, setFilter, page, currentRole, n
 
   return (
     <div className="relative z-10 grid gap-[22px] w-full">
-      {page.stats?.length ? (
-        <section className="stats-grid">
-          {page.stats.map((stat, index) => (
-            <article key={stat.label} className="stat-card" style={{ '--stat-index': index }}>
-              <div className="stat-card-top">
-                <span className="stat-index">{String(index + 1).padStart(2, '0')}</span>
-                <span className="stat-dot" aria-hidden="true" />
-              </div>
-              <span className="stat-label">{stat.label}</span>
-              <strong className="stat-value">{stat.value}</strong>
-            </article>
-          ))}
-        </section>
-      ) : null}
+      {page.stats?.length ? <StatsGrid stats={page.stats} /> : null}
 
       {page.actions?.length ? (
         <div className="flex justify-end gap-2 mt-4 mb-4">
@@ -522,8 +510,8 @@ function PageBody({ showMap, setShowMap, filter, setFilter, page, currentRole, n
                 zoom={12}
                 height={500}
                 markers={[
-                  { id: '1', position: [7.1907, 125.4553], label: 'A', color: '#093850', popup: 'Marker A' },
-                  { id: '2', position: [7.2000, 125.4500], label: 'B', color: '#10b981', popup: 'Marker B' }
+                  { id: '1', position: [7.1907, 125.4553], label: 'A', color: '#0c1031', popup: 'Marker A' },
+                  { id: '2', position: [7.2000, 125.4500], label: 'B', color: '#255684', popup: 'Marker B' }
                 ]}
               />
             </div>
@@ -563,8 +551,8 @@ function PageBody({ showMap, setShowMap, filter, setFilter, page, currentRole, n
                 zoom={12}
                 height={500}
                 markers={[
-                  { id: '1', position: [7.1907, 125.4553], label: 'P1', color: '#093850', popup: 'Location 1' },
-                  { id: '2', position: [7.2000, 125.4500], label: 'P2', color: '#10b981', popup: 'Location 2' }
+                  { id: '1', position: [7.1907, 125.4553], label: 'P1', color: '#0c1031', popup: 'Location 1' },
+                  { id: '2', position: [7.2000, 125.4500], label: 'P2', color: '#255684', popup: 'Location 2' }
                 ]}
               />
             </div>

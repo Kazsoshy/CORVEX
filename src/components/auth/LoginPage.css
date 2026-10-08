@@ -32,7 +32,7 @@
 .login-page-backdrop-overlay {
   position: absolute;
   inset: 0;
-  background: rgba(5, 20, 32, 0.62);
+  background: rgba(12, 16, 49, 0.62);
 }
 
 .login-shell {
@@ -71,9 +71,9 @@
   inset: 0;
   background: linear-gradient(
     165deg,
-    rgba(9, 56, 80, 0.45) 0%,
-    rgba(9, 56, 80, 0.15) 45%,
-    rgba(9, 56, 80, 0.55) 100%
+    rgba(12, 16, 49, 0.55) 0%,
+    rgba(12, 16, 49, 0.2) 45%,
+    rgba(12, 16, 49, 0.65) 100%
   );
   pointer-events: none;
 }
@@ -179,7 +179,7 @@
   align-items: center;
   justify-content: center;
   width: 44px;
-  color: #94a3b8;
+  color: var(--secondary-gray);
   z-index: 1;
 }
 
@@ -221,11 +221,11 @@
 }
 
 .login-page .login-input::placeholder {
-  color: #94a3b8;
+  color: var(--secondary-gray);
 }
 
 .login-page .login-input:hover:not(:disabled) {
-  border-color: #cbd5e1 !important;
+  border-color: var(--secondary-gray) !important;
 }
 
 .login-page .login-input:focus {
@@ -266,11 +266,11 @@
   padding: 0 !important;
   border-radius: 6px;
   transition: color 0.2s ease;
-  color: #94a3b8;
+  color: var(--secondary-gray);
 }
 
 .login-page .password-toggle:hover {
-  color: #475569;
+  color: var(--secondary-gray);
   background: none !important;
   transform: none;
 }

@@ -1,4 +1,5 @@
 import { Pagination } from '../shared/Pagination';
+import { StatsGrid, Stats } from '../shared/StatsGrid';
 import { usePagination } from '../../hooks/usePagination';
 import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
@@ -44,23 +45,6 @@ import { NavIcon } from '../../navIcons';
 import { StatusBadge } from '../StatusBadge';
 import { CreditHistoryListPage, CreditHistoryDetailPage } from '../shared/CreditHistoryPages';
 import { formatCurrency, formatDisplayDate, formatDisplayDateTime } from '../../utils/formatters.js';
-function StatsGrid({
-  stats
-}) {
-  if (!stats?.length) return null;
-  return <section className="stats-grid">
-      {stats.map((stat, index) => <article key={stat.label} className="stat-card" style={{
-      '--stat-index': index
-    }}>
-          <div className="stat-card-top">
-            <span className="stat-index">{String(index + 1).padStart(2, '0')}</span>
-            <span className="stat-dot" aria-hidden="true" />
-          </div>
-          <span className="stat-label">{stat.label}</span>
-          <strong className="stat-value">{stat.value}</strong>
-        </article>)}
-    </section>;
-}
 function StockStatusBadge({
   status
 }) {
@@ -94,94 +78,272 @@ function DashboardPage({
     }
     load();
   }, [showToast]);
+
   const summary = dashboard?.summary || {};
   const health = dashboard?.inventoryHealth || {};
   const quickId = dashboard?.quickProductId;
+  const transfers = dashboard?.recentTransfers || [];
+  const restocks = dashboard?.recentRestocks || [];
+  const topMoving = dashboard?.topMovingProducts || [];
+  const criticalProducts = dashboard?.criticalProducts || [];
+
+  const transfersPager = usePagination(transfers);
+  const restocksPager = usePagination(restocks);
+  const topMovingPager = usePagination(topMoving);
+  const criticalPager = usePagination(criticalProducts);
+
   if (loading) return <LoadingState message="Loading dashboard..." />;
-  return <div className="relative z-10 grid gap-[22px] w-full">
-      <section className="panel dashboard-greeting">
-        <div className="flex flex-col gap-1">
-          <p className="text-[0.82rem] font-bold tracking-widest uppercase text-navy/60 m-0">Warehouse operations</p>
+
+  return (
+    <div className="warehouse-dashboard relative z-10 grid gap-5 w-full">
+      <section className="panel dashboard-greeting warehouse-dashboard-header">
+        <div className="dashboard-greeting-main">
+          <p className="dashboard-eyebrow">Warehouse operations</p>
           <h2>{user?.fullName || 'Warehouse Staff'}</h2>
-          <p className="text-ink/70">{user?.branch?.name || 'Branch warehouse'}</p>
+          <p className="muted">{user?.branch?.name || 'Branch warehouse'}</p>
         </div>
-        <Link to="/warehouse/notifications" className="relative p-2 text-ink/70 hover:text-blue hover:bg-blue/5 rounded-full transition-colors cursor-pointer" aria-label={`${unreadCount} unread notifications`}>
+        <Link
+          to="/warehouse/notifications"
+          className="relative p-2 text-ink/70 hover:text-blue hover:bg-blue/5 rounded-md transition-colors cursor-pointer"
+          aria-label={`${unreadCount} unread notifications`}
+        >
           <NavIcon name="bell" />
-          {unreadCount > 0 ? <span className="absolute top-0 right-0 min-w-[18px] h-[18px] px-1 flex justify-center items-center rounded-full bg-red text-white text-[0.7rem] font-bold border-2 border-mint">{unreadCount}</span> : null}
+          {unreadCount > 0 ? (
+            <span className="absolute top-0 right-0 min-w-[18px] h-[18px] px-1 flex justify-center items-center rounded-full bg-red text-white text-[0.7rem] font-bold border-2 border-mint">
+              {unreadCount}
+            </span>
+          ) : null}
         </Link>
       </section>
 
-      <StatsGrid stats={[{
-      label: 'Total Products Tracked',
-      value: String(summary.totalProducts ?? 0)
-    }, {
-      label: 'Low Stock Alerts',
-      value: String(summary.lowStockAlerts ?? 0)
-    }, {
-      label: 'Pending Transfers',
-      value: String(summary.pendingTransfers ?? 0)
-    }, {
-      label: "Today's Stock Movements",
-      value: String(summary.movementsToday ?? 0)
-    }]} />
+      {/* Overview */}
+      <section className="dashboard-section" aria-labelledby="wh-overview-heading">
+        <div className="dashboard-section-header">
+          <h3 id="wh-overview-heading" className="dashboard-section-title">Overview</h3>
+          <p className="dashboard-section-sub">Key inventory metrics for your branch</p>
+        </div>
 
-      <div className="flex flex-wrap gap-2 justify-end mt-2 mb-2">
-        <button className="button secondary" type="button" onClick={() => navigate('/warehouse/transfers')}>Transfers</button>
-        <button className="button secondary" type="button" onClick={() => navigate('/warehouse/transfers/new')}>New Transfer Request</button>
-        <button className="button secondary" type="button" onClick={() => navigate('/warehouse/branch-inventory')}>View Branch Inventory</button>
-        {quickId ? <>
-            <button className="button secondary" type="button" onClick={() => navigate(`/warehouse/product/${quickId}/transfer`)}>Transfer Stock</button>
-            <button className="button secondary" type="button" onClick={() => navigate(`/warehouse/product/${quickId}/restock`)}>Record Restock</button>
-            <button className="button" type="button" onClick={() => navigate(`/warehouse/product/${quickId}/stock-count`)}>Log Stock Count</button>
-          </> : null}
-      </div>
+        <StatsGrid stats={[
+          { label: 'Total Products Tracked', value: String(summary.totalProducts ?? 0) },
+          { label: 'Low Stock Alerts', value: String(summary.lowStockAlerts ?? 0) },
+          { label: 'Pending Transfers', value: String(summary.pendingTransfers ?? 0) },
+          { label: "Today's Stock Movements", value: String(summary.movementsToday ?? 0) },
+        ]} />
 
-      {(dashboard?.criticalProducts || []).length ? <section className="panel content-panel alert-panel">
-          <div className="flex flex-col md:flex-row justify-between gap-4 items-start md:items-center mb-4"><h3>Critical Stock Alerts</h3></div>
-          <ul className="list-none p-0 m-0 flex flex-col gap-3">
-            {(dashboard?.criticalProducts || []).map(p => <li key={p.product_id}>
-                <div><strong>{p.product_name}</strong><span className="text-ink/70">{p.sku} · {p.branch_name}</span></div>
-                <StatusBadge status={p.stock_status} />
-              </li>)}
-          </ul>
-        </section> : null}
+        <div className="dashboard-actions">
+          <button className="button" type="button" onClick={() => navigate('/warehouse/transfers/new')}>
+            New Transfer Request
+          </button>
+          <button className="button secondary" type="button" onClick={() => navigate('/warehouse/transfers')}>
+            Transfers
+          </button>
+          <button className="button secondary" type="button" onClick={() => navigate('/warehouse/branch-inventory')}>
+            View Branch Inventory
+          </button>
+          {quickId ? (
+            <>
+              <button className="button ghost" type="button" onClick={() => navigate(`/warehouse/product/${quickId}/transfer`)}>
+                Transfer Stock
+              </button>
+              <button className="button ghost" type="button" onClick={() => navigate(`/warehouse/product/${quickId}/restock`)}>
+                Record Restock
+              </button>
+              <button className="button ghost" type="button" onClick={() => navigate(`/warehouse/product/${quickId}/stock-count`)}>
+                Log Stock Count
+              </button>
+            </>
+          ) : null}
+        </div>
 
-      <div className="dashboard-widgets grid two-up">
-        <section className="panel content-panel relative overflow-hidden">
-          <div className="flex flex-col md:flex-row justify-between gap-4 items-start md:items-center mb-4"><h3>Recent Transfers</h3></div>
-          <ul className="list-none p-0 m-0 flex flex-col gap-3">
-            {(dashboard?.recentTransfers || []).map(t => <li key={t.transfer_id}><div><strong>{t.transfer_ref}</strong><span className="text-ink/70">{t.product_name}</span></div><span>{t.status}</span></li>)}
-            {!(dashboard?.recentTransfers || []).length ? <li className="text-ink/70">No transfers yet.</li> : null}
-          </ul>
-        </section>
-        <section className="panel content-panel relative overflow-hidden">
-          <div className="flex flex-col md:flex-row justify-between gap-4 items-start md:items-center mb-4"><h3>Recent Restocks</h3></div>
-          <ul className="list-none p-0 m-0 flex flex-col gap-3">
-            {(dashboard?.recentRestocks || []).map(r => <li key={r.restock_id}><div><strong>{r.product_name}</strong><span className="text-ink/70">{formatDisplayDate(r.received_date)}</span></div><span>+{r.quantity}</span></li>)}
-            {!(dashboard?.recentRestocks || []).length ? <li className="text-ink/70">No restocks yet.</li> : null}
-          </ul>
-        </section>
-      </div>
+        {criticalProducts.length ? (
+          <section className="panel dashboard-panel-compact alert-panel">
+            <div className="dashboard-panel-heading">
+              <h4>Stock Alerts</h4>
+              <span className="muted">{criticalProducts.length} item{criticalProducts.length === 1 ? '' : 's'}</span>
+            </div>
+            <div className="corvex-table-wrapper dashboard-table-wrap">
+              <table className="corvex-table">
+                <thead>
+                  <tr>
+                    <th>Product</th>
+                    <th>SKU</th>
+                    <th>Branch</th>
+                    <th>Status</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {criticalPager.paginatedData.map((p) => (
+                    <tr
+                      key={p.product_id}
+                      className="clickable-row"
+                      onClick={() => navigate(`/warehouse/product/${p.product_id}`)}
+                    >
+                      <td>{p.product_name}</td>
+                      <td>{p.sku || '—'}</td>
+                      <td>{p.branch_name || '—'}</td>
+                      <td><StatusBadge status={p.stock_status} /></td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <Pagination {...criticalPager} />
+          </section>
+        ) : null}
+      </section>
 
-      <div className="dashboard-widgets grid two-up">
-        <section className="panel content-panel relative overflow-hidden">
-          <div className="flex flex-col md:flex-row justify-between gap-4 items-start md:items-center mb-4"><h3>Top Moving Products</h3></div>
-          <ul className="list-none p-0 m-0 flex flex-col gap-3">
-            {(dashboard?.topMovingProducts || []).map(p => <li key={p.name}><div><strong>{p.name}</strong></div><span>{p.movements} movements</span></li>)}
-            {!(dashboard?.topMovingProducts || []).length ? <li className="text-ink/70">No movement data (30 days).</li> : null}
-          </ul>
-        </section>
-        <section className="panel content-panel relative overflow-hidden">
-          <div className="flex flex-col md:flex-row justify-between gap-4 items-start md:items-center mb-4"><h3>Inventory Health Summary</h3></div>
-          <div className="analytics-grid two-up">
-            <div className="analytics-card"><span className="metric-label">Sufficient</span><strong>{health.sufficient ?? 0}</strong></div>
-            <div className="analytics-card"><span className="metric-label">Low Stock</span><strong>{health.low ?? 0}</strong></div>
-            <div className="analytics-card"><span className="metric-label">Critical</span><strong>{health.critical ?? 0}</strong></div>
-            <div className="analytics-card"><span className="metric-label">Out of Stock</span><strong>{health.outOfStock ?? 0}</strong></div>
-          </div>
-        </section>
-      </div>
-    </div>;
+      {/* Recent Activity */}
+      <section className="dashboard-section" aria-labelledby="wh-activity-heading">
+        <div className="dashboard-section-header">
+          <h3 id="wh-activity-heading" className="dashboard-section-title">Recent Activity</h3>
+          <p className="dashboard-section-sub">Latest transfers and restocks</p>
+        </div>
+
+        <div className="dashboard-widgets grid two-up">
+          <section className="panel dashboard-panel-compact">
+            <div className="dashboard-panel-heading">
+              <h4>Recent Transfers</h4>
+            </div>
+            {transfers.length ? (
+              <>
+                <div className="corvex-table-wrapper dashboard-table-wrap">
+                  <table className="corvex-table">
+                    <thead>
+                      <tr>
+                        <th>Transfer ID</th>
+                        <th>Product</th>
+                        <th>Status</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {transfersPager.paginatedData.map((t) => (
+                        <tr
+                          key={t.transfer_id}
+                          className="clickable-row"
+                          onClick={() => navigate(`/warehouse/transfers/${t.transfer_id}`)}
+                        >
+                          <td><span className="mono-cell">{t.transfer_ref}</span></td>
+                          <td>{t.product_name}</td>
+                          <td><StatusBadge status={t.status} /></td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                <Pagination {...transfersPager} />
+              </>
+            ) : (
+              <p className="dashboard-empty muted">No transfers yet.</p>
+            )}
+          </section>
+
+          <section className="panel dashboard-panel-compact">
+            <div className="dashboard-panel-heading">
+              <h4>Recent Restocks</h4>
+            </div>
+            {restocks.length ? (
+              <>
+                <div className="corvex-table-wrapper dashboard-table-wrap">
+                  <table className="corvex-table">
+                    <thead>
+                      <tr>
+                        <th>Product</th>
+                        <th>Date</th>
+                        <th className="text-right">Quantity</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {restocksPager.paginatedData.map((r) => (
+                        <tr key={r.restock_id}>
+                          <td>{r.product_name}</td>
+                          <td>{formatDisplayDate(r.received_date)}</td>
+                          <td className="text-right qty-positive">+{r.quantity}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                <Pagination {...restocksPager} />
+              </>
+            ) : (
+              <p className="dashboard-empty muted">No restocks yet.</p>
+            )}
+          </section>
+        </div>
+      </section>
+
+      {/* Product Activity + Inventory Health */}
+      <section className="dashboard-section" aria-labelledby="wh-product-heading">
+        <div className="dashboard-section-header">
+          <h3 id="wh-product-heading" className="dashboard-section-title">Product Activity</h3>
+          <p className="dashboard-section-sub">Movement trends and stock health</p>
+        </div>
+
+        <div className="dashboard-widgets grid two-up dashboard-widgets-start">
+          <section className="panel dashboard-panel-compact">
+            <div className="dashboard-panel-heading">
+              <h4>Top Moving Products</h4>
+              <span className="muted">Last 30 days</span>
+            </div>
+            {topMoving.length ? (
+              <>
+                <div className="corvex-table-wrapper dashboard-table-wrap">
+                  <table className="corvex-table">
+                    <thead>
+                      <tr>
+                        <th>Product</th>
+                        <th className="text-right">Movements</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {topMovingPager.paginatedData.map((p) => {
+                        const count = Number(p.movements) || 0;
+                        return (
+                          <tr key={p.name}>
+                            <td>{p.name}</td>
+                            <td className="text-right" title={`${count} movement${count === 1 ? '' : 's'}`}>
+                              {count}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+                <Pagination {...topMovingPager} />
+              </>
+            ) : (
+              <p className="dashboard-empty muted">No movement data (30 days).</p>
+            )}
+          </section>
+
+          <section className="panel dashboard-panel-compact" aria-labelledby="wh-health-heading">
+            <div className="dashboard-panel-heading">
+              <h4 id="wh-health-heading">Inventory Health</h4>
+            </div>
+            <div className="inventory-health-grid">
+              <article className="inventory-health-item health-sufficient">
+                <span className="inventory-health-label">Sufficient</span>
+                <strong className="inventory-health-value">{health.sufficient ?? 0}</strong>
+              </article>
+              <article className="inventory-health-item health-low">
+                <span className="inventory-health-label">Low Stock</span>
+                <strong className="inventory-health-value">{health.low ?? 0}</strong>
+              </article>
+              <article className="inventory-health-item health-critical">
+                <span className="inventory-health-label">Critical</span>
+                <strong className="inventory-health-value">{health.critical ?? 0}</strong>
+              </article>
+              <article className="inventory-health-item health-out">
+                <span className="inventory-health-label">Out of Stock</span>
+                <strong className="inventory-health-value">{health.outOfStock ?? 0}</strong>
+              </article>
+            </div>
+          </section>
+        </div>
+      </section>
+    </div>
+  );
 }
 function InventoryPage({
   navigate,
@@ -268,7 +430,7 @@ function InventoryPage({
           }} style={{
             padding: '8px 12px',
             borderRadius: '6px',
-            border: '1px solid #e2e8f0',
+            border: '1px solid #c5c8d0',
             fontSize: '0.9rem',
             flex: 1,
             minWidth: '200px'
@@ -279,7 +441,7 @@ function InventoryPage({
           }} style={{
             padding: '8px 12px',
             borderRadius: '6px',
-            border: '1px solid #e2e8f0',
+            border: '1px solid #c5c8d0',
             fontSize: '0.9rem'
           }}>
               <option value="All">All Categories</option>
@@ -291,7 +453,7 @@ function InventoryPage({
           }} style={{
             padding: '8px 12px',
             borderRadius: '6px',
-            border: '1px solid #e2e8f0',
+            border: '1px solid #c5c8d0',
             fontSize: '0.9rem'
           }}>
               {['All', 'Active', 'Inactive'].map(s => <option key={s}>{s === 'All' ? 'All Statuses' : s}</option>)}
@@ -299,7 +461,7 @@ function InventoryPage({
             <select className="filter-select" value={sortBy} onChange={e => setSortBy(e.target.value)} style={{
             padding: '8px 12px',
             borderRadius: '6px',
-            border: '1px solid #e2e8f0',
+            border: '1px solid #c5c8d0',
             fontSize: '0.9rem'
           }}>
               {['Product Name', 'Unit Price'].map(s => <option key={s}>Sort: {s}</option>)}
@@ -317,7 +479,7 @@ function InventoryPage({
                       {product.image_url ? <img src={product.image_url} alt="" width={48} height={48} style={{
                     objectFit: 'cover',
                     borderRadius: 6,
-                    border: '1px solid #e2e8f0'
+                    border: '1px solid #c5c8d0'
                   }} /> : <span className="text-ink/50" style={{
                     fontSize: '0.75rem'
                   }}>—</span>}
@@ -415,7 +577,7 @@ function ProductDetailPage({
             {product.image_url ? <img src={product.image_url} alt={product_name} width={96} height={96} style={{
             objectFit: 'cover',
             borderRadius: 8,
-            border: '1px solid #e2e8f0'
+            border: '1px solid #c5c8d0'
           }} /> : null}
             <div>
               <h3 style={{
@@ -530,7 +692,7 @@ function ProductDetailPage({
                     </td>
                     <td style={{
                   fontWeight: 600,
-                  color: (m.quantity || 0) > 0 ? '#059669' : '#dc2626'
+                  color: (m.quantity || 0) > 0 ? '#4A6B12' : '#dc2626'
                 }}>
                       {(m.quantity || 0) > 0 ? `+${m.quantity}` : m.quantity}
                     </td>
@@ -1228,7 +1390,7 @@ function MovementsPage({
                     }}>{m.sku}</span></> : null}</td>
                     <td style={{
                   fontWeight: 600,
-                  color: m.quantity > 0 ? '#059669' : '#dc2626'
+                  color: m.quantity > 0 ? '#4A6B12' : '#dc2626'
                 }}>
                       {m.quantity > 0 ? `+${m.quantity}` : m.quantity}
                     </td>
@@ -1792,7 +1954,7 @@ function RestockHistoryPage({
                     <td>{r.supplier_name}</td>
                     <td>{r.branch_name}</td>
                     <td style={{
-                  color: '#059669',
+                  color: '#4A6B12',
                   fontWeight: 600
                 }}>+{r.quantity}</td>
                     <td>{formatDisplayDate(r.received_date)}</td>
@@ -2070,7 +2232,7 @@ function SuppliersPage({
       if (search) params.append('search', search);
       const res = await apiClient.get(`/suppliers?${params.toString()}`);
       if (res.data.success) {
-        setSuppliers(res.data.data);
+        setSuppliers(res.data.data || []);
         setTotal(res.data.pagination?.total || 0);
       }
     } catch (err) {
@@ -2196,7 +2358,17 @@ function SuppliersPage({
               </tbody>
             </table>
             </div>
-            <Pagination currentPage={page} totalPages={Math.max(1, totalPages)} totalRecords={filtered.length} pageSize={PAGE_SIZE} startRecord={filtered.length ? (page - 1) * PAGE_SIZE + 1 : 0} endRecord={Math.min(page * PAGE_SIZE, filtered.length)} prevPage={() => setPage((p) => Math.max(1, p - 1))} nextPage={() => setPage((p) => Math.min(Math.max(1, totalPages), p + 1))} goToPage={setPage} /></>
+            <Pagination
+              currentPage={page}
+              totalPages={Math.max(1, totalPages)}
+              totalRecords={total}
+              pageSize={limit}
+              startRecord={total ? (page - 1) * limit + 1 : 0}
+              endRecord={Math.min(page * limit, total)}
+              prevPage={() => setPage((p) => Math.max(1, p - 1))}
+              nextPage={() => setPage((p) => Math.min(Math.max(1, totalPages), p + 1))}
+              goToPage={setPage}
+            /></>
         : <EmptyState title="No suppliers found" description="Adjust your search or filters." actionLabel="Add Supplier" onAction={handleAdd} />}
       </section>
 

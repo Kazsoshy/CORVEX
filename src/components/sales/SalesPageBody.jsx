@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { Pagination } from '../shared/Pagination';
+import { StatsGrid, Stats } from '../shared/StatsGrid';
 import { usePagination, useServerPagination, DEFAULT_PAGE_SIZE } from '../../hooks/usePagination';
 import {
   createCustomer,
@@ -39,23 +40,6 @@ import { StatusBadge } from '../StatusBadge';
 import { NavIcon } from '../../navIcons';
 import LeafletMap from '../common/LeafletMap';
 import { CreditHistoryListPage, CreditHistoryDetailPage } from '../shared/CreditHistoryPages';
-function StatsGrid({
-  stats
-}) {
-  if (!stats?.length) return null;
-  return <section className="stats-grid">
-      {stats.map((stat, index) => <article key={stat.label} className="stat-card" style={{
-      '--stat-index': index
-    }}>
-          <div className="stat-card-top">
-            <span className="stat-index">{String(index + 1).padStart(2, '0')}</span>
-            <span className="stat-dot" aria-hidden="true" />
-          </div>
-          <span className="stat-label">{stat.label}</span>
-          <strong className="stat-value">{stat.value}</strong>
-        </article>)}
-    </section>;
-}
 function OfflineBanner() {
   return null;
 }
@@ -196,11 +180,16 @@ function DashboardPage({
           <h3>Sales Analytics</h3>
           <button className="button ghost" type="button" onClick={() => navigate('/sales/route-tracking')}>Route Tracking</button>
         </div>
-        <div className="analytics-grid three-up">
-          <div className="analytics-card"><span className="metric-label">Daily Total</span><strong>{formatCurrency(analytics.dailyRevenue || 0)}</strong></div>
-          <div className="analytics-card"><span className="metric-label">Weekly Total</span><strong>{formatCurrency(analytics.weeklyRevenue || 0)}</strong></div>
-          <div className="analytics-card"><span className="metric-label">Monthly Total</span><strong>{formatCurrency(analytics.monthlyRevenue || 0)}</strong></div>
-        </div>
+        <StatsGrid stats={[{
+          label: 'Daily Total',
+          value: formatCurrency(analytics.dailyRevenue || 0)
+        }, {
+          label: 'Weekly Total',
+          value: formatCurrency(analytics.weeklyRevenue || 0)
+        }, {
+          label: 'Monthly Total',
+          value: formatCurrency(analytics.monthlyRevenue || 0)
+        }]} />
         <h4 className="subsection-title">Top Customers</h4>
         <ul className="widget-list">
           {(analytics.topCustomers || []).map(customer => <li key={customer.name}><div><strong>{customer.name}</strong></div><span>{formatCurrency(customer.revenue)}</span></li>)}
@@ -258,7 +247,7 @@ function SchedulePage({
     }
     return sum;
   }, [coordVisits]);
-  const visitColor = v => v.status === 'Completed' ? '#10b981' : v.status === 'Pending' ? '#093850' : '#f59e0b';
+  const visitColor = v => v.status === 'Completed' ? '#255684' : v.status === 'Pending' ? '#0c1031' : '#f59e0b';
   const mapMarkers = filtered.filter(v => Number(v.latitude) && Number(v.longitude)).map(v => ({
     id: v.visit_id,
     position: [Number(v.latitude), Number(v.longitude)],
@@ -301,7 +290,7 @@ function SchedulePage({
             <LeafletMap center={mapCenter} zoom={13} height={500} markers={mapMarkers} polylines={totalDistance ? [{
             id: 'route',
             positions: [...coordVisits].sort((a, b) => new Date(a.scheduled_date || 0) - new Date(b.scheduled_date || 0)).map(v => [Number(v.latitude), Number(v.longitude)]),
-            color: '#093850'
+            color: '#0c1031'
           }] : []} />
           </div>
           <p className="muted">Visits mapped: {filtered.length}{totalDistance ? ` · Route distance: ${totalDistance.toFixed(1)} km` : ''}</p>
@@ -492,7 +481,7 @@ function CustomersPage({
             <input className="filter-input search" type="search" placeholder="Search by ID, name, territory, or contact" value={search} onChange={e => setSearch(e.target.value)} style={{
             padding: '8px 12px',
             borderRadius: '6px',
-            border: '1px solid #e2e8f0',
+            border: '1px solid #c5c8d0',
             fontSize: '0.9rem',
             flex: 1,
             minWidth: '200px'
@@ -500,7 +489,7 @@ function CustomersPage({
             <select className="filter-select" value={filter} onChange={e => setFilter(e.target.value)} style={{
             padding: '8px 12px',
             borderRadius: '6px',
-            border: '1px solid #e2e8f0',
+            border: '1px solid #c5c8d0',
             fontSize: '0.9rem'
           }}>
               {['Active Customers', 'Inactive Customers', 'All Customers'].map(o => <option key={o} value={o}>{o}</option>)}
@@ -508,7 +497,7 @@ function CustomersPage({
             <select className="filter-select" value={sortBy} onChange={e => setSortBy(e.target.value)} style={{
             padding: '8px 12px',
             borderRadius: '6px',
-            border: '1px solid #e2e8f0',
+            border: '1px solid #c5c8d0',
             fontSize: '0.9rem'
           }}>
               {['Name'].map(o => <option key={o} value={o}>Sort: {o}</option>)}
@@ -1035,7 +1024,7 @@ function CustomerDetailPage({
           }}>
               <div className="progress-bar" style={{
               width: `${Math.min(outstandingBalance / (creditLimit || 1) * 100, 100)}%`,
-              backgroundColor: outstandingBalance > creditLimit * 0.8 ? '#ef4444' : '#3b82f6'
+              backgroundColor: outstandingBalance > creditLimit * 0.8 ? '#ef4444' : '#255684'
             }} />
             </div>
           </div>
@@ -1078,7 +1067,7 @@ function CustomerDetailPage({
           position: customer.latitude && customer.longitude ? [Number(customer.latitude), Number(customer.longitude)] : [7.1907, 125.4553],
           popup: `<strong>${customer.first_name} ${customer.last_name}</strong><br/>${customer.address}`,
           label: String(customer.customer_id),
-          color: '#093850'
+          color: '#0c1031'
         }]} />
         </div>
       </section>
@@ -1114,7 +1103,7 @@ function CustomerDetailPage({
                   </td>
                 </tr>) : <tr><td colSpan="6" style={{
                 textAlign: 'center',
-                color: '#64748b',
+                color: '#818697',
                 padding: 16
               }}>No recent payments</td></tr>}
             </tbody>
@@ -1545,7 +1534,7 @@ function VisitLogPage({
               position: [Number(visit.latitude), Number(visit.longitude)],
               popup: `<strong>${customerName}</strong><br/>${visit.address || ''}`,
               label: String(visit.visit_id),
-              color: visit.status === 'Completed' ? '#10b981' : '#093850'
+              color: visit.status === 'Completed' ? '#255684' : '#0c1031'
             }]} />
               </div> : null}
           </div>
@@ -1818,7 +1807,7 @@ function InventoryPage({
             <input className="filter-input search" type="search" placeholder="Search products by name or category" value={search} onChange={e => setSearch(e.target.value)} style={{
             padding: '8px 12px',
             borderRadius: '6px',
-            border: '1px solid #e2e8f0',
+            border: '1px solid #c5c8d0',
             fontSize: '0.9rem',
             flex: 1,
             minWidth: '200px'
@@ -1826,7 +1815,7 @@ function InventoryPage({
             <select className="filter-select" value={category} onChange={e => setCategory(e.target.value)} style={{
             padding: '8px 12px',
             borderRadius: '6px',
-            border: '1px solid #e2e8f0',
+            border: '1px solid #c5c8d0',
             fontSize: '0.9rem'
           }}>
               <option value="All">All Categories</option>
@@ -1835,7 +1824,7 @@ function InventoryPage({
             <select className="filter-select" value={sortBy} onChange={e => setSortBy(e.target.value)} style={{
             padding: '8px 12px',
             borderRadius: '6px',
-            border: '1px solid #e2e8f0',
+            border: '1px solid #c5c8d0',
             fontSize: '0.9rem'
           }}>
               {['Product Name', 'Unit Price'].map(o => <option key={o} value={o}>Sort: {o}</option>)}
@@ -2206,11 +2195,11 @@ function RouteTrackingPage({
     id: v.visit_id,
     position: [Number(v.latitude), Number(v.longitude)],
     label: String(v.visit_id),
-    color: v.status === 'Completed' ? '#10b981' : '#f59e0b',
+    color: v.status === 'Completed' ? '#255684' : '#f59e0b',
     popup: `${v.customer_name} — ${v.status}`,
   }));
   const polyline = markers.length >= 2
-    ? [{ id: 'route', positions: markers.map(m => m.position), color: '#093850' }]
+    ? [{ id: 'route', positions: markers.map(m => m.position), color: '#0c1031' }]
     : [];
   const coverage = visits.length ? Math.round((completed.length / visits.length) * 100) : 0;
   if (loading) return <LoadingState message="Loading route..." />;

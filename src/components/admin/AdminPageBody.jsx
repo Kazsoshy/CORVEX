@@ -1,4 +1,5 @@
 import { Pagination } from '../shared/Pagination';
+import { StatsGrid, Stats } from '../shared/StatsGrid';
 import { usePagination, useServerPagination, DEFAULT_PAGE_SIZE } from '../../hooks/usePagination';
 import { useEffect, useMemo, useState, useCallback } from 'react';
 import apiClient from '../../api/apiClient';
@@ -39,19 +40,6 @@ function Toolbar({
             {actions.map(a => <button key={a.label} className={btn(a.variant)} type="button" onClick={() => onAction(a)}>{a.label}</button>)}
           </div>}
       </div>
-    </section>;
-}
-function Stats({
-  stats
-}) {
-  return <section className="stats-grid">
-      {stats.map((s, i) => <article key={s.label} className="stat-card" style={{
-      '--stat-index': i
-    }}>
-          <div className="stat-card-top"><span className="stat-index">{String(i + 1).padStart(2, '0')}</span><span className="stat-dot" /></div>
-          <span className="stat-label">{s.label}</span>
-          <strong className="stat-value">{s.value}</strong>
-        </article>)}
     </section>;
 }
 function Card({
@@ -139,7 +127,7 @@ function DashboardPage({
         <Card title="User Growth" sub="Monthly registered users">
           <ResponsiveContainer width="100%" height={200}>
             <AreaChart data={USER_GROWTH}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
+              <CartesianGrid strokeDasharray="3 3" stroke="#c5c8d0" />
               <XAxis dataKey="month" tick={{
               fontSize: 12
             }} />
@@ -147,7 +135,7 @@ function DashboardPage({
               fontSize: 12
             }} />
               <Tooltip />
-              <Area type="monotone" dataKey="users" name="Users" stroke="#093850" fill="#093850" fillOpacity={0.1} strokeWidth={2} />
+              <Area type="monotone" dataKey="users" name="Users" stroke="#255684" fill="#255684" fillOpacity={0.1} strokeWidth={2} />
             </AreaChart>
           </ResponsiveContainer>
         </Card>
@@ -155,7 +143,7 @@ function DashboardPage({
         <Card title="Branch Overview" sub="Performance scores">
           <ResponsiveContainer width="100%" height={200}>
             <BarChart data={BRANCH_PERFORMANCE_CHART}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
+              <CartesianGrid strokeDasharray="3 3" stroke="#c5c8d0" />
               <XAxis dataKey="branch" tick={{
               fontSize: 12
             }} />
@@ -164,7 +152,7 @@ function DashboardPage({
             }} />
               <Tooltip />
               <Legend />
-              <Bar dataKey="performance" name="Performance" fill="#093850" radius={[4, 4, 0, 0]} />
+              <Bar dataKey="performance" name="Performance" fill="#255684" radius={[4, 4, 0, 0]} />
               <Bar dataKey="risk" name="Risk Score" fill="#ef4444" radius={[4, 4, 0, 0]} />
             </BarChart>
           </ResponsiveContainer>
@@ -717,7 +705,7 @@ function BranchListPage({
           <div style={{
           padding: '40px',
           textAlign: 'center',
-          color: '#64748b'
+          color: '#818697'
         }}>Loading branches...</div>
         </section>
       </div>;
@@ -750,7 +738,7 @@ function BranchListPage({
               {branches.length === 0 ? <tr><td colSpan="10" style={{
                   textAlign: 'center',
                   padding: '40px',
-                  color: '#64748b'
+                  color: '#818697'
                 }}>No branches found</td></tr> : paginatedBranches.map(b => <tr key={b.branch_id} className="clickable-row" onClick={() => navigate(`${adminBase}/branches/${b.branch_id}`)}>
                     <td>{b.branch_id}</td>
                     <td><strong>{b.branch_name}</strong></td>
@@ -1329,14 +1317,14 @@ function ReportsPage({
         <Card title="Collections Trend" sub={analytics.scope || 'All branches'}>
           <ResponsiveContainer width="100%" height={240}>
             <AreaChart data={analytics.trends?.collections || []}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
+              <CartesianGrid strokeDasharray="3 3" stroke="#c5c8d0" />
               <XAxis dataKey="day" tick={{
               fontSize: 12
             }} /><YAxis tick={{
               fontSize: 11
             }} tickFormatter={v => `${(v / 1000).toFixed(0)}k`} />
               <Tooltip formatter={v => formatCurrency(v)} />
-              <Area type="monotone" dataKey="amount" name="Collections" stroke="#093850" fill="#093850" fillOpacity={0.1} strokeWidth={2} />
+              <Area type="monotone" dataKey="amount" name="Collections" stroke="#255684" fill="#255684" fillOpacity={0.1} strokeWidth={2} />
             </AreaChart>
           </ResponsiveContainer>
         </Card>
@@ -1374,15 +1362,15 @@ function ReportsPage({
               compliance: row.routeCompliance,
               inventory: row.inventoryHealth,
             }))}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
+              <CartesianGrid strokeDasharray="3 3" stroke="#c5c8d0" />
               <XAxis dataKey="branch" tick={{
               fontSize: 12
             }} /><YAxis domain={[0, 100]} tick={{
               fontSize: 12
             }} />
               <Tooltip /><Legend />
-              <Bar dataKey="compliance" name="Route Compliance" fill="#093850" radius={[4, 4, 0, 0]} />
-              <Bar dataKey="inventory" name="Inventory Health" fill="#06b6d4" radius={[4, 4, 0, 0]} />
+              <Bar dataKey="compliance" name="Route Compliance" fill="#255684" radius={[4, 4, 0, 0]} />
+              <Bar dataKey="inventory" name="Inventory Health" fill="#255684" radius={[4, 4, 0, 0]} />
             </BarChart>
           </ResponsiveContainer>
         </Card>
@@ -1441,7 +1429,7 @@ function AuditLogsPage({
           <div style={{
           padding: '40px',
           textAlign: 'center',
-          color: '#64748b'
+          color: '#818697'
         }}>Loading audit logs...</div>
         </section>
       </div>;
@@ -1488,7 +1476,7 @@ function AuditLogsPage({
               {filtered.length === 0 ? <tr><td colSpan="6" style={{
                   textAlign: 'center',
                   padding: '40px',
-                  color: '#64748b'
+                  color: '#818697'
                 }}>No audit logs found</td></tr> : paginated_filtered.map(l => <tr key={l.log_id}>
                     <td>{l.log_id}</td>
                     <td>{l.user_name || `User #${l.user_id}`}</td>

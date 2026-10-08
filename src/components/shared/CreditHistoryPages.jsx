@@ -6,6 +6,7 @@ import { NavIcon } from '../../navIcons';
 import { EmptyState } from '../shared/EmptyState';
 import { LoadingState } from '../shared/LoadingState';
 import { StatusBadge } from '../StatusBadge';
+import { StatsGrid } from '../shared/StatsGrid';
 import { formatCurrency, formatDisplayDate } from '../../utils/formatters.js';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -112,11 +113,11 @@ export function CreditHistoryListPage({
                     <td>{formatCurrency(r.previous_balance)}</td>
                     <td style={{
                   fontWeight: 600,
-                  color: '#093850'
+                  color: '#255684'
                 }}>{formatCurrency(r.payment_amount)}</td>
                     <td style={{
                   fontWeight: 600,
-                  color: Number(r.remaining_balance) > 0 ? '#dc2626' : '#059669'
+                  color: Number(r.remaining_balance) > 0 ? '#dc2626' : '#4A6B12'
                 }}>
                       {formatCurrency(r.remaining_balance)}
                     </td>
@@ -174,7 +175,7 @@ export function CreditHistoryDetailPage({
   }
   const statusColor = {
     Paid: {
-      color: '#059669'
+      color: '#4A6B12'
     },
     Partial: {
       color: '#d97706'
@@ -183,7 +184,7 @@ export function CreditHistoryDetailPage({
       color: '#dc2626'
     }
   }[record.payment_status] ?? {
-    color: '#64748b'
+    color: '#818697'
   };
   return <div className="relative z-10 grid gap-[22px] w-full">
       {/* Header */}
@@ -200,8 +201,7 @@ export function CreditHistoryDetailPage({
       </section>
 
       {/* KPI strip */}
-      <section className="stats-grid">
-        {[{
+      <StatsGrid stats={[{
         label: 'Previous Balance',
         value: formatCurrency(record.previous_balance)
       }, {
@@ -216,19 +216,7 @@ export function CreditHistoryDetailPage({
       }, {
         label: 'Transaction Date',
         value: formatDisplayDate(record.transaction_date)
-      }].map((s, i) => <article key={s.label} className="stat-card" style={{
-        '--stat-index': i
-      }}>
-            <div className="stat-card-top">
-              <span className="stat-index">{String(i + 1).padStart(2, '0')}</span>
-              <span className="stat-dot" aria-hidden="true" />
-            </div>
-            <span className="stat-label">{s.label}</span>
-            <strong className="stat-value" style={{
-          fontSize: '1rem'
-        }}>{s.value}</strong>
-          </article>)}
-      </section>
+      }]} />
 
       {/* Full record */}
       <section className="panel content-panel relative overflow-hidden">
@@ -267,12 +255,12 @@ export function CreditHistoryDetailPage({
           <li><span className="info-item-label">Payment Amount</span>
               <span className="info-item-value" style={{
             fontWeight: 700,
-            color: '#093850'
+            color: '#255684'
           }}>{formatCurrency(record.payment_amount)}</span></li>
           <li><span className="info-item-label">Remaining Balance</span>
               <span className="info-item-value" style={{
             fontWeight: 700,
-            color: Number(record.remaining_balance) > 0 ? '#dc2626' : '#059669'
+            color: Number(record.remaining_balance) > 0 ? '#dc2626' : '#4A6B12'
           }}>
                 {formatCurrency(record.remaining_balance)}
               </span></li>

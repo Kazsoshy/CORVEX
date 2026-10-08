@@ -217,6 +217,8 @@ const ADMIN_TITLES = {
   branchList: 'Branch Management',
   branchDetail: 'Branch Details',
   inventory: 'Inventory Management',
+  productCategories: 'Product Categories',
+  suppliers: 'Suppliers',
   reports: 'System Reports',
   auditLogs: 'Audit Logs',
   notifications: 'Notifications',

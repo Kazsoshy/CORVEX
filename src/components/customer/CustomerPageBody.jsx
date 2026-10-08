@@ -1,4 +1,5 @@
 import { Pagination } from '../shared/Pagination';
+import { StatsGrid, Stats } from '../shared/StatsGrid';
 import { usePagination } from '../../hooks/usePagination';
 import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
@@ -23,19 +24,6 @@ import { EmptyState } from '../shared/EmptyState';
 import { LoadingState } from '../shared/LoadingState';
 import { StatusBadge } from '../StatusBadge';
 import { NavIcon } from '../../navIcons';
-function StatsGrid({
-  stats
-}) {
-  if (!stats?.length) return null;
-  return <section className="stats-grid customer-stats">
-      {stats.map((stat, index) => <article key={stat.label} className="stat-card" style={{
-      '--stat-index': index
-    }}>
-          <span className="stat-label">{stat.label}</span>
-          <strong className="stat-value">{stat.value}</strong>
-        </article>)}
-    </section>;
-}
 function LoginPage({
   navigate,
   showToast
@@ -509,10 +497,10 @@ function StatementsPage({
   return <div className="page customer-page">
       <section className="panel content-panel relative overflow-hidden">
         <div className="flex flex-col md:flex-row justify-between gap-4 items-start md:items-center mb-4"><h3>Outstanding Balance Summary</h3></div>
-        <div className="analytics-card highlight">
-          <span className="metric-label">Current Outstanding Balance</span>
-          <strong>{formatCurrency(Number(summary?.outstanding_balance || 0))}</strong>
-        </div>
+        <StatsGrid stats={[{
+          label: 'Current Outstanding Balance',
+          value: formatCurrency(Number(summary?.outstanding_balance || 0))
+        }]} />
       </section>
 
       {!months.length ? <EmptyState title="No statements" description="Monthly payment totals will appear here after collections are recorded." /> : <section className="panel content-panel relative overflow-hidden">

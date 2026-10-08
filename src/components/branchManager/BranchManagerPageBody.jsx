@@ -1,4 +1,5 @@
 import { Pagination } from '../shared/Pagination';
+import { StatsGrid, Stats } from '../shared/StatsGrid';
 import { usePagination } from '../../hooks/usePagination';
 import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
@@ -44,21 +45,7 @@ import { downloadPdf, exportRows } from '../../utils/dataExport.js';
 
 // Re-export for use in other components
 export { getBranchAnalytics, getBranchStaff, getBranchCustomers, getBranchAlerts };
-const C = ['#093850', '#06b6d4', '#10b981', '#f59e0b', '#ef4444'];
-function Stats({
-  stats
-}) {
-  if (!stats?.length) return null;
-  return <section className="stats-grid">
-      {stats.map((s, i) => <article key={s.label} className="stat-card" style={{
-      '--stat-index': i
-    }}>
-          <div className="stat-card-top"><span className="stat-index">{String(i + 1).padStart(2, '0')}</span><span className="stat-dot" /></div>
-          <span className="stat-label">{s.label}</span>
-          <strong className="stat-value">{s.value}</strong>
-        </article>)}
-    </section>;
-}
+const C = ['#255684', '#0c1031', '#818697', '#f59e0b', '#ef4444'];
 function Severity({
   severity
 }) {
@@ -171,7 +158,7 @@ function DashboardPage({
         <Card title="Daily Collection vs Target" sub="This week">
           <ResponsiveContainer width="100%" height={220}>
             <AreaChart data={collectionData?.daily || []}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
+              <CartesianGrid strokeDasharray="3 3" stroke="#c5c8d0" />
               <XAxis dataKey="day" tick={{
               fontSize: 12
             }} />
@@ -180,15 +167,15 @@ function DashboardPage({
             }} tickFormatter={v => `${(v / 1000).toFixed(0)}k`} />
               <Tooltip formatter={v => formatCurrency(v)} />
               <Legend />
-              <Area type="monotone" dataKey="target" name="Target" stroke="#e2e8f0" fill="#f1f5f9" strokeWidth={2} strokeDasharray="5 5" />
-              <Area type="monotone" dataKey="amount" name="Collected" stroke="#093850" fill="#093850" fillOpacity={0.12} strokeWidth={2} />
+              <Area type="monotone" dataKey="target" name="Target" stroke="#c5c8d0" fill="#c5c8d0" strokeWidth={2} strokeDasharray="5 5" />
+              <Area type="monotone" dataKey="amount" name="Collected" stroke="#255684" fill="#255684" fillOpacity={0.12} strokeWidth={2} />
             </AreaChart>
           </ResponsiveContainer>
         </Card>
         <Card title="Sales vs Target" sub="This week">
           <ResponsiveContainer width="100%" height={220}>
             <BarChart data={salesData?.weekly || []}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
+              <CartesianGrid strokeDasharray="3 3" stroke="#c5c8d0" />
               <XAxis dataKey="day" tick={{
               fontSize: 12
             }} />
@@ -196,8 +183,8 @@ function DashboardPage({
               fontSize: 11
             }} tickFormatter={v => `${(v / 1000).toFixed(0)}k`} />
               <Tooltip formatter={v => formatCurrency(v)} /><Legend />
-              <Bar dataKey="target" name="Target" fill="#e2e8f0" radius={[4, 4, 0, 0]} />
-              <Bar dataKey="actual" name="Actual" fill="#06b6d4" radius={[4, 4, 0, 0]} />
+              <Bar dataKey="target" name="Target" fill="#c5c8d0" radius={[4, 4, 0, 0]} />
+              <Bar dataKey="actual" name="Actual" fill="#255684" radius={[4, 4, 0, 0]} />
             </BarChart>
           </ResponsiveContainer>
         </Card>
@@ -207,7 +194,7 @@ function DashboardPage({
         <Card title="Delinquency Trend" sub="Weekly overdue accounts">
           <ResponsiveContainer width="100%" height={200}>
             <AreaChart data={delinquencyData?.delinquency || []}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" /><XAxis dataKey="week" tick={{
+              <CartesianGrid strokeDasharray="3 3" stroke="#c5c8d0" /><XAxis dataKey="week" tick={{
               fontSize: 12
             }} /><YAxis tick={{
               fontSize: 12
@@ -321,28 +308,28 @@ function FieldOperationsHub({
           <Card title="Collector Performance" sub="Compliance & recovery">
             <ResponsiveContainer width="100%" height={220}>
               <BarChart data={collectorChart}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
+                <CartesianGrid strokeDasharray="3 3" stroke="#c5c8d0" />
                 <XAxis dataKey="name" tick={{
                 fontSize: 12
               }} /><YAxis domain={[0, 100]} unit="%" tick={{
                 fontSize: 12
               }} /><Tooltip formatter={v => `${v}%`} /><Legend />
-                <Bar dataKey="compliance" name="Compliance" fill="#093850" radius={[4, 4, 0, 0]} />
-                <Bar dataKey="recovery" name="Recovery" fill="#06b6d4" radius={[4, 4, 0, 0]} />
+                <Bar dataKey="compliance" name="Compliance" fill="#255684" radius={[4, 4, 0, 0]} />
+                <Bar dataKey="recovery" name="Recovery" fill="#0c1031" radius={[4, 4, 0, 0]} />
               </BarChart>
             </ResponsiveContainer>
           </Card>
           <Card title="Sales Agent Performance" sub="Visit completion & conversion">
             <ResponsiveContainer width="100%" height={220}>
               <BarChart data={salesChart}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
+                <CartesianGrid strokeDasharray="3 3" stroke="#c5c8d0" />
                 <XAxis dataKey="name" tick={{
                 fontSize: 12
               }} /><YAxis domain={[0, 100]} unit="%" tick={{
                 fontSize: 12
               }} /><Tooltip formatter={v => `${v}%`} /><Legend />
-                <Bar dataKey="visits" name="Visit Completion" fill="#1e5a7a" radius={[4, 4, 0, 0]} />
-                <Bar dataKey="conversion" name="Conversion" fill="#10b981" radius={[4, 4, 0, 0]} />
+                <Bar dataKey="visits" name="Visit Completion" fill="#255684" radius={[4, 4, 0, 0]} />
+                <Bar dataKey="conversion" name="Conversion" fill="#0c1031" radius={[4, 4, 0, 0]} />
               </BarChart>
             </ResponsiveContainer>
           </Card>
@@ -355,10 +342,10 @@ function FieldOperationsHub({
           padding: '12px 0'
         }}>
             {staff.collectors.slice(0, 4).map(c => <div key={c.id} style={{
-            background: '#f8fafc',
+            background: '#eef0f4',
             padding: 12,
             borderRadius: 8,
-            border: '1px solid #e2e8f0'
+            border: '1px solid #c5c8d0'
           }}>
                 <strong style={{
               fontSize: '0.9rem'
@@ -369,7 +356,7 @@ function FieldOperationsHub({
               flexDirection: 'column',
               gap: 4,
               fontSize: '0.85rem',
-              color: '#475569'
+              color: '#818697'
             }}>
                   <span>Assigned: {c.accountsAssigned}</span>
                   <span>Visited: {c.accountsVisited}</span>
@@ -876,7 +863,7 @@ function ReportsHubPage({
             <Card title="Daily Collection vs Target" sub="Last 7 days">
               <ResponsiveContainer width="100%" height={220}>
                 <AreaChart data={collectionData?.daily || []}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
+                  <CartesianGrid strokeDasharray="3 3" stroke="#c5c8d0" />
                   <XAxis dataKey="day" tick={{
                 fontSize: 12
               }} />
@@ -885,15 +872,15 @@ function ReportsHubPage({
               }} tickFormatter={v => `${(v / 1000).toFixed(0)}k`} />
                   <Tooltip formatter={v => formatCurrency(v)} />
                   <Legend />
-                  <Area type="monotone" dataKey="target" name="Target" stroke="#e2e8f0" fill="#f1f5f9" strokeWidth={2} strokeDasharray="5 5" />
-                  <Area type="monotone" dataKey="amount" name="Collected" stroke="#093850" fill="#093850" fillOpacity={0.12} strokeWidth={2} />
+                  <Area type="monotone" dataKey="target" name="Target" stroke="#c5c8d0" fill="#c5c8d0" strokeWidth={2} strokeDasharray="5 5" />
+                  <Area type="monotone" dataKey="amount" name="Collected" stroke="#255684" fill="#255684" fillOpacity={0.12} strokeWidth={2} />
                 </AreaChart>
               </ResponsiveContainer>
             </Card>
             <Card title="Collector Amounts">
               <ResponsiveContainer width="100%" height={220}>
                 <BarChart data={collectorAmt}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
+                  <CartesianGrid strokeDasharray="3 3" stroke="#c5c8d0" />
                   <XAxis dataKey="name" tick={{
                 fontSize: 12
               }} />
@@ -902,8 +889,8 @@ function ReportsHubPage({
               }} tickFormatter={v => `${(v / 1000).toFixed(0)}k`} />
                   <Tooltip />
                   <Legend />
-                  <Bar dataKey="amount" name="Collected (PHP)" fill="#093850" radius={[4, 4, 0, 0]} />
-                  <Bar dataKey="compliance" name="Compliance %" fill="#06b6d4" radius={[4, 4, 0, 0]} />
+                  <Bar dataKey="amount" name="Collected (PHP)" fill="#255684" radius={[4, 4, 0, 0]} />
+                  <Bar dataKey="compliance" name="Compliance %" fill="#0c1031" radius={[4, 4, 0, 0]} />
                 </BarChart>
               </ResponsiveContainer>
             </Card>
@@ -928,7 +915,7 @@ function ReportsHubPage({
             <Card title="Sales vs Target" sub="Last 7 days">
               <ResponsiveContainer width="100%" height={220}>
                 <BarChart data={salesData?.weekly || []}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
+                  <CartesianGrid strokeDasharray="3 3" stroke="#c5c8d0" />
                   <XAxis dataKey="day" tick={{
                 fontSize: 12
               }} />
@@ -937,15 +924,15 @@ function ReportsHubPage({
               }} tickFormatter={v => `${(v / 1000).toFixed(0)}k`} />
                   <Tooltip formatter={v => formatCurrency(v)} />
                   <Legend />
-                  <Bar dataKey="target" name="Target" fill="#e2e8f0" radius={[4, 4, 0, 0]} />
-                  <Bar dataKey="actual" name="Actual" fill="#06b6d4" radius={[4, 4, 0, 0]} />
+                  <Bar dataKey="target" name="Target" fill="#c5c8d0" radius={[4, 4, 0, 0]} />
+                  <Bar dataKey="actual" name="Actual" fill="#255684" radius={[4, 4, 0, 0]} />
                 </BarChart>
               </ResponsiveContainer>
             </Card>
             <Card title="Agent Revenue & Visits">
               <ResponsiveContainer width="100%" height={220}>
                 <BarChart data={agentRev}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
+                  <CartesianGrid strokeDasharray="3 3" stroke="#c5c8d0" />
                   <XAxis dataKey="name" tick={{
                 fontSize: 12
               }} />
@@ -957,8 +944,8 @@ function ReportsHubPage({
               }} />
                   <Tooltip />
                   <Legend />
-                  <Bar yAxisId="l" dataKey="revenue" name="Revenue" fill="#1e5a7a" radius={[4, 4, 0, 0]} />
-                  <Bar yAxisId="r" dataKey="visits" name="Visit %" fill="#10b981" radius={[4, 4, 0, 0]} />
+                  <Bar yAxisId="l" dataKey="revenue" name="Revenue" fill="#255684" radius={[4, 4, 0, 0]} />
+                  <Bar yAxisId="r" dataKey="visits" name="Visit %" fill="#0c1031" radius={[4, 4, 0, 0]} />
                 </BarChart>
               </ResponsiveContainer>
             </Card>
@@ -986,7 +973,7 @@ function ReportsHubPage({
                   <Pie data={[{
                 name: 'Sufficient',
                 value: inventoryData?.summary?.sufficient || 0,
-                color: '#10b981'
+                color: '#255684'
               }, {
                 name: 'Low Stock',
                 value: inventoryData?.summary?.low || 0,
@@ -998,14 +985,14 @@ function ReportsHubPage({
               }, {
                 name: 'Out of Stock',
                 value: inventoryData?.summary?.outOfStock || 0,
-                color: '#64748b'
+                color: '#818697'
               }]} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={80} label={({
                 name,
                 value
               }) => `${name}: ${value}`}>
                     {[{
                   name: 'Sufficient',
-                  color: '#10b981'
+                  color: '#255684'
                 }, {
                   name: 'Low Stock',
                   color: '#f59e0b'
@@ -1014,7 +1001,7 @@ function ReportsHubPage({
                   color: '#ef4444'
                 }, {
                   name: 'Out of Stock',
-                  color: '#64748b'
+                  color: '#818697'
                 }].map(entry => <Cell key={entry.name} fill={entry.color} />)}
                   </Pie>
                   <Tooltip />
@@ -1058,7 +1045,7 @@ function ReportsHubPage({
             <Card title="Delinquency Trend" sub="Weekly overdue accounts">
               <ResponsiveContainer width="100%" height={220}>
                 <AreaChart data={delinquencyData?.delinquency || []}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
+                  <CartesianGrid strokeDasharray="3 3" stroke="#c5c8d0" />
                   <XAxis dataKey="week" tick={{
                 fontSize: 12
               }} />
@@ -1083,7 +1070,7 @@ function ReportsHubPage({
               });
               return point;
             }) || []}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
+                  <CartesianGrid strokeDasharray="3 3" stroke="#c5c8d0" />
                   <XAxis dataKey="week" tick={{
                 fontSize: 12
               }} />
@@ -1092,7 +1079,7 @@ function ReportsHubPage({
               }} />
                   <Tooltip formatter={v => `${v}%`} />
                   <Legend />
-                  {complianceData?.compliance?.map((c, i) => <Line key={c.name} type="monotone" dataKey={c.name} stroke={['#093850', '#06b6d4', '#10b981', '#f59e0b', '#ef4444'][i % 5]} strokeWidth={2} dot={false} />)}
+                  {complianceData?.compliance?.map((c, i) => <Line key={c.name} type="monotone" dataKey={c.name} stroke={['#255684', '#0c1031', '#818697', '#f59e0b', '#ef4444'][i % 5]} strokeWidth={2} dot={false} />)}
                 </LineChart>
               </ResponsiveContainer>
             </Card>
@@ -1127,13 +1114,13 @@ function ReportsHubPage({
             value: formatCurrency(invoices.reduce((s, i) => s + Number(i.total_amount || 0), 0))
           }].map(s => <div key={s.label} style={{
             padding: 14,
-            background: '#f8fafc',
-            border: '1px solid #e2e8f0',
+            background: '#eef0f4',
+            border: '1px solid #c5c8d0',
             borderRadius: 8
           }}>
                     <span style={{
               fontSize: '0.78rem',
-              color: '#64748b',
+              color: '#818697',
               fontWeight: 600,
               textTransform: 'uppercase',
               letterSpacing: '0.03em'
@@ -1211,43 +1198,31 @@ function ReportsHubPage({
       marginTop: 24
     }}>
           <Card title="Overall KPI Summary">
-            <div style={{
-          display: 'grid',
-          gridTemplateColumns: 'repeat(4, 1fr)',
-          gap: '24px 20px',
-          padding: '16px 0'
-        }}>
-              <div><strong>Health Score</strong><div style={{
-              fontSize: '1.5rem',
-              color: '#093850'
-            }}>{kpi?.healthScore || 0}/100</div></div>
-              <div><strong>Active Collectors</strong><div style={{
-              fontSize: '1.5rem',
-              color: '#10b981'
-            }}>{kpi?.activeCollectors || 0}</div></div>
-              <div><strong>Active Sales Agents</strong><div style={{
-              fontSize: '1.5rem',
-              color: '#1e5a7a'
-            }}>{kpi?.activeSalesAgents || 0}</div></div>
-              <div><strong>Total Customers</strong><div style={{
-              fontSize: '1.5rem'
-            }}>{kpi?.totalCustomers || 0}</div></div>
-              <div><strong>Outstanding Balance</strong><div style={{
-              fontSize: '1.5rem',
-              color: '#ef4444'
-            }}>{formatCurrency(kpi?.totalOutstanding || 0)}</div></div>
-              <div><strong>Collections (7d)</strong><div style={{
-              fontSize: '1.5rem',
-              color: '#059669'
-            }}>{formatCurrency(kpi?.totalCollectionsAmount || 0)}</div></div>
-              <div><strong>Sales (7d)</strong><div style={{
-              fontSize: '1.5rem',
-              color: '#093850'
-            }}>{formatCurrency(kpi?.totalSalesAmount || 0)}</div></div>
-              <div><strong>Inventory Health</strong><div style={{
-              fontSize: '1.5rem'
-            }}>{kpi?.inventoryHealth || 0}%</div></div>
-            </div>
+            <Stats stats={[{
+              label: 'Health Score',
+              value: `${kpi?.healthScore || 0}/100`
+            }, {
+              label: 'Active Collectors',
+              value: String(kpi?.activeCollectors || 0)
+            }, {
+              label: 'Active Sales Agents',
+              value: String(kpi?.activeSalesAgents || 0)
+            }, {
+              label: 'Total Customers',
+              value: String(kpi?.totalCustomers || 0)
+            }, {
+              label: 'Outstanding Balance',
+              value: formatCurrency(kpi?.totalOutstanding || 0)
+            }, {
+              label: 'Collections (7d)',
+              value: formatCurrency(kpi?.totalCollectionsAmount || 0)
+            }, {
+              label: 'Sales (7d)',
+              value: formatCurrency(kpi?.totalSalesAmount || 0)
+            }, {
+              label: 'Inventory Health',
+              value: `${kpi?.inventoryHealth || 0}%`
+            }]} />
           </Card>
         </div>}
     </div>;
@@ -1356,26 +1331,26 @@ function StaffPerformancePage({
           <Card title="Collector Scorecard" sub="Compliance & recovery rates">
             <ResponsiveContainer width="100%" height={220}>
               <BarChart data={collectorBar}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" /><XAxis dataKey="name" tick={{
+                <CartesianGrid strokeDasharray="3 3" stroke="#c5c8d0" /><XAxis dataKey="name" tick={{
                 fontSize: 12
               }} /><YAxis domain={[0, 100]} unit="%" tick={{
                 fontSize: 12
               }} /><Tooltip formatter={v => `${v}%`} /><Legend />
-                <Bar dataKey="score" name="Compliance" fill="#093850" radius={[4, 4, 0, 0]} />
-                <Bar dataKey="recovery" name="Recovery" fill="#06b6d4" radius={[4, 4, 0, 0]} />
+                <Bar dataKey="score" name="Compliance" fill="#255684" radius={[4, 4, 0, 0]} />
+                <Bar dataKey="recovery" name="Recovery" fill="#0c1031" radius={[4, 4, 0, 0]} />
               </BarChart>
             </ResponsiveContainer>
           </Card>
           <Card title="Sales Agent Scorecard" sub="Visit completion & conversion">
             <ResponsiveContainer width="100%" height={220}>
               <BarChart data={salesBar}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" /><XAxis dataKey="name" tick={{
+                <CartesianGrid strokeDasharray="3 3" stroke="#c5c8d0" /><XAxis dataKey="name" tick={{
                 fontSize: 12
               }} /><YAxis domain={[0, 100]} unit="%" tick={{
                 fontSize: 12
               }} /><Tooltip formatter={v => `${v}%`} /><Legend />
-                <Bar dataKey="visits" name="Visit Completion" fill="#1e5a7a" radius={[4, 4, 0, 0]} />
-                <Bar dataKey="conversion" name="Conversion" fill="#10b981" radius={[4, 4, 0, 0]} />
+                <Bar dataKey="visits" name="Visit Completion" fill="#255684" radius={[4, 4, 0, 0]} />
+                <Bar dataKey="conversion" name="Conversion" fill="#0c1031" radius={[4, 4, 0, 0]} />
               </BarChart>
             </ResponsiveContainer>
           </Card>
@@ -1383,12 +1358,12 @@ function StaffPerformancePage({
         <Card title="Route Compliance Trend" sub="Weekly per collector">
           <ResponsiveContainer width="100%" height={200}>
             <LineChart data={complianceChartData}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" /><XAxis dataKey="week" tick={{
+              <CartesianGrid strokeDasharray="3 3" stroke="#c5c8d0" /><XAxis dataKey="week" tick={{
               fontSize: 12
             }} /><YAxis domain={[80, 100]} unit="%" tick={{
               fontSize: 12
             }} /><Tooltip formatter={v => `${v}%`} /><Legend />
-              {complianceData?.compliance?.map((c, i) => <Line key={c.name} type="monotone" dataKey={c.name} stroke={['#093850', '#06b6d4', '#10b981', '#f59e0b', '#ef4444'][i % 5]} strokeWidth={2} dot={false} />)}
+              {complianceData?.compliance?.map((c, i) => <Line key={c.name} type="monotone" dataKey={c.name} stroke={['#255684', '#0c1031', '#818697', '#f59e0b', '#ef4444'][i % 5]} strokeWidth={2} dot={false} />)}
             </LineChart>
           </ResponsiveContainer>
         </Card>
@@ -1669,7 +1644,7 @@ function CustomersPage({
             <input className="filter-input search" type="search" placeholder="Search by customer name, address, or phone" value={search} onChange={e => setSearch(e.target.value)} style={{
             padding: '8px 12px',
             borderRadius: '6px',
-            border: '1px solid #e2e8f0',
+            border: '1px solid #c5c8d0',
             fontSize: '0.9rem',
             flex: 1,
             minWidth: '200px'
@@ -1677,7 +1652,7 @@ function CustomersPage({
             <select className="filter-select" value={statusFilter} onChange={e => setStatusFilter(e.target.value)} style={{
             padding: '8px 12px',
             borderRadius: '6px',
-            border: '1px solid #e2e8f0',
+            border: '1px solid #c5c8d0',
             fontSize: '0.9rem'
           }}>
               {['All', 'Active', 'Inactive'].map(s => <option key={s} value={s}>{s === 'All' ? 'All Statuses' : s}</option>)}
@@ -1685,7 +1660,7 @@ function CustomersPage({
             <select className="filter-select" value={paymentFilter} onChange={e => setPaymentFilter(e.target.value)} style={{
             padding: '8px 12px',
             borderRadius: '6px',
-            border: '1px solid #e2e8f0',
+            border: '1px solid #c5c8d0',
             fontSize: '0.9rem'
           }}>
               {['All', 'Current', 'Overdue'].map(s => <option key={s} value={s}>{s === 'All' ? 'All Payment Status' : s}</option>)}
@@ -1831,7 +1806,7 @@ function CustomerDetailPage({
           id: customer.customer_id,
           position: [Number(customer.latitude), Number(customer.longitude)],
           label: name.substring(0, 2).toUpperCase(),
-          color: paymentStatus === 'Overdue' ? '#ef4444' : '#093850',
+          color: paymentStatus === 'Overdue' ? '#ef4444' : '#0c1031',
           popup: name
         }]} />
           </div>
@@ -1889,7 +1864,7 @@ function LeafletPage({
           id: a.id,
           position: [a.lat, a.lng],
           label: a.customerName.substring(0, 2).toUpperCase(),
-          color: a.paymentStatus === 'Overdue' ? '#ef4444' : '#10b981',
+          color: a.paymentStatus === 'Overdue' ? '#ef4444' : '#255684',
           popup: `${a.customerName} - ${a.paymentStatus}`
         }))} />
         </div>
@@ -2208,7 +2183,7 @@ function ApprovalCenterPage({
   const RiskBadge = ({
     score
   }) => {
-    const color = score >= 70 ? '#dc2626' : score >= 40 ? '#d97706' : '#059669';
+    const color = score >= 70 ? '#dc2626' : score >= 40 ? '#d97706' : '#4A6B12';
     const label = score >= 70 ? 'High Risk' : score >= 40 ? 'Medium' : 'Low Risk';
     return <span style={{
       fontWeight: 600,
@@ -2227,31 +2202,19 @@ function ApprovalCenterPage({
   }
   return <div className="relative z-10 grid gap-[22px] w-full">
       {/* Summary bar */}
-      <section className="stats-grid">
-        {[{
+      <Stats stats={[{
         label: 'Total Pending',
         value: String(totalPending),
-        idx: 0
       }, {
         label: 'CI Approvals',
         value: String(ciList.filter(c => c.status === 'Pending').length),
-        idx: 1
       }, {
         label: 'Transfer Approvals',
         value: String(transferList.filter(t => t.status === 'Pending Approval').length),
-        idx: 2
       }, {
         label: 'Special Collections',
         value: String(specialList.filter(s => s.status === 'Pending').length),
-        idx: 3
-      }].map((s, i) => <article key={s.label} className="stat-card" style={{
-        '--stat-index': i
-      }}>
-            <div className="stat-card-top"><span className="stat-index">{String(i + 1).padStart(2, '0')}</span><span className="stat-dot" /></div>
-            <span className="stat-label">{s.label}</span>
-            <strong className="stat-value">{s.value}</strong>
-          </article>)}
-      </section>
+      }]} />
 
       {/* Tab navigation */}
       <div className="segmented-control">
@@ -2469,7 +2432,7 @@ function AccountLocationDetailPage({
         id: customer.customer_id,
         position: [lat, lng],
         label: name.substring(0, 2).toUpperCase(),
-        color: '#093850',
+        color: '#0c1031',
         popup: name
       }]} />
         </section> : <EmptyState title="No coordinates" description="This customer has no map pin on file." />}

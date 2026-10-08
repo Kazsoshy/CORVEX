@@ -24,7 +24,7 @@ L.Icon.Default.mergeOptions({
 });
 
 // A custom DivIcon creator for more modern looking markers if needed
-export const createCustomIcon = (color = '#093850', label = '') => {
+export const createCustomIcon = (color = '#255684', label = '') => {
   return L.divIcon({
     className: 'custom-leaflet-marker',
     html: `<div style="
@@ -92,7 +92,7 @@ export default function LeafletMap({
           <Polyline 
             key={line.id} 
             positions={line.positions} 
-            color={line.color || '#093850'}
+            color={line.color || '#255684'}
             weight={line.weight ?? 3}
             opacity={line.opacity ?? 0.7}
             dashArray={line.dashArray}

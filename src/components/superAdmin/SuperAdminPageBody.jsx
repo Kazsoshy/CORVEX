@@ -1,4 +1,5 @@
 import { Pagination } from '../shared/Pagination';
+import { StatsGrid, Stats } from '../shared/StatsGrid';
 import { usePagination } from '../../hooks/usePagination';
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import apiClient from '../../api/apiClient';
@@ -47,19 +48,6 @@ function Toolbar({
       </div>
     </section>;
 }
-function Stats({
-  stats
-}) {
-  return <section className="stats-grid">
-      {stats.map((s, i) => <article key={s.label} className="stat-card" style={{
-      '--stat-index': i
-    }}>
-          <div className="stat-card-top"><span className="stat-index">{String(i + 1).padStart(2, '0')}</span><span className="stat-dot" /></div>
-          <span className="stat-label">{s.label}</span>
-          <strong className="stat-value">{s.value}</strong>
-        </article>)}
-    </section>;
-}
 function Card({
   title,
   sub,
@@ -82,7 +70,7 @@ function MetricBar({
   label,
   value,
   max = 100,
-  color = '#093850'
+  color = '#255684'
 }) {
   return <div style={{
     marginBottom: 14
@@ -98,12 +86,12 @@ function MetricBar({
       }}>{label}</span>
         <span style={{
         fontSize: '0.88rem',
-        color: '#64748b'
+        color: '#818697'
       }}>{value}{max === 100 ? '%' : ' ms'}</span>
       </div>
       <div style={{
       height: 8,
-      background: '#f1f5f9',
+      background: '#c5c8d0',
       borderRadius: 999,
       overflow: 'hidden'
     }}>
@@ -155,7 +143,7 @@ function DashboardPage({
   const pagination_auditLogs = usePagination(auditLogs || []);
   const paginated_auditLogs = pagination_auditLogs.paginatedData;
   if (loading) return <LoadingState message="Loading system dashboard..." />;
-  const dbColor = health?.dbStatus === 'Online' ? '#059669' : '#dc2626';
+  const dbColor = health?.dbStatus === 'Online' ? '#4A6B12' : '#dc2626';
   return <div className="relative z-10 grid gap-[22px] w-full">
       <section className="panel dashboard-greeting">
         <div className="flex flex-col gap-1">
@@ -217,7 +205,7 @@ function DashboardPage({
                     <td><strong>{r.role}</strong></td>
                     <td>{r.total}</td>
                     <td style={{
-                  color: '#059669'
+                  color: '#4A6B12'
                 }}>{r.active}</td>
                     <td style={{
                   color: '#dc2626'
@@ -257,7 +245,7 @@ function DashboardPage({
         <div style={{
         padding: '8px 0'
       }}>
-          {health?.memoryUsage != null ? <MetricBar label="Memory Usage" value={health.memoryUsage} color="#093850" /> : null}
+          {health?.memoryUsage != null ? <MetricBar label="Memory Usage" value={health.memoryUsage} color="#255684" /> : null}
           <MetricBar label="API Response" value={health?.apiResponseMs || 0} max={500} color="#f59e0b" />
         </div>
       </Card>
@@ -529,7 +517,7 @@ function RolesPage({
                             <input type="checkbox" checked={r.permissions[p.permission_id] || false} disabled={r.slug === 'super_admin'} onChange={() => togglePermission(roleIdx, p.permission_id)} style={{
                     width: 16,
                     height: 16,
-                    accentColor: '#093850',
+                    accentColor: '#255684',
                     cursor: r.slug === 'super_admin' ? 'not-allowed' : 'pointer'
                   }} />
                           </td>)}
@@ -667,7 +655,7 @@ function RolesPage({
             })} style={{
               width: '100%',
               padding: '8px 12px',
-              border: '1px solid #cbd5e1',
+              border: '1px solid #c5c8d0',
               borderRadius: 8
             }} /></div>
               <div style={{
@@ -1165,7 +1153,7 @@ function UsersPage({
                       width: 32,
                       height: 32,
                       borderRadius: "50%",
-                      background: "#093850",
+                      background: "#0c1031",
                       color: "#fff",
                       display: "grid",
                       placeItems: "center",

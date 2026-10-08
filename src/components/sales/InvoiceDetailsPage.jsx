@@ -9,14 +9,14 @@ import { formatCurrency, formatDisplayDate, formatDisplayDateTime } from '../../
 
 const detailTileStyle = {
   padding: 14,
-  background: '#f8fafc',
-  border: '1px solid #e2e8f0',
+  background: '#eef0f4',
+  border: '1px solid #c5c8d0',
   borderRadius: 8,
 };
 
 const detailLabelStyle = {
   fontSize: '0.78rem',
-  color: '#64748b',
+  color: '#818697',
   fontWeight: 600,
   textTransform: 'uppercase',
   letterSpacing: '0.03em',
@@ -157,13 +157,13 @@ export function InvoiceDetailsPage({
             <div
               style={{
                 padding: 16,
-                background: '#f8fafc',
-                border: '1px solid #e2e8f0',
+                background: '#eef0f4',
+                border: '1px solid #c5c8d0',
                 borderRadius: 8,
               }}
             >
               <span style={detailLabelStyle}>Notes</span>
-              <p style={{ margin: '8px 0 0', whiteSpace: 'pre-wrap', lineHeight: 1.5, color: '#0f172a' }}>
+              <p style={{ margin: '8px 0 0', whiteSpace: 'pre-wrap', lineHeight: 1.5, color: '#0c1031' }}>
                 {notesText || '—'}
               </p>
             </div>
