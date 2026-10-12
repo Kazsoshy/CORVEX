@@ -469,30 +469,49 @@ function InventoryPage({
           </div>
         </div>
         {paginated.length ? <><div className="corvex-table-wrapper">
-            <table className="corvex-table">
+            <table className="corvex-table corvex-table-products">
+              <colgroup>
+                <col style={{ width: 72 }} />
+                <col style={{ width: 88 }} />
+                <col style={{ width: 120 }} />
+                <col />
+                <col style={{ width: 140 }} />
+                <col style={{ width: 112 }} />
+                <col style={{ width: 100 }} />
+                <col style={{ width: 108 }} />
+              </colgroup>
               <thead>
-                <tr><th>Image</th><th>Product ID</th><th>SKU</th><th>Product Name</th><th>Category</th><th>Unit Price</th><th>Status</th><th>Actions</th></tr>
+                <tr>
+                  <th className="cell-image">Image</th>
+                  <th>Product ID</th>
+                  <th>SKU</th>
+                  <th>Product Name</th>
+                  <th>Category</th>
+                  <th className="cell-price">Unit Price</th>
+                  <th>Status</th>
+                  <th className="cell-actions">Actions</th>
+                </tr>
               </thead>
               <tbody>
                 {paginated.map(product => <tr key={product.product_id}>
-                    <td>
-                      {product.image_url ? <img src={product.image_url} alt="" width={48} height={48} style={{
-                    objectFit: 'cover',
-                    borderRadius: 6,
-                    border: '1px solid #c5c8d0'
-                  }} /> : <span className="text-ink/50" style={{
-                    fontSize: '0.75rem'
-                  }}>—</span>}
+                    <td className="cell-image">
+                      {product.image_url ? (
+                        <img src={product.image_url} alt="" width={48} height={48} />
+                      ) : (
+                        <span className="text-ink/50" style={{ fontSize: '0.75rem' }}>—</span>
+                      )}
                     </td>
                     <td>{product.product_id}</td>
-                    <td><span style={{ fontFamily: 'monospace', fontSize: '0.82rem' }}>{product.sku || '—'}</span></td>
-                    <td>{product.product_name}</td>
+                    <td><span className="mono-cell">{product.sku || '—'}</span></td>
+                    <td className="cell-name">{product.product_name}</td>
                     <td>{product.category_name || product.category_id}</td>
-                    <td>{formatCurrency(product.unit_price)}</td>
-                    <td><StatusBadge status={product.status} /></td>
-                    <td className="table-actions" onClick={e => e.stopPropagation()}>
-                      <button className="icon-action-button" type="button" title="View" onClick={() => navigate(`/warehouse/product/${product.product_id}`)}><NavIcon name="view" /></button>
-                      <button className="icon-action-button" type="button" title="Edit" onClick={() => navigate(`/warehouse/product/${product.product_id}/edit`)}><NavIcon name="edit" /></button>
+                    <td className="cell-price">{formatCurrency(product.unit_price)}</td>
+                    <td><StatusBadge status={product.status} variant="pill" /></td>
+                    <td className="cell-actions" onClick={e => e.stopPropagation()}>
+                      <div className="table-actions">
+                        <button className="icon-action-button" type="button" title="View" onClick={() => navigate(`/warehouse/product/${product.product_id}`)}><NavIcon name="view" /></button>
+                        <button className="icon-action-button" type="button" title="Edit" onClick={() => navigate(`/warehouse/product/${product.product_id}/edit`)}><NavIcon name="edit" /></button>
+                      </div>
                     </td>
                   </tr>)}
               </tbody>

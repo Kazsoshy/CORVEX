@@ -3348,15 +3348,7 @@ select {
   padding-top: 14px;
 }
 
-/* Warehouse module */
-.table-actions {
-  display: inline-flex;
-  flex-wrap: nowrap;
-  gap: 4px;
-  align-items: center;
-  justify-content: flex-start;
-  white-space: nowrap;
-}
+/* Warehouse module — flex lives on inner .table-actions, not on <td> */
 
 .pagination {
   display: flex;
@@ -3831,6 +3823,23 @@ select {
   margin: 0;
 }
 
+/* Never flex a <td> — breaks row border alignment across columns */
+.corvex-table td.table-actions,
+.corvex-table th.table-actions,
+table td.table-actions,
+table th.table-actions {
+  display: table-cell !important;
+  vertical-align: middle;
+  white-space: nowrap;
+}
+
+.corvex-table td.table-actions > .icon-action-button:not(:first-child),
+.corvex-table td.table-actions > .button:not(:first-child),
+table td.table-actions > .icon-action-button:not(:first-child),
+table td.table-actions > .button:not(:first-child) {
+  margin-left: 4px;
+}
+
 /* Generic layout improvements */
 .panel,
 .dashboard-panel,
@@ -4050,4 +4059,52 @@ select {
 
 .corvex-table tbody tr:last-child td {
   border-bottom: none;
+}
+
+/* Warehouse product catalog — fixed columns so header/body lines align */
+.corvex-table.corvex-table-products {
+  table-layout: fixed;
+  border-collapse: collapse;
+}
+
+.corvex-table.corvex-table-products th,
+.corvex-table.corvex-table-products td {
+  vertical-align: middle;
+}
+
+.corvex-table.corvex-table-products .cell-image {
+  width: 72px;
+  text-align: center;
+  padding-left: 10px;
+  padding-right: 10px;
+}
+
+.corvex-table.corvex-table-products .cell-image img {
+  display: block;
+  width: 48px;
+  height: 48px;
+  margin: 0 auto;
+  object-fit: cover;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+}
+
+.corvex-table.corvex-table-products .cell-name {
+  white-space: normal;
+  word-break: break-word;
+  line-height: 1.35;
+}
+
+.corvex-table.corvex-table-products .cell-price {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.corvex-table.corvex-table-products th.cell-price {
+  text-align: right;
+}
+
+.corvex-table.corvex-table-products .cell-actions {
+  width: 108px;
+  white-space: nowrap;
 }
