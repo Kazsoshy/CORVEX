@@ -7,6 +7,7 @@ import {
   mapSawPriorityRow,
 } from '../lib/sawCollectionData.js';
 import { manilaDateString } from '../lib/sawCollection.js';
+import { notifyScheduleAssigned } from '../lib/operationalNotifications.js';
 
 const router = express.Router();
 router.use(requireRole(ROLE_SETS.branchOps), requireAssignedBranch);
@@ -38,8 +39,7 @@ router.get('/analytics', requireAuth, async (req, res) => {
     const pool = req.app.locals.pool;
     const user = req.currentUser;
 
-    const isBranchScoped = user.branchId !== null;
-    const bid = isBranchScoped ? user.branchId : null;
+    const { branchScoped: isBranchScoped, bid } = scopeUser(user);
 
     const [
       staffResult,
@@ -224,8 +224,7 @@ router.get('/staff', requireAuth, async (req, res) => {
     const pool = req.app.locals.pool;
     const user = req.currentUser;
 
-    const isBranchScoped = user.branchId !== null;
-    const bid = isBranchScoped ? user.branchId : null;
+    const { branchScoped: isBranchScoped, bid } = scopeUser(user);
 
     const result = await pool.query(
       `SELECT u.id, u.first_name, u.last_name, u.email, r.slug AS role_slug
@@ -352,6 +351,250 @@ router.get('/staff', requireAuth, async (req, res) => {
   }
 });
 
+function mapPeriodRange(period) {
+  const today = manilaDateString();
+  if (period === 'today') return { start: today, end: today };
+  if (period === 'week') {
+    const current = new Date(`${today}T12:00:00+08:00`);
+    const day = current.getDay();
+    const mondayOffset = day === 0 ? 6 : day - 1;
+    current.setDate(current.getDate() - mondayOffset);
+    return { start: manilaDateString(current), end: today };
+  }
+  const [year, month] = today.split('-');
+  return { start: `${year}-${month}-01`, end: today };
+}
+
+function validCoord(lat, lng) {
+  const a = Number(lat);
+  const b = Number(lng);
+  return Number.isFinite(a) && Number.isFinite(b) && !(a === 0 && b === 0);
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// GET /api/branch-manager/map
+// GIS payload for Leaflet layers: accounts, visits, territories, staff, depot
+// Query: period=today|week|month
+// ──────────────────────────────────────────────────────────────────────────────
+router.get('/map', requireAuth, async (req, res) => {
+  try {
+    const pool = req.app.locals.pool;
+    const user = req.currentUser;
+    const { branchScoped, bid } = scopeUser(user);
+    const period = String(req.query.period || 'today').toLowerCase();
+    const { start, end } = mapPeriodRange(period);
+    const today = manilaDateString();
+    const branchSql = branchScoped ? 'AND branch_id = $3' : '';
+    const customerBranchSql = branchScoped ? 'AND c.branch_id = $3' : '';
+    // Visits must match both staff branch and customer branch so BM maps never
+    // pull another branch's accounts via cross-assigned field visits.
+    const visitBranchSql = branchScoped ? 'AND u.branch_id = $3 AND c.branch_id = $3' : '';
+    const rangeParams = branchScoped ? [start, end, bid] : [start, end];
+
+    const [branchResult, staffResult, customerResult, visitResult, territoryResult] = await Promise.all([
+      pool.query(
+        `SELECT id, name, latitude, longitude, address
+         FROM branches
+         WHERE status = 'Active' ${branchScoped ? 'AND id = $1' : ''}
+         ORDER BY name`,
+        branchScoped ? [bid] : []
+      ),
+      pool.query(
+        `SELECT u.id, u.first_name, u.last_name, r.slug AS role_slug,
+                u.branch_id, b.name AS branch_name
+         FROM users u
+         JOIN roles r ON r.role_id = u.role_id
+         LEFT JOIN branches b ON b.id = u.branch_id
+         WHERE u.status = 'Active'
+           AND r.slug IN ('collector', 'sales_staff')
+           ${branchScoped ? 'AND u.branch_id = $1' : ''}
+         ORDER BY b.name NULLS LAST, r.slug, u.first_name`,
+        branchScoped ? [bid] : []
+      ),
+      pool.query(
+        `SELECT c.customer_id, c.first_name, c.last_name, c.address,
+                c.latitude, c.longitude, c.territory_id, c.branch_id,
+                b.name AS branch_name,
+                c.account_manager_id, c.assigned_sales_agent_id,
+                t.territory_name,
+                COALESCE(NULLIF(TRIM(mgr.full_name), ''), TRIM(mgr.first_name || ' ' || mgr.last_name)) AS collector_name,
+                COALESCE(NULLIF(TRIM(agent.full_name), ''), TRIM(agent.first_name || ' ' || agent.last_name)) AS sales_agent_name,
+                COALESCE(ca.outstanding_balance, 0) AS outstanding_balance,
+                COALESCE(ca.purchase_volume, 0) AS purchase_volume,
+                ca.last_collection_date, ca.last_sales_visit,
+                COALESCE(pay.period_collected, 0) AS period_collected,
+                COALESCE(sales.period_sales, 0) AS period_sales
+         FROM customers c
+         JOIN branches b ON b.id = c.branch_id
+         LEFT JOIN territories t ON t.territory_id = c.territory_id
+         LEFT JOIN customer_activity ca ON ca.customer_id = c.customer_id
+         LEFT JOIN users mgr ON mgr.id = c.account_manager_id
+         LEFT JOIN users agent ON agent.id = c.assigned_sales_agent_id
+         LEFT JOIN (
+           SELECT customer_id, SUM(amount) AS period_collected
+           FROM collection_payment
+           WHERE payment_date BETWEEN $1::date AND $2::date
+             AND status = 'Completed'
+             ${branchSql}
+           GROUP BY customer_id
+         ) pay ON pay.customer_id = c.customer_id
+         LEFT JOIN (
+           SELECT customer_id, SUM(total_amount) AS period_sales
+           FROM sales_invoices
+           WHERE invoices_date BETWEEN $1::date AND $2::date
+             AND status <> 'Cancelled'
+             ${branchSql}
+           GROUP BY customer_id
+         ) sales ON sales.customer_id = c.customer_id
+         WHERE c.status = 'Active' ${customerBranchSql}
+         ORDER BY b.name, c.last_name, c.first_name`,
+        rangeParams
+      ),
+      pool.query(
+        `SELECT fv.visit_id, fv.scheduled_date, fv.status, fv.visit_type,
+                fv.user_id AS staff_id, fv.customer_id,
+                c.first_name || ' ' || c.last_name AS customer_name,
+                c.latitude, c.longitude, c.branch_id,
+                b.name AS branch_name,
+                COALESCE(NULLIF(TRIM(u.full_name), ''), TRIM(u.first_name || ' ' || u.last_name)) AS staff_name,
+                r.slug AS role_slug
+         FROM field_visits fv
+         JOIN customers c ON c.customer_id = fv.customer_id
+         JOIN branches b ON b.id = c.branch_id
+         JOIN users u ON u.id = fv.user_id
+         JOIN roles r ON r.role_id = u.role_id
+         WHERE fv.scheduled_date BETWEEN $1::date AND $2::date
+           ${visitBranchSql}
+         ORDER BY fv.user_id, fv.scheduled_date, fv.visit_id
+         LIMIT 2000`,
+        rangeParams
+      ),
+      pool.query(
+        `SELECT
+           t.territory_id, t.territory_name, t.coverage_area, t.assigned_user,
+           t.branch_id, b.name AS branch_name,
+           COALESCE(
+             JSON_AGG(
+               JSON_BUILD_OBJECT('user_id', ta.user_id, 'user_name', TRIM(u2.first_name || ' ' || u2.last_name))
+             ) FILTER (WHERE ta.user_id IS NOT NULL),
+             '[]'
+           ) AS assigned_users
+         FROM territories t
+         JOIN branches b ON b.id = t.branch_id
+         LEFT JOIN territory_assignments ta ON ta.territory_id = t.territory_id
+         LEFT JOIN users u2 ON u2.id = ta.user_id
+         ${branchScoped ? 'WHERE t.branch_id = $1' : ''}
+         GROUP BY t.territory_id, b.name
+         ORDER BY b.name, t.territory_name`,
+        branchScoped ? [bid] : []
+      ),
+    ]);
+
+    const collectors = [];
+    const salesAgents = [];
+    staffResult.rows.forEach((row) => {
+      const person = {
+        id: String(row.id),
+        name: `${row.first_name} ${row.last_name}`.trim(),
+        role: row.role_slug,
+        branchId: row.branch_id != null ? Number(row.branch_id) : null,
+        branchName: row.branch_name || null,
+      };
+      if (row.role_slug === 'collector') collectors.push(person);
+      else salesAgents.push(person);
+    });
+
+    const accounts = customerResult.rows
+      .filter((row) => validCoord(row.latitude, row.longitude))
+      .map((row) => {
+        const balance = Number(row.outstanding_balance) || 0;
+        return {
+          id: String(row.customer_id),
+          customerName: `${row.first_name} ${row.last_name}`.trim(),
+          address: row.address,
+          lat: Number(row.latitude),
+          lng: Number(row.longitude),
+          balance,
+          purchaseVolume: Number(row.purchase_volume) || 0,
+          periodCollected: Number(row.period_collected) || 0,
+          periodSales: Number(row.period_sales) || 0,
+          paymentStatus: balance > 0 ? 'Overdue' : 'Current',
+          lastVisit: row.last_collection_date || row.last_sales_visit || null,
+          lastCollection: row.last_collection_date,
+          lastSalesVisit: row.last_sales_visit,
+          collectorId: row.account_manager_id ? String(row.account_manager_id) : null,
+          salesAgentId: row.assigned_sales_agent_id ? String(row.assigned_sales_agent_id) : null,
+          assignedStaff: (row.collector_name || row.sales_agent_name || 'Unassigned').trim(),
+          territoryId: row.territory_id,
+          territoryName: row.territory_name,
+          branchId: row.branch_id != null ? Number(row.branch_id) : null,
+          branchName: row.branch_name || null,
+        };
+      });
+
+    const visits = visitResult.rows
+      .filter((row) => validCoord(row.latitude, row.longitude))
+      .map((row) => {
+        let status = row.status;
+        if (row.status === 'Pending' && row.scheduled_date < today) status = 'Missed';
+        return {
+          visitId: row.visit_id,
+          staffId: String(row.staff_id),
+          staffName: row.staff_name,
+          roleSlug: row.role_slug,
+          customerId: String(row.customer_id),
+          customerName: row.customer_name,
+          visitType: row.visit_type,
+          scheduledDate: row.scheduled_date,
+          status,
+          lat: Number(row.latitude),
+          lng: Number(row.longitude),
+          branchId: row.branch_id != null ? Number(row.branch_id) : null,
+          branchName: row.branch_name || null,
+        };
+      });
+
+    const territories = territoryResult.rows.map((row) => {
+      const assigned = Array.isArray(row.assigned_users) ? row.assigned_users : [];
+      const assignedUserIds = [...new Set([
+        row.assigned_user,
+        ...assigned.map((person) => person.user_id),
+      ].filter(Boolean).map(Number))];
+      return {
+        id: row.territory_id,
+        name: row.territory_name,
+        coverageArea: row.coverage_area,
+        assignedUserIds,
+        assignedNames: assigned.map((person) => person.user_name).filter(Boolean),
+        branchId: row.branch_id != null ? Number(row.branch_id) : null,
+        branchName: row.branch_name || null,
+      };
+    });
+
+    return res.status(200).json({
+      success: true,
+      data: {
+        period,
+        range: { start, end },
+        branches: branchResult.rows.map((row) => ({
+          id: row.id,
+          name: row.name,
+          lat: row.latitude != null ? Number(row.latitude) : null,
+          lng: row.longitude != null ? Number(row.longitude) : null,
+          address: row.address,
+        })),
+        staff: { collectors, salesAgents },
+        accounts,
+        visits,
+        territories,
+      },
+    });
+  } catch (err) {
+    console.error('[Branch Manager] GET /map error:', err.message);
+    return res.status(500).json({ success: false, message: 'Failed to load map data.' });
+  }
+});
+
 // ──────────────────────────────────────────────────────────────────────────────
 // GET /api/branch-manager/customers
 // Returns customers for the branch
@@ -361,8 +604,7 @@ router.get('/customers', requireAuth, async (req, res) => {
     const pool = req.app.locals.pool;
     const user = req.currentUser;
 
-    const isBranchScoped = user.branchId !== null;
-    const bid = isBranchScoped ? user.branchId : null;
+    const { branchScoped: isBranchScoped, bid } = scopeUser(user);
 
     const result = await pool.query(
       `SELECT c.customer_id, c.first_name, c.last_name, c.contact_phone, c.status,
@@ -440,8 +682,7 @@ router.get('/customers/:id', requireAuth, async (req, res) => {
     const pool = req.app.locals.pool;
     const user = req.currentUser;
 
-    const isBranchScoped = user.branchId !== null;
-    const bid = isBranchScoped ? user.branchId : null;
+    const { branchScoped: isBranchScoped, bid } = scopeUser(user);
 
     let customerQuery = `SELECT c.customer_id, c.first_name, c.last_name, c.address, c.latitude, c.longitude,
               c.contact_phone, c.contact_person_fname, c.contact_person_lname,
@@ -501,8 +742,7 @@ router.get('/alerts', requireAuth, async (req, res) => {
     const pool = req.app.locals.pool;
     const user = req.currentUser;
 
-    const isBranchScoped = user.branchId !== null;
-    const bid = isBranchScoped ? user.branchId : null;
+    const { branchScoped: isBranchScoped, bid } = scopeUser(user);
 
     let inventoryQuery = `SELECT p.name AS product_name, bi.available_stock, bi.reorder_level
        FROM branch_inventory bi
@@ -677,6 +917,24 @@ router.post('/staff/collectors/:id/collection-assignments', requireAuth, async (
       scheduledDate,
     });
 
+    if (result.created.length) {
+      const ids = result.created.map((row) => Number(row.customer_id));
+      const names = await pool.query(
+        `SELECT customer_id,
+                COALESCE(NULLIF(TRIM(CONCAT_WS(' ', first_name, last_name)), ''), 'Customer') AS customer_name
+         FROM customers
+         WHERE customer_id = ANY($1::int[])`,
+        [ids]
+      );
+      const byId = new Map(names.rows.map((row) => [Number(row.customer_id), row.customer_name]));
+      await notifyScheduleAssigned(pool, {
+        userId: collectorId,
+        scheduledDate: result.scheduledDate,
+        visitType: 'Collection',
+        customerNames: ids.map((id) => byId.get(id) || 'Customer'),
+      });
+    }
+
     return res.status(201).json({
       success: true,
       message: result.created.length
@@ -808,6 +1066,131 @@ router.get('/staff/sales/:id', requireAuth, async (req, res) => {
   } catch (err) {
     console.error('[Branch Manager] GET /staff/sales/:id error:', err.message);
     return res.status(500).json({ success: false, message: 'Failed to load sales agent detail.' });
+  }
+});
+
+const FIELD_REPORT_FROM = `
+  FROM field_activity_reports far
+  JOIN field_visits fv ON fv.visit_id = far.visit_id
+  JOIN customers c ON c.customer_id = fv.customer_id
+  JOIN users u ON u.id = far.user_id
+  JOIN roles r ON r.role_id = u.role_id AND r.slug IN ('collector', 'sales_staff')
+  LEFT JOIN branches b ON b.id = u.branch_id
+`;
+
+const FIELD_REPORT_COLUMNS = `
+  far.report_id,
+  far.visit_id,
+  far.activity_type,
+  far.remarks,
+  far.sync_status,
+  far.created_at,
+  (far.photo IS NOT NULL AND far.photo <> '') AS has_photo,
+  fv.scheduled_date,
+  fv.visit_type,
+  fv.status AS visit_status,
+  COALESCE(NULLIF(CONCAT_WS(' ', c.first_name, c.last_name), ''), 'Customer') AS customer_name,
+  c.customer_id,
+  CONCAT_WS(' ', u.first_name, u.last_name) AS collector_name,
+  u.id AS collector_id,
+  CASE r.slug WHEN 'sales_staff' THEN 'Sales Agent' ELSE 'Collector' END AS staff_role,
+  b.name AS branch_name
+`;
+
+function mapFieldReportRow(row, { includePhoto = false } = {}) {
+  const mapped = {
+    report_id: row.report_id,
+    visit_id: row.visit_id,
+    activity_type: row.activity_type,
+    remarks: row.remarks,
+    sync_status: row.sync_status,
+    created_at: row.created_at,
+    has_photo: Boolean(row.has_photo),
+    scheduled_date: row.scheduled_date,
+    visit_type: row.visit_type,
+    visit_status: row.visit_status,
+    customer_name: row.customer_name,
+    customer_id: row.customer_id,
+    collector_name: row.collector_name,
+    collector_id: row.collector_id,
+    staff_role: row.staff_role,
+    branch_name: row.branch_name,
+  };
+  if (includePhoto) mapped.photo = row.photo || null;
+  return mapped;
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// GET /api/branch-manager/field-activity-reports
+// Collector visit reports. Branch managers see their branch; unscoped roles see all.
+// ──────────────────────────────────────────────────────────────────────────────
+router.get('/field-activity-reports', requireAuth, async (req, res) => {
+  try {
+    const pool = req.app.locals.pool;
+    const user = req.currentUser;
+    const { branchScoped: isBranchScoped, bid } = scopeUser(user);
+    const params = isBranchScoped ? [bid] : [];
+    const branchSql = isBranchScoped ? 'WHERE u.branch_id = $1' : '';
+
+    const result = await pool.query(
+      `SELECT ${FIELD_REPORT_COLUMNS}, COUNT(*) OVER() AS total_count
+       ${FIELD_REPORT_FROM}
+       ${branchSql}
+       ORDER BY far.created_at DESC
+       LIMIT 500`,
+      params
+    );
+
+    const total = result.rows.length ? Number(result.rows[0].total_count) : 0;
+    return res.status(200).json({
+      success: true,
+      data: result.rows.map((row) => mapFieldReportRow(row)),
+      count: result.rows.length,
+      total,
+    });
+  } catch (err) {
+    console.error('[Branch Manager] GET /field-activity-reports error:', err.message);
+    return res.status(500).json({ success: false, message: 'Failed to load field activity reports.' });
+  }
+});
+
+// ──────────────────────────────────────────────────────────────────────────────
+// GET /api/branch-manager/field-activity-reports/:id
+// Full report, including photo evidence.
+// ──────────────────────────────────────────────────────────────────────────────
+router.get('/field-activity-reports/:id', requireAuth, async (req, res) => {
+  const reportId = Number(req.params.id);
+  if (!Number.isInteger(reportId) || reportId <= 0) {
+    return res.status(400).json({ success: false, message: 'Invalid report id.' });
+  }
+
+  try {
+    const pool = req.app.locals.pool;
+    const user = req.currentUser;
+    const { branchScoped: isBranchScoped, bid } = scopeUser(user);
+    const params = isBranchScoped ? [bid, reportId] : [reportId];
+    const whereSql = isBranchScoped
+      ? 'WHERE u.branch_id = $1 AND far.report_id = $2'
+      : 'WHERE far.report_id = $1';
+
+    const result = await pool.query(
+      `SELECT ${FIELD_REPORT_COLUMNS}, far.photo
+       ${FIELD_REPORT_FROM}
+       ${whereSql}`,
+      params
+    );
+
+    if (!result.rows.length) {
+      return res.status(404).json({ success: false, message: 'Field activity report not found.' });
+    }
+
+    return res.status(200).json({
+      success: true,
+      data: mapFieldReportRow(result.rows[0], { includePhoto: true }),
+    });
+  } catch (err) {
+    console.error('[Branch Manager] GET /field-activity-reports/:id error:', err.message);
+    return res.status(500).json({ success: false, message: 'Failed to load field activity report.' });
   }
 });
 

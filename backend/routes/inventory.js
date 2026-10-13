@@ -1,6 +1,7 @@
 import express from 'express';
 import { requireAuth, requireRole, requireAssignedBranch, isUnscoped, ROLE_SETS } from '../middleware/auth.js';
 import {
+  alignCentralInventory,
   deriveStockStatus,
   insertStockMovement,
   logWarehouseAudit,
@@ -11,11 +12,329 @@ import {
   notifyTransferDecision,
   notifyTransferSubmitted,
 } from '../lib/inventoryTransferNotifications.js';
+import { publishStockAlerts } from '../lib/operationalNotifications.js';
 
 const TRANSFER_APPROVER_ROLES = new Set(['branch_manager', 'operating_manager', 'super_admin']);
+/** Stock mutations (restock / count / transfer create / product create) — not branch managers. */
+const INVENTORY_WRITER_ROLES = ['inventory_staff', 'operating_manager', 'super_admin'];
 
 const router = express.Router();
 router.use(requireRole(ROLE_SETS.inventory), requireAssignedBranch);
+
+router.get('/central', requireAuth, async (req, res) => {
+  try {
+    const pool = req.app.locals.pool;
+    const scopedBranchId = isUnscoped(req.currentUser) ? null : req.currentUser.branchId;
+    const branchParams = scopedBranchId != null ? [scopedBranchId] : [];
+    const branchOnlySql = scopedBranchId != null ? 'AND b.id = $1' : '';
+    const movementBranchSql = scopedBranchId != null ? 'AND sm.branch_id = $1' : '';
+    const alertBranchSql = scopedBranchId != null ? 'AND bi.branch_id = $1' : '';
+
+    const [productsResult, metricsResult, byBranchResult, alertsResult, movementsResult] = await Promise.all([
+      pool.query(
+        `SELECT p.id AS product_id,
+                p.name AS product_name,
+                p.sku,
+                COALESCE(ci.total_quantity, 0)::int AS central_quantity,
+                COALESCE(ci.branch_count, 0)::int AS branch_count,
+                ci.updated_at AS centralized_at,
+                COALESCE(SUM(bi.available_stock), 0)::int AS branch_total,
+                COUNT(bi.inventory_id)::int AS inventory_rows,
+                COUNT(*) FILTER (
+                  WHERE bi.available_stock <= 0
+                     OR bi.stock_status IN ('Out of Stock', 'Critical Stock', 'Low Stock')
+                     OR (bi.reorder_level > 0 AND bi.available_stock <= bi.reorder_level)
+                )::int AS alert_rows,
+                (
+                  SELECT COALESCE(json_agg(
+                    json_build_object(
+                      'branch_id', b.id,
+                      'branch_name', b.name,
+                      'available_stock', stock.available_stock,
+                      'reorder_level', stock.reorder_level,
+                      'stock_status', stock.stock_status
+                    )
+                    ORDER BY b.name
+                  ), '[]'::json)
+                  FROM branches b
+                  LEFT JOIN branch_inventory stock
+                    ON stock.branch_id = b.id AND stock.product_id = p.id
+                  WHERE b.status = 'Active'
+                    ${scopedBranchId != null ? 'AND b.id = $1' : ''}
+                ) AS branches
+         FROM products p
+         LEFT JOIN central_inventory ci ON ci.product_id = p.id
+         LEFT JOIN branch_inventory bi ON bi.product_id = p.id
+           ${scopedBranchId != null ? 'AND bi.branch_id = $1' : ''}
+         WHERE COALESCE(p.status, 'Active') = 'Active'
+         GROUP BY p.id, p.name, p.sku, ci.total_quantity, ci.branch_count, ci.updated_at
+         ORDER BY p.name`,
+        branchParams
+      ),
+      pool.query(
+        scopedBranchId != null
+          ? `SELECT
+               COALESCE((SELECT SUM(available_stock)::int FROM branch_inventory WHERE branch_id = $1), 0) AS total_stock,
+               COALESCE((SELECT SUM(available_stock)::int FROM branch_inventory WHERE branch_id = $1), 0) AS central_total,
+               (SELECT COUNT(*)::int FROM branch_inventory WHERE branch_id = $1) AS products_tracked,
+               (
+                 SELECT COUNT(*)::int FROM branch_inventory
+                 WHERE branch_id = $1
+                   AND available_stock > 0
+                   AND (
+                     stock_status IN ('Low Stock', 'Critical Stock')
+                     OR (reorder_level > 0 AND available_stock <= reorder_level)
+                   )
+               ) AS low_stock,
+               (
+                 SELECT COUNT(*)::int FROM branch_inventory
+                 WHERE branch_id = $1
+                   AND (available_stock <= 0 OR stock_status = 'Out of Stock')
+               ) AS out_of_stock,
+               1 AS branches_with_stock,
+               1 AS active_branches,
+               (
+                 SELECT COUNT(*)::int FROM branch_inventory WHERE branch_id = $1
+               ) AS aligned_products`
+          : `SELECT
+           COALESCE((SELECT SUM(available_stock)::int FROM branch_inventory), 0) AS total_stock,
+           COALESCE((SELECT SUM(total_quantity)::int FROM central_inventory), 0) AS central_total,
+           (SELECT COUNT(*)::int FROM products WHERE COALESCE(status, 'Active') = 'Active') AS products_tracked,
+           (
+             SELECT COUNT(*)::int FROM branch_inventory
+             WHERE available_stock > 0
+               AND (
+                 stock_status IN ('Low Stock', 'Critical Stock')
+                 OR (reorder_level > 0 AND available_stock <= reorder_level)
+               )
+           ) AS low_stock,
+           (
+             SELECT COUNT(*)::int FROM branch_inventory
+             WHERE available_stock <= 0 OR stock_status = 'Out of Stock'
+           ) AS out_of_stock,
+           (SELECT COUNT(DISTINCT branch_id)::int FROM branch_inventory) AS branches_with_stock,
+           (SELECT COUNT(*)::int FROM branches WHERE status = 'Active') AS active_branches,
+           (
+             SELECT COUNT(*)::int
+             FROM products p
+             LEFT JOIN central_inventory ci ON ci.product_id = p.id
+             LEFT JOIN (
+               SELECT product_id, SUM(available_stock)::int AS branch_total
+               FROM branch_inventory
+               GROUP BY product_id
+             ) bt ON bt.product_id = p.id
+             WHERE COALESCE(p.status, 'Active') = 'Active'
+               AND COALESCE(ci.total_quantity, 0) = COALESCE(bt.branch_total, 0)
+           ) AS aligned_products`,
+        branchParams
+      ),
+      pool.query(
+        `SELECT
+           b.id AS branch_id,
+           b.name AS branch_name,
+           b.address,
+           b.region,
+           COALESCE(SUM(bi.available_stock), 0)::int AS total_units,
+           COUNT(bi.inventory_id)::int AS products_stocked,
+           COUNT(*) FILTER (
+             WHERE bi.available_stock > 0
+               AND (
+                 bi.stock_status IN ('Low Stock', 'Critical Stock')
+                 OR (bi.reorder_level > 0 AND bi.available_stock <= bi.reorder_level)
+               )
+           )::int AS low_stock,
+           COUNT(*) FILTER (
+             WHERE bi.available_stock <= 0 OR bi.stock_status = 'Out of Stock'
+           )::int AS out_of_stock,
+           COALESCE((
+             SELECT string_agg(DISTINCT area, ', ' ORDER BY area)
+             FROM (
+               SELECT TRIM(unnest(string_to_array(COALESCE(t.coverage_area, ''), ','))) AS area
+               FROM territories t
+               WHERE t.branch_id = b.id
+                 AND NULLIF(TRIM(t.coverage_area), '') IS NOT NULL
+             ) areas
+             WHERE area <> ''
+           ), NULLIF(TRIM(b.region), ''), NULLIF(TRIM(b.address), ''), 'Coverage pending') AS areas_covered
+         FROM branches b
+         LEFT JOIN branch_inventory bi ON bi.branch_id = b.id
+         WHERE b.status = 'Active'
+           ${branchOnlySql}
+         GROUP BY b.id, b.name, b.address, b.region
+         ORDER BY total_units DESC, b.name`,
+        branchParams
+      ),
+      pool.query(
+        `SELECT
+           bi.inventory_id,
+           bi.branch_id,
+           b.name AS branch_name,
+           bi.product_id,
+           p.name AS product_name,
+           p.sku,
+           bi.available_stock,
+           bi.reorder_level,
+           COALESCE(
+             NULLIF(bi.stock_status, ''),
+             CASE
+               WHEN bi.available_stock <= 0 THEN 'Out of Stock'
+               WHEN bi.reorder_level > 0 AND bi.available_stock <= bi.reorder_level THEN 'Low Stock'
+               ELSE 'Sufficient'
+             END
+           ) AS stock_status,
+           bi.updated_at
+         FROM branch_inventory bi
+         JOIN products p ON p.id = bi.product_id
+         JOIN branches b ON b.id = bi.branch_id
+         WHERE (
+              bi.available_stock <= 0
+              OR bi.stock_status IN ('Out of Stock', 'Critical Stock', 'Low Stock')
+              OR (bi.reorder_level > 0 AND bi.available_stock <= bi.reorder_level)
+           )
+           ${alertBranchSql}
+         ORDER BY
+           CASE
+             WHEN bi.available_stock <= 0 OR bi.stock_status = 'Out of Stock' THEN 0
+             WHEN bi.stock_status = 'Critical Stock' THEN 1
+             ELSE 2
+           END,
+           bi.available_stock ASC
+         LIMIT 25`,
+        branchParams
+      ),
+      pool.query(
+        `SELECT
+           sm.id AS movement_id,
+           sm.movement_ref,
+           sm.type,
+           sm.quantity,
+           sm.movement_date,
+           sm.created_at,
+           p.name AS product_name,
+           b.name AS branch_name
+         FROM stock_movements sm
+         JOIN products p ON p.id = sm.product_id
+         LEFT JOIN branches b ON b.id = sm.branch_id
+         WHERE 1=1
+           ${movementBranchSql}
+         ORDER BY sm.created_at DESC NULLS LAST, sm.id DESC
+         LIMIT 12`,
+        branchParams
+      ),
+    ]);
+
+    const data = productsResult.rows.map((row) => {
+      const branchTotal = Number(row.branch_total) || 0;
+      const centralQuantity = scopedBranchId != null
+        ? branchTotal
+        : Number(row.central_quantity) || 0;
+      return {
+        ...row,
+        central_quantity: centralQuantity,
+        branch_count: scopedBranchId != null ? (branchTotal > 0 || Number(row.inventory_rows) > 0 ? 1 : 0) : Number(row.branch_count) || 0,
+        branch_total: branchTotal,
+        aligned: centralQuantity === branchTotal,
+      };
+    });
+
+    const metrics = metricsResult.rows[0] || {};
+    const totalStock = Number(metrics.total_stock) || 0;
+    const byBranch = byBranchResult.rows.map((row) => {
+      const units = Number(row.total_units) || 0;
+      return {
+        ...row,
+        total_units: units,
+        share_pct: totalStock > 0 ? Math.round((units / totalStock) * 1000) / 10 : 0,
+      };
+    });
+
+    return res.json({
+      success: true,
+      data,
+      byBranch,
+      alerts: alertsResult.rows,
+      recentMovements: movementsResult.rows,
+      summary: {
+        products: data.length,
+        aligned: data.filter((row) => row.aligned).length,
+        totalStock,
+        centralTotal: Number(metrics.central_total) || 0,
+        productsTracked: Number(metrics.products_tracked) || data.length,
+        lowStock: Number(metrics.low_stock) || 0,
+        outOfStock: Number(metrics.out_of_stock) || 0,
+        branchesWithStock: Number(metrics.branches_with_stock) || 0,
+        activeBranches: Number(metrics.active_branches) || byBranch.length,
+        alignedProducts: Number(metrics.aligned_products) || data.filter((row) => row.aligned).length,
+        lastSyncedAt: new Date().toISOString(),
+      },
+    });
+  } catch (err) {
+    console.error('[Inventory] GET /central error:', err.message);
+    return res.status(500).json({ success: false, message: 'Failed to load central inventory.' });
+  }
+});
+
+// Rebuild central_inventory from live branch_inventory (single source of truth).
+router.post('/central/realign', requireAuth, requireRole(['operating_manager', 'super_admin', 'inventory_staff']), async (req, res) => {
+  const pool = req.app.locals.pool;
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    await client.query(
+      `INSERT INTO central_inventory (product_id, total_quantity, branch_count, updated_at)
+       SELECT p.id,
+              COALESCE(SUM(bi.available_stock), 0),
+              COUNT(bi.inventory_id)::int,
+              CURRENT_TIMESTAMP
+       FROM products p
+       LEFT JOIN branch_inventory bi ON bi.product_id = p.id
+       GROUP BY p.id
+       ON CONFLICT (product_id) DO UPDATE
+         SET total_quantity = EXCLUDED.total_quantity,
+             branch_count = EXCLUDED.branch_count,
+             updated_at = CURRENT_TIMESTAMP`
+    );
+    // Drop orphan central rows for deleted products (FK usually handles this).
+    await client.query(
+      `DELETE FROM central_inventory ci
+       WHERE NOT EXISTS (SELECT 1 FROM products p WHERE p.id = ci.product_id)`
+    );
+    const check = await client.query(
+      `SELECT COUNT(*)::int AS products,
+              COUNT(*) FILTER (
+                WHERE COALESCE(ci.total_quantity, 0) = COALESCE(bt.branch_total, 0)
+              )::int AS aligned
+       FROM products p
+       LEFT JOIN central_inventory ci ON ci.product_id = p.id
+       LEFT JOIN (
+         SELECT product_id, SUM(available_stock)::int AS branch_total
+         FROM branch_inventory
+         GROUP BY product_id
+       ) bt ON bt.product_id = p.id`
+    );
+    await logWarehouseAudit(
+      client,
+      req.currentUser.id,
+      'Central Inventory Realign',
+      `Rebuilt central totals for ${check.rows[0]?.products || 0} products`
+    );
+    await client.query('COMMIT');
+    return res.json({
+      success: true,
+      message: 'Central inventory realigned from branch stock.',
+      summary: {
+        products: Number(check.rows[0]?.products) || 0,
+        aligned: Number(check.rows[0]?.aligned) || 0,
+      },
+    });
+  } catch (err) {
+    await client.query('ROLLBACK');
+    console.error('[Inventory] POST /central/realign error:', err.message);
+    return res.status(500).json({ success: false, message: 'Failed to realign central inventory.' });
+  } finally {
+    client.release();
+  }
+});
 
 // ──────────────────────────────────────────────────────────────────────────────
 // GET /api/inventory-transfers
@@ -30,7 +349,7 @@ router.get('/transfers', requireAuth, async (req, res) => {
     const params = [];
     let pIdx = 1;
 
-    if (user.branchId) {
+    if (!isUnscoped(user)) {
       conditions.push(`(it.source_branch_id = $${pIdx} OR it.destination_branch_id = $${pIdx})`);
       params.push(user.branchId);
       pIdx++;
@@ -185,7 +504,7 @@ async function completeTransferStock(client, transferRow, userId) {
   const reorder = product.rows[0]?.reorder_point ?? 5;
   const today = manilaToday();
 
-  await upsertBranchInventoryStock(client, {
+  const sourceSnapshot = await upsertBranchInventoryStock(client, {
     branchId: sourceId,
     productId,
     delta: -quantity,
@@ -216,6 +535,7 @@ async function completeTransferStock(client, transferRow, userId) {
     movementRef: `MOV-${transferRef}-IN`,
     movementDate: today,
   });
+  return sourceSnapshot;
 }
 
 // PATCH /api/inventory/transfers/:id — approve or reject (org / inventory roles)
@@ -242,7 +562,7 @@ router.patch('/transfers/:id', requireAuth, async (req, res) => {
       return res.status(404).json({ success: false, message: 'Transfer not found.' });
     }
     const row = existing.rows[0];
-    if (user.branchId != null
+    if (!isUnscoped(user)
       && row.source_branch_id !== user.branchId
       && row.destination_branch_id !== user.branchId) {
       return res.status(403).json({ success: false, message: 'Transfer is outside your branch scope.' });
@@ -261,7 +581,7 @@ router.patch('/transfers/:id', requireAuth, async (req, res) => {
         return res.status(404).json({ success: false, message: 'Transfer not found.' });
       }
       const transferRow = fullRow.rows[0];
-      if (user.branchId != null
+      if (!isUnscoped(user)
         && transferRow.source_branch_id !== user.branchId
         && transferRow.destination_branch_id !== user.branchId
         && !TRANSFER_APPROVER_ROLES.has(user.roleSlug)) {
@@ -294,11 +614,13 @@ router.patch('/transfers/:id', requireAuth, async (req, res) => {
         [status, setApprover, approvalInfo ? String(approvalInfo).trim() : null, completedDate, transferId]
       );
 
+      let sourceSnapshot = null;
       if (status === 'Completed' && transferRow.status !== 'Completed') {
-        await completeTransferStock(client, transferRow, user.id);
+        sourceSnapshot = await completeTransferStock(client, transferRow, user.id);
       }
 
       await client.query('COMMIT');
+      if (sourceSnapshot) await publishStockAlerts(pool, [sourceSnapshot]);
 
       if (status === 'Approved' || status === 'Rejected') {
         await notifyTransferDecision(pool, {
@@ -400,20 +722,33 @@ router.get('/branch-inventory', requireAuth, async (req, res) => {
     const params = [];
     let pIdx = 1;
 
-    // Branch-scope: non OM/super-admin roles only see their branch
-    const branchId = user.branchId !== null
-      ? user.branchId
-      : (req.query.branch_id ? Number(req.query.branch_id) : null);
-
-    if (branchId !== null && Number.isFinite(Number(branchId))) {
+    // Branch-scope: only OM / super_admin may see all branches.
+    // Branch managers / warehouse staff always see their assigned branch only.
+    if (!isUnscoped(user)) {
+      if (user.branchId == null) {
+        return res.status(403).json({
+          success: false,
+          message: 'No branch assigned. Cannot view branch inventory.',
+        });
+      }
       conditions.push(`bi.branch_id = $${pIdx++}`);
-      params.push(Number(branchId));
+      params.push(Number(user.branchId));
+    } else if (req.query.branch_id) {
+      const branchId = Number(req.query.branch_id);
+      if (Number.isFinite(branchId)) {
+        conditions.push(`bi.branch_id = $${pIdx++}`);
+        params.push(branchId);
+      }
     }
 
     if (req.query.status && req.query.status !== 'All') {
       conditions.push(`bi.stock_status = $${pIdx++}`);
       params.push(req.query.status);
     }
+
+    // Hide archived catalog products from operational inventory lists.
+    // OM manages archived SKUs under Inventory → Products, not here.
+    conditions.push(`COALESCE(p.status, 'Active') = 'Active'`);
 
     const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
 
@@ -486,7 +821,7 @@ router.get('/movements', requireAuth, async (req, res) => {
     const params = [];
     let pIdx = 1;
 
-    const scopeBranchId = user.branchId !== null && user.branchId !== undefined
+    const scopeBranchId = !isUnscoped(user)
       ? user.branchId
       : (branch_id ? Number(branch_id) : null);
 
@@ -547,7 +882,7 @@ router.get('/movements/:id', requireAuth, async (req, res) => {
     const params = [movementId];
     let branchClause = '';
 
-    if (user.branchId !== null && user.branchId !== undefined) {
+    if (!isUnscoped(user)) {
       branchClause = ' AND sm.branch_id = $2';
       params.push(user.branchId);
     }
@@ -576,7 +911,8 @@ function nextTransferRef(pool) {
   });
 }
 
-// GET /api/inventory/branches — active branches (for transfers)
+// GET /api/inventory/branches — active branch names for transfer destinations.
+// Names only (no stock/customers). Branch staff need other branches as destinations.
 router.get('/branches', requireAuth, async (req, res) => {
   try {
     const pool = req.app.locals.pool;
@@ -703,7 +1039,7 @@ router.get('/restocks/:id', requireAuth, async (req, res) => {
     const restockId = Number(req.params.id);
     const params = [restockId];
     let branchSql = '';
-    if (user.branchId != null) {
+    if (!isUnscoped(user)) {
       branchSql = ' AND r.branch_id = $2';
       params.push(user.branchId);
     }
@@ -728,7 +1064,7 @@ router.get('/restocks/:id', requireAuth, async (req, res) => {
 });
 
 // POST /api/inventory/restocks
-router.post('/restocks', requireAuth, async (req, res) => {
+router.post('/restocks', requireAuth, requireRole(INVENTORY_WRITER_ROLES), async (req, res) => {
   const pool = req.app.locals.pool;
   const user = req.currentUser;
   const branchId = user.branchId;
@@ -767,7 +1103,7 @@ router.post('/restocks', requireAuth, async (req, res) => {
       [productId, branchId, deliveryRef, supplierId, quantity, receivedDate]
     );
 
-    await upsertBranchInventoryStock(client, {
+    const stockSnapshot = await upsertBranchInventoryStock(client, {
       branchId,
       productId,
       delta: quantity,
@@ -786,6 +1122,7 @@ router.post('/restocks', requireAuth, async (req, res) => {
     });
 
     await client.query('COMMIT');
+    await publishStockAlerts(pool, [stockSnapshot]);
     await logWarehouseAudit(pool, user.id, 'Restock recorded', `${deliveryRef} +${quantity} units`, req.ip);
 
     return res.status(201).json({
@@ -803,7 +1140,7 @@ router.post('/restocks', requireAuth, async (req, res) => {
 });
 
 // POST /api/inventory/stock-counts
-router.post('/stock-counts', requireAuth, async (req, res) => {
+router.post('/stock-counts', requireAuth, requireRole(INVENTORY_WRITER_ROLES), async (req, res) => {
   const pool = req.app.locals.pool;
   const user = req.currentUser;
   const branchId = user.branchId;
@@ -832,8 +1169,9 @@ router.post('/stock-counts', requireAuth, async (req, res) => {
       return res.status(400).json({ success: false, message: 'Notes required when variance exists.' });
     }
 
+    let stockSnapshot = null;
     if (variance !== 0) {
-      await upsertBranchInventoryStock(client, {
+      stockSnapshot = await upsertBranchInventoryStock(client, {
         branchId,
         productId,
         delta: variance,
@@ -852,6 +1190,7 @@ router.post('/stock-counts', requireAuth, async (req, res) => {
     }
 
     await client.query('COMMIT');
+    if (stockSnapshot) await publishStockAlerts(pool, [stockSnapshot]);
     await logWarehouseAudit(
       pool,
       user.id,
@@ -875,7 +1214,7 @@ router.post('/stock-counts', requireAuth, async (req, res) => {
 });
 
 // POST /api/inventory/transfers
-router.post('/transfers', requireAuth, async (req, res) => {
+router.post('/transfers', requireAuth, requireRole(INVENTORY_WRITER_ROLES), async (req, res) => {
   const pool = req.app.locals.pool;
   const user = req.currentUser;
   const branchId = user.branchId;
@@ -962,7 +1301,7 @@ router.get('/audit-logs', requireAuth, async (req, res) => {
 });
 
 // POST /api/inventory/products — create product + optional branch stock
-router.post('/products', requireAuth, async (req, res) => {
+router.post('/products', requireAuth, requireRole(INVENTORY_WRITER_ROLES), async (req, res) => {
   const pool = req.app.locals.pool;
   const user = req.currentUser;
   const branchId = user.branchId;
@@ -1011,16 +1350,20 @@ router.post('/products', requireAuth, async (req, res) => {
     );
     const productId = created.rows[0].product_id;
     const qty = Number(initialQuantity) || 0;
+    let stockSnapshot = null;
     if (qty > 0) {
-      await upsertBranchInventoryStock(client, {
+      stockSnapshot = await upsertBranchInventoryStock(client, {
         branchId,
         productId,
         delta: qty,
         reorderLevel: Number(reorderPoint) || 5,
       });
+    } else {
+      await alignCentralInventory(client, productId);
     }
 
     await client.query('COMMIT');
+    if (stockSnapshot) await publishStockAlerts(pool, [stockSnapshot]);
     await logWarehouseAudit(pool, user.id, 'Product created', `${name} (${sku})`, req.ip);
 
     return res.status(201).json({ success: true, message: 'Product created.', data: { product_id: productId } });

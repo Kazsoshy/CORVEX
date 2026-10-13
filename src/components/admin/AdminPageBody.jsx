@@ -15,6 +15,7 @@ import { getOperatingManagerAnalytics } from '../../api/reportsService.js';
 import { NotificationsInbox } from '../shared/NotificationsInbox';
 import { AccountProfilePanel } from '../shared/AccountProfilePanel';
 import { StatusBadge } from '../StatusBadge';
+import { CentralInventoryPanel } from '../inventory/CentralInventoryPanel';
 function btn(v) {
   if (v === 'secondary') return 'button secondary';
   if (v === 'ghost') return 'button ghost';
@@ -563,7 +564,9 @@ function UserFormPage({
             role_id: e.target.value
           })}>
               <option value="">Select role</option>
-              {roles.map(r => <option key={r.id ?? r.role_id} value={r.id ?? r.role_id}>{r.name ?? r.role_name}</option>)}
+              {roles
+                .filter(r => !['super_admin', 'operating_manager', 'client'].includes(r.slug) || String(r.id ?? r.role_id) === String(form.role_id))
+                .map(r => <option key={r.id ?? r.role_id} value={r.id ?? r.role_id}>{r.name ?? r.role_name}</option>)}
             </select>
             {errors.role_id && <p className="form-error">{errors.role_id}</p>}
           </div>
@@ -976,8 +979,11 @@ function InventoryPage({
   navigate,
   showToast
 }) {
-  const [tab, setTab] = useState('products');
+  const [tab, setTab] = useState('overview');
   const tabs = [{
+    key: 'overview',
+    label: 'Overview'
+  }, {
     key: 'products',
     label: 'Products'
   }, {
@@ -993,6 +999,8 @@ function InventoryPage({
   const [loadingTab, setLoadingTab] = useState(false);
   const [showProductForm, setShowProductForm] = useState(false);
   const [editingProductId, setEditingProductId] = useState(null);
+  const [productStatusFilter, setProductStatusFilter] = useState('All');
+  const [confirmProductAction, setConfirmProductAction] = useState(null);
   const [productForm, setProductForm] = useState({
     name: '',
     sku: '',
@@ -1003,13 +1011,15 @@ function InventoryPage({
   const loadProducts = useCallback(async () => {
     setLoadingTab(true);
     try {
-      const res = await apiClient.get('/products?limit=200');
+      const res = await apiClient.get('/products', {
+        params: { limit: 200, product_status: productStatusFilter },
+      });
       if (res.data.success) setProducts(res.data.data || []);
     } catch (err) {
       showToast('Failed to load products.', 'error');
     }
     setLoadingTab(false);
-  }, [showToast]);
+  }, [showToast, productStatusFilter]);
   const loadTransfers = useCallback(async () => {
     setLoadingTab(true);
     try {
@@ -1084,6 +1094,35 @@ function InventoryPage({
       showToast(err.response?.data?.message || 'Failed to update transfer.', 'error');
     }
   };
+  const handleArchiveProduct = async (product) => {
+    try {
+      await apiClient.delete(`/products/${product.product_id}`, { params: { mode: 'archive' } });
+      showToast('Product archived.', 'success');
+      setConfirmProductAction(null);
+      loadProducts();
+    } catch (err) {
+      showToast(err.response?.data?.message || 'Failed to archive product.', 'error');
+    }
+  };
+  const handleRestoreProduct = async (product) => {
+    try {
+      await apiClient.put(`/products/${product.product_id}`, { status: 'Active' });
+      showToast('Product restored.', 'success');
+      loadProducts();
+    } catch (err) {
+      showToast(err.response?.data?.message || 'Failed to restore product.', 'error');
+    }
+  };
+  const handleDeleteProduct = async (product) => {
+    try {
+      await apiClient.delete(`/products/${product.product_id}`, { params: { mode: 'hard' } });
+      showToast('Product permanently deleted.', 'success');
+      setConfirmProductAction(null);
+      loadProducts();
+    } catch (err) {
+      showToast(err.response?.data?.message || 'Failed to delete product.', 'error');
+    }
+  };
   const pagination_products = usePagination(products);
   const paginated_products = pagination_products.paginatedData;
   const pagination_TRANSFER_REQUESTS = usePagination(transfers);
@@ -1096,11 +1135,22 @@ function InventoryPage({
         {tabs.map(t => <button key={t.key} className={tab === t.key ? 'segment active' : 'segment'} type="button" onClick={() => setTab(t.key)}>{t.label}</button>)}
       </div>
 
+      {tab === 'overview' && <CentralInventoryPanel title="Inventory Management" onToast={showToast} />}
+
       {tab === 'products' && <>
           <section className="panel content-panel relative overflow-hidden">
             <div className="list-section-header">
               <h3>All Products</h3>
-              <div className="list-section-actions">
+              <div className="list-section-actions" style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+                <select
+                  className="filter-select"
+                  value={productStatusFilter}
+                  onChange={(e) => setProductStatusFilter(e.target.value)}
+                >
+                  <option value="All">All Statuses</option>
+                  <option value="Active">Active</option>
+                  <option value="Inactive">Archived</option>
+                </select>
                 <button className="button" type="button" onClick={openCreateProduct}>+ Add Product</button>
               </div>
             </div>
@@ -1112,13 +1162,60 @@ function InventoryPage({
                       <td><strong>{p.product_name}</strong></td><td>{p.sku}</td><td>{p.category_name || '—'}</td>
                       <td>{p.unit_price != null ? Number(p.unit_price).toFixed(2) : '—'}</td>
                       <td>{p.total_quantity ?? p.quantity ?? '—'}</td>
-                      <td><StatusPill status={p.stock_status || p.status} /></td>
-                      <td className="table-actions"><button className="icon-action-button" type="button" title="Edit" onClick={() => openEditProduct(p)}><NavIcon name="edit" /></button></td>
+                      <td><StatusPill status={p.status || p.stock_status} /></td>
+                      <td className="table-actions">
+                        <button className="icon-action-button" type="button" title="Edit" onClick={() => openEditProduct(p)}><NavIcon name="edit" /></button>
+                        {String(p.status) === 'Inactive' ? (
+                          <button className="icon-action-button" type="button" title="Restore" onClick={() => handleRestoreProduct(p)}><NavIcon name="reset" /></button>
+                        ) : (
+                          <button
+                            className="icon-action-button danger"
+                            type="button"
+                            title="Archive"
+                            onClick={() => setConfirmProductAction({ type: 'archive', product: p })}
+                          >
+                            <NavIcon name="archive" />
+                          </button>
+                        )}
+                        <button
+                          className="icon-action-button danger"
+                          type="button"
+                          title="Delete permanently"
+                          onClick={() => setConfirmProductAction({ type: 'delete', product: p })}
+                        >
+                          <NavIcon name="trash" />
+                        </button>
+                      </td>
                     </tr>)}
                 </tbody>
               </table>
             </div><Pagination {...pagination_products} /></>}
           </section>
+
+          {confirmProductAction ? <div className="modal-overlay" onClick={() => setConfirmProductAction(null)}>
+            <div className="modal-content" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 440 }}>
+              <h3>{confirmProductAction.type === 'delete' ? 'Delete Product' : 'Archive Product'}</h3>
+              <p className="text-ink/70">
+                {confirmProductAction.type === 'delete'
+                  ? `Permanently delete “${confirmProductAction.product.product_name}”? This only works if the product has no inventory, sales, or movement history. Prefer Archive when the SKU has been used.`
+                  : `Archive “${confirmProductAction.product.product_name}”? It will be hidden from active catalogs but can be restored later.`}
+              </p>
+              <div className="modal-actions">
+                <button type="button" className="button secondary" onClick={() => setConfirmProductAction(null)}>Cancel</button>
+                <button
+                  type="button"
+                  className="button"
+                  onClick={() => (
+                    confirmProductAction.type === 'delete'
+                      ? handleDeleteProduct(confirmProductAction.product)
+                      : handleArchiveProduct(confirmProductAction.product)
+                  )}
+                >
+                  {confirmProductAction.type === 'delete' ? 'Delete Permanently' : 'Archive'}
+                </button>
+              </div>
+            </div>
+          </div> : null}
 
           {showProductForm && <div className="modal-overlay" onClick={() => setShowProductForm(false)}>
               <div className="modal-content" onClick={e => e.stopPropagation()} style={{
@@ -1502,7 +1599,11 @@ function NotificationsPage({
 function ProfilePage({
   showToast
 }) {
-  return <AccountProfilePanel showToast={showToast} title="Admin Profile" />;
+  return <AccountProfilePanel
+    showToast={showToast}
+    title="Admin Profile"
+    subtitle="View your personal details and update your account password."
+  />;
 }
 
 // ── Product Categories (Admin) ────────────────────────────────────────────────

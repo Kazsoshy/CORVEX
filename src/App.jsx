@@ -9,6 +9,7 @@ import { CustomerPageBody } from './components/customer/CustomerPageBody';
 import { SuperAdminPageBody } from './components/superAdmin/SuperAdminPageBody';
 import { Toast, useToast } from './components/shared/Toast';
 import { getEntryPathForRole, logout, getCurrentUser } from './api/authService.js';
+import { startIdleSessionWatch } from './api/sessionActivity.js';
 import logo from './assets/corvex-logo.png';
 import { LoginPage } from './components/auth/LoginPage';
 import { ActivatePortalPage } from './components/auth/ActivatePortalPage';
@@ -123,9 +124,16 @@ function PrototypeShell() {
 
   useEffect(() => {
     const handleRequestLogout = () => setShowLogoutConfirm(true);
+    const handleSessionEnded = () => navigate('/login', { replace: true });
     window.addEventListener('request-logout', handleRequestLogout);
-    return () => window.removeEventListener('request-logout', handleRequestLogout);
-  }, []);
+    window.addEventListener('session-ended', handleSessionEnded);
+    const stopIdleWatch = startIdleSessionWatch();
+    return () => {
+      window.removeEventListener('request-logout', handleRequestLogout);
+      window.removeEventListener('session-ended', handleSessionEnded);
+      stopIdleWatch();
+    };
+  }, [navigate]);
 
   const handleLogoutConfirm = () => {
     logout();

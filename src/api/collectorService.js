@@ -225,9 +225,10 @@ export function mapSawRowToRouteStop(row, visitByCustomer = new Map()) {
   const visitDone = visit?.status === 'Completed';
   const daysOverdue = Number(row.days_overdue) || 0;
   const outstandingBalance = Number(row.outstanding_balance) || 0;
-  const collectorStatus = outstandingBalance > 0
-    ? (daysOverdue > 0 ? 'Overdue' : 'Pending')
-    : 'Current';
+  const openStatus = outstandingBalance > 0 && daysOverdue > 0 ? 'Overdue' : 'Pending';
+  const collectorStatus = visit
+    ? openStatus
+    : (outstandingBalance > 0 ? openStatus : 'Current');
 
   return {
     id,
@@ -238,7 +239,7 @@ export function mapSawRowToRouteStop(row, visitByCustomer = new Map()) {
     outstandingBalance,
     daysOverdue,
     distanceKm: Number(row.distance_km) || 0,
-    sawScore: Number(row.score) || 0,
+    sawScore: row.score == null || row.score === '' ? null : Number(row.score),
     rank: row.rank,
     status: visitDone ? 'Completed' : collectorStatus,
     visitId: visit?.visit_id,

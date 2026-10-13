@@ -1,8 +1,16 @@
 import express from 'express';
-import { allow, ROLE_SETS } from '../middleware/auth.js';
+import { allow, isUnscoped, ROLE_SETS } from '../middleware/auth.js';
 
 const router = express.Router();
 router.use(allow(ROLE_SETS.catalogRead, ROLE_SETS.catalogWrite));
+
+const PRODUCT_DELETE_ROLES = ['operating_manager', 'super_admin'];
+/** Only OM / super_admin may list or open archived (Inactive) products. */
+const PRODUCT_ARCHIVE_VIEW_ROLES = new Set(['operating_manager', 'super_admin']);
+
+function canViewArchivedProducts(user) {
+  return PRODUCT_ARCHIVE_VIEW_ROLES.has(user?.roleSlug);
+}
 
 // ──────────────────────────────────────────────────────────────────────────────
 // GET /api/products
@@ -11,28 +19,41 @@ router.use(allow(ROLE_SETS.catalogRead, ROLE_SETS.catalogWrite));
 router.get('/', async (req, res) => {
   try {
     const pool = req.app.locals.pool;
+    const user = req.currentUser;
     const { branch_id, category, status, product_status, search, page = 1, limit = 50 } = req.query;
+
+    // Branch staff always see their branch stock only.
+    const scopedBranchId = !isUnscoped(user) && user.branchId != null
+      ? Number(user.branchId)
+      : (branch_id ? Number(branch_id) : null);
 
     const conditions = [];
     const params = [];
     let pIdx = 1;
 
-    if (product_status && ['Active', 'Inactive'].includes(String(product_status))) {
+    // Archived products are hidden from warehouse/sales/BM/etc.
+    // Only operating managers (and super_admin) may request Inactive or All.
+    const productStatus = String(product_status || '').trim();
+    const allowArchived = canViewArchivedProducts(user);
+    if (allowArchived && ['Active', 'Inactive'].includes(productStatus)) {
       conditions.push(`p.status = $${pIdx++}`);
-      params.push(String(product_status));
+      params.push(productStatus);
+    } else if (allowArchived && productStatus.toLowerCase() === 'all') {
+      // no status filter — include Active + archived
     } else {
       conditions.push("p.status = 'Active'");
     }
 
-    if (branch_id) {
-      conditions.push(`i.branch_id = $${pIdx++}`);
-      params.push(Number(branch_id));
+    let branchJoinParam = null;
+    if (scopedBranchId != null && Number.isFinite(scopedBranchId)) {
+      branchJoinParam = pIdx++;
+      params.push(scopedBranchId);
     }
     if (category) {
       conditions.push(`p.category_id = $${pIdx++}`);
       params.push(Number(category));
     }
-    if (status && branch_id) {
+    if (status && scopedBranchId != null) {
       conditions.push(`i.stock_status = $${pIdx++}`);
       params.push(status);
     }
@@ -49,8 +70,7 @@ router.get('/', async (req, res) => {
     params.push(Number(limit), offset);
 
     let query;
-    if (branch_id) {
-      const branchParam = 1;
+    if (branchJoinParam != null) {
       query = `
         SELECT
           p.id AS product_id,
@@ -65,7 +85,7 @@ router.get('/', async (req, res) => {
           b.name AS branch_name
         FROM products p
         LEFT JOIN product_categories pc ON pc.category_id = p.category_id
-        LEFT JOIN branch_inventory i ON i.product_id = p.id AND i.branch_id = $${branchParam}
+        LEFT JOIN branch_inventory i ON i.product_id = p.id AND i.branch_id = $${branchJoinParam}
         LEFT JOIN branches b ON b.id = i.branch_id
         ${where}
         ORDER BY p.name
@@ -116,11 +136,15 @@ router.get('/', async (req, res) => {
 });
 
 // ──────────────────────────────────────────────────────────────────────────────
-// GET /api/products/:id  — Single product with inventory across all branches
+// GET /api/products/:id  — Product detail; branch roles only see own-branch stock
 // ──────────────────────────────────────────────────────────────────────────────
 router.get('/:id', async (req, res) => {
   try {
     const pool = req.app.locals.pool;
+    const user = req.currentUser;
+    const scopedBranchId = !isUnscoped(user) && user.branchId != null
+      ? Number(user.branchId)
+      : null;
 
     const productResult = await pool.query(
       `SELECT p.id AS product_id,
@@ -143,7 +167,19 @@ router.get('/:id', async (req, res) => {
     if (productResult.rows.length === 0) {
       return res.status(404).json({ success: false, message: 'Product not found.' });
     }
+    if (
+      String(productResult.rows[0].status) === 'Inactive'
+      && !canViewArchivedProducts(user)
+    ) {
+      return res.status(404).json({
+        success: false,
+        message: 'Product not found or has been archived.',
+      });
+    }
 
+    const inventoryParams = scopedBranchId != null
+      ? [req.params.id, scopedBranchId]
+      : [req.params.id];
     const inventoryResult = await pool.query(
       `SELECT
          i.inventory_id AS branch_inventory_id,
@@ -159,8 +195,9 @@ router.get('/:id', async (req, res) => {
        FROM branch_inventory i
        JOIN branches b ON b.id = i.branch_id
        WHERE i.product_id = $1
+         ${scopedBranchId != null ? 'AND i.branch_id = $2' : ''}
        ORDER BY b.name`,
-      [req.params.id]
+      inventoryParams
     );
 
     const movementsResult = await pool.query(
@@ -169,9 +206,10 @@ router.get('/:id', async (req, res) => {
        LEFT JOIN users u ON u.id = sm.performed_by
        JOIN branches b ON b.id = sm.branch_id
        WHERE sm.product_id = $1
+         ${scopedBranchId != null ? 'AND sm.branch_id = $2' : ''}
        ORDER BY sm.movement_date DESC
        LIMIT 20`,
-      [req.params.id]
+      inventoryParams
     );
 
     return res.status(200).json({
@@ -269,6 +307,94 @@ router.put('/:id', async (req, res) => {
   } catch (err) {
     console.error('[Products] PUT /:id error:', err.message);
     return res.status(500).json({ success: false, message: 'Failed to update product.' });
+  }
+});
+
+// ──────────────────────────────────────────────────────────────────────────────
+// DELETE /api/products/:id
+// Query: mode=archive (default) | mode=hard
+// Archive sets status=Inactive. Hard delete only when no operational refs remain.
+// Hard delete: operating_manager / super_admin only.
+// ──────────────────────────────────────────────────────────────────────────────
+router.delete('/:id', async (req, res) => {
+  try {
+    const pool = req.app.locals.pool;
+    const productId = Number(req.params.id);
+    const mode = String(req.query.mode || 'archive').toLowerCase();
+
+    if (!Number.isFinite(productId)) {
+      return res.status(400).json({ success: false, message: 'Invalid product id.' });
+    }
+
+    const existing = await pool.query(
+      `SELECT id, name, sku, status FROM products WHERE id = $1`,
+      [productId]
+    );
+    if (!existing.rows.length) {
+      return res.status(404).json({ success: false, message: 'Product not found.' });
+    }
+
+    if (mode === 'hard') {
+      if (!PRODUCT_DELETE_ROLES.includes(req.currentUser?.roleSlug)) {
+        return res.status(403).json({
+          success: false,
+          message: 'Only operating managers can permanently delete products.',
+        });
+      }
+
+      const refs = await pool.query(
+        `SELECT
+           (SELECT COUNT(*)::int FROM branch_inventory WHERE product_id = $1) AS inventory_rows,
+           (SELECT COUNT(*)::int FROM sales_invoice_items WHERE product_id = $1) AS sale_rows,
+           (SELECT COUNT(*)::int FROM stock_movements WHERE product_id = $1) AS movement_rows,
+           (SELECT COUNT(*)::int FROM restocks WHERE product_id = $1) AS restock_rows,
+           (SELECT COUNT(*)::int FROM inventory_transfers WHERE product_id = $1) AS transfer_rows,
+           (SELECT COUNT(*)::int FROM central_inventory WHERE product_id = $1) AS central_rows`,
+        [productId]
+      );
+      const usage = refs.rows[0] || {};
+      const blocking = Object.entries(usage)
+        .filter(([, count]) => Number(count) > 0)
+        .map(([key, count]) => `${key.replace(/_rows$/, '')}: ${count}`);
+
+      if (blocking.length) {
+        return res.status(409).json({
+          success: false,
+          message: `Cannot permanently delete this product because it is still referenced (${blocking.join(', ')}). Archive it instead.`,
+          data: usage,
+        });
+      }
+
+      await pool.query(`DELETE FROM products WHERE id = $1`, [productId]);
+      return res.status(200).json({
+        success: true,
+        message: 'Product permanently deleted.',
+        data: { product_id: productId, mode: 'hard' },
+      });
+    }
+
+    // Soft archive
+    if (existing.rows[0].status === 'Inactive') {
+      return res.status(200).json({
+        success: true,
+        message: 'Product is already archived.',
+        data: { product_id: productId, status: 'Inactive', mode: 'archive' },
+      });
+    }
+
+    await pool.query(
+      `UPDATE products SET status = 'Inactive', updated_at = CURRENT_TIMESTAMP WHERE id = $1`,
+      [productId]
+    );
+
+    return res.status(200).json({
+      success: true,
+      message: 'Product archived.',
+      data: { product_id: productId, status: 'Inactive', mode: 'archive' },
+    });
+  } catch (err) {
+    console.error('[Products] DELETE /:id error:', err.message);
+    return res.status(500).json({ success: false, message: 'Failed to delete product.' });
   }
 });
 

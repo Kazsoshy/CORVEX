@@ -24,13 +24,13 @@ import {
   submitCollectorIncident,
 } from '../../api/collectorService';
 import { fetchNotifications } from '../../api/notificationService.js';
-import { fetchMyProfile, updateMyProfile } from '../../api/profileService.js';
-import { getCurrentUser, persistCurrentUserFromProfile, requestLogout } from '../../api/authService.js';
+import { getCurrentUser } from '../../api/authService.js';
 import { downloadPdf } from '../../utils/dataExport';
 import { collectorMapPath, openPhoneCall } from '../../utils/mapsNavigation';
 import { NotificationsInbox } from '../shared/NotificationsInbox';
 import { EmptyState } from '../shared/EmptyState';
 import { LoadingState } from '../shared/LoadingState';
+import { AccountProfilePanel } from '../shared/AccountProfilePanel';
 import { NavIcon } from '../../navIcons';
 import LeafletMap from '../common/LeafletMap';
 import CollectionRouteMap from './CollectionRouteMap';
@@ -82,7 +82,7 @@ function collectorOpenMap(account, navigate, parentContext = 'accounts') {
 
 function resolveCollectorNotificationPath(category) {
   const c = String(category || '').toLowerCase();
-  if (c.includes('route') || c.includes('visit')) return '/collector/route';
+  if (c.includes('schedule') || c.includes('route') || c.includes('visit')) return '/collector/route';
   if (c.includes('receipt') || c.includes('collection')) return '/collector/history';
   if (c.includes('ci') || c.includes('credit')) return '/collector/accounts';
   return '/collector/notifications';
@@ -96,6 +96,7 @@ function DashboardPage({
   const today = formatDisplayDate(new Date());
   const [dashboard, setDashboard] = useState(null);
   const [unreadCount, setUnreadCount] = useState(0);
+  const [scheduleNotices, setScheduleNotices] = useState([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -108,7 +109,9 @@ function DashboardPage({
       if (dashRes.success) setDashboard(dashRes.data);
       else if (showToast) showToast(dashRes.message || 'Failed to load dashboard.', 'error');
       if (notifRes.success) {
-        setUnreadCount((notifRes.data || []).filter(n => n.status !== 'Read').length);
+        const rows = notifRes.data || [];
+        setUnreadCount(rows.filter(n => n.status !== 'Read').length);
+        setScheduleNotices(rows.filter((n) => String(n.category || '').toLowerCase().includes('schedule')).slice(0, 4));
       }
       setLoading(false);
     }
@@ -150,6 +153,25 @@ function DashboardPage({
       label: 'Collections Today',
       value: String(summary.collectionsToday ?? 0)
     }]} />
+
+      {scheduleNotices.length ? (
+        <section className="panel content-panel relative overflow-hidden">
+          <div className="list-section-header">
+            <h3 style={{ margin: 0 }}>Today&apos;s schedule alerts</h3>
+            <button className="button secondary" type="button" onClick={() => navigate('/collector/route')}>Open route</button>
+          </div>
+          <ul className="notification-list" style={{ margin: 0 }}>
+            {scheduleNotices.map((n) => (
+              <li key={n.notification_id} className={`notification-item${n.status === 'Read' ? '' : ' unread'}`}>
+                <div>
+                  <strong>{n.title}</strong>
+                  <p className="muted">{n.message}</p>
+                </div>
+              </li>
+            ))}
+          </ul>
+        </section>
+      ) : null}
 
       <div className="flex flex-wrap gap-2 justify-end mt-2 mb-2">
         <button className="button secondary" type="button" onClick={() => navigate('/collector/accounts')}>View Accounts</button>
@@ -464,6 +486,10 @@ function FieldActivityReportsPage({
         </section> : <EmptyState title="No field activity reports yet" description="Submit a report after completing a route stop." />}
     </div>;
 }
+function isRouteStopCompleted(stop) {
+  return stop.status === 'Completed' || stop.visitStatus === 'Completed';
+}
+
 function RoutePage({
   pageType,
   navigate,
@@ -529,9 +555,14 @@ function RoutePage({
 
   const filteredStops = useMemo(() => {
     if (filter === 'All') return customers;
-    if (filter === 'Pending') return customers.filter(s => s.status === 'Pending' || s.status === 'Overdue');
-    return customers.filter(s => s.status === 'Completed' || s.visitStatus === 'Completed');
+    if (filter === 'Pending') return customers.filter((s) => !isRouteStopCompleted(s));
+    return customers.filter(isRouteStopCompleted);
   }, [filter, customers]);
+  const routeCounts = useMemo(() => ({
+    All: customers.length,
+    Pending: customers.filter((s) => !isRouteStopCompleted(s)).length,
+    Completed: customers.filter(isRouteStopCompleted).length,
+  }), [customers]);
   const actions = [{
     label: 'Route List',
     to: '/collector/route',
@@ -579,8 +610,8 @@ function RoutePage({
           </div>
           <ul className="info-grid">
             <li><span className="info-item-label">Total Outstanding on Route</span><span className="info-item-value">{formatCurrency(customers.reduce((sum, s) => sum + (s.outstandingBalance || 0), 0))}</span></li>
-            <li><span className="info-item-label">Pending / Overdue Visits</span><span className="info-item-value">{customers.filter(s => s.status !== 'Completed').length} stops</span></li>
-            <li><span className="info-item-label">Completed Visits</span><span className="info-item-value">{customers.filter(s => s.status === 'Completed').length} stops</span></li>
+            <li><span className="info-item-label">Pending / Overdue Visits</span><span className="info-item-value">{routeCounts.Pending} stops</span></li>
+            <li><span className="info-item-label">Completed Visits</span><span className="info-item-value">{routeCounts.Completed} stops</span></li>
           </ul>
         </section>
       </div>;
@@ -634,7 +665,7 @@ function RoutePage({
           <div className="inline-toolbar">
             <div className="segmented-control">
               {['All', 'Pending', 'Completed'].map(item => <button key={item} className={filter === item ? 'segment active' : 'segment'} type="button" onClick={() => setFilter(item)}>
-                  {item}
+                  {item} ({routeCounts[item]})
                 </button>)}
             </div>
             {pageType !== 'routeMap' ? <button className="button secondary" type="button" onClick={() => setShowMap(!showMap)}>
@@ -1925,71 +1956,12 @@ function ProfilePage({
   navigate,
   showToast
 }) {
-  const sessionUser = getCurrentUser();
-  const [profile, setProfile] = useState(null);
-  const [password, setPassword] = useState('');
-  const [editing, setEditing] = useState(false);
-  useEffect(() => {
-    async function load() {
-      const res = await fetchMyProfile();
-      if (res.success) setProfile(res.data);
-    }
-    load();
-  }, []);
-  const userName = profile
-    ? [profile.first_name, profile.last_name].filter(Boolean).join(' ')
-    : sessionUser?.fullName || 'Collector';
-  const userBranch = profile?.branch?.name || sessionUser?.branch?.name || '—';
-  const roleLabel = profile?.role?.name || sessionUser?.role?.name || 'Collector';
-  const userInitials = userName.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2);
-  const saveProfile = async () => {
-    if (!profile) return;
-    const payload = {
-      first_name: profile.first_name,
-      last_name: profile.last_name,
-      email: profile.email,
-      phone: profile.phone,
-    };
-    if (password.trim()) payload.password = password.trim();
-    const res = await updateMyProfile(payload);
-    if (res.success) {
-      persistCurrentUserFromProfile(res.data);
-      setProfile(res.data);
-      setPassword('');
-      setEditing(false);
-      showToast('Profile updated.', 'success');
-    } else showToast(res.message || 'Update failed.', 'error');
-  };
-  if (!profile) return <LoadingState message="Loading profile..." />;
-  return <div className="relative z-10 grid gap-[22px] w-full">
-      <section className="panel content-panel profile-panel">
-        <div className="profile-header">
-          <div className="profile-avatar">{userInitials}</div>
-          <div><h3>{userName}</h3><p className="text-ink/70">{roleLabel}</p></div>
-        </div>
-        {editing ? <div className="form-grid" style={{ marginTop: 16 }}>
-            <label>First name<input value={profile.first_name || ''} onChange={e => setProfile(p => ({ ...p, first_name: e.target.value }))} /></label>
-            <label>Last name<input value={profile.last_name || ''} onChange={e => setProfile(p => ({ ...p, last_name: e.target.value }))} /></label>
-            <label>Email<input type="email" value={profile.email || ''} onChange={e => setProfile(p => ({ ...p, email: e.target.value }))} /></label>
-            <label>Phone<input value={profile.phone || ''} onChange={e => setProfile(p => ({ ...p, phone: e.target.value }))} /></label>
-            <label>New password (optional)<input type="password" value={password} onChange={e => setPassword(e.target.value)} placeholder="Min. 8 characters" /></label>
-          </div>
-          : <ul className="info-grid">
-            <li><span className="info-item-label">Branch</span><span className="info-item-value">{userBranch}</span></li>
-            <li><span className="info-item-label">Email</span><span className="info-item-value">{profile.email}</span></li>
-            <li><span className="info-item-label">Phone</span><span className="info-item-value">{profile.phone || '—'}</span></li>
-            <li><span className="info-item-label">Status</span><span className="info-item-value">{profile.status || '—'}</span></li>
-          </ul>}
-      </section>
-      <div className="flex flex-wrap gap-2 justify-end mt-4 mb-2">
-        <button className="button ghost" type="button" onClick={() => navigate('/collector/settings')}>Settings</button>
-        <button className="button ghost" type="button" onClick={() => requestLogout()}>Logout</button>
-        {editing ? <>
-            <button className="button ghost" type="button" onClick={() => setEditing(false)}>Cancel</button>
-            <button className="button" type="button" onClick={saveProfile}>Save Profile</button>
-          </> : <button className="button" type="button" onClick={() => setEditing(true)}>Update Profile</button>}
-      </div>
-    </div>;
+  return <AccountProfilePanel
+    showToast={showToast}
+    title="Collector Profile"
+    subtitle="View your personal details and update your account password."
+    extraActions={<button className="button ghost" type="button" onClick={() => navigate('/collector/settings')}>Settings</button>}
+  />;
 }
 function SettingsPage({
   navigate

@@ -4,6 +4,8 @@ import { resolveBranchManagerPage } from './branchManagerRoutes';
 
 const ROUTE_DEFINITIONS = [
   { pattern: /^\/operating-manager\/dashboard$/, pageType: 'dashboard' },
+  // Legacy alias — redirects to admin inventory (same module)
+  { pattern: /^\/operating-manager\/inventory-centralization$/, pageType: 'inventoryCentralizationRedirect' },
   { pattern: /^\/operating-manager\/branch-performance$/, pageType: 'branchPerformance' },
   { pattern: /^\/operating-manager\/branch-performance\/comparison$/, pageType: 'branchComparison' },
   { pattern: /^\/operating-manager\/branch-performance\/branch\/([^/]+)$/, pageType: 'branchDetail', params: ['branchId'] },
@@ -57,6 +59,8 @@ export function buildOperatingManagerBreadcrumbs(pageType, params = {}) {
   switch (pageType) {
     case 'dashboard':
       return [{ label: 'Operating Dashboard', to: '/operating-manager/dashboard' }];
+    case 'inventoryCentralizationRedirect':
+      return [...crumbs, { label: 'Inventory Management', to: '/operating-manager/admin/inventory' }];
     case 'branchPerformance':
       return [...crumbs, ...branchPerf];
     case 'branchComparison':
@@ -150,6 +154,7 @@ export function resolveOperatingManagerPage(pathname) {
 
   const titles = {
     dashboard: 'Operating Dashboard',
+    inventoryCentralizationRedirect: 'Inventory Management',
     branchPerformance: 'Branch Performance',
     branchComparison: 'Branch Comparison',
     branchDetail: 'Branch Detail',
@@ -191,6 +196,10 @@ export function isOperatingManagerNavActive(fullPath, navTo) {
   if (navTo === '/operating-manager/dashboard') {
     return pathname === '/operating-manager/dashboard';
   }
+  if (navTo === '/operating-manager/admin/inventory') {
+    return pathname === '/operating-manager/admin/inventory'
+      || pathname === '/operating-manager/inventory-centralization';
+  }
   if (navTo === '/operating-manager/branch-performance') {
     return pathname.startsWith('/operating-manager/branch-performance') || pathname === '/operating-manager/compare';
   }
@@ -199,6 +208,9 @@ export function isOperatingManagerNavActive(fullPath, navTo) {
   }
   if (navTo === '/operating-manager/reports') {
     return pathname.startsWith('/operating-manager/reports');
+  }
+  if (navTo === '/operating-manager/operations/field-activity-reports') {
+    return pathname.startsWith('/operating-manager/operations/field-activity-reports');
   }
   if (navTo === '/operating-manager/alerts') return pathname === '/operating-manager/alerts';
   if (navTo === '/operating-manager/notifications') return pathname === '/operating-manager/notifications';
@@ -232,6 +244,7 @@ const OPERATION_TITLES = {
   auditLog: 'Audit Log',
   customers: 'Customers',
   customerDetail: 'Customer Detail',
+  fieldActivityReports: 'Field Activity Reports',
   fieldOperations: 'Field Operations',
   routePerformance: 'Route Performance',
   collectorRoutes: 'Collector Route Overview',

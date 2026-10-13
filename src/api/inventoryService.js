@@ -1,5 +1,36 @@
 import apiClient from './apiClient.js';
 
+export async function fetchCentralInventory() {
+  try {
+    const response = await apiClient.get('/inventory/central');
+    return response.data;
+  } catch (err) {
+    console.error('Failed to fetch central inventory:', err);
+    return {
+      success: false,
+      message: err.response?.data?.message || 'Failed to load central inventory.',
+      data: [],
+      byBranch: [],
+      alerts: [],
+      recentMovements: [],
+      summary: null,
+    };
+  }
+}
+
+export async function realignCentralInventory() {
+  try {
+    const response = await apiClient.post('/inventory/central/realign');
+    return response.data;
+  } catch (err) {
+    console.error('Failed to realign central inventory:', err);
+    return {
+      success: false,
+      message: err.response?.data?.message || 'Failed to realign central inventory.',
+    };
+  }
+}
+
 export async function fetchInventoryTransfers(params = {}) {
   try {
     const response = await apiClient.get('/inventory/transfers', { params });

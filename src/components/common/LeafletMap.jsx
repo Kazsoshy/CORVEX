@@ -1,5 +1,5 @@
 import React, { useEffect } from 'react';
-import { MapContainer, TileLayer, Marker, Popup, Polyline, useMap } from 'react-leaflet';
+import { MapContainer, TileLayer, Marker, Popup, Polyline, Circle, Polygon, useMap } from 'react-leaflet';
 import L from 'leaflet';
 
 function FitBounds({ bounds, padding = [36, 36] }) {
@@ -13,6 +13,26 @@ function FitBounds({ bounds, padding = [36, 36] }) {
     }
   }, [bounds, map, padding]);
   return null;
+}
+
+function InvalidateSize() {
+  const map = useMap();
+  useEffect(() => {
+    const timer = setTimeout(() => map.invalidateSize(), 80);
+    return () => clearTimeout(timer);
+  }, [map]);
+  return null;
+}
+
+function OverlayPopup({ overlay }) {
+  if (!overlay?.popupContent && !overlay?.popup) return null;
+  return (
+    <Popup>
+      <div style={{ padding: '4px', minWidth: 160 }}>
+        {overlay.popupContent || overlay.popup}
+      </div>
+    </Popup>
+  );
 }
 
 // Fix for default marker icon in leaflet
@@ -57,7 +77,9 @@ export const createCustomIcon = (color = '#255684', label = '') => {
  */
 export default function LeafletMap({ 
   markers = [], 
-  polylines = [], 
+  polylines = [],
+  circles = [],
+  polygons = [],
   center = [12.8797, 121.7740], // Default center: Philippines
   zoom = 5,
   height = 560,
@@ -70,7 +92,42 @@ export default function LeafletMap({
           attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
           url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
         />
+        <InvalidateSize />
         {fitBounds?.length ? <FitBounds bounds={fitBounds} /> : null}
+
+        {polygons.map((polygon) => (
+          <Polygon
+            key={polygon.id}
+            positions={polygon.positions}
+            pathOptions={{
+              color: polygon.color || '#255684',
+              weight: polygon.weight ?? 2,
+              fillColor: polygon.fillColor || polygon.color || '#255684',
+              fillOpacity: polygon.fillOpacity ?? 0.18,
+              opacity: polygon.opacity ?? 0.85,
+              dashArray: polygon.dashArray,
+            }}
+          >
+            <OverlayPopup overlay={polygon} />
+          </Polygon>
+        ))}
+
+        {circles.map((circle) => (
+          <Circle
+            key={circle.id}
+            center={circle.center}
+            radius={circle.radius ?? 400}
+            pathOptions={{
+              color: circle.color || '#255684',
+              weight: circle.weight ?? 1,
+              fillColor: circle.fillColor || circle.color || '#255684',
+              fillOpacity: circle.fillOpacity ?? 0.22,
+              opacity: circle.opacity ?? 0.8,
+            }}
+          >
+            <OverlayPopup overlay={circle} />
+          </Circle>
+        ))}
         
         {markers.map((marker) => (
           <Marker 
@@ -96,7 +153,9 @@ export default function LeafletMap({
             weight={line.weight ?? 3}
             opacity={line.opacity ?? 0.7}
             dashArray={line.dashArray}
-          />
+          >
+            <OverlayPopup overlay={line} />
+          </Polyline>
         ))}
       </MapContainer>
     </div>

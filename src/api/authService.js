@@ -44,9 +44,10 @@ export function getCurrentUser() {
 export function persistCurrentUserFromProfile(profile) {
   if (!profile) return;
   const prev = getCurrentUser() || {};
-  const fullName = [profile.first_name, profile.middle_name, profile.last_name]
-    .filter(Boolean)
-    .join(' ')
+  const fullName = (
+    profile.full_name
+    || [profile.first_name, profile.middle_name, profile.last_name].filter(Boolean).join(' ')
+  )
     .replace(/\s+/g, ' ')
     .trim();
   const next = {

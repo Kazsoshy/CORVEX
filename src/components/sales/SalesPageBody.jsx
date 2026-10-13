@@ -19,6 +19,8 @@ import {
   fetchSalesPurchaseRequestById,
   fetchSalesPurchaseRequests,
   fetchTerritories,
+  fetchSalesFieldReports,
+  submitSalesFieldReport,
   submitSalesCreditInvestigation,
   updateFieldVisit,
   updateSalesPurchaseRequestStatus,
@@ -26,8 +28,8 @@ import {
 import { lookupCustomersForDuplicate, resendCustomerPortalInvitation } from '../../api/customerPortalService';
 import { fetchNotifications, markNotificationRead, markAllNotificationsRead, mapNotificationRow } from '../../api/notificationService.js';
 import { mapCreditInvestigationRow } from '../../api/approvalsService.js';
-import { fetchMyProfile, updateMyProfile } from '../../api/profileService.js';
-import { getCurrentUser, persistCurrentUserFromProfile, requestLogout } from '../../api/authService.js';
+import { getCurrentUser } from '../../api/authService.js';
+import { AccountProfilePanel } from '../shared/AccountProfilePanel';
 import apiClient from '../../api/apiClient.js';
 import { CONTACT_RELATIONSHIP_OPTIONS, formatContactPersonName, formatCustomerDisplayId, formatCustomerFullName, formatMiddleNameDisplay, formatPurchaseVolumeUnits, formatSecondaryContactName } from '../../utils/customerDisplay';
 import { downloadPdf } from '../../utils/dataExport';
@@ -59,6 +61,7 @@ function DashboardPage({
   const today = formatDisplayDate(new Date());
   const [dashboard, setDashboard] = useState(null);
   const [unreadCount, setUnreadCount] = useState(0);
+  const [scheduleNotices, setScheduleNotices] = useState([]);
   const [loading, setLoading] = useState(true);
   useEffect(() => {
     async function load() {
@@ -66,7 +69,9 @@ function DashboardPage({
       const [dashRes, notifRes] = await Promise.all([fetchSalesDashboard(), fetchNotifications()]);
       if (dashRes.success) setDashboard(dashRes.data);
       if (notifRes.success) {
-        setUnreadCount((notifRes.data || []).filter(n => n.status !== 'Read').length);
+        const rows = notifRes.data || [];
+        setUnreadCount(rows.filter(n => n.status !== 'Read').length);
+        setScheduleNotices(rows.filter((n) => String(n.category || '').toLowerCase().includes('schedule')).slice(0, 4));
       }
       setLoading(false);
     }
@@ -107,6 +112,23 @@ function DashboardPage({
       label: 'Pending CIs',
       value: String(summary.creditInvestigationsPending ?? 0)
     }]} />
+
+      {scheduleNotices.length ? <section className="panel content-panel relative overflow-hidden">
+          <div className="list-section-header">
+            <h3 style={{ margin: 0 }}>Today&apos;s schedule alerts</h3>
+            <button className="button secondary" type="button" onClick={() => navigate('/sales/schedule')}>Open schedule</button>
+          </div>
+          <ul className="notification-list" style={{ margin: 0 }}>
+            {scheduleNotices.map((n) => (
+              <li key={n.notification_id} className={`notification-item${n.status === 'Read' ? '' : ' unread'}`}>
+                <div>
+                  <strong>{n.title}</strong>
+                  <p className="muted">{n.message}</p>
+                </div>
+              </li>
+            ))}
+          </ul>
+        </section> : null}
 
       {(summary.creditInvestigationsPending ?? 0) > 0 ? <section className="panel content-panel alert-panel">
           <div className="panel-section-header">
@@ -2045,6 +2067,190 @@ export function SalesHistoryPage({
       </section>
     </div>;
 }
+function manilaToday() {
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Manila',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(new Date());
+}
+
+function FieldActivityReportsPage({ showToast }) {
+  const [reports, setReports] = useState([]);
+  const [visits, setVisits] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [submitting, setSubmitting] = useState(false);
+  const [form, setForm] = useState({
+    visit_id: '',
+    activity_type: '',
+    remarks: '',
+    photo: '',
+    photoName: '',
+  });
+  const [errors, setErrors] = useState({});
+
+  async function loadReports() {
+    setLoading(true);
+    const today = manilaToday();
+    const [reportsResult, visitsResult] = await Promise.all([
+      fetchSalesFieldReports(),
+      fetchFieldVisits({ scheduled_date: today, status: 'All' }),
+    ]);
+    if (reportsResult.success) setReports(reportsResult.data || []);
+    if (visitsResult.success) setVisits(visitsResult.data || []);
+    setLoading(false);
+  }
+
+  useEffect(() => {
+    loadReports();
+  }, []);
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    const nextErrors = {};
+    if (!form.visit_id) nextErrors.visit_id = 'Select a visit.';
+    if (!form.activity_type) nextErrors.activity_type = 'Select an activity type.';
+    if (!form.remarks.trim()) nextErrors.remarks = 'Remarks are required.';
+    if (!form.photo) nextErrors.photo = 'Photo evidence is required.';
+    setErrors(nextErrors);
+    if (Object.keys(nextErrors).length) return;
+    setSubmitting(true);
+    const result = await submitSalesFieldReport({
+      visit_id: Number(form.visit_id),
+      activity_type: form.activity_type,
+      remarks: form.remarks.trim(),
+      photo: form.photo,
+    });
+    setSubmitting(false);
+    if (result.success) {
+      showToast(result.message || 'Report submitted.', 'success');
+      setForm({ visit_id: '', activity_type: '', remarks: '', photo: '', photoName: '' });
+      loadReports();
+    } else {
+      showToast(result.message || 'Failed to submit report.', 'error');
+    }
+  };
+
+  const pagination = usePagination(reports);
+  if (loading) return <LoadingState message="Loading field activity reports..." />;
+
+  return <div className="page">
+    <section className="panel content-panel">
+      <div className="panel-section-header">
+        <h3>Field Activity Reports</h3>
+        <p className="muted">Submit visit activity for today's sales schedule ({reports.length} report{reports.length === 1 ? '' : 's'} on file).</p>
+      </div>
+      <form className="grid gap-3" onSubmit={handleSubmit}>
+        <div className="form-group">
+          <label>Visit / Customer<span className="required">*</span></label>
+          <select className="filter-select" value={form.visit_id} onChange={(e) => setForm((p) => ({ ...p, visit_id: e.target.value }))}>
+            <option value="">Select today's visit</option>
+            {visits.map((v) => <option key={v.visit_id} value={v.visit_id}>
+              {v.customer_name} — {v.visit_type} ({formatDisplayDate(v.scheduled_date)}, {v.status})
+            </option>)}
+          </select>
+          {errors.visit_id ? <p className="form-error">{errors.visit_id}</p> : null}
+          {!visits.length ? <p className="muted">No visits scheduled for today. Reports can be filed once a visit is assigned.</p> : null}
+        </div>
+        <div className="form-group">
+          <label>Activity Type<span className="required">*</span></label>
+          <select className="filter-select" value={form.activity_type} onChange={(e) => setForm((p) => ({ ...p, activity_type: e.target.value }))}>
+            <option value="">Select activity type</option>
+            {['Sales Visit', 'Canvassing', 'Delivery', 'Site Check', 'Follow-up', 'Customer Not Available'].map((t) => <option key={t} value={t}>{t}</option>)}
+          </select>
+          {errors.activity_type ? <p className="form-error">{errors.activity_type}</p> : null}
+        </div>
+        <div className="form-group">
+          <label>Remarks<span className="required">*</span></label>
+          <textarea rows={3} placeholder="Describe the visit outcome, order taken, or follow-up needed..." value={form.remarks} onChange={(e) => setForm((p) => ({ ...p, remarks: e.target.value }))} />
+          {errors.remarks ? <p className="form-error">{errors.remarks}</p> : null}
+        </div>
+        <div className="form-group">
+          <label>Photo Evidence<span className="required">*</span></label>
+          <input
+            type="file"
+            accept="image/*"
+            capture="environment"
+            onChange={(e) => {
+              const file = e.target.files?.[0];
+              if (!file) {
+                setForm((p) => ({ ...p, photo: '', photoName: '' }));
+                return;
+              }
+              if (!file.type.startsWith('image/')) {
+                setErrors((prev) => ({ ...prev, photo: 'Please select an image file.' }));
+                return;
+              }
+              if (file.size > 700_000) {
+                setErrors((prev) => ({ ...prev, photo: 'Image must be 700 KB or smaller.' }));
+                return;
+              }
+              const reader = new FileReader();
+              reader.onload = () => {
+                setForm((p) => ({
+                  ...p,
+                  photo: typeof reader.result === 'string' ? reader.result : '',
+                  photoName: file.name,
+                }));
+                setErrors((prev) => {
+                  const next = { ...prev };
+                  delete next.photo;
+                  return next;
+                });
+              };
+              reader.readAsDataURL(file);
+            }}
+          />
+          {form.photoName ? <p className="muted">Selected: {form.photoName}</p> : null}
+          {form.photo ? <img src={form.photo} alt="Report preview" style={{ marginTop: 8, maxWidth: 200, maxHeight: 140, borderRadius: 8, border: '1px solid #c5c8d0' }} /> : null}
+          {errors.photo ? <p className="form-error">{errors.photo}</p> : null}
+        </div>
+        <div className="flex justify-end">
+          <button className="button" type="submit" disabled={submitting || !visits.length}>
+            {submitting ? 'Submitting…' : 'Submit Report'}
+          </button>
+        </div>
+      </form>
+    </section>
+    {reports.length ? <section className="panel content-panel">
+      <div className="corvex-table-wrapper">
+        <table className="corvex-table">
+          <thead>
+            <tr>
+              <th>Customer</th>
+              <th>Activity</th>
+              <th>Visit Date</th>
+              <th>Sync</th>
+              <th>Photo</th>
+              <th>Submitted</th>
+              <th>Remarks</th>
+            </tr>
+          </thead>
+          <tbody>
+            {pagination.paginatedData.map((r) => <tr key={r.report_id}>
+              <td>{r.customer_name}</td>
+              <td>{r.activity_type}</td>
+              <td>{formatDisplayDate(r.scheduled_date)}</td>
+              <td><StatusBadge status={r.sync_status} /></td>
+              <td>
+                {r.photo ? (
+                  <a href={r.photo} target="_blank" rel="noreferrer">
+                    <img src={r.photo} alt="Report" style={{ width: 48, height: 48, objectFit: 'cover', borderRadius: 6, border: '1px solid #c5c8d0' }} />
+                  </a>
+                ) : '—'}
+              </td>
+              <td>{formatDisplayDateTime(r.created_at)}</td>
+              <td style={{ maxWidth: 220, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={r.remarks}>{r.remarks || '—'}</td>
+            </tr>)}
+          </tbody>
+        </table>
+      </div>
+      <Pagination {...pagination} />
+    </section> : <EmptyState title="No field activity reports yet" description="Submit a report after a scheduled sales visit." />}
+  </div>;
+}
+
 function NotificationsPage({
   navigate,
   showToast
@@ -2107,69 +2313,15 @@ function ProfilePage({
   navigate,
   showToast
 }) {
-  const sessionUser = getCurrentUser();
-  const [profile, setProfile] = useState(null);
-  const [password, setPassword] = useState('');
-  const [editing, setEditing] = useState(false);
-  useEffect(() => {
-    async function load() {
-      const res = await fetchMyProfile();
-      if (res.success) setProfile(res.data);
-    }
-    load();
-  }, []);
-  const displayName = profile
-    ? [profile.first_name, profile.last_name].filter(Boolean).join(' ')
-    : sessionUser?.fullName || 'Sales Agent';
-  const save = async () => {
-    if (!profile) return;
-    const payload = {
-      first_name: profile.first_name,
-      last_name: profile.last_name,
-      email: profile.email,
-      phone: profile.phone,
-    };
-    if (password.trim()) payload.password = password.trim();
-    const res = await updateMyProfile(payload);
-    if (res.success) {
-      persistCurrentUserFromProfile(res.data);
-      setProfile(res.data);
-      setPassword('');
-      setEditing(false);
-      showToast('Profile updated.', 'success');
-    } else showToast(res.message || 'Update failed.', 'error');
-  };
-  if (!profile) return <LoadingState message="Loading profile..." />;
-  return <div className="page">
+  return <>
       <OfflineBanner />
-      <section className="panel content-panel profile-panel">
-        <div className="profile-header">
-          <div className="profile-avatar">{displayName.split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase()}</div>
-          <div><h3>{displayName}</h3><p className="muted">{profile.email || ''}</p></div>
-        </div>
-        {editing ? <div className="form-grid" style={{ marginTop: 16 }}>
-            <label>First name<input value={profile.first_name || ''} onChange={e => setProfile(p => ({ ...p, first_name: e.target.value }))} /></label>
-            <label>Last name<input value={profile.last_name || ''} onChange={e => setProfile(p => ({ ...p, last_name: e.target.value }))} /></label>
-            <label>Email<input type="email" value={profile.email || ''} onChange={e => setProfile(p => ({ ...p, email: e.target.value }))} /></label>
-            <label>Phone<input value={profile.phone || ''} onChange={e => setProfile(p => ({ ...p, phone: e.target.value }))} /></label>
-            <label>New password<input type="password" value={password} onChange={e => setPassword(e.target.value)} placeholder="Min. 8 characters" /></label>
-          </div>
-          : <ul className="info-grid">
-          <li><span className="info-item-label">Assigned Branch</span><span className="info-item-value">{profile.branch?.name || '—'}</span></li>
-          <li><span className="info-item-label">Role</span><span className="info-item-value">{profile.role?.name || '—'}</span></li>
-          <li><span className="info-item-label">Phone</span><span className="info-item-value">{profile.phone || '—'}</span></li>
-          <li><span className="info-item-label">Status</span><span className="info-item-value">{profile.status || '—'}</span></li>
-        </ul>}
-      </section>
-      <div className="flex justify-end gap-2 mt-4">
-        <button className="button ghost" type="button" onClick={() => navigate('/sales/audit-log')}>Audit Log</button>
-        <button className="button ghost" type="button" onClick={() => requestLogout()}>Logout</button>
-        {editing ? <>
-            <button className="button ghost" type="button" onClick={() => setEditing(false)}>Cancel</button>
-            <button className="button" type="button" onClick={save}>Save Profile</button>
-          </> : <button className="button" type="button" onClick={() => setEditing(true)}>Update Profile</button>}
-      </div>
-    </div>;
+      <AccountProfilePanel
+        showToast={showToast}
+        title="Sales Profile"
+        subtitle="View your personal details and update your account password."
+        extraActions={<button className="button ghost" type="button" onClick={() => navigate('/sales/audit-log')}>Audit Log</button>}
+      />
+    </>;
 }
 function RouteTrackingPage({
   navigate
@@ -2424,6 +2576,8 @@ export function SalesPageBody({
     case 'scheduleList':
     case 'scheduleMap':
       return <SchedulePage pageType={page.pageType} {...props} />;
+    case 'fieldActivityReports':
+      return <FieldActivityReportsPage {...props} />;
     case 'customers':
       return <CustomersPage {...props} />;
     case 'purchaseRequests':

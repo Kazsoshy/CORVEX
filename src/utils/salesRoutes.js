@@ -3,6 +3,7 @@ const ROUTE_DEFINITIONS = [
   { pattern: /^\/sales\/settings$/, pageType: 'settings' },
   { pattern: /^\/sales\/schedule\/map$/, pageType: 'scheduleMap' },
   { pattern: /^\/sales\/schedule$/, pageType: 'scheduleList' },
+  { pattern: /^\/sales\/field-reports$/, pageType: 'fieldActivityReports' },
   { pattern: /^\/sales\/customers$/, pageType: 'customers' },
   { pattern: /^\/sales\/customers\/new$/, pageType: 'customerForm' },
   { pattern: /^\/sales\/purchase-requests$/, pageType: 'purchaseRequests' },
@@ -70,6 +71,9 @@ export function buildSalesBreadcrumbs(pageType, params = {}, parentContext = 'cu
         { label: "Today's Schedule", to: '/sales/schedule' },
         ...(pageType === 'scheduleMap' ? [{ label: 'Territory Map', to: '/sales/schedule/map' }] : []),
       ];
+
+    case 'fieldActivityReports':
+      return [...crumbs, { label: 'Field Activity Reports', to: '/sales/field-reports' }];
 
     case 'customers':
       return [...crumbs, { label: 'Customers', to: '/sales/customers' }];
@@ -176,6 +180,7 @@ export function resolveSalesPage(pathname, search = '') {
     settings: 'Settings',
     scheduleList: "Today's Schedule",
     scheduleMap: 'Territory Map',
+    fieldActivityReports: 'Field Activity Reports',
     customers: 'Customers',
     customerForm: 'Add Customer',
     purchaseRequests: 'Purchase Requests',
@@ -216,6 +221,7 @@ export function isSalesNavActive(fullPath, navTo) {
   if (navTo === '/sales/dashboard') return pathname === '/sales/dashboard' || pathname === '/sales/settings' || pathname === '/sales/route-tracking' || pathname === '/sales/audit-log';
   if (navTo === '/sales/log-sale') return pathname.startsWith('/sales/log-sale');
   if (navTo === '/sales/schedule') return pathname.startsWith('/sales/schedule') || pathname.startsWith('/sales/visit-log') || fullPath.includes('from=schedule');
+  if (navTo === '/sales/field-reports') return pathname === '/sales/field-reports';
   if (navTo === '/sales/customers') {
     return pathname === '/sales/customers'
       || pathname === '/sales/customers/new'

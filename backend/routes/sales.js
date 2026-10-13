@@ -1,5 +1,5 @@
 import express from 'express';
-import { requireRole } from '../middleware/auth.js';
+import { requireRole, isUnscoped } from '../middleware/auth.js';
 import {
   purchaseRequestListFilter,
   purchaseRequestAccessSql,
@@ -11,6 +11,14 @@ import {
   CREDIT_INVESTIGATION_SELECT,
 } from '../lib/creditInvestigationQueries.js';
 import { notifyCreditInvestigationSubmitted } from '../lib/creditInvestigationNotifications.js';
+import { insertStockMovement, upsertBranchInventoryStock } from '../lib/branchInventoryStock.js';
+import { manilaDateString } from '../lib/sawCollection.js';
+import {
+  notifyInvoicePendingReview,
+  notifyOverdueAccounts,
+  notifyScheduleAssigned,
+  publishStockAlerts,
+} from '../lib/operationalNotifications.js';
 
 const router = express.Router();
 
@@ -40,7 +48,7 @@ async function getInvoice(invoiceIdentifier, user) {
   if (user.roleSlug === 'sales_staff') {
     conditions.push('si.sales_agent_id = $2');
     params.push(user.id);
-  } else if (user.branchId !== null) {
+  } else if (!isUnscoped(user)) {
     conditions.push('si.branch_id = $2');
     params.push(user.branchId);
   }
@@ -774,6 +782,7 @@ router.post('/invoices', async (req, res) => {
     }
 
     const lineItems = [];
+    const stockAlerts = [];
     for (const item of normalizedItems) {
       const productResult = await client.query(
         `SELECT id, unit_price
@@ -800,23 +809,24 @@ router.post('/invoices', async (req, res) => {
         });
       }
 
-      const stockResult = await client.query(
-        `UPDATE branch_inventory
-         SET available_stock = available_stock - $1,
-             quantity = CASE WHEN quantity IS NULL THEN NULL ELSE quantity - $1 END
-         WHERE product_id = $2
-           AND branch_id = $3
-           AND available_stock >= $1
-         RETURNING available_stock`,
-        [item.quantity, item.productId, user.branchId]
-      );
-      if (stockResult.rows.length === 0) {
-        await client.query('ROLLBACK');
-        return res.status(400).json({
-          success: false,
-          message: `Not enough stock for product ${item.productId} at your branch.`,
+      let snapshot;
+      try {
+        snapshot = await upsertBranchInventoryStock(client, {
+          branchId: user.branchId,
+          productId: item.productId,
+          delta: -item.quantity,
         });
+      } catch (stockError) {
+        await client.query('ROLLBACK');
+        if (stockError.message === 'INSUFFICIENT_STOCK') {
+          return res.status(400).json({
+            success: false,
+            message: `Not enough stock for product ${item.productId} at your branch.`,
+          });
+        }
+        throw stockError;
       }
+      stockAlerts.push(snapshot);
 
       lineItems.push({
         productId: item.productId,
@@ -850,13 +860,23 @@ router.post('/invoices', async (req, res) => {
 
     const invoiceId = invoiceInsert.rows[0].sales_invoices_id;
 
-    for (const item of lineItems) {
+    for (let index = 0; index < lineItems.length; index += 1) {
+      const item = lineItems[index];
       await client.query(
         `INSERT INTO sales_invoice_items
            (invoices_id, product_id, quantity, unit_price, line_total)
          VALUES ($1, $2, $3, $4, $5)`,
         [invoiceId, item.productId, item.quantity, item.unitPrice, item.lineTotal]
       );
+      await insertStockMovement(client, {
+        performedBy: user.id,
+        productId: item.productId,
+        branchId: user.branchId,
+        quantity: -item.quantity,
+        type: 'Sale Deduction',
+        movementRef: `SALE-${invoiceNumber}-${item.productId}-${index + 1}`,
+        movementDate: invoicesDate || manilaDateString(),
+      });
     }
 
     if (purchaseRequestId) {
@@ -883,6 +903,14 @@ router.post('/invoices', async (req, res) => {
     }
 
     await client.query('COMMIT');
+    await publishStockAlerts(pool, stockAlerts);
+    await notifyOverdueAccounts(pool);
+    await notifyInvoicePendingReview(pool, {
+      branchId: user.branchId,
+      invoiceNumber,
+      customerId,
+      agentId: user.id,
+    });
 
     try {
       const invoice = await getInvoice(invoiceNumber, { ...user, pool });
@@ -1067,6 +1095,20 @@ router.post('/visits', async (req, res) => {
 
     if (status === 'Completed' && visitType === 'Sales' && req.currentUser.roleSlug === 'sales_staff') {
       await assignSalesAgentToCustomer(pool, customerId, req.currentUser.id);
+    }
+
+    if (status === 'Pending') {
+      const nameRow = await pool.query(
+        `SELECT COALESCE(NULLIF(TRIM(CONCAT_WS(' ', first_name, last_name)), ''), 'Customer') AS customer_name
+         FROM customers WHERE customer_id = $1`,
+        [customerId]
+      );
+      await notifyScheduleAssigned(pool, {
+        userId: req.currentUser.id,
+        scheduledDate,
+        visitType,
+        customerNames: [nameRow.rows[0]?.customer_name || 'Customer'],
+      });
     }
 
     const visit = await getVisit.call({ pool }, result.rows[0].visit_id, req.currentUser.id);
@@ -1392,6 +1434,92 @@ router.patch('/purchase-requests/:id', async (req, res) => {
   } catch (err) {
     console.error('[Sales] PATCH /purchase-requests/:id error:', err.message);
     return res.status(500).json({ success: false, message: 'Failed to update purchase request.' });
+  }
+});
+
+router.get('/field-reports', async (req, res) => {
+  const pool = req.app.locals.pool;
+  const userId = req.currentUser.id;
+
+  try {
+    const result = await pool.query(
+      `SELECT
+         far.report_id,
+         far.visit_id,
+         far.activity_type,
+         far.remarks,
+         far.sync_status,
+         far.photo,
+         far.created_at,
+         fv.scheduled_date,
+         fv.visit_type,
+         fv.status AS visit_status,
+         COALESCE(NULLIF(CONCAT_WS(' ', c.first_name, c.last_name), ''), 'Customer') AS customer_name
+       FROM field_activity_reports far
+       JOIN field_visits fv ON fv.visit_id = far.visit_id
+       JOIN customers c ON c.customer_id = fv.customer_id
+       WHERE far.user_id = $1
+       ORDER BY far.created_at DESC
+       LIMIT 100`,
+      [userId]
+    );
+
+    return res.status(200).json({ success: true, data: result.rows, count: result.rows.length });
+  } catch (error) {
+    console.error('[Sales] GET /field-reports error:', error);
+    return res.status(500).json({ success: false, message: 'Failed to fetch field activity reports.' });
+  }
+});
+
+router.post('/field-reports', async (req, res) => {
+  const pool = req.app.locals.pool;
+  const userId = req.currentUser.id;
+  const { visit_id, activity_type, remarks, photo } = req.body;
+  const photoValue = typeof photo === 'string' ? photo.trim() : '';
+
+  if (!visit_id || !activity_type || !String(remarks || '').trim()) {
+    return res.status(400).json({
+      success: false,
+      message: 'visit_id, activity_type, and remarks are required.',
+    });
+  }
+  if (!photoValue || !photoValue.startsWith('data:image/')) {
+    return res.status(400).json({
+      success: false,
+      message: 'photo must be a valid image upload.',
+    });
+  }
+  if (photoValue.length > 900_000) {
+    return res.status(400).json({
+      success: false,
+      message: 'photo is too large. Use a smaller image.',
+    });
+  }
+
+  try {
+    const visitCheck = await pool.query(
+      `SELECT visit_id FROM field_visits WHERE visit_id = $1 AND user_id = $2`,
+      [Number(visit_id), userId]
+    );
+    if (!visitCheck.rows.length) {
+      return res.status(404).json({ success: false, message: 'Visit not found for this sales agent.' });
+    }
+
+    const result = await pool.query(
+      `INSERT INTO field_activity_reports (visit_id, user_id, activity_type, remarks, photo, sync_status)
+       VALUES ($1, $2, $3, $4, $5, 'Pending')
+       RETURNING report_id, visit_id, activity_type, remarks, photo, sync_status, created_at`,
+      [Number(visit_id), userId, String(activity_type).trim(), String(remarks).trim(), photoValue]
+    );
+
+    return res.status(201).json({
+      success: true,
+      message: 'Field activity report submitted.',
+      data: result.rows[0],
+    });
+  } catch (error) {
+    console.error('[Sales] POST /field-reports error:', error);
+    return res.status(500).json({ success: false, message: 'Failed to submit field activity report.' });
   }
 });
 

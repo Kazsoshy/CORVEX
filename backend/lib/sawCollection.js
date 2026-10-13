@@ -121,18 +121,26 @@ export function runSawPipeline(eligibleRows, { asOfDate } = {}) {
   }));
 }
 
+function isSawEligibleRow(row, { requireCollectorId } = {}) {
+  if (String(row.status) !== 'Active') return false;
+  if (Number(row.outstanding_balance) <= 0) return false;
+  if (requireCollectorId != null && Number(row.collector_id) !== Number(requireCollectorId)) {
+    return false;
+  }
+  const inv = String(row.invoice_status || row.invoices_status || '');
+  if (!['Unpaid', 'Partial'].includes(inv)) return false;
+  if (!row.due_date) return false;
+  if (row.cust_lat == null || row.cust_lon == null) return false;
+  if (row.branch_lat == null || row.branch_lon == null) return false;
+  return true;
+}
+
 /** Filter raw rows like the notebook (before feature engineering). */
 export function filterEligibleRows(rows, collectorId) {
-  const cid = Number(collectorId);
-  return rows.filter((row) => {
-    if (String(row.status) !== 'Active') return false;
-    if (Number(row.outstanding_balance) <= 0) return false;
-    if (Number(row.collector_id) !== cid) return false;
-    const inv = String(row.invoice_status || row.invoices_status || '');
-    if (!['Unpaid', 'Partial'].includes(inv)) return false;
-    if (!row.due_date) return false;
-    if (row.cust_lat == null || row.cust_lon == null) return false;
-    if (row.branch_lat == null || row.branch_lon == null) return false;
-    return true;
-  });
+  return rows.filter((row) => isSawEligibleRow(row, { requireCollectorId: collectorId }));
+}
+
+/** Org-wide SAW eligibility (no collector portfolio constraint). */
+export function filterOrgEligibleRows(rows) {
+  return rows.filter((row) => isSawEligibleRow(row));
 }

@@ -30,6 +30,20 @@ export async function getBranchCustomers() {
   }
 }
 
+export async function getBranchMap(params = {}) {
+  try {
+    const response = await apiClient.get('/branch-manager/map', { params });
+    return response.data;
+  } catch (error) {
+    console.error('Failed to fetch branch map:', error);
+    return {
+      success: false,
+      message: error.response?.data?.message || 'Failed to load map data.',
+      data: null,
+    };
+  }
+}
+
 export async function getBranchCustomerById(id) {
   try {
     const response = await apiClient.get(`/branch-manager/customers/${id}`);
@@ -95,6 +109,34 @@ export async function assignCollectorCollectionRoute(collectorId, body) {
     return {
       success: false,
       message: error.response?.data?.message || 'Failed to assign collection visits.',
+    };
+  }
+}
+
+export async function getFieldActivityReports() {
+  try {
+    const response = await apiClient.get('/branch-manager/field-activity-reports');
+    return response.data;
+  } catch (error) {
+    console.error('Failed to fetch field activity reports:', error);
+    return {
+      success: false,
+      message: error.response?.data?.message || 'Failed to load field activity reports.',
+      data: [],
+    };
+  }
+}
+
+export async function getFieldActivityReport(reportId) {
+  try {
+    const response = await apiClient.get(`/branch-manager/field-activity-reports/${reportId}`);
+    return response.data;
+  } catch (error) {
+    console.error('Failed to fetch field activity report:', error);
+    return {
+      success: false,
+      message: error.response?.data?.message || 'Failed to load field activity report.',
+      data: null,
     };
   }
 }

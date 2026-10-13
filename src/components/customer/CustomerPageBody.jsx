@@ -205,7 +205,9 @@ function AccountDetailsPage({
   const [account, setAccount] = useState(null);
   const [loading, setLoading] = useState(true);
   const [contact, setContact] = useState({ contactNumber: '', email: '' });
+  const [currentPassword, setCurrentPassword] = useState('');
   const [password, setPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [saving, setSaving] = useState(false);
   useEffect(() => {
@@ -278,27 +280,52 @@ function AccountDetailsPage({
       </section>
 
       {showPassword ? <section className="panel form-panel content-panel">
-        <label>New password<input type="password" value={password} onChange={e => setPassword(e.target.value)} placeholder="Min. 8 characters" /></label>
+        <div className="form-grid">
+          <label>Current password<input type="password" value={currentPassword} onChange={e => setCurrentPassword(e.target.value)} autoComplete="current-password" /></label>
+          <label>New password<input type="password" value={password} onChange={e => setPassword(e.target.value)} placeholder="Min. 8 characters" autoComplete="new-password" /></label>
+          <label>Confirm new password<input type="password" value={confirmPassword} onChange={e => setConfirmPassword(e.target.value)} placeholder="Re-enter new password" autoComplete="new-password" /></label>
+        </div>
       </section> : null}
       <div className="flex justify-end gap-2 mt-4">
+        <button className="button ghost" type="button" onClick={() => requestLogout()}>Logout</button>
         <button className="button secondary" type="button" disabled={saving} onClick={async () => {
           if (!showPassword) {
             setShowPassword(true);
+            return;
+          }
+          if (!currentPassword) {
+            showToast('Enter your current password.', 'error');
             return;
           }
           if (password.trim().length < 8) {
             showToast('Password must be at least 8 characters.', 'error');
             return;
           }
+          if (password.trim() !== confirmPassword.trim()) {
+            showToast('New password and confirmation do not match.', 'error');
+            return;
+          }
           setSaving(true);
-          const result = await updateMyProfile({ password: password.trim() });
+          const result = await updateMyProfile({
+            current_password: currentPassword,
+            password: password.trim(),
+            confirm_password: confirmPassword.trim(),
+          });
           setSaving(false);
           if (result.success) {
+            setCurrentPassword('');
             setPassword('');
+            setConfirmPassword('');
             setShowPassword(false);
-            showToast('Password updated.', 'success');
+            showToast(result.message || 'Password updated.', 'success');
           } else showToast(result.message || 'Failed to change password.', 'error');
         }}>{showPassword ? 'Save Password' : 'Change Password'}</button>
+        {showPassword ? <button className="button ghost" type="button" disabled={saving} onClick={() => {
+          setShowPassword(false);
+          setCurrentPassword('');
+          setPassword('');
+          setConfirmPassword('');
+        }}>Cancel</button> : null}
         <button className="button" type="button" disabled={saving} onClick={async () => {
           setSaving(true);
           const result = await updateCustomerPortalContact({
@@ -608,21 +635,31 @@ function ProfilePage({
 }) {
   const [account, setAccount] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [editingContact, setEditingContact] = useState(false);
+  const [contact, setContact] = useState({ contactNumber: '', email: '' });
   const [otpEnabled, setOtpEnabled] = useState(() => localStorage.getItem('corvex_customer_otp') !== '0');
   const [showPassword, setShowPassword] = useState(false);
+  const [currentPassword, setCurrentPassword] = useState('');
   const [password, setPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
   const [saving, setSaving] = useState(false);
   useEffect(() => {
     async function load() {
       const res = await fetchCustomerPortalMe();
-      if (res.success) setAccount(res.data);
+      if (res.success && res.data) {
+        setAccount(res.data);
+        setContact({
+          contactNumber: res.data.contact_phone || '',
+          email: res.data.portal_email || '',
+        });
+      }
       setLoading(false);
     }
     load();
   }, []);
   if (loading) return <LoadingState message="Loading profile…" />;
   if (!account) return <EmptyState title="Profile unavailable" description="Could not load your customer record." />;
-  const customerName = `${account.first_name || ''} ${account.last_name || ''}`.trim() || '—';
+  const customerName = `${account.first_name || ''} ${account.middle_name || ''} ${account.last_name || ''}`.replace(/\s+/g, ' ').trim() || '—';
   return <div className="page customer-page">
       <section className="panel content-panel relative overflow-hidden">
         <div className="list-section-header"><h3>Personal Information</h3></div>
@@ -647,6 +684,10 @@ function ProfilePage({
                 <td>Branch</td>
                 <td>{account.branch_name || '—'}</td>
               </tr>
+              <tr>
+                <td>Status</td>
+                <td><StatusBadge status={account.status || '—'} /></td>
+              </tr>
             </tbody>
           </table>
         </div>
@@ -654,30 +695,38 @@ function ProfilePage({
 
       <section className="panel content-panel relative overflow-hidden">
         <div className="list-section-header"><h3>Contact Information</h3></div>
-        <div className="corvex-table-wrapper">
-          <table className="corvex-table">
-            <thead>
-              <tr>
-                <th>Field</th>
-                <th>Details</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr>
-                <td>Phone</td>
-                <td>{account.contact_phone || '—'}</td>
-              </tr>
-              <tr>
-                <td>Email</td>
-                <td>{account.portal_email || '—'}</td>
-              </tr>
-              <tr>
-                <td>Address</td>
-                <td>{account.address || '—'}</td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
+        {editingContact ? (
+          <div className="form-grid">
+            <label>Phone<input value={contact.contactNumber} onChange={e => setContact(c => ({ ...c, contactNumber: e.target.value }))} /></label>
+            <label>Email<input type="email" value={contact.email} onChange={e => setContact(c => ({ ...c, email: e.target.value }))} /></label>
+            <label>Address<input value={account.address || ''} readOnly /></label>
+          </div>
+        ) : (
+          <div className="corvex-table-wrapper">
+            <table className="corvex-table">
+              <thead>
+                <tr>
+                  <th>Field</th>
+                  <th>Details</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>Phone</td>
+                  <td>{account.contact_phone || '—'}</td>
+                </tr>
+                <tr>
+                  <td>Email</td>
+                  <td>{account.portal_email || '—'}</td>
+                </tr>
+                <tr>
+                  <td>Address</td>
+                  <td>{account.address || '—'}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        )}
       </section>
 
       <section className="panel form-panel content-panel">
@@ -692,7 +741,11 @@ function ProfilePage({
       </section>
 
       {showPassword ? <section className="panel form-panel content-panel">
-        <label>New password<input type="password" value={password} onChange={e => setPassword(e.target.value)} placeholder="Min. 8 characters" /></label>
+        <div className="form-grid">
+          <label>Current password<input type="password" value={currentPassword} onChange={e => setCurrentPassword(e.target.value)} autoComplete="current-password" /></label>
+          <label>New password<input type="password" value={password} onChange={e => setPassword(e.target.value)} placeholder="Min. 8 characters" autoComplete="new-password" /></label>
+          <label>Confirm new password<input type="password" value={confirmPassword} onChange={e => setConfirmPassword(e.target.value)} placeholder="Re-enter new password" autoComplete="new-password" /></label>
+        </div>
       </section> : null}
       <div className="flex justify-end gap-2 mt-4">
         <button className="button ghost" type="button" onClick={() => requestLogout()}>Logout</button>
@@ -701,19 +754,61 @@ function ProfilePage({
             setShowPassword(true);
             return;
           }
+          if (!currentPassword) {
+            showToast('Enter your current password.', 'error');
+            return;
+          }
           if (password.trim().length < 8) {
             showToast('Password must be at least 8 characters.', 'error');
             return;
           }
+          if (password.trim() !== confirmPassword.trim()) {
+            showToast('New password and confirmation do not match.', 'error');
+            return;
+          }
           setSaving(true);
-          const result = await updateMyProfile({ password: password.trim() });
+          const result = await updateMyProfile({
+            current_password: currentPassword,
+            password: password.trim(),
+            confirm_password: confirmPassword.trim(),
+          });
           setSaving(false);
           if (result.success) {
+            setCurrentPassword('');
             setPassword('');
+            setConfirmPassword('');
             setShowPassword(false);
-            showToast('Password updated.', 'success');
+            showToast(result.message || 'Password updated.', 'success');
           } else showToast(result.message || 'Failed to change password.', 'error');
         }}>{showPassword ? 'Save Password' : 'Change Password'}</button>
+        {showPassword ? <button className="button ghost" type="button" disabled={saving} onClick={() => {
+          setShowPassword(false);
+          setCurrentPassword('');
+          setPassword('');
+          setConfirmPassword('');
+        }}>Cancel</button> : null}
+        {editingContact ? <>
+            <button className="button ghost" type="button" disabled={saving} onClick={() => {
+              setEditingContact(false);
+              setContact({
+                contactNumber: account.contact_phone || '',
+                email: account.portal_email || '',
+              });
+            }}>Cancel</button>
+            <button className="button" type="button" disabled={saving} onClick={async () => {
+              setSaving(true);
+              const result = await updateCustomerPortalContact({
+                contact_phone: contact.contactNumber,
+                portal_email: contact.email,
+              });
+              setSaving(false);
+              if (result.success) {
+                setAccount(result.data);
+                setEditingContact(false);
+                showToast('Profile updated.', 'success');
+              } else showToast(result.message || 'Failed to update profile.', 'error');
+            }}>Save Profile</button>
+          </> : <button className="button" type="button" onClick={() => setEditingContact(true)}>Update Profile</button>}
       </div>
     </div>;
 }

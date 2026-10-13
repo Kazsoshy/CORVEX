@@ -5,6 +5,8 @@
 export async function ensureSchema(client) {
   await client.query(`
     ALTER TABLE users ADD COLUMN IF NOT EXISTS middle_name VARCHAR(50) DEFAULT NULL;
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS phone VARCHAR(30);
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS full_name VARCHAR(120);
 
     ALTER TABLE customers ADD COLUMN IF NOT EXISTS middle_name VARCHAR(50) DEFAULT NULL;
     ALTER TABLE customers ADD COLUMN IF NOT EXISTS contact_person_mname VARCHAR(100) DEFAULT NULL;
@@ -34,6 +36,74 @@ export async function ensureSchema(client) {
     ALTER TABLE customers ADD COLUMN IF NOT EXISTS assigned_sales_agent_id INTEGER;
 
     ALTER TABLE purchase_requests ADD COLUMN IF NOT EXISTS sales_invoices_id INTEGER;
+
+    ALTER TABLE sales_invoices ADD COLUMN IF NOT EXISTS reviewed_by INTEGER;
+    ALTER TABLE sales_invoices ADD COLUMN IF NOT EXISTS reviewed_at TIMESTAMP;
+    ALTER TABLE sales_invoices ADD COLUMN IF NOT EXISTS review_note TEXT;
+  `);
+
+  await client.query(`
+    DO $do$
+    DECLARE
+      cname text;
+    BEGIN
+      SELECT conname INTO cname
+      FROM pg_constraint
+      WHERE conrelid = 'stock_movements'::regclass
+        AND contype = 'c'
+        AND pg_get_constraintdef(oid) ILIKE '%Sale Deduction%'
+        AND pg_get_constraintdef(oid) NOT ILIKE '%Sale Reversal%';
+      IF cname IS NOT NULL THEN
+        EXECUTE format('ALTER TABLE stock_movements DROP CONSTRAINT %I', cname);
+        ALTER TABLE stock_movements ADD CONSTRAINT stock_movements_type_check
+          CHECK (type IN (
+            'Sale Deduction', 'Restock', 'Transfer In', 'Transfer Out',
+            'Stock Count Adjustment', 'Damage Write-Off', 'Sale Reversal'
+          ));
+      END IF;
+    END
+    $do$;
+  `);
+
+  await client.query(`
+    CREATE TABLE IF NOT EXISTS notification_dedup (
+      dedup_key  VARCHAR(160) PRIMARY KEY,
+      created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+  `);
+
+  await client.query(`
+    CREATE TABLE IF NOT EXISTS central_inventory (
+      product_id      INTEGER PRIMARY KEY REFERENCES products(id) ON DELETE CASCADE,
+      total_quantity  INTEGER NOT NULL DEFAULT 0,
+      branch_count    INTEGER NOT NULL DEFAULT 0,
+      updated_at      TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+  `);
+
+  // Prevent duplicate inventory rows per branch+product (oversell / double-count risk).
+  await client.query(`
+    CREATE UNIQUE INDEX IF NOT EXISTS uq_branch_inventory_branch_product
+      ON branch_inventory (branch_id, product_id);
+    CREATE INDEX IF NOT EXISTS idx_branch_inventory_stock_status
+      ON branch_inventory (stock_status);
+    CREATE INDEX IF NOT EXISTS idx_branch_inventory_available
+      ON branch_inventory (available_stock);
+  `);
+
+  await client.query(`
+    INSERT INTO central_inventory (product_id, total_quantity, branch_count, updated_at)
+    SELECT p.id,
+           COALESCE(SUM(bi.available_stock), 0),
+           COUNT(bi.inventory_id)::int,
+           CURRENT_TIMESTAMP
+    FROM products p
+    LEFT JOIN branch_inventory bi ON bi.product_id = p.id
+    GROUP BY p.id
+    ON CONFLICT (product_id) DO UPDATE
+      SET total_quantity = EXCLUDED.total_quantity,
+          branch_count = EXCLUDED.branch_count,
+          updated_at = CURRENT_TIMESTAMP
   `);
 
   await client.query(`

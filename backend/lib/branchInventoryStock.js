@@ -17,16 +17,38 @@ export async function getBranchInventoryRow(client, branchId, productId) {
   return result.rows[0] || null;
 }
 
+export async function alignCentralInventory(client, productId) {
+  await client.query(
+    `INSERT INTO central_inventory (product_id, total_quantity, branch_count, updated_at)
+     SELECT $1, COALESCE(SUM(available_stock), 0), COUNT(*)::int, CURRENT_TIMESTAMP
+     FROM branch_inventory
+     WHERE product_id = $1
+     ON CONFLICT (product_id) DO UPDATE
+       SET total_quantity = EXCLUDED.total_quantity,
+           branch_count = EXCLUDED.branch_count,
+           updated_at = CURRENT_TIMESTAMP`,
+    [productId]
+  );
+}
+
 export async function upsertBranchInventoryStock(client, {
   branchId,
   productId,
   delta,
   reorderLevel,
 }) {
+  await client.query('SELECT pg_advisory_xact_lock(748392100, $1)', [Number(productId)]);
   const existing = await getBranchInventoryRow(client, branchId, productId);
   const reorder = reorderLevel != null
     ? Number(reorderLevel)
     : Number(existing?.reorder_level) || 5;
+
+  const snapshot = {
+    branchId,
+    productId,
+    reorderLevel: reorder,
+    previousAvailable: existing ? Number(existing.available_stock) : Number.POSITIVE_INFINITY,
+  };
 
   if (!existing) {
     if (delta < 0) {
@@ -39,7 +61,8 @@ export async function upsertBranchInventoryStock(client, {
        VALUES ($1, $2, $3, $3, $4, $5, $5, CURRENT_TIMESTAMP)`,
       [branchId, productId, available, reorder, status]
     );
-    return available;
+    await alignCentralInventory(client, productId);
+    return { ...snapshot, available };
   }
 
   const nextStock = Number(existing.available_stock) + Number(delta);
@@ -60,7 +83,11 @@ export async function upsertBranchInventoryStock(client, {
      RETURNING available_stock`,
     [nextStock, reorderLevel != null ? reorder : null, status, branchId, productId]
   );
-  return updated.rows[0]?.available_stock ?? nextStock;
+  await alignCentralInventory(client, productId);
+  return {
+    ...snapshot,
+    available: Number(updated.rows[0]?.available_stock ?? nextStock),
+  };
 }
 
 export async function insertStockMovement(client, {

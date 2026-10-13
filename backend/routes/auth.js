@@ -13,17 +13,32 @@ function clientAddress(req) {
   return req.ip || req.socket?.remoteAddress || 'unknown';
 }
 
-function tooManyAttempts(address) {
+function attemptKey(address, email) {
+  return `${address}|${String(email || '').toLowerCase().trim()}`;
+}
+
+function tooManyAttempts(key) {
   const now = Date.now();
-  const recent = (loginAttempts.get(address) || []).filter((stamp) => now - stamp < LOGIN_WINDOW_MS);
-  loginAttempts.set(address, recent);
+  const recent = (loginAttempts.get(key) || []).filter((stamp) => now - stamp < LOGIN_WINDOW_MS);
+  loginAttempts.set(key, recent);
   return recent.length >= LOGIN_MAX_ATTEMPTS;
 }
 
-function recordAttempt(address) {
-  const recent = loginAttempts.get(address) || [];
-  recent.push(Date.now());
-  loginAttempts.set(address, recent);
+function recordAttempt(key) {
+  const now = Date.now();
+  const recent = (loginAttempts.get(key) || []).filter((stamp) => now - stamp < LOGIN_WINDOW_MS);
+  recent.push(now);
+  loginAttempts.set(key, recent);
+  return recent.length;
+}
+
+function attemptNotice(attemptCount) {
+  const remaining = LOGIN_MAX_ATTEMPTS - attemptCount;
+  if (remaining <= 0) {
+    return 'Too many login attempts for this account. Try again in 15 minutes.';
+  }
+  const attemptsLabel = remaining === 1 ? '1 attempt' : `${remaining} attempts`;
+  return `${attemptsLabel} remaining before this account is locked for 15 minutes.`;
 }
 
 // POST /api/auth/login
@@ -37,11 +52,12 @@ router.post('/login', async (req, res) => {
     });
   }
 
-  const address = clientAddress(req);
-  if (tooManyAttempts(address)) {
+  const attempt = attemptKey(clientAddress(req), email);
+  if (tooManyAttempts(attempt)) {
     return res.status(429).json({
       success: false,
-      message: 'Too many login attempts. Try again later.',
+      message: 'Too many login attempts for this account. Try again in 15 minutes.',
+      attemptsRemaining: 0,
     });
   }
 
@@ -75,36 +91,51 @@ router.post('/login', async (req, res) => {
     );
 
     if (result.rows.length === 0) {
-      recordAttempt(address);
-      return res.status(401).json({ success: false, message: 'Invalid email or password.' });
+      const attemptCount = recordAttempt(attempt);
+      return res.status(401).json({
+        success: false,
+        message: `Invalid email or password. ${attemptNotice(attemptCount)}`,
+        attemptsRemaining: Math.max(0, LOGIN_MAX_ATTEMPTS - attemptCount),
+      });
     }
 
     const user = result.rows[0];
 
     if (user.status === 'Invited') {
-      recordAttempt(address);
+      const attemptCount = recordAttempt(attempt);
       return res.status(403).json({
         success: false,
-        message: 'Your portal account is not activated yet. Use the activation link sent to your email.',
+        message: `Your portal account is not activated yet. Use the activation link sent to your email. ${attemptNotice(attemptCount)}`,
+        attemptsRemaining: Math.max(0, LOGIN_MAX_ATTEMPTS - attemptCount),
       });
     }
 
     if (user.status !== 'Active') {
-      recordAttempt(address);
-      return res.status(401).json({ success: false, message: 'Invalid email or password.' });
+      const attemptCount = recordAttempt(attempt);
+      return res.status(401).json({
+        success: false,
+        message: `Invalid email or password. ${attemptNotice(attemptCount)}`,
+        attemptsRemaining: Math.max(0, LOGIN_MAX_ATTEMPTS - attemptCount),
+      });
     }
 
     // Verify password
     const isValid = await bcrypt.compare(password, user.password_hash);
     if (!isValid) {
-      recordAttempt(address);
+      const attemptCount = recordAttempt(attempt);
       await pool.query(
         `INSERT INTO audit_logs (user_id, user_name, action, ip_address, status_details)
          VALUES ($1, $2, 'Login Failed', $3, 'Invalid password')`,
         [user.id, user.full_name, req.ip]
       );
-      return res.status(401).json({ success: false, message: 'Invalid email or password.' });
+      return res.status(401).json({
+        success: false,
+        message: `Invalid email or password. ${attemptNotice(attemptCount)}`,
+        attemptsRemaining: Math.max(0, LOGIN_MAX_ATTEMPTS - attemptCount),
+      });
     }
+
+    loginAttempts.delete(attempt);
 
     // Log successful login
     await pool.query(
@@ -140,6 +171,10 @@ router.post('/login', async (req, res) => {
     console.error('[Auth] Login error:', err.message);
     return res.status(500).json({ success: false, message: 'Internal server error.' });
   }
+});
+
+router.post('/touch', requireAuth, (req, res) => {
+  res.json({ success: true });
 });
 
 router.get('/portal/invitation/:token', async (req, res) => {
@@ -201,50 +236,66 @@ router.post('/portal/activate', async (req, res) => {
   }
 });
 
+const PROFILE_SELECT = `
+  SELECT
+    u.id AS user_id,
+    u.branch_id,
+    u.role_id,
+    u.first_name,
+    u.middle_name,
+    u.last_name,
+    u.full_name,
+    u.email,
+    u.phone,
+    u.status,
+    u.created_at,
+    u.updated_at,
+    r.role_name,
+    r.slug AS role_slug,
+    b.name AS branch_name
+  FROM users u
+  JOIN roles r ON r.role_id = u.role_id
+  LEFT JOIN branches b ON b.id = u.branch_id
+  WHERE u.id = $1
+`;
+
+function formatProfileRow(row) {
+  const fullName = (
+    row.full_name
+    || [row.first_name, row.middle_name, row.last_name].filter(Boolean).join(' ')
+  ).replace(/\s+/g, ' ').trim();
+  return {
+    user_id: row.user_id,
+    first_name: row.first_name,
+    middle_name: row.middle_name || null,
+    last_name: row.last_name,
+    full_name: fullName || null,
+    email: row.email,
+    phone: row.phone || null,
+    status: row.status,
+    created_at: row.created_at || null,
+    updated_at: row.updated_at || null,
+    role: { id: row.role_id, name: row.role_name, slug: row.role_slug },
+    branch: row.branch_id ? { id: row.branch_id, name: row.branch_name } : null,
+  };
+}
+
+function isValidEmail(value) {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(value || '').trim());
+}
+
 // GET /api/auth/me — current user profile (including phone)
 router.get('/me', requireAuth, async (req, res) => {
   try {
     const pool = req.app.locals.pool;
     const userId = req.currentUser.id;
-    const result = await pool.query(
-      `SELECT
-         u.id AS user_id,
-         u.branch_id,
-         u.role_id,
-         u.first_name,
-         u.middle_name,
-         u.last_name,
-         u.email,
-         u.phone,
-         u.status,
-         u.created_at,
-         u.updated_at,
-         r.role_name,
-         r.slug AS role_slug,
-         b.name AS branch_name
-       FROM users u
-       JOIN roles r ON r.role_id = u.role_id
-       LEFT JOIN branches b ON b.id = u.branch_id
-       WHERE u.id = $1`,
-      [userId]
-    );
+    const result = await pool.query(PROFILE_SELECT, [userId]);
     if (!result.rows.length) {
       return res.status(404).json({ success: false, message: 'User not found.' });
     }
-    const row = result.rows[0];
     return res.status(200).json({
       success: true,
-      data: {
-        user_id: row.user_id,
-        first_name: row.first_name,
-        middle_name: row.middle_name || null,
-        last_name: row.last_name,
-        email: row.email,
-        phone: row.phone || null,
-        status: row.status,
-        role: { id: row.role_id, name: row.role_name, slug: row.role_slug },
-        branch: row.branch_id ? { id: row.branch_id, name: row.branch_name } : null,
-      },
+      data: formatProfileRow(result.rows[0]),
     });
   } catch (err) {
     console.error('[Auth] GET /me error:', err.message);
@@ -252,33 +303,104 @@ router.get('/me', requireAuth, async (req, res) => {
   }
 });
 
-// PUT /api/auth/me — update own profile (name, email, phone, password)
+// PUT /api/auth/me — update own profile (name, email, phone) and/or password
 router.put('/me', requireAuth, async (req, res) => {
   try {
     const pool = req.app.locals.pool;
     const userId = req.currentUser.id;
-    const { first_name, middle_name, last_name, email, phone, password } = req.body;
+    const {
+      first_name,
+      middle_name,
+      last_name,
+      email,
+      phone,
+      password,
+      new_password,
+      confirm_password,
+      current_password,
+    } = req.body;
 
+    const nextPassword = password ?? new_password;
     const updates = [];
     const params = [];
     let pIdx = 1;
+    let changingPassword = false;
+    let changingIdentity = false;
 
-    if (first_name) { updates.push(`first_name = $${pIdx++}`); params.push(String(first_name).trim()); }
+    const currentResult = await pool.query(
+      `SELECT id, first_name, middle_name, last_name, email, phone, password_hash
+       FROM users WHERE id = $1`,
+      [userId]
+    );
+    if (!currentResult.rows.length) {
+      return res.status(404).json({ success: false, message: 'User not found.' });
+    }
+    const current = currentResult.rows[0];
+
+    if (first_name !== undefined) {
+      const value = String(first_name || '').trim();
+      if (!value) {
+        return res.status(400).json({ success: false, message: 'First name is required.' });
+      }
+      updates.push(`first_name = $${pIdx++}`);
+      params.push(value);
+      changingIdentity = true;
+    }
     if (middle_name !== undefined) {
       updates.push(`middle_name = $${pIdx++}`);
       params.push(middle_name ? String(middle_name).trim() : null);
+      changingIdentity = true;
     }
-    if (last_name) { updates.push(`last_name = $${pIdx++}`); params.push(String(last_name).trim()); }
-    if (email) { updates.push(`email = $${pIdx++}`); params.push(String(email).toLowerCase().trim()); }
+    if (last_name !== undefined) {
+      const value = String(last_name || '').trim();
+      if (!value) {
+        return res.status(400).json({ success: false, message: 'Last name is required.' });
+      }
+      updates.push(`last_name = $${pIdx++}`);
+      params.push(value);
+      changingIdentity = true;
+    }
+    if (email !== undefined) {
+      const value = String(email || '').toLowerCase().trim();
+      if (!value || !isValidEmail(value)) {
+        return res.status(400).json({ success: false, message: 'Enter a valid email address.' });
+      }
+      if (value !== String(current.email || '').toLowerCase()) {
+        const dup = await pool.query(
+          `SELECT id FROM users WHERE LOWER(email) = LOWER($1) AND id <> $2 LIMIT 1`,
+          [value, userId]
+        );
+        if (dup.rows.length) {
+          return res.status(409).json({ success: false, message: 'Email already in use.' });
+        }
+      }
+      updates.push(`email = $${pIdx++}`);
+      params.push(value);
+    }
     if (phone !== undefined) {
       updates.push(`phone = $${pIdx++}`);
       params.push(phone ? String(phone).trim() : null);
     }
-    if (password) {
-      if (String(password).length < 8) {
+
+    if (nextPassword !== undefined && nextPassword !== null && String(nextPassword).length > 0) {
+      changingPassword = true;
+      if (!current_password) {
+        return res.status(400).json({
+          success: false,
+          message: 'Current password is required to set a new password.',
+        });
+      }
+      const matches = await bcrypt.compare(String(current_password), current.password_hash);
+      if (!matches) {
+        return res.status(401).json({ success: false, message: 'Current password is incorrect.' });
+      }
+      if (String(nextPassword).length < 8) {
         return res.status(400).json({ success: false, message: 'Password must be at least 8 characters.' });
       }
-      const hash = await bcrypt.hash(password, 12);
+      if (confirm_password !== undefined && String(confirm_password) !== String(nextPassword)) {
+        return res.status(400).json({ success: false, message: 'New password and confirmation do not match.' });
+      }
+      const hash = await bcrypt.hash(String(nextPassword), 12);
       updates.push(`password_hash = $${pIdx++}`);
       params.push(hash);
     }
@@ -287,49 +409,37 @@ router.put('/me', requireAuth, async (req, res) => {
       return res.status(400).json({ success: false, message: 'No fields to update.' });
     }
 
+    if (changingIdentity) {
+      const nextFirst = first_name !== undefined ? String(first_name).trim() : current.first_name;
+      const nextMiddle = middle_name !== undefined
+        ? (middle_name ? String(middle_name).trim() : null)
+        : current.middle_name;
+      const nextLast = last_name !== undefined ? String(last_name).trim() : current.last_name;
+      const fullName = [nextFirst, nextMiddle, nextLast].filter(Boolean).join(' ').replace(/\s+/g, ' ').trim();
+      updates.push(`full_name = $${pIdx++}`);
+      params.push(fullName || null);
+    }
+
     params.push(userId);
     await pool.query(
       `UPDATE users SET ${updates.join(', ')}, updated_at = NOW() WHERE id = $${pIdx}`,
       params
     );
 
-    const result = await pool.query(
-      `SELECT
-         u.id AS user_id,
-         u.first_name,
-         u.middle_name,
-         u.last_name,
-         u.email,
-         u.phone,
-         u.status,
-         r.role_name,
-         r.slug AS role_slug,
-         b.name AS branch_name,
-         u.branch_id,
-         u.role_id
-       FROM users u
-       JOIN roles r ON r.role_id = u.role_id
-       LEFT JOIN branches b ON b.id = u.branch_id
-       WHERE u.id = $1`,
-      [userId]
-    );
-    const row = result.rows[0];
+    const result = await pool.query(PROFILE_SELECT, [userId]);
     return res.status(200).json({
       success: true,
-      message: 'Profile updated.',
-      data: {
-        user_id: row.user_id,
-        first_name: row.first_name,
-        middle_name: row.middle_name || null,
-        last_name: row.last_name,
-        email: row.email,
-        phone: row.phone || null,
-        status: row.status,
-        role: { id: row.role_id, name: row.role_name, slug: row.role_slug },
-        branch: row.branch_id ? { id: row.branch_id, name: row.branch_name } : null,
-      },
+      message: changingPassword && updates.length === 1
+        ? 'Password updated.'
+        : changingPassword
+          ? 'Profile and password updated.'
+          : 'Profile updated.',
+      data: formatProfileRow(result.rows[0]),
     });
   } catch (err) {
+    if (err.code === '23505') {
+      return res.status(409).json({ success: false, message: 'Email already in use.' });
+    }
     console.error('[Auth] PUT /me error:', err.message);
     return res.status(500).json({ success: false, message: 'Failed to update profile.' });
   }

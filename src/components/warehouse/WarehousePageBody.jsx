@@ -21,8 +21,8 @@ import {
   submitStockCount,
 } from '../../api/inventoryService';
 import { fetchNotifications } from '../../api/notificationService.js';
-import { fetchMyProfile, updateMyProfile } from '../../api/profileService.js';
-import { getCurrentUser, persistCurrentUserFromProfile, requestLogout } from '../../api/authService.js';
+import { getCurrentUser } from '../../api/authService.js';
+import { AccountProfilePanel } from '../shared/AccountProfilePanel';
 
 function transferWorkflowStepIndex(status) {
   if (status === 'Rejected') return -1;
@@ -45,6 +45,7 @@ import { NavIcon } from '../../navIcons';
 import { StatusBadge } from '../StatusBadge';
 import { CreditHistoryListPage, CreditHistoryDetailPage } from '../shared/CreditHistoryPages';
 import { formatCurrency, formatDisplayDate, formatDisplayDateTime } from '../../utils/formatters.js';
+import { CentralInventoryPanel } from '../inventory/CentralInventoryPanel';
 function StockStatusBadge({
   status
 }) {
@@ -64,6 +65,7 @@ function DashboardPage({
   const user = getCurrentUser();
   const [dashboard, setDashboard] = useState(null);
   const [unreadCount, setUnreadCount] = useState(0);
+  const [recentNotifications, setRecentNotifications] = useState([]);
   const [loading, setLoading] = useState(true);
   useEffect(() => {
     async function load() {
@@ -72,7 +74,9 @@ function DashboardPage({
       if (dashRes.success) setDashboard(dashRes.data);
       else if (showToast) showToast(dashRes.message || 'Failed to load dashboard.', 'error');
       if (notifRes.success) {
-        setUnreadCount((notifRes.data || []).filter(n => n.status !== 'Read').length);
+        const rows = notifRes.data || [];
+        setUnreadCount(rows.filter(n => n.status !== 'Read').length);
+        setRecentNotifications(rows.filter((n) => String(n.category || '').toLowerCase().includes('stock')).slice(0, 5));
       }
       setLoading(false);
     }
@@ -129,6 +133,27 @@ function DashboardPage({
           { label: 'Pending Transfers', value: String(summary.pendingTransfers ?? 0) },
           { label: "Today's Stock Movements", value: String(summary.movementsToday ?? 0) },
         ]} />
+
+        {recentNotifications.length ? (
+          <section className="panel content-panel relative overflow-hidden" style={{ marginTop: 14 }}>
+            <div className="list-section-header">
+              <h3 style={{ margin: 0 }}>Stock threshold alerts</h3>
+              <button className="button secondary" type="button" onClick={() => navigate('/warehouse/notifications')}>
+                View all
+              </button>
+            </div>
+            <ul className="notification-list" style={{ margin: 0 }}>
+              {recentNotifications.map((n) => (
+                <li key={n.notification_id} className={`notification-item${n.status === 'Read' ? '' : ' unread'}`}>
+                  <div>
+                    <strong>{n.title}</strong>
+                    <p className="muted">{n.message}</p>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          </section>
+        ) : null}
 
         <div className="dashboard-actions">
           <button className="button" type="button" onClick={() => navigate('/warehouse/transfers/new')}>
@@ -352,7 +377,6 @@ function InventoryPage({
   const [search, setSearch] = useState('');
   const [branch, setBranch] = useState('All');
   const [category, setCategory] = useState('All');
-  const [statusFilter, setStatusFilter] = useState('All');
   const [sortBy, setSortBy] = useState('Product Name');
   const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(true);
@@ -362,9 +386,8 @@ function InventoryPage({
     async function loadProducts() {
       setLoading(true);
       try {
-        const params = {};
-        if (statusFilter !== 'All') params.product_status = statusFilter;
-        const res = await apiClient.get('/products', { params });
+        // Archived products are hidden from warehouse (OM-only).
+        const res = await apiClient.get('/products', { params: { product_status: 'Active' } });
         if (res.data.success) {
           setProducts(res.data.data);
           setCategories(res.data.categories || []);
@@ -376,7 +399,7 @@ function InventoryPage({
       setLoading(false);
     }
     loadProducts();
-  }, [statusFilter, showToast]);
+  }, [showToast]);
   const filtered = useMemo(() => {
     let results = [...products];
     const query = search.trim().toLowerCase();
@@ -391,7 +414,7 @@ function InventoryPage({
     if (category !== 'All') results = results.filter(p => p.category_id === Number(category));
     if (sortBy === 'Product Name') results.sort((a, b) => a.product_name.localeCompare(b.product_name));else if (sortBy === 'Unit Price') results.sort((a, b) => a.unit_price - b.unit_price);
     return results;
-  }, [products, search, category, statusFilter, sortBy]);
+  }, [products, search, category, sortBy]);
   const totalPages = Math.ceil(filtered.length / PAGE_SIZE);
   const paginated = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
   if (loading) return <LoadingState message="Loading inventory..." />;
@@ -446,17 +469,6 @@ function InventoryPage({
           }}>
               <option value="All">All Categories</option>
               {categories.map(c => <option key={c.category_id} value={c.category_id}>{c.category_name}</option>)}
-            </select>
-            <select className="filter-select" value={statusFilter} onChange={e => {
-            setStatusFilter(e.target.value);
-            setPage(1);
-          }} style={{
-            padding: '8px 12px',
-            borderRadius: '6px',
-            border: '1px solid #c5c8d0',
-            fontSize: '0.9rem'
-          }}>
-              {['All', 'Active', 'Inactive'].map(s => <option key={s}>{s === 'All' ? 'All Statuses' : s}</option>)}
             </select>
             <select className="filter-select" value={sortBy} onChange={e => setSortBy(e.target.value)} style={{
             padding: '8px 12px',
@@ -575,6 +587,7 @@ function ProductDetailPage({
   const unit_price = product.unit_price != null ? product.unit_price : product.unitPrice || 0;
   const status = product.status || '—';
   const totalStock = inventory.reduce((sum, b) => sum + Number(b.quantity || b.available_stock || 0), 0);
+  const multiBranchStock = inventory.length > 1;
   return <div className="relative z-10 grid gap-[22px] w-full">
       <StatsGrid stats={[{
       label: 'Product ID',
@@ -586,7 +599,7 @@ function ProductDetailPage({
       label: 'Status',
       value: status
     }, {
-      label: 'Total Stock (All Branches)',
+      label: multiBranchStock ? 'Total Stock (All Branches)' : 'Branch Stock',
       value: `${totalStock} units`
     }]} />
 
@@ -622,10 +635,10 @@ function ProductDetailPage({
         </ul>
       </section>
 
-      {/* Inventory per branch — from branch_inventory */}
+      {/* Inventory per branch — from branch_inventory (scoped to caller’s branch for non-OM roles) */}
       {inventory.length > 0 && <section className="panel content-panel relative overflow-hidden">
           <div className="flex flex-col md:flex-row justify-between gap-4 items-start md:items-center mb-4">
-            <h3>Stock by Branch</h3>
+            <h3>{multiBranchStock ? 'Stock by Branch' : 'Branch Stock'}</h3>
             <p className="text-ink/70" style={{
           margin: 0,
           fontSize: '0.82rem'
@@ -2055,60 +2068,15 @@ function ProfilePage({
   navigate,
   showToast
 }) {
-  const user = getCurrentUser();
-  const [profile, setProfile] = useState(null);
-  const [editing, setEditing] = useState(false);
-  const [phone, setPhone] = useState('');
-  const [password, setPassword] = useState('');
-  useEffect(() => {
-    async function load() {
-      const res = await fetchMyProfile();
-      if (res.success && res.data) {
-        setProfile(res.data);
-        setPhone(res.data.phone || '');
-      }
-    }
-    load();
-  }, []);
-  const initials = (profile?.fullName || user?.fullName || 'W').split(' ').map(p => p[0]).join('').slice(0, 2).toUpperCase();
-  const save = async () => {
-    const body = { phone: phone.trim() };
-    if (password.trim().length >= 8) body.password = password.trim();
-    const res = await updateMyProfile(body);
-    if (res.success) {
-      persistCurrentUserFromProfile(res.data);
-      setProfile(res.data);
-      setPassword('');
-      setEditing(false);
-      showToast('Profile updated.', 'success');
-    } else showToast(res.message || 'Update failed.', 'error');
-  };
-  return <div className="relative z-10 grid gap-[22px] w-full">
-      <section className="panel content-panel profile-panel">
-        <div className="profile-header">
-          <div className="profile-avatar">{initials}</div>
-          <div><h3>{profile?.fullName || user?.fullName}</h3><p className="text-ink/70">{profile?.email || user?.email}</p></div>
-        </div>
-        {editing ? <div className="form-group">
-            <label>Phone<input value={phone} onChange={e => setPhone(e.target.value)} /></label>
-            <label>New password<input type="password" value={password} onChange={e => setPassword(e.target.value)} placeholder="Min. 8 characters" /></label>
-          </div> : <div className="transfer-detail-grid">
-          <article className="transfer-detail-card"><span>Branch</span><strong>{profile?.branch?.name || user?.branch?.name || '—'}</strong></article>
-          <article className="transfer-detail-card"><span>Email</span><strong>{profile?.email || '—'}</strong></article>
-          <article className="transfer-detail-card"><span>Phone</span><strong>{profile?.phone || '—'}</strong></article>
-          <article className="transfer-detail-card"><span>Status</span><strong>{profile?.status || '—'}</strong></article>
-        </div>}
-      </section>
-      <div className="flex justify-end gap-2 mt-4">
-        <button className="button ghost" type="button" onClick={() => navigate('/warehouse/audit-log')}>Audit Log</button>
-        <button className="button ghost" type="button" onClick={() => navigate('/warehouse/reports')}>Reports</button>
-        <button className="button ghost" type="button" onClick={() => requestLogout()}>Logout</button>
-        {editing ? <>
-            <button className="button ghost" type="button" onClick={() => setEditing(false)}>Cancel</button>
-            <button className="button" type="button" onClick={save}>Save</button>
-          </> : <button className="button" type="button" onClick={() => setEditing(true)}>Update Profile</button>}
-      </div>
-    </div>;
+  return <AccountProfilePanel
+    showToast={showToast}
+    title="Warehouse Profile"
+    subtitle="View your personal details and update your account password."
+    extraActions={<>
+      <button className="button ghost" type="button" onClick={() => navigate('/warehouse/audit-log')}>Audit Log</button>
+      <button className="button ghost" type="button" onClick={() => navigate('/warehouse/reports')}>Reports</button>
+    </>}
+  />;
 }
 function AuditLogPage({
   navigate
@@ -2707,6 +2675,8 @@ export function WarehousePageBody({
     case 'inventory':
     case 'branchInventory':
       return <BranchInventoryPage {...props} />;
+    case 'centralInventory':
+      return <CentralInventoryPanel />;
     case 'products':
       return <InventoryPage {...props} />;
     case 'addProduct':

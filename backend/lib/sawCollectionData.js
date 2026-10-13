@@ -1,7 +1,10 @@
 import {
+  daysOverdueFromDueDate,
   filterEligibleRows,
-  runSawPipeline,
+  filterOrgEligibleRows,
+  haversineKm,
   manilaDateString,
+  runSawPipeline,
 } from './sawCollection.js';
 
 /**
@@ -98,6 +101,85 @@ export async function computeCollectorSawPriority(pool, { collectorId, branchId,
   };
 }
 
+/**
+ * Load invoice-level rows for org-wide SAW (all branches, no collector portfolio filter).
+ */
+export async function fetchOrgSawSourceRows(pool) {
+  const result = await pool.query(
+    `
+    WITH invoice_payments AS (
+      SELECT ch.sales_id, COALESCE(SUM(ch.payment_amount), 0) AS paid
+      FROM credit_history ch
+      WHERE ch.sales_id IS NOT NULL
+      GROUP BY ch.sales_id
+    ),
+    open_invoices AS (
+      SELECT
+        si.customer_id,
+        si.due_date,
+        si.total_amount,
+        CASE
+          WHEN COALESCE(ip.paid, 0) >= si.total_amount THEN 'Paid'
+          WHEN COALESCE(ip.paid, 0) > 0 THEN 'Partial'
+          ELSE 'Unpaid'
+        END AS invoice_status
+      FROM sales_invoices si
+      LEFT JOIN invoice_payments ip ON ip.sales_id = si.sales_invoices_id
+      WHERE si.status IN ('Confirmed', 'Pending Review')
+        AND si.due_date IS NOT NULL
+        AND si.customer_id IS NOT NULL
+    )
+    SELECT
+      c.customer_id,
+      COALESCE(c.account_manager_id, 0)::INTEGER AS collector_id,
+      c.status,
+      COALESCE(ca.outstanding_balance, 0)::FLOAT AS outstanding_balance,
+      oi.invoice_status,
+      oi.due_date,
+      c.latitude::FLOAT AS cust_lat,
+      c.longitude::FLOAT AS cust_lon,
+      b.latitude::FLOAT AS branch_lat,
+      b.longitude::FLOAT AS branch_lon,
+      c.first_name,
+      c.last_name,
+      c.address,
+      c.contact_phone,
+      c.branch_id
+    FROM customers c
+    JOIN customer_activity ca ON ca.customer_id = c.customer_id
+    JOIN branches b ON b.id = c.branch_id
+    JOIN open_invoices oi ON oi.customer_id = c.customer_id
+    WHERE c.status = 'Active'
+      AND COALESCE(b.status, 'Active') = 'Active'
+      AND COALESCE(ca.outstanding_balance, 0) > 0
+      AND oi.invoice_status IN ('Unpaid', 'Partial')
+      AND c.latitude IS NOT NULL
+      AND c.longitude IS NOT NULL
+      AND b.latitude IS NOT NULL
+      AND b.longitude IS NOT NULL
+    `
+  );
+  return result.rows;
+}
+
+export async function computeOrgSawPriority(pool, { asOfDate } = {}) {
+  const raw = await fetchOrgSawSourceRows(pool);
+  const eligible = filterOrgEligibleRows(raw);
+  const asOf = asOfDate || manilaDateString();
+  const ranked = runSawPipeline(eligible, { asOfDate: asOf });
+
+  return {
+    asOf,
+    ranked,
+    stats: {
+      sourceRows: raw.length,
+      eligible: eligible.length,
+      ranked: ranked.length,
+      branches: new Set(ranked.map((r) => Number(r.branch_id)).filter(Boolean)).size,
+    },
+  };
+}
+
 export function mapSawPriorityRow(row) {
   const name = `${row.first_name || ''} ${row.last_name || ''}`.trim() || 'Customer';
   return {
@@ -165,15 +247,26 @@ export async function computeAssignedSawRoute(pool, { collectorId, branchId, sch
   });
 
   const filtered = ranked.filter((r) => assignedIds.has(Number(r.customer_id)));
-  const rankedAssigned = filtered.map((row, i) => {
+  const rankedIds = new Set(filtered.map((r) => Number(r.customer_id)));
+  const missingIds = [...assignedIds].filter((id) => !rankedIds.has(id));
+  const extras = missingIds.length
+    ? await fetchAssignedCustomersOutsideSaw(pool, missingIds, collectorId, asOf)
+    : [];
+
+  const withVisit = [...filtered, ...extras].map((row) => {
     const visit = visitByCustomer.get(Number(row.customer_id));
     return {
       ...row,
-      rank: i + 1,
-      visit_id: visit?.visit_id,
-      visit_status: visit?.status,
+      visit_id: visit?.visit_id ?? null,
+      visit_status: visit?.status ?? null,
     };
   });
+  const openStops = withVisit.filter((row) => row.visit_status !== 'Completed');
+  const completedStops = withVisit.filter((row) => row.visit_status === 'Completed');
+  const rankedAssigned = [...openStops, ...completedStops].map((row, i) => ({
+    ...row,
+    rank: i + 1,
+  }));
 
   return {
     asOf,
@@ -182,10 +275,65 @@ export async function computeAssignedSawRoute(pool, { collectorId, branchId, sch
       ...stats,
       assigned: assignments.length,
       onRoute: rankedAssigned.length,
+      completed: completedStops.length,
     },
     assignmentMode: true,
     scheduledDate: date,
   };
+}
+
+/** Assigned stops that no longer qualify for SAW (usually collected in full) still belong on today's route. */
+async function fetchAssignedCustomersOutsideSaw(pool, customerIds, collectorId, asOf) {
+  const result = await pool.query(
+    `SELECT
+       c.customer_id,
+       c.first_name,
+       c.last_name,
+       c.address,
+       c.contact_phone,
+       c.latitude::FLOAT AS cust_lat,
+       c.longitude::FLOAT AS cust_lon,
+       COALESCE(ca.outstanding_balance, 0)::FLOAT AS outstanding_balance,
+       b.latitude::FLOAT AS branch_lat,
+       b.longitude::FLOAT AS branch_lon,
+       (
+         SELECT MIN(si.due_date)
+         FROM sales_invoices si
+         WHERE si.customer_id = c.customer_id
+           AND si.status IN ('Confirmed', 'Pending Review')
+       ) AS due_date
+     FROM customers c
+     LEFT JOIN customer_activity ca ON ca.customer_id = c.customer_id
+     LEFT JOIN branches b ON b.id = c.branch_id
+     WHERE c.customer_id = ANY($1::int[])
+     ORDER BY c.last_name, c.first_name`,
+    [customerIds]
+  );
+
+  return result.rows.map((row) => {
+    const hasCoords = [row.cust_lat, row.cust_lon, row.branch_lat, row.branch_lon]
+      .every((n) => Number.isFinite(Number(n)));
+    const balance = Number(row.outstanding_balance) || 0;
+    return {
+      customer_id: row.customer_id,
+      collector_id: collectorId,
+      first_name: row.first_name,
+      last_name: row.last_name,
+      address: row.address,
+      contact_phone: row.contact_phone,
+      outstanding_balance: balance,
+      invoice_status: balance > 0 ? 'Partial' : 'Paid',
+      due_date: row.due_date,
+      days_overdue: daysOverdueFromDueDate(asOf, row.due_date),
+      distance_km: hasCoords
+        ? haversineKm(row.branch_lat, row.branch_lon, row.cust_lat, row.cust_lon)
+        : 0,
+      cust_lat: row.cust_lat,
+      cust_lon: row.cust_lon,
+      score: null,
+      generated_at: asOf,
+    };
+  });
 }
 
 export async function assignCollectionVisits(pool, {
@@ -245,9 +393,9 @@ export async function assignCollectionVisits(pool, {
   }
 }
 
-export async function persistSawResults(pool, rankedRows) {
+export async function persistSawResults(pool, rankedRows, { replaceAll = false } = {}) {
   if (!rankedRows.length) {
-    await pool.query(`DELETE FROM saw_results`);
+    if (replaceAll) await pool.query(`DELETE FROM saw_results`);
     return 0;
   }
 
@@ -255,10 +403,14 @@ export async function persistSawResults(pool, rankedRows) {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
-    await client.query(
-      `DELETE FROM saw_results WHERE customer_id = ANY($1::int[])`,
-      [customerIds]
-    );
+    if (replaceAll) {
+      await client.query(`DELETE FROM saw_results`);
+    } else {
+      await client.query(
+        `DELETE FROM saw_results WHERE customer_id = ANY($1::int[])`,
+        [customerIds]
+      );
+    }
     for (const row of rankedRows) {
       await client.query(
         `INSERT INTO saw_results (customer_id, score, ranking, generated_at)

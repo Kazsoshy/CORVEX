@@ -50,6 +50,28 @@ export async function patchSpecialCollectionRequest(id, body) {
   }
 }
 
+export async function fetchPendingSalesInvoices() {
+  try {
+    const response = await apiClient.get('/approvals/sales-invoices');
+    return response.data;
+  } catch (error) {
+    console.error('Failed to fetch invoices for review:', error);
+    return { success: false, data: [] };
+  }
+}
+
+export async function patchSalesInvoiceReview(id, body) {
+  try {
+    const response = await apiClient.patch(`/approvals/sales-invoices/${id}`, body);
+    return response.data;
+  } catch (error) {
+    return {
+      success: false,
+      message: error.response?.data?.message || 'Update failed.',
+    };
+  }
+}
+
 export async function fetchApprovalCenterSummary() {
   try {
     const response = await apiClient.get('/approvals/center-summary');

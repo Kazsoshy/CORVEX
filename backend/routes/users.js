@@ -10,6 +10,14 @@ async function roleSlug(pool, roleId) {
   return result.rows[0]?.slug ?? null;
 }
 
+const OP_BLOCKED_ROLE_SLUGS = new Set(['super_admin', 'operating_manager', 'client']);
+
+function operatingManagerCannotAssign(actor, slug, currentSlug = null) {
+  return actor?.roleSlug === 'operating_manager'
+    && OP_BLOCKED_ROLE_SLUGS.has(slug)
+    && slug !== currentSlug;
+}
+
 async function userRoleSlug(pool, userId) {
   const result = await pool.query(
     `SELECT r.slug FROM users u JOIN roles r ON r.role_id = u.role_id WHERE u.id = $1`,
@@ -25,6 +33,7 @@ async function userRoleSlug(pool, userId) {
 router.get('/', async (req, res) => {
   try {
     const pool = req.app.locals.pool;
+    const user = req.currentUser;
     const {
       role, status, branch_id, search,
       page = 1, limit = 20,
@@ -34,6 +43,15 @@ router.get('/', async (req, res) => {
     const params = [];
     let pIdx = 1;
 
+    // Branch-scoped roles may only list staff in their own branch.
+    if (user?.branchId != null && !['super_admin', 'operating_manager'].includes(user.roleSlug)) {
+      conditions.push(`u.branch_id = $${pIdx++}`);
+      params.push(user.branchId);
+    } else if (branch_id) {
+      conditions.push(`u.branch_id = $${pIdx++}`);
+      params.push(Number(branch_id));
+    }
+
     if (role) {
       conditions.push(`r.slug = $${pIdx++}`);
       params.push(role);
@@ -41,10 +59,6 @@ router.get('/', async (req, res) => {
     if (status) {
       conditions.push(`u.status = $${pIdx++}`);
       params.push(status);
-    }
-    if (branch_id) {
-      conditions.push(`u.branch_id = $${pIdx++}`);
-      params.push(Number(branch_id));
     }
     if (search) {
       conditions.push(`(u.first_name ILIKE $${pIdx} OR u.last_name ILIKE $${pIdx} OR u.email ILIKE $${pIdx})`);
@@ -113,6 +127,7 @@ router.get('/:id', async (req, res) => {
          u.branch_id,
          u.role_id,
          u.first_name,
+         u.middle_name,
          u.last_name,
          u.email,
          u.phone,
@@ -171,6 +186,12 @@ router.post('/', async (req, res) => {
     if (assignedSlug === 'super_admin' && req.currentUser.roleSlug !== 'super_admin') {
       return res.status(403).json({ success: false, message: 'Access denied.' });
     }
+    if (operatingManagerCannotAssign(req.currentUser, assignedSlug)) {
+      return res.status(403).json({
+        success: false,
+        message: 'Operating managers cannot assign Super Admin, Operating Manager, or Client.',
+      });
+    }
 
     // Check uniqueness
     const dupCheck = await pool.query(
@@ -182,16 +203,18 @@ router.post('/', async (req, res) => {
     }
 
     const passwordHash = await bcrypt.hash(password, 12);
+    const fullName = [first_name, middle_name, last_name].filter(Boolean).join(' ').replace(/\s+/g, ' ').trim();
 
     const result = await pool.query(
       `INSERT INTO users
-         (first_name, middle_name, last_name, email, password_hash, role_id, branch_id, status)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+         (first_name, middle_name, last_name, full_name, email, password_hash, role_id, branch_id, status)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
        RETURNING id AS user_id`,
       [
         first_name.trim(),
         middle_name ? middle_name.trim() : null,
         last_name.trim(),
+        fullName,
         email.toLowerCase().trim(),
         passwordHash,
         Number(role_id),
@@ -206,6 +229,7 @@ router.post('/', async (req, res) => {
          u.branch_id,
          u.role_id,
          u.first_name,
+         u.middle_name,
          u.last_name,
          u.email,
          u.status,
@@ -262,6 +286,12 @@ router.put('/:id', async (req, res) => {
       if (assignedSlug === 'super_admin' && req.currentUser.roleSlug !== 'super_admin') {
         return res.status(403).json({ success: false, message: 'Access denied.' });
       }
+      if (operatingManagerCannotAssign(req.currentUser, assignedSlug, targetSlug)) {
+        return res.status(403).json({
+          success: false,
+          message: 'Operating managers cannot assign Super Admin, Operating Manager, or Client.',
+        });
+      }
     }
 
     // Build update fields dynamically
@@ -299,6 +329,12 @@ router.put('/:id', async (req, res) => {
       `UPDATE users SET ${updates.join(', ')}, updated_at = NOW() WHERE id = $${pIdx}`,
       params
     );
+    await pool.query(
+      `UPDATE users
+       SET full_name = TRIM(CONCAT_WS(' ', first_name, NULLIF(middle_name, ''), last_name))
+       WHERE id = $1`,
+      [userId]
+    );
 
     const updated = await pool.query(
       `SELECT
@@ -306,6 +342,7 @@ router.put('/:id', async (req, res) => {
          u.branch_id,
          u.role_id,
          u.first_name,
+         u.middle_name,
          u.last_name,
          u.email,
          u.phone,
