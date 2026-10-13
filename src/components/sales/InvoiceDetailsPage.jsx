@@ -7,34 +7,52 @@ import { LoadingState } from '../shared/LoadingState';
 import { StatusBadge } from '../StatusBadge';
 import { formatCurrency, formatDisplayDate, formatDisplayDateTime } from '../../data/salesMockData';
 
-const detailTileStyle = {
-  padding: 14,
-  background: '#eef0f4',
-  border: '1px solid #c5c8d0',
+const sectionStyle = {
+  marginBottom: 4,
+};
+
+const itemsTableShellStyle = {
+  maxHeight: 280,
+  overflow: 'auto',
+  border: '1px solid var(--border, #c5c8d0)',
   borderRadius: 8,
 };
 
-const detailLabelStyle = {
-  fontSize: '0.78rem',
-  color: '#818697',
-  fontWeight: 600,
-  textTransform: 'uppercase',
-  letterSpacing: '0.03em',
-};
-
-const summaryTileStyle = {
-  padding: 14,
-  background: '#f0fdf4',
-  border: '1px solid #bbf7d0',
-  borderRadius: 8,
-};
+function DetailRowsTable({ rows }) {
+  return (
+    <div className="corvex-table-wrapper">
+      <table className="corvex-table">
+        <thead>
+          <tr>
+            <th style={{ width: '36%' }}>Field</th>
+            <th>Value</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((row) => (
+            <tr key={row.label}>
+              <td style={{ fontWeight: 600, color: '#818697' }}>{row.label}</td>
+              <td>{row.value}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
 
 export function InvoiceDetailsPage({
   invoiceId,
   navigate,
   showToast,
   historyBasePath = '/sales/history',
+  onBack,
+  embedded = false,
 }) {
+  const handleBack = () => {
+    if (typeof onBack === 'function') onBack();
+    else navigate(historyBasePath);
+  };
   const [invoice, setInvoice] = useState(null);
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -68,7 +86,7 @@ export function InvoiceDetailsPage({
   }, [invoiceId, showToast]);
 
   const pagination_items = usePagination(items);
-  const paginated_items = pagination_items.paginatedData;
+  const paginated_items = embedded ? items : pagination_items.paginatedData;
 
   if (loading) return <LoadingState message="Loading invoice details..." />;
   if (error && !invoice && !items.length) {
@@ -76,17 +94,144 @@ export function InvoiceDetailsPage({
       <EmptyState
         title="Unable to load invoice"
         description={error}
-        actionLabel="Back to History"
-        onAction={() => navigate(historyBasePath)}
+        actionLabel={embedded ? 'Close' : 'Back to History'}
+        onAction={handleBack}
       />
     );
   }
 
+  const itemsSubtotal = items.reduce((sum, item) => sum + Number(item.line_total || 0), 0);
   const totalQuantity = items.reduce((sum, item) => sum + Number(item.quantity || 0), 0);
-  const totalAmount = items.reduce((sum, item) => sum + Number(item.line_total || 0), 0);
   const headerTotal = Number(invoice?.total_amount || 0);
   const customerName = invoice?.customer_name || `${invoice?.first_name || ''} ${invoice?.last_name || ''}`.trim() || '—';
   const notesText = String(invoice?.notes ?? '').trim();
+
+  const invoiceInfoRows = invoice
+    ? [
+        { label: 'Invoice Number', value: invoice.invoice_number || '—' },
+        { label: 'Invoice Date', value: formatDisplayDate(invoice.invoices_date) },
+        { label: 'Due Date', value: formatDisplayDate(invoice.due_date) },
+        { label: 'Status', value: <StatusBadge status={invoice.status} /> },
+        { label: 'Branch', value: invoice.branch_name || '—' },
+        { label: 'Sales Agent', value: invoice.sales_agent_name || '—' },
+        { label: 'Created', value: formatDisplayDateTime(invoice.created_at) },
+      ]
+    : [];
+
+  const customerInfoRows = invoice
+    ? [
+        { label: 'Customer Name', value: customerName },
+        { label: 'Customer ID', value: invoice.customer_id ?? '—' },
+        { label: 'Branch', value: invoice.branch_name || '—' },
+        { label: 'Notes', value: notesText || '—' },
+      ]
+    : [];
+
+  const paymentSummaryRows = [
+    { label: 'Items Subtotal', value: formatCurrency(itemsSubtotal) },
+    { label: 'Invoice Total', value: <strong>{formatCurrency(headerTotal)}</strong> },
+    { label: 'Payment Method', value: invoice?.payment_method || '—' },
+    { label: 'Payment Status', value: invoice?.status ? <StatusBadge status={invoice.status} /> : '—' },
+    { label: 'Due Date', value: formatDisplayDate(invoice?.due_date) },
+  ];
+
+  const content = (
+    <>
+      {invoice ? (
+        <>
+          <section style={sectionStyle}>
+            <h4 className="subsection-title">Invoice Information</h4>
+            <DetailRowsTable rows={invoiceInfoRows} />
+          </section>
+
+          <section style={sectionStyle}>
+            <h4 className="subsection-title">Customer Information</h4>
+            <DetailRowsTable rows={customerInfoRows} />
+          </section>
+        </>
+      ) : (
+        <EmptyState title="Invoice not found" description="The invoice header could not be loaded." />
+      )}
+
+      <section style={sectionStyle}>
+        <h4 className="subsection-title">Invoice Items</h4>
+        <p className="list-section-subtitle muted" style={{ marginBottom: 10 }}>
+          {items.length
+            ? `${items.length} item${items.length === 1 ? '' : 's'} · Qty ${totalQuantity}`
+            : 'Line items for this invoice'}
+        </p>
+
+        {items.length > 0 ? (
+          <>
+            <div
+              className="corvex-table-wrapper"
+              style={embedded ? itemsTableShellStyle : undefined}
+            >
+              <table className="corvex-table">
+                <thead>
+                  <tr>
+                    <th>Product Name</th>
+                    <th>SKU</th>
+                    <th>Quantity</th>
+                    <th>Unit Price</th>
+                    <th>Subtotal</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {paginated_items.map((item) => (
+                    <tr key={item.sales_invoices_items_id}>
+                      <td>{item.product_name || '—'}</td>
+                      <td>
+                        <span style={{ fontFamily: 'monospace', fontSize: '0.82rem' }}>
+                          {item.sku || '—'}
+                        </span>
+                      </td>
+                      <td>{item.quantity}</td>
+                      <td>{formatCurrency(Number(item.unit_price))}</td>
+                      <td style={{ fontWeight: 600 }}>{formatCurrency(Number(item.line_total))}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            {!embedded ? <Pagination {...pagination_items} /> : null}
+          </>
+        ) : (
+          <EmptyState title="No invoice items found" description="This invoice has no line items." />
+        )}
+      </section>
+
+      <section style={sectionStyle}>
+        <h4 className="subsection-title">Payment Summary</h4>
+        <DetailRowsTable rows={paymentSummaryRows} />
+      </section>
+
+      <div className={embedded ? 'modal-actions' : 'flex justify-end mt-4'}>
+        <button className="button ghost" type="button" onClick={handleBack}>
+          {embedded ? 'Close' : 'Back to History'}
+        </button>
+      </div>
+    </>
+  );
+
+  if (embedded) {
+    return (
+      <div className="grid gap-[18px] w-full">
+        <div className="modal-header">
+          <div>
+            <h3>{invoice?.invoice_number ? `Invoice #${invoice.invoice_number}` : 'Invoice Details'}</h3>
+            <p className="list-section-subtitle muted" style={{ margin: '4px 0 0' }}>
+              Invoice ID: {invoice?.sales_invoices_id ?? invoiceId}
+            </p>
+          </div>
+          <button className="button ghost" type="button" onClick={handleBack} aria-label="Close">
+            Close
+          </button>
+        </div>
+        {content}
+      </div>
+    );
+  }
 
   return (
     <div className="relative z-10 grid gap-[22px] w-full">
@@ -94,157 +239,13 @@ export function InvoiceDetailsPage({
         <div className="list-section-header">
           <div>
             <h3>{invoice?.invoice_number ? `Invoice #${invoice.invoice_number}` : 'Invoice Details'}</h3>
-            <p className="list-section-subtitle muted">Invoice ID: {invoice?.sales_invoices_id ?? invoiceId}</p>
+            <p className="list-section-subtitle muted">
+              Invoice ID: {invoice?.sales_invoices_id ?? invoiceId}
+            </p>
           </div>
         </div>
-
-        {invoice ? (
-          <>
-            <div
-              style={{
-                display: 'grid',
-                gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))',
-                gap: 16,
-                marginBottom: 20,
-              }}
-            >
-              <div style={detailTileStyle}>
-                <span style={detailLabelStyle}>Invoice Number</span>
-                <strong style={{ display: 'block', fontSize: '1.15rem', marginTop: 4 }}>{invoice.invoice_number || '—'}</strong>
-              </div>
-              <div style={detailTileStyle}>
-                <span style={detailLabelStyle}>Customer</span>
-                <strong style={{ display: 'block', fontSize: '1.15rem', marginTop: 4 }}>{customerName}</strong>
-              </div>
-              <div style={detailTileStyle}>
-                <span style={detailLabelStyle}>Total Amount</span>
-                <strong style={{ display: 'block', fontSize: '1.35rem', marginTop: 4 }}>{formatCurrency(headerTotal)}</strong>
-              </div>
-              <div style={detailTileStyle}>
-                <span style={detailLabelStyle}>Branch</span>
-                <strong style={{ display: 'block', fontSize: '1.15rem', marginTop: 4 }}>{invoice.branch_name || '—'}</strong>
-              </div>
-              <div style={detailTileStyle}>
-                <span style={detailLabelStyle}>Payment Method</span>
-                <strong style={{ display: 'block', fontSize: '1.15rem', marginTop: 4 }}>{invoice.payment_method || '—'}</strong>
-              </div>
-              <div style={detailTileStyle}>
-                <span style={detailLabelStyle}>Status</span>
-                <span style={{ display: 'block', marginTop: 4 }}><StatusBadge status={invoice.status} /></span>
-              </div>
-              <div style={detailTileStyle}>
-                <span style={detailLabelStyle}>Invoice Date</span>
-                <strong style={{ display: 'block', fontSize: '1.15rem', marginTop: 4 }}>{formatDisplayDate(invoice.invoices_date)}</strong>
-              </div>
-              <div style={detailTileStyle}>
-                <span style={detailLabelStyle}>Due Date</span>
-                <strong style={{ display: 'block', fontSize: '1.15rem', marginTop: 4 }}>{formatDisplayDate(invoice.due_date)}</strong>
-              </div>
-              <div style={detailTileStyle}>
-                <span style={detailLabelStyle}>Sales Agent</span>
-                <strong style={{ display: 'block', fontSize: '1.15rem', marginTop: 4 }}>{invoice.sales_agent_name || '—'}</strong>
-              </div>
-              <div style={detailTileStyle}>
-                <span style={detailLabelStyle}>Created</span>
-                <strong style={{ display: 'block', fontSize: '1.05rem', marginTop: 4 }}>{formatDisplayDateTime(invoice.created_at)}</strong>
-              </div>
-              <div style={detailTileStyle}>
-                <span style={detailLabelStyle}>Updated</span>
-                <strong style={{ display: 'block', fontSize: '1.05rem', marginTop: 4 }}>{formatDisplayDateTime(invoice.updated_at)}</strong>
-              </div>
-            </div>
-
-            <div
-              style={{
-                padding: 16,
-                background: '#eef0f4',
-                border: '1px solid #c5c8d0',
-                borderRadius: 8,
-              }}
-            >
-              <span style={detailLabelStyle}>Notes</span>
-              <p style={{ margin: '8px 0 0', whiteSpace: 'pre-wrap', lineHeight: 1.5, color: '#0c1031' }}>
-                {notesText || '—'}
-              </p>
-            </div>
-          </>
-        ) : (
-          <EmptyState title="Invoice not found" description="The invoice header could not be loaded." />
-        )}
+        {content}
       </section>
-
-      <section className="panel content-panel relative overflow-hidden">
-        <div className="list-section-header">
-          <h3>Item Details</h3>
-          <p className="list-section-subtitle muted">Line items for this invoice</p>
-        </div>
-
-        {items.length > 0 ? (
-          <>
-            <div
-              style={{
-                display: 'grid',
-                gridTemplateColumns: 'repeat(3, 1fr)',
-                gap: 16,
-                marginBottom: 20,
-              }}
-            >
-              <div style={summaryTileStyle}>
-                <span style={{ ...detailLabelStyle, color: '#4d7302' }}>Total Items</span>
-                <strong style={{ display: 'block', fontSize: '1.35rem', marginTop: 4 }}>{items.length}</strong>
-              </div>
-              <div style={summaryTileStyle}>
-                <span style={{ ...detailLabelStyle, color: '#4d7302' }}>Total Quantity</span>
-                <strong style={{ display: 'block', fontSize: '1.35rem', marginTop: 4 }}>{totalQuantity}</strong>
-              </div>
-              <div style={summaryTileStyle}>
-                <span style={{ ...detailLabelStyle, color: '#4d7302' }}>Items Total</span>
-                <strong style={{ display: 'block', fontSize: '1.35rem', marginTop: 4 }}>{formatCurrency(totalAmount)}</strong>
-              </div>
-            </div>
-
-            <div className="corvex-table-wrapper">
-              <table className="corvex-table">
-                <thead>
-                  <tr>
-                    <th>Item ID</th>
-                    <th>Invoice ID</th>
-                    <th>Product ID</th>
-                    <th>Product</th>
-                    <th>SKU</th>
-                    <th>Quantity</th>
-                    <th>Unit Price</th>
-                    <th>Line Total</th>
-                    <th>Created At</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {paginated_items.map((item) => (
-                    <tr key={item.sales_invoices_items_id}>
-                      <td><span style={{ fontFamily: 'monospace', fontSize: '0.82rem' }}>{item.sales_invoices_items_id}</span></td>
-                      <td><span style={{ fontFamily: 'monospace', fontSize: '0.82rem' }}>{item.invoice_id}</span></td>
-                      <td><span style={{ fontFamily: 'monospace', fontSize: '0.82rem' }}>{item.product_id}</span></td>
-                      <td>{item.product_name || '—'}</td>
-                      <td><span style={{ fontFamily: 'monospace', fontSize: '0.82rem' }}>{item.sku || '—'}</span></td>
-                      <td>{item.quantity}</td>
-                      <td style={{ fontWeight: 600 }}>{formatCurrency(Number(item.unit_price))}</td>
-                      <td style={{ fontWeight: 700 }}>{formatCurrency(Number(item.line_total))}</td>
-                      <td>{formatDisplayDateTime(item.created_at)}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-            <Pagination {...pagination_items} />
-          </>
-        ) : (
-          <EmptyState title="No invoice items found" description="This invoice has no line items." />
-        )}
-      </section>
-
-      <div className="flex justify-end mt-4">
-        <button className="button ghost" type="button" onClick={() => navigate(historyBasePath)}>Back to History</button>
-      </div>
     </div>
   );
 }

@@ -1,13 +1,54 @@
 import { useEffect, useState } from 'react';
 import { fetchMyProfile, updateMyProfile } from '../../api/profileService';
 import { persistCurrentUserFromProfile, requestLogout } from '../../api/authService';
+import { formatDisplayDate } from '../../utils/formatters';
+import { NavIcon } from '../../navIcons';
 import { LoadingState } from './LoadingState';
 
-export function AccountProfilePanel({ showToast, title = 'Profile' }) {
+function updateField(setter, key) {
+  return (event) => {
+    const value = event.target.value;
+    setter((current) => (current ? { ...current, [key]: value } : current));
+  };
+}
+
+function formatUserId(userId) {
+  if (userId == null || userId === '') return '—';
+  const numeric = Number(userId);
+  if (Number.isFinite(numeric)) {
+    return `USR-${String(Math.trunc(numeric)).padStart(4, '0')}`;
+  }
+  return String(userId);
+}
+
+function ProfileField({ label, value }) {
+  return (
+    <div className="profile-field">
+      <span className="profile-field-label">{label}</span>
+      <span className="profile-field-value">{value || '—'}</span>
+    </div>
+  );
+}
+
+function AccountInfoItem({ icon, label, value }) {
+  return (
+    <li className="profile-account-item">
+      <span className="profile-account-icon" aria-hidden="true">
+        <NavIcon name={icon} className="profile-account-svg" />
+      </span>
+      <div className="profile-account-copy">
+        <span className="profile-account-label">{label}</span>
+        <span className="profile-account-value">{value || '—'}</span>
+      </div>
+    </li>
+  );
+}
+
+export function AccountProfilePanel({ showToast, title = 'Profile Information' }) {
   const [profile, setProfile] = useState(null);
-  const [editing, setEditing] = useState(false);
-  const [focusPassword, setFocusPassword] = useState(false);
   const [password, setPassword] = useState('');
+  const [editing, setEditing] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
   const [saving, setSaving] = useState(false);
   const [loadError, setLoadError] = useState('');
 
@@ -23,29 +64,42 @@ export function AccountProfilePanel({ showToast, title = 'Profile' }) {
     return () => { active = false; };
   }, []);
 
-  const save = async () => {
+  const saveProfile = async (includePassword = false) => {
     if (!profile) return;
-    if (password.trim() && password.trim().length < 8) {
-      showToast?.('Password must be at least 8 characters.', 'error');
-      return;
+
+    if (includePassword) {
+      if (!password.trim()) {
+        showToast?.('Enter a new password first.', 'error');
+        return;
+      }
+      if (password.trim().length < 8) {
+        showToast?.('Password must be at least 8 characters.', 'error');
+        return;
+      }
     }
+
     setSaving(true);
     const payload = {
       first_name: profile.first_name,
+      middle_name: profile.middle_name ?? '',
       last_name: profile.last_name,
       email: profile.email,
       phone: profile.phone,
     };
-    if (password.trim()) payload.password = password.trim();
+    if (includePassword && password.trim()) {
+      payload.password = password.trim();
+    }
+
     const res = await updateMyProfile(payload);
     setSaving(false);
+
     if (res.success) {
       persistCurrentUserFromProfile(res.data);
       setProfile(res.data);
       setPassword('');
+      setShowPassword(false);
       setEditing(false);
-      setFocusPassword(false);
-      showToast?.(password.trim() ? 'Password updated.' : 'Profile updated.', 'success');
+      showToast?.(includePassword ? 'Password updated.' : 'Profile updated.', 'success');
     } else {
       showToast?.(res.message || 'Update failed.', 'error');
     }
@@ -53,45 +107,196 @@ export function AccountProfilePanel({ showToast, title = 'Profile' }) {
 
   if (!profile && !loadError) return <LoadingState message="Loading profile..." />;
   if (loadError) {
-    return <section className="panel content-panel"><p>{loadError}</p></section>;
+    return (
+      <div className="page profile-page">
+        <section className="profile-card">
+          <p className="profile-load-error">{loadError}</p>
+        </section>
+      </div>
+    );
   }
 
-  const fullName = [profile.first_name, profile.middle_name, profile.last_name].filter(Boolean).join(' ');
+  const fullName = [profile.first_name, profile.middle_name, profile.last_name]
+    .filter(Boolean)
+    .join(' ')
+    .replace(/\s+/g, ' ')
+    .trim() || '—';
+  const roleName = profile.role?.name || '—';
+  const statusLabel = profile.status || '—';
+  const statusClass = String(statusLabel).toLowerCase() === 'active'
+    ? 'is-active'
+    : 'is-inactive';
+
   return (
-    <div className="relative z-10 grid gap-[22px] w-full">
-      <section className="panel content-panel relative overflow-hidden">
-        <div className="flex flex-col md:flex-row justify-between gap-4 items-start md:items-center mb-4">
-          <h3>{title}</h3>
-        </div>
-        {editing ? (
-          <div className="form-grid">
-            <label>First name<input value={profile.first_name || ''} onChange={(e) => setProfile((p) => ({ ...p, first_name: e.target.value }))} /></label>
-            <label>Last name<input value={profile.last_name || ''} onChange={(e) => setProfile((p) => ({ ...p, last_name: e.target.value }))} /></label>
-            <label>Email<input type="email" value={profile.email || ''} onChange={(e) => setProfile((p) => ({ ...p, email: e.target.value }))} /></label>
-            <label>Phone<input value={profile.phone || ''} onChange={(e) => setProfile((p) => ({ ...p, phone: e.target.value }))} /></label>
-            <label>New password<input type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Min. 8 characters" autoFocus={focusPassword} /></label>
+    <div className="page profile-page">
+      <section className="profile-card" aria-label={title}>
+        <header className="profile-hero">
+          <div className="profile-hero-avatar" aria-hidden="true">
+            <NavIcon name="user" className="profile-hero-svg" />
           </div>
-        ) : (
-          <ul className="info-grid">
-            <li><span className="info-item-label">Name</span><span className="info-item-value">{fullName || '—'}</span></li>
-            <li><span className="info-item-label">User ID</span><span className="info-item-value">{profile.user_id}</span></li>
-            <li><span className="info-item-label">Email</span><span className="info-item-value">{profile.email || '—'}</span></li>
-            <li><span className="info-item-label">Phone</span><span className="info-item-value">{profile.phone || '—'}</span></li>
-            <li><span className="info-item-label">Role</span><span className="info-item-value">{profile.role?.name || '—'}</span></li>
-            <li><span className="info-item-label">Branch</span><span className="info-item-value">{profile.branch?.name || 'Head Office'}</span></li>
+          <div className="profile-hero-copy">
+            <h2 className="profile-hero-name">{fullName}</h2>
+            <p className="profile-hero-role">{roleName}</p>
+            <p className={`profile-hero-status ${statusClass}`}>
+              <span className="profile-status-dot" aria-hidden="true" />
+              <span>{statusLabel}</span>
+            </p>
+          </div>
+        </header>
+
+        <div className="profile-divider" role="presentation" />
+
+        <div className="profile-section">
+          <h3 className="profile-section-title">Personal Information</h3>
+
+          {editing ? (
+            <div className="profile-personal-grid profile-personal-edit">
+              <label className="profile-field">
+                <span className="profile-field-label">First Name</span>
+                <input
+                  value={profile.first_name || ''}
+                  onChange={updateField(setProfile, 'first_name')}
+                  autoComplete="given-name"
+                />
+              </label>
+              <label className="profile-field">
+                <span className="profile-field-label">Last Name</span>
+                <input
+                  value={profile.last_name || ''}
+                  onChange={updateField(setProfile, 'last_name')}
+                  autoComplete="family-name"
+                />
+              </label>
+              <label className="profile-field">
+                <span className="profile-field-label">Email Address</span>
+                <input
+                  type="email"
+                  value={profile.email || ''}
+                  onChange={updateField(setProfile, 'email')}
+                  autoComplete="email"
+                />
+              </label>
+              <label className="profile-field">
+                <span className="profile-field-label">Phone Number</span>
+                <input
+                  type="tel"
+                  value={profile.phone || ''}
+                  onChange={updateField(setProfile, 'phone')}
+                  autoComplete="tel"
+                />
+              </label>
+              {showPassword ? (
+                <label className="profile-field profile-password-field">
+                  <span className="profile-field-label">New Password</span>
+                  <input
+                    type="password"
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    placeholder="Min. 8 characters"
+                    autoComplete="new-password"
+                    autoFocus
+                  />
+                </label>
+              ) : null}
+            </div>
+          ) : (
+            <div className="profile-personal-grid">
+              <ProfileField label="First Name" value={profile.first_name} />
+              <ProfileField label="Last Name" value={profile.last_name} />
+              <ProfileField label="Email Address" value={profile.email} />
+              <ProfileField label="Phone Number" value={profile.phone} />
+            </div>
+          )}
+        </div>
+
+        <div className="profile-divider" role="presentation" />
+
+        <div className="profile-section">
+          <h3 className="profile-section-title">Account Information</h3>
+          <ul className="profile-account-list">
+            <AccountInfoItem
+              icon="credit-card"
+              label="User ID"
+              value={formatUserId(profile.user_id)}
+            />
+            <AccountInfoItem
+              icon="shield-check"
+              label="Role"
+              value={roleName}
+            />
+            <AccountInfoItem
+              icon="calendar"
+              label="Date Created"
+              value={formatDisplayDate(profile.created_at)}
+            />
+            <AccountInfoItem
+              icon="clock"
+              label="Last Login"
+              value={formatDisplayDate(profile.last_login)}
+            />
           </ul>
-        )}
-        <div className="flex justify-end gap-2 mt-6">
-          <button className="button ghost" type="button" onClick={() => requestLogout()}>Logout</button>
+        </div>
+
+        <div className="profile-divider" role="presentation" />
+
+        <div className="profile-actions" aria-label="Profile actions">
           {editing ? (
             <>
-              <button className="button ghost" type="button" onClick={() => { setEditing(false); setPassword(''); setFocusPassword(false); }}>Cancel</button>
-              <button className="button" type="button" onClick={save} disabled={saving}>{saving ? 'Saving…' : 'Save'}</button>
+              <button
+                className="button ghost profile-action-btn"
+                type="button"
+                disabled={saving}
+                onClick={async () => {
+                  setEditing(false);
+                  setShowPassword(false);
+                  setPassword('');
+                  const res = await fetchMyProfile();
+                  if (res.success && res.data) setProfile(res.data);
+                }}
+              >
+                Cancel
+              </button>
+              <button
+                className="button profile-action-btn"
+                type="button"
+                disabled={saving}
+                onClick={() => saveProfile(showPassword)}
+              >
+                {saving ? 'Saving…' : (showPassword ? 'Save Password' : 'Save')}
+              </button>
             </>
           ) : (
             <>
-              <button className="button secondary" type="button" onClick={() => { setFocusPassword(true); setEditing(true); }}>Change Password</button>
-              <button className="button" type="button" onClick={() => { setFocusPassword(false); setEditing(true); }}>Update Profile</button>
+              <button
+                className="button profile-action-btn"
+                type="button"
+                disabled={saving}
+                onClick={() => {
+                  setShowPassword(false);
+                  setEditing(true);
+                }}
+              >
+                Update Profile
+              </button>
+              <button
+                className="button secondary profile-action-btn"
+                type="button"
+                disabled={saving}
+                onClick={() => {
+                  setShowPassword(true);
+                  setEditing(true);
+                }}
+              >
+                Change Password
+              </button>
+              <button
+                className="button ghost profile-action-btn"
+                type="button"
+                disabled={saving}
+                onClick={() => requestLogout()}
+              >
+                Logout
+              </button>
             </>
           )}
         </div>

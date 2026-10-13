@@ -40,6 +40,7 @@ import {
 import { getReportCollection, getReportSales, getReportInventory, getReportDelinquency, getReportCompliance, getReportKPI, getReportInvoices } from '../../api/reportsService.js';
 import { CreditHistoryListPage, CreditHistoryDetailPage } from '../shared/CreditHistoryPages';
 import { TerritoriesPage } from '../territories/TerritoriesPage';
+import { InvoiceDetailsPage } from '../sales/InvoiceDetailsPage';
 import { formatMiddleNameDisplay } from '../../utils/customerDisplay.js';
 import { downloadPdf, exportRows } from '../../utils/dataExport.js';
 
@@ -769,6 +770,7 @@ function ReportsHubPage({
   const [complianceData, setComplianceData] = useState(null);
   const [kpi, setKpi] = useState(null);
   const [invoices, setInvoices] = useState([]);
+  const [viewingInvoiceId, setViewingInvoiceId] = useState(null);
   const [loading, setLoading] = useState(true);
   const tabs = [{
     key: 'collection',
@@ -833,7 +835,7 @@ function ReportsHubPage({
   };
   return <div className="relative z-10 grid gap-[22px] w-full">
       <div className="segmented-control">
-        {tabs.map(t => <button key={t.key} className={tab === t.key ? 'segment active' : 'segment'} type="button" onClick={() => setTab(t.key)}>{t.label}</button>)}
+        {tabs.map(t => <button key={t.key} className={tab === t.key ? 'segment active' : 'segment'} type="button" onClick={() => { setTab(t.key); setViewingInvoiceId(null); }}>{t.label}</button>)}
       </div>
       <div style={{
       display: 'flex',
@@ -1096,7 +1098,7 @@ function ReportsHubPage({
           {invoices.length ? <>
               <div style={{
           display: 'grid',
-          gridTemplateColumns: 'repeat(4, 1fr)',
+          gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))',
           gap: 16,
           margin: '4px 0 20px'
         }}>
@@ -1139,53 +1141,42 @@ function ReportsHubPage({
                     <tr>
                       <th>Invoice #</th>
                       <th>Customer</th>
-                      <th>Sales Agent</th>
-                      <th>Branch</th>
-                      <th>Amount</th>
-                      <th>Payment</th>
-                      <th>Status</th>
                       <th>Invoice Date</th>
-                      <th>Due Date</th>
-                      <th>Notes</th>
-                      <th>Created At</th>
-                      <th>Updated At</th>
+                      <th>Total Amount</th>
+                      <th>Status</th>
+                      <th>Actions</th>
                     </tr>
                   </thead>
                   <tbody>
                     {paginated_invoices.map(inv => {
-                  const isOverdue = inv.due_date && new Date(inv.due_date) < new Date() && inv.status !== 'Cancelled';
-                  return <tr key={inv.sales_invoices_id}>
+                  const invoiceKey = inv.invoice_number || inv.sales_invoices_id;
+                  return <tr
+                    key={inv.sales_invoices_id}
+                    className="clickable-row"
+                    onClick={() => setViewingInvoiceId(invoiceKey)}
+                  >
                           <td style={{
                       fontFamily: 'monospace',
                       fontSize: '0.82rem'
                     }}>{inv.invoice_number}</td>
                           <td>{inv.customer_name || '—'}</td>
-                          <td>{inv.sales_agent_name || '—'}</td>
-                          <td>{inv.branch_name || '—'}</td>
+                          <td>{formatDisplayDate(inv.invoices_date)}</td>
                           <td style={{
                       fontWeight: 600
                     }}>{formatCurrency(Number(inv.total_amount))}</td>
-                          <td>{inv.payment_method || '—'}</td>
                           <td>
                             <StatusBadge status={inv.status} />
                           </td>
-                          <td>{formatDisplayDate(inv.invoices_date)}</td>
-                          <td style={{
-                      color: isOverdue ? '#dc2626' : 'inherit',
-                      fontWeight: isOverdue ? 700 : 400
-                    }}>
-                            {formatDisplayDate(inv.due_date)}
+                          <td className="table-actions" onClick={e => e.stopPropagation()}>
+                            <button
+                              className="icon-action-button"
+                              type="button"
+                              title="View"
+                              onClick={() => setViewingInvoiceId(invoiceKey)}
+                            >
+                              <NavIcon name="view" />
+                            </button>
                           </td>
-                          <td style={{
-                      maxWidth: 200,
-                      whiteSpace: 'nowrap',
-                      overflow: 'hidden',
-                      textOverflow: 'ellipsis'
-                    }} title={inv.notes || ''}>
-                            {inv.notes || '—'}
-                          </td>
-                          <td>{formatDisplayDateTime(inv.created_at)}</td>
-                          <td>{formatDisplayDateTime(inv.updated_at)}</td>
                         </tr>;
                 })}
                   </tbody>
@@ -1193,6 +1184,33 @@ function ReportsHubPage({
               </div><Pagination {...pagination_invoices} /></>
             </> : <EmptyState title="No invoices found" description="No sales invoices exist for this branch yet." />}
         </section>}
+
+      {viewingInvoiceId ? <div
+        className="modal-overlay"
+        role="dialog"
+        aria-modal="true"
+        aria-label="Sales invoice details"
+        onClick={() => setViewingInvoiceId(null)}
+      >
+          <div
+            className="modal-content"
+            style={{
+              maxWidth: 880,
+              width: 'min(880px, 100%)',
+              maxHeight: 'calc(100vh - 48px)',
+              overflowY: 'auto',
+            }}
+            onClick={e => e.stopPropagation()}
+          >
+            <InvoiceDetailsPage
+              invoiceId={viewingInvoiceId}
+              navigate={navigate}
+              showToast={showToast}
+              embedded
+              onBack={() => setViewingInvoiceId(null)}
+            />
+          </div>
+        </div> : null}
 
       {tab !== 'invoices' && <div style={{
       marginTop: 24

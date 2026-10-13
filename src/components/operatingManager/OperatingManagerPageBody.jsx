@@ -11,8 +11,6 @@ import LeafletMap from '../common/LeafletMap';
 import { BRANCHES, BRANCH_RADAR, ENTERPRISE_KPIS, LEAFLET_LAYERS, MONTHLY_COLLECTIONS, MONTHLY_DELINQUENCY, MONTHLY_REVENUE, REPORT_CATEGORIES, TREND_DATA, WEEKLY_COLLECTION_RATE, WEEKLY_SALES_RATE, SALES_ANALYTICS, INVENTORY_ANALYTICS, PAYMENT_ANALYTICS, formatCurrency, getBranchById, getHighestPerformingBranch, getLowestPerformingBranch } from '../../data/operatingManagerMockData';
 import { fetchOperationalAlerts, patchOperationalAlert, mapOperationalAlertRow } from '../../api/operationalAlertsService.js';
 import { fetchNotifications, markNotificationRead, markAllNotificationsRead, mapNotificationRow } from '../../api/notificationService.js';
-import { fetchMyProfile, updateMyProfile } from '../../api/profileService.js';
-import { persistCurrentUserFromProfile, requestLogout } from '../../api/authService.js';
 import { formatDisplayDate, formatDisplayDateTime } from '../../utils/formatters.js';
 import { getPresetDateRange } from '../../utils/analyticsDateRange.js';
 import { formatMiddleNameDisplay } from '../../utils/customerDisplay.js';
@@ -22,6 +20,7 @@ import apiClient from '../../api/apiClient';
 import { fetchCustomers, fetchCustomerById } from '../../api/salesService';
 import { EmptyState } from '../shared/EmptyState';
 import { LoadingState } from '../shared/LoadingState';
+import { AccountProfilePanel } from '../shared/AccountProfilePanel';
 import { NavIcon } from '../../navIcons';
 import { getCurrentUser } from '../../api/authService';
 import { TerritoriesPage } from '../territories/TerritoriesPage';
@@ -1433,78 +1432,9 @@ function CustomerDetailPage({
     </div>;
 }
 function ProfilePage({
-  navigate,
   showToast
 }) {
-  const [profile, setProfile] = useState(null);
-  const [password, setPassword] = useState('');
-  const [showPassword, setShowPassword] = useState(false);
-  useEffect(() => {
-    async function load() {
-      const res = await fetchMyProfile();
-      if (res.success) setProfile(res.data);
-    }
-    load();
-  }, []);
-  const saveProfile = async (includePassword) => {
-    if (!profile) return;
-    const payload = {
-      first_name: profile.first_name,
-      last_name: profile.last_name,
-      email: profile.email,
-      phone: profile.phone,
-    };
-    if (includePassword && password.trim()) payload.password = password.trim();
-    const res = await updateMyProfile(payload);
-    if (res.success) {
-      persistCurrentUserFromProfile(res.data);
-      setProfile(res.data);
-      setPassword('');
-      setShowPassword(false);
-      showToast(includePassword ? 'Password updated.' : 'Profile updated.', 'success');
-    } else showToast(res.message || 'Update failed.', 'error');
-  };
-  if (!profile) return <LoadingState message="Loading profile..." />;
-  return <div className="page">
-      <section className="panel form-panel content-panel">
-        <div className="panel-section-header"><h3>Operating Manager Information</h3></div>
-        <div className="form-grid">
-          <label>First name<input value={profile.first_name || ''} onChange={e => setProfile(p => ({
-            ...p,
-            first_name: e.target.value
-          }))} /></label>
-          <label>Last name<input value={profile.last_name || ''} onChange={e => setProfile(p => ({
-            ...p,
-            last_name: e.target.value
-          }))} /></label>
-          <label>Employee ID<input value={String(profile.user_id)} readOnly /></label>
-          <label>Role<input value={profile.role?.name || 'Operating Manager'} readOnly /></label>
-          <label>Email<input type="email" value={profile.email || ''} onChange={e => setProfile(p => ({
-            ...p,
-            email: e.target.value
-          }))} /></label>
-          <label>Phone<input value={profile.phone || ''} onChange={e => setProfile(p => ({
-            ...p,
-            phone: e.target.value
-          }))} /></label>
-          {showPassword ? <label>New password<input type="password" value={password} onChange={e => setPassword(e.target.value)} placeholder="Min. 8 characters" /></label> : null}
-        </div>
-      </section>
-      <PageToolbar actions={[{
-      label: 'Update Profile'
-    }, {
-      label: showPassword ? 'Save Password' : 'Change Password',
-      variant: 'secondary'
-    }, {
-      label: 'Logout',
-      variant: 'ghost'
-    }]} onAction={a => {
-      if (a.label === 'Logout') requestLogout();
-      else if (a.label === 'Change Password') setShowPassword(true);
-      else if (a.label === 'Save Password') saveProfile(true);
-      else saveProfile(false);
-    }} />
-    </div>;
+  return <AccountProfilePanel showToast={showToast} title="Operating Manager Information" />;
 }
 const ANALYTIC_RANGE_OPTIONS = [{
   value: 'today',

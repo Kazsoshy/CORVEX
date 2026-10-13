@@ -1502,7 +1502,7 @@ function NotificationsPage({
 function ProfilePage({
   showToast
 }) {
-  return <AccountProfilePanel showToast={showToast} title="Admin Profile" />;
+  return <AccountProfilePanel showToast={showToast} title="Profile Information" />;
 }
 
 // ── Product Categories (Admin) ────────────────────────────────────────────────

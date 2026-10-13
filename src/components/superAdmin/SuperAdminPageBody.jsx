@@ -1002,7 +1002,7 @@ function AuditLogsPage({
 function ProfilePage({
   showToast
 }) {
-  return <AccountProfilePanel showToast={showToast} title="Super Admin Profile" />;
+  return <AccountProfilePanel showToast={showToast} title="Profile Information" />;
 }
 
 // â”€â”€ Users Management (API-Backed) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€

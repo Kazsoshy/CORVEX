@@ -139,7 +139,7 @@ async function getVisit(pool, visitId, userId) {
 }
 
 const salesStaffOnly = requireRole(['sales_staff']);
-const salesStaffOrOperatingManager = requireRole(['sales_staff', 'operating_manager']);
+const salesStaffOrOperatingManager = requireRole(['sales_staff', 'operating_manager', 'branch_manager']);
 
 function manilaTodayString() {
   return new Intl.DateTimeFormat('en-CA', {
@@ -485,6 +485,9 @@ router.get('/invoices', salesStaffOrOperatingManager, async (req, res) => {
       conditions.push(`si.branch_id = $${pIdx++}`);
       params.push(Number(branchId));
     }
+  } else if (user.roleSlug === 'branch_manager') {
+    conditions.push(`si.branch_id = $${pIdx++}`);
+    params.push(user.branchId);
   } else {
     conditions.push(`si.sales_agent_id = $${pIdx++}`);
     params.push(userId);
