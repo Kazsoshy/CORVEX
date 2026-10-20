@@ -9,6 +9,7 @@
     "migrate": "node backend/run_migrations.js",
     "seed:demo-customer": "node backend/scripts/seed_demo_customer_portal.js",
     "seed:saw-davao": "node backend/scripts/seed_davao_saw_collection.js",
+    "seed:secondary-branches": "node backend/scripts/seed_secondary_branches.js",
     "seed:reset-passwords": "node backend/reset_passwords.js",
     "saw:csv": "node backend/scripts/run_saw_from_csv.js",
     "check:schema": "node scripts/check_schema.mjs",

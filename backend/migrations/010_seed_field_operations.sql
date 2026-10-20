@@ -42,8 +42,8 @@ INSERT INTO field_visits (customer_id, user_id, visit_type, scheduled_date, stat
 -- FIELD ACTIVITY REPORTS
 -- ============================================================
 INSERT INTO field_activity_reports (visit_id, user_id, activity_type, remarks, sync_status) VALUES
-(1, 10, 'Collection', 'Collected PHP 5,000. Customer paid in cash. Receipt issued.', 'Synced'),
-(2, 10, 'Collection', 'Collected PHP 3,000. Partial payment. Balance remains.', 'Synced'),
+(1, 10, 'Collection', 'Collected ₱5,000.00. Customer paid in cash. Receipt issued.', 'Synced'),
+(2, 10, 'Collection', 'Collected ₱3,000.00. Partial payment. Balance remains.', 'Synced'),
 (3, 11, 'Collection', 'Customer not home. Left notice slip for follow-up.', 'Synced'),
 (4, 12, 'Collection', 'Scheduled for tomorrow. Confirmed via SMS.', 'Pending'),
 (5, 10, 'Sales Visit', 'Presented new sofa catalog. Customer interested in 3-seater.', 'Synced'),

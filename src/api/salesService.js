@@ -226,6 +226,28 @@ export async function fetchSalesCreditInvestigationById(id) {
   }
 }
 
+export async function fetchSalesFieldReports() {
+  try {
+    const response = await apiClient.get('/sales/field-reports');
+    return response.data;
+  } catch (error) {
+    console.error('Failed to fetch sales field reports:', error);
+    return { success: false, data: [], count: 0 };
+  }
+}
+
+export async function submitSalesFieldReport(payload) {
+  try {
+    const response = await apiClient.post('/sales/field-reports', payload);
+    return response.data;
+  } catch (error) {
+    return {
+      success: false,
+      message: error.response?.data?.message || 'Failed to submit report.',
+    };
+  }
+}
+
 export async function fetchSalesAuditLogs(params = {}) {
   try {
     const response = await apiClient.get('/sales/audit-logs', { params });

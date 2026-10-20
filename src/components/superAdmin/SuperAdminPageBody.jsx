@@ -144,7 +144,7 @@ function DashboardPage({
   const paginated_auditLogs = pagination_auditLogs.paginatedData;
   if (loading) return <LoadingState message="Loading system dashboard..." />;
   const dbColor = health?.dbStatus === 'Online' ? '#4A6B12' : '#dc2626';
-  return <div className="relative z-10 grid gap-[22px] w-full">
+  return <div className="page">
       <section className="panel dashboard-greeting">
         <div className="flex flex-col gap-1">
           <p className="text-[0.82rem] font-bold tracking-widest uppercase text-navy/60 m-0">Super Admin</p>
@@ -342,7 +342,7 @@ function RolesPage({
   const fetchData = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await apiClient.get('/roles');
+      const res = await apiClient.get('/roles', { params: { status: 'all' } });
       if (res.data.success) {
         setRolePermissions(res.data.data.roles);
         setRoles(res.data.data.roles); // roles table view
@@ -420,14 +420,14 @@ function RolesPage({
     }
   };
   const deleteRole = async role => {
-    if (role.slug === 'super_admin') return showToast('Cannot archive super admin.', 'error');
-    if (!window.confirm(`Archive role ${role.name}?`)) return;
+    if (role.slug === 'super_admin') return showToast('Cannot archive Super Admin.', 'error');
+    if (!window.confirm(`Archive role “${role.name}”? The role record is preserved. Active users must be reassigned first.`)) return;
     try {
       await apiClient.delete(`/roles/${role.id}`);
       showToast('Role archived.', 'success');
       fetchData();
     } catch (err) {
-      showToast('Failed to archive role.', 'error');
+      showToast(err.response?.data?.message || 'Failed to archive role.', 'error');
     }
   };
 
@@ -460,20 +460,20 @@ function RolesPage({
     }
   };
   const deletePerm = async perm => {
-    if (!window.confirm(`Archive permission ${perm.label}?`)) return;
+    if (!window.confirm(`Archive permission “${perm.label}”? The permission record is preserved.`)) return;
     try {
       await apiClient.delete(`/permissions/${perm.permission_id}`);
       showToast('Permission archived.', 'success');
       fetchData();
     } catch (err) {
-      showToast('Failed to archive permission.', 'error');
+      showToast(err.response?.data?.message || 'Failed to archive permission.', 'error');
     }
   };
   const pagination_roles = usePagination(roles);
   const paginated_roles = pagination_roles.paginatedData;
   const pagination_permissions = usePagination(permissions);
   const paginated_permissions = pagination_permissions.paginatedData;
-  return <div className="relative z-10 grid gap-[22px] w-full">
+  return <div className="page">
       <div style={{
       display: 'flex',
       gap: 10,
@@ -486,44 +486,45 @@ function RolesPage({
 
       {loading ? <LoadingState message="Loading roles & permissions..." /> : <>
           {tab === 'matrix' && <>
-              <section className="panel content-panel relative overflow-hidden" style={{
-          overflowX: 'auto'
-        }}>
+              <section className="panel content-panel relative overflow-hidden">
                 <div className="flex flex-col md:flex-row justify-between gap-4 items-start md:items-center mb-4">
                   <div>
                     <h3>Role Permission Matrix</h3>
                     <p className="text-ink/70" style={{
                 margin: '2px 0 0',
                 fontSize: '0.85rem'
-              }}>Super Admin row is read-only.</p>
+              }}>Super Admin row is read-only. Archived roles and permissions are hidden.</p>
                   </div>
                   <button className="button" type="button" onClick={savePermissions}>Save Permissions</button>
                 </div>
-                <table className="corvex-table" style={{
-            minWidth: 720
-          }}>
-                  <thead>
-                    <tr>
-                      <th>Role</th>
-                      {permissions.map(p => <th key={p.permission_id} title={p.description}>{p.label}</th>)}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {rolePermissions.map((r, roleIdx) => <tr key={r.id}>
-                        <td><strong>{r.name}</strong></td>
-                        {permissions.map(p => <td key={p.permission_id} style={{
-                  textAlign: 'center'
-                }}>
-                            <input type="checkbox" checked={r.permissions[p.permission_id] || false} disabled={r.slug === 'super_admin'} onChange={() => togglePermission(roleIdx, p.permission_id)} style={{
-                    width: 16,
-                    height: 16,
-                    accentColor: '#255684',
-                    cursor: r.slug === 'super_admin' ? 'not-allowed' : 'pointer'
-                  }} />
-                          </td>)}
-                      </tr>)}
-                  </tbody>
-                </table>
+                <div className="corvex-table-wrapper">
+                  <table className="corvex-table" style={{ minWidth: 720 }}>
+                    <thead>
+                      <tr>
+                        <th>Role</th>
+                        {permissions.filter((p) => String(p.status || 'Active').toLowerCase() !== 'inactive').map(p => <th key={p.permission_id} title={p.description}>{p.label}</th>)}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {rolePermissions.map((r, roleIdx) => {
+                        if (String(r.status || 'Active').toLowerCase() === 'inactive') return null;
+                        return <tr key={r.id}>
+                          <td><strong>{r.name}</strong></td>
+                          {permissions.filter((p) => String(p.status || 'Active').toLowerCase() !== 'inactive').map(p => <td key={p.permission_id} style={{
+                    textAlign: 'center'
+                  }}>
+                              <input type="checkbox" checked={r.permissions[p.permission_id] || false} disabled={r.slug === 'super_admin'} onChange={() => togglePermission(roleIdx, p.permission_id)} style={{
+                      width: 16,
+                      height: 16,
+                      accentColor: '#255684',
+                      cursor: r.slug === 'super_admin' ? 'not-allowed' : 'pointer'
+                    }} />
+                            </td>)}
+                        </tr>;
+                      })}
+                    </tbody>
+                  </table>
+                </div>
               </section>
             </>}
 
@@ -535,17 +536,19 @@ function RolesPage({
                 </div>
                 <><div className="corvex-table-wrapper">
                   <table className="corvex-table">
-                    <thead><tr><th>ID</th><th>Role Name</th><th>Slug</th><th>Created At</th><th>Updated At</th><th>Actions</th></tr></thead>
+                    <thead><tr><th>ID</th><th>Role Name</th><th>Slug</th><th>Status</th><th>Created At</th><th>Actions</th></tr></thead>
                     <tbody>
                       {paginated_roles.map(r => <tr key={r.id}>
                           <td>{r.id}</td>
                           <td><strong>{r.name}</strong></td>
                           <td><code>{r.slug}</code></td>
+                          <td><StatusBadge status={r.status || 'Active'} /></td>
                           <td>{formatDisplayDateTime(r.created_at)}</td>
-                          <td>{formatDisplayDateTime(r.updated_at)}</td>
                           <td className="table-actions">
                             <button className="icon-action-button" type="button" title="Edit" onClick={() => openRoleModal(r)}><NavIcon name="edit" /></button>
-                            <button className="icon-action-button danger" type="button" title="Archive" disabled={r.slug === 'super_admin'} onClick={() => deleteRole(r)}><NavIcon name="archive" /></button>
+                            {String(r.status || 'Active').toLowerCase() !== 'inactive' && r.slug !== 'super_admin' ? (
+                              <button className="icon-action-button danger" type="button" title="Archive" onClick={() => deleteRole(r)}><NavIcon name="archive" /></button>
+                            ) : null}
                           </td>
                         </tr>)}
                     </tbody>
@@ -562,17 +565,18 @@ function RolesPage({
                 </div>
                 <><div className="corvex-table-wrapper">
                   <table className="corvex-table">
-                    <thead><tr><th>ID</th><th>Label</th><th>Description</th><th>Created At</th><th>Updated At</th><th>Actions</th></tr></thead>
+                    <thead><tr><th>ID</th><th>Label</th><th>Description</th><th>Status</th><th>Actions</th></tr></thead>
                     <tbody>
                       {paginated_permissions.map(p => <tr key={p.permission_id}>
                           <td>{p.permission_id}</td>
                           <td><strong>{p.label}</strong></td>
                           <td>{p.description}</td>
-                          <td>{formatDisplayDateTime(p.created_at)}</td>
-                          <td>{p.updated_at ? formatDisplayDateTime(p.updated_at) : '—'}</td>
+                          <td><StatusBadge status={p.status || 'Active'} /></td>
                           <td className="table-actions">
                             <button className="icon-action-button" type="button" title="Edit" onClick={() => openPermModal(p)}><NavIcon name="edit" /></button>
-                            <button className="icon-action-button danger" type="button" title="Archive" onClick={() => deletePerm(p)}><NavIcon name="archive" /></button>
+                            {String(p.status || 'Active').toLowerCase() !== 'inactive' ? (
+                              <button className="icon-action-button danger" type="button" title="Archive" onClick={() => deletePerm(p)}><NavIcon name="archive" /></button>
+                            ) : null}
                           </td>
                         </tr>)}
                     </tbody>
@@ -733,7 +737,7 @@ function SettingsPage({
   };
   if (loading) return <LoadingState message="Loading settings..." />;
   if (!settings) return <EmptyState title="Settings unavailable" description="Company settings could not be loaded." />;
-  return <div className="relative z-10 grid gap-[22px] w-full">
+  return <div className="page">
       <section className="panel form-panel content-panel">
         <div className="flex flex-col md:flex-row justify-between gap-4 items-start md:items-center mb-4"><h3>Company Information</h3></div>
         <div className="grid two-up">
@@ -828,7 +832,7 @@ function BackupPage({
     setConfirmRestore(null);
   };
   if (loading) return <LoadingState message="Loading backups..." />;
-  return <div className="relative z-10 grid gap-[22px] w-full">
+  return <div className="page">
       <Stats stats={[{
       label: 'Total Backups',
       value: String(backups.length)
@@ -907,7 +911,7 @@ function MonitoringPage({
   }, [refresh]);
   if (loading && !health) return <LoadingState message="Loading system health..." />;
   const uptime = health?.processUptimeSeconds != null ? `${Math.floor(health.processUptimeSeconds / 3600)}h ${Math.floor(health.processUptimeSeconds % 3600 / 60)}m` : '—';
-  return <div className="relative z-10 grid gap-[22px] w-full">
+  return <div className="page">
       <Toolbar actions={[{
       label: loading ? 'Refreshing…' : 'Refresh',
       action: 'refresh'
@@ -978,13 +982,17 @@ function AuditLogsPage({
   };
   if (loading) return <LoadingState message="Loading audit logs..." />;
   if (error) return <EmptyState title="Audit logs unavailable" description={error} />;
-  return <div className="relative z-10 grid gap-[22px] w-full">
+  return <div className="page">
       <section className="panel content-panel relative overflow-hidden">
         <div className="flex flex-col md:flex-row justify-between gap-4 items-start md:items-center mb-4">
           <h3>System Audit Log</h3>
           <button className="button" type="button" onClick={exportLogs}>Export PDF</button>
         </div>
-        <input className="filter-input search" type="search" placeholder="Search by user, action, or status" value={search} onChange={(e) => setSearch(e.target.value)} style={{ marginBottom: 12 }} />
+        <div className="list-section-toolbar">
+          <div className="list-section-controls">
+            <input className="filter-input search" type="search" placeholder="Search by user, action, or status" value={search} onChange={(e) => setSearch(e.target.value)} />
+          </div>
+        </div>
         <><div className="corvex-table-wrapper">
           <table className="corvex-table">
             <thead><tr><th>Timestamp</th><th>User</th><th>Action</th><th>IP Address</th><th>Status</th></tr></thead>
@@ -1002,7 +1010,11 @@ function AuditLogsPage({
 function ProfilePage({
   showToast
 }) {
-  return <AccountProfilePanel showToast={showToast} title="Profile Information" />;
+  return <AccountProfilePanel
+    showToast={showToast}
+    title="Super Admin Profile"
+    subtitle="View your personal details and update your account password."
+  />;
 }
 
 // â”€â”€ Users Management (API-Backed) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -1113,18 +1125,18 @@ function UsersPage({
     }
   };
   const deactivateUser = async id => {
-    if (!window.confirm('Are you sure you want to deactivate this user?')) return;
+    if (!window.confirm('Disable this user? They will lose system access. Their record is preserved and can be re-enabled later.')) return;
     try {
       await apiClient.delete(`/users/${id}`);
-      showToast('User deactivated.', 'success');
+      showToast('User disabled.', 'success');
       fetchData();
     } catch (err) {
-      showToast('Failed to deactivate user.', 'error');
+      showToast(err.response?.data?.message || 'Failed to disable user.', 'error');
     }
   };
   const pagination_users = usePagination(users);
   const paginated_users = pagination_users.paginatedData;
-  return <div className="relative z-10 grid gap-[22px] w-full">
+  return <div className="page">
       <section className="panel content-panel relative overflow-hidden">
         <div className="list-section-header">
           <h3>User Directory</h3>
@@ -1185,7 +1197,7 @@ function UsersPage({
                     <td><StatusBadge status={u.status} /></td>
                     <td className="table-actions">
                       <button className="icon-action-button" type="button" title="Edit" onClick={() => openEdit(u)}><NavIcon name="edit" /></button>
-                      <button className="icon-action-button danger" type="button" title="Deactivate" onClick={() => deactivateUser(u.id)}><NavIcon name="trash" /></button>
+                      <button className="icon-action-button danger" type="button" title="Disable" onClick={() => deactivateUser(u.id)}><NavIcon name="ban" /></button>
                     </td>
                   </tr>)}
             </tbody>

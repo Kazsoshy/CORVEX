@@ -8,9 +8,12 @@ import { AreaChart, Area, BarChart, Bar, LineChart, Line, RadarChart, Radar, Pol
 import { AdminPageBody } from '../admin/AdminPageBody';
 import { BranchManagerPageBody } from '../branchManager/BranchManagerPageBody';
 import LeafletMap from '../common/LeafletMap';
+import { OrgLeafletPage } from './OrgLeafletPage';
+import { SawResultsPage } from './SawResultsPage';
 import { BRANCHES, BRANCH_RADAR, ENTERPRISE_KPIS, LEAFLET_LAYERS, MONTHLY_COLLECTIONS, MONTHLY_DELINQUENCY, MONTHLY_REVENUE, REPORT_CATEGORIES, TREND_DATA, WEEKLY_COLLECTION_RATE, WEEKLY_SALES_RATE, SALES_ANALYTICS, INVENTORY_ANALYTICS, PAYMENT_ANALYTICS, formatCurrency, getBranchById, getHighestPerformingBranch, getLowestPerformingBranch } from '../../data/operatingManagerMockData';
 import { fetchOperationalAlerts, patchOperationalAlert, mapOperationalAlertRow } from '../../api/operationalAlertsService.js';
-import { fetchNotifications, markNotificationRead, markAllNotificationsRead, mapNotificationRow } from '../../api/notificationService.js';
+import { fetchNotifications, markNotificationRead, markAllNotificationsRead, mapNotificationRow, countUnreadNotifications } from '../../api/notificationService.js';
+import { AccountProfilePanel } from '../shared/AccountProfilePanel';
 import { formatDisplayDate, formatDisplayDateTime } from '../../utils/formatters.js';
 import { getPresetDateRange } from '../../utils/analyticsDateRange.js';
 import { formatMiddleNameDisplay } from '../../utils/customerDisplay.js';
@@ -20,14 +23,13 @@ import apiClient from '../../api/apiClient';
 import { fetchCustomers, fetchCustomerById } from '../../api/salesService';
 import { EmptyState } from '../shared/EmptyState';
 import { LoadingState } from '../shared/LoadingState';
-import { AccountProfilePanel } from '../shared/AccountProfilePanel';
+import { DetailRowsTable } from '../shared/DetailRowsTable';
 import { NavIcon } from '../../navIcons';
 import { getCurrentUser } from '../../api/authService';
 import { TerritoriesPage } from '../territories/TerritoriesPage';
 import { SalesHistoryPage } from '../sales/SalesPageBody';
 import { InvoiceDetailsPage } from '../sales/InvoiceDetailsPage';
 import { fetchDigitalReceipts } from '../../api/digitalReceiptsService';
-import { fetchSawResults } from '../../api/sawResultsService';
 const COLORS = ['#255684', '#0c1031', '#ef4444', '#f59e0b'];
 const BRANCH_COLORS = {
   'Davao City': '#255684',
@@ -87,14 +89,27 @@ function DashboardPage({
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [unreadCount, setUnreadCount] = useState(0);
+  const [recentNotifications, setRecentNotifications] = useState([]);
   useEffect(() => {
     async function load() {
       setLoading(true);
-      const result = await getExecutiveDashboard();
+      const [result, notifRes] = await Promise.all([
+        getExecutiveDashboard(),
+        fetchNotifications(),
+      ]);
       if (result.success) {
         setData(result.data);
       } else {
         setError('Failed to load dashboard data.');
+      }
+      if (notifRes.success) {
+        const mapped = (notifRes.data || []).map((row) => mapNotificationRow(row, {
+          opsBase: '/operating-manager',
+          orgBase: '/operating-manager',
+        }));
+        setUnreadCount(countUnreadNotifications(mapped));
+        setRecentNotifications(mapped.slice(0, 6));
       }
       setLoading(false);
     }
@@ -148,12 +163,52 @@ function DashboardPage({
           <h2>{currentUser?.fullName || 'Operating Manager'}</h2>
           <p className="muted">{formatDisplayDate(new Date())}</p>
         </div>
-        <Link to="/operating-manager/notifications" className="notification-bell" aria-label="Notifications" style={{
+        <Link to="/operating-manager/notifications" className="notification-bell relative" aria-label={`${unreadCount} unread notifications`} style={{
         flexShrink: 0,
         alignSelf: 'flex-start'
       }}>
           <NavIcon name="bell" />
+          {unreadCount > 0 ? (
+            <span className="absolute top-0 right-0 min-w-[18px] h-[18px] px-1 flex justify-center items-center rounded-full bg-red text-white text-[0.7rem] font-bold border-2 border-mint">
+              {unreadCount}
+            </span>
+          ) : null}
         </Link>
+      </section>
+
+      {/* ── Operational updates (FR-38) ── */}
+      <section className="panel content-panel relative overflow-hidden">
+        <div className="list-section-header">
+          <div>
+            <h3 style={{ margin: 0 }}>Operational Updates</h3>
+            <p className="text-ink/70" style={{ margin: '4px 0 0', fontSize: '0.85rem' }}>
+              Overdue accounts, approvals, and other org alerts
+            </p>
+          </div>
+          <button className="button secondary" type="button" onClick={() => navigate('/operating-manager/notifications')}>
+            Open inbox
+          </button>
+        </div>
+        {recentNotifications.length ? (
+          <ul className="notification-list" style={{ margin: 0 }}>
+            {recentNotifications.map((n) => (
+              <li key={n.id} className={`notification-item${n.read ? '' : ' unread'}`}>
+                <div>
+                  <strong>{n.title || n.category}</strong>
+                  <p className="muted">{n.message}</p>
+                  <span className="notification-time">{formatDisplayDateTime(n.time)}</span>
+                </div>
+                <div className="notification-actions">
+                  {n.relatedTo ? (
+                    <button className="button ghost" type="button" onClick={() => navigate(n.relatedTo)}>Open</button>
+                  ) : null}
+                </div>
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <EmptyState title="No operational updates" description="Overdue and schedule digests appear here when they are generated." />
+        )}
       </section>
 
       {/* ── KPI Cards (all traceable to DB) ── */}
@@ -970,7 +1025,7 @@ function BranchDetailPage({
   return <div className="page">
       <section className="panel dashboard-greeting">
         <div className="dashboard-greeting-main">
-          <p className="dashboard-eyebrow">{branch.status}</p>
+          <p className="dashboard-eyebrow"><StatusBadge status={branch.status} /></p>
           <h2>{branch.name}</h2>
           <p className="muted">{branch.collectors} collectors · {branch.salesAgents} sales agents · {branch.locations} locations</p>
         </div>
@@ -1298,23 +1353,20 @@ function CustomerRecordsPage({
 
       <section className="panel content-panel">
         <div className="list-section-header"><h3>All Customer Accounts <span className="text-ink/70">({filtered.length})</span></h3></div>
-        <div className="list-section-toolbar" style={{
-        marginBottom: 12
-      }}>
+        <div className="list-section-toolbar">
           <div className="list-section-controls">
             <input
               className="filter-input search"
-              style={{ flex: '1 1 360px', height: 40 }}
               type="search"
               placeholder="Search by customer name, address, or contact phone"
               value={search}
               onChange={e => setSearch(e.target.value)}
             />
-            <select className="filter-select" style={{ flex: '0 1 180px', height: 40 }} value={branchFilter} onChange={e => setBranchFilter(e.target.value)}>
+            <select className="filter-select" value={branchFilter} onChange={e => setBranchFilter(e.target.value)}>
               <option value="All">All Branches</option>
               {BRANCHES.map(b => <option key={b.id} value={b.name}>{b.name}</option>)}
             </select>
-            <select className="filter-select" style={{ flex: '0 1 180px', height: 40 }} value={statusFilter} onChange={e => setStatusFilter(e.target.value)}>
+            <select className="filter-select" value={statusFilter} onChange={e => setStatusFilter(e.target.value)}>
               {['All', 'Active', 'Inactive'].map(s => <option key={s} value={s}>{s === 'All' ? 'All Statuses' : s}</option>)}
             </select>
           </div>
@@ -1370,7 +1422,7 @@ function CustomerDetailPage({
   return <div className="page">
       <section className="panel dashboard-greeting">
         <div className="dashboard-greeting-main">
-          <p className="dashboard-eyebrow">{customer.status}</p>
+          <p className="dashboard-eyebrow"><StatusBadge status={customer.status} /></p>
           <h2>{name}</h2>
           <p className="muted">{customer.branch_name} Branch · {customer.address}</p>
         </div>
@@ -1390,38 +1442,42 @@ function CustomerDetailPage({
       <div className="grid two-up">
         <section className="panel content-panel">
           <div className="panel-section-header"><h3>Account Information</h3></div>
-          <ul className="info-grid">
-            <li><span className="info-item-label">Name</span><span className="info-item-value">{name}</span></li>
-            <li><span className="info-item-label">Middle Name</span><span className="info-item-value">{formatMiddleNameDisplay(customer.middle_name)}</span></li>
-            <li><span className="info-item-label">Address</span><span className="info-item-value">{customer.address}</span></li>
-            <li><span className="info-item-label">Contact Phone</span><span className="info-item-value">{customer.contact_phone}</span></li>
-            <li><span className="info-item-label">Contact Person</span><span className="info-item-value">{customer.contact_person_fname} {customer.contact_person_lname}</span></li>
-            <li><span className="info-item-label">Contact Person Middle Name</span><span className="info-item-value">{formatMiddleNameDisplay(customer.contact_person_mname)}</span></li>
-            <li><span className="info-item-label">Contact Person Phone</span><span className="info-item-value">{customer.contact_person_phone}</span></li>
-            <li><span className="info-item-label">Status</span><span className="info-item-value">{customer.status}</span></li>
-          </ul>
+          <DetailRowsTable rows={[
+            { label: 'Name', value: name },
+            { label: 'Middle Name', value: formatMiddleNameDisplay(customer.middle_name) },
+            { label: 'Address', value: customer.address || '—' },
+            { label: 'Contact Phone', value: customer.contact_phone || '—' },
+            { label: 'Contact Person', value: [customer.contact_person_fname, customer.contact_person_lname].filter(Boolean).join(' ') || '—' },
+            { label: 'Contact Person Middle Name', value: formatMiddleNameDisplay(customer.contact_person_mname) },
+            { label: 'Contact Person Phone', value: customer.contact_person_phone || '—' },
+            { label: 'Status', value: <StatusBadge status={customer.status} /> },
+          ]} />
         </section>
 
         {customer.activity && <section className="panel content-panel">
             <div className="panel-section-header"><h3>Account Activity</h3></div>
-            <ul className="info-grid">
-              <li><span className="info-item-label">Outstanding Balance</span><span className="info-item-value">{formatCurrency(Number(customer.activity.outstanding_balance || 0))}</span></li>
-              <li><span className="info-item-label">Purchase Volume</span><span className="info-item-value">{formatCurrency(Number(customer.activity.purchase_volume || 0))}</span></li>
-              <li><span className="info-item-label">Last Collection</span><span className="info-item-value">{customer.activity.last_collection_date || '—'}</span></li>
-              <li><span className="info-item-label">Last Sales Visit</span><span className="info-item-value">{customer.activity.last_sales_visit || '—'}</span></li>
-            </ul>
+            <DetailRowsTable
+              fieldHeader="Activity"
+              detailsHeader="Details"
+              rows={[
+                { label: 'Outstanding Balance', value: formatCurrency(Number(customer.activity.outstanding_balance || 0)) },
+                { label: 'Purchase Volume', value: formatCurrency(Number(customer.activity.purchase_volume || 0)) },
+                { label: 'Last Collection', value: customer.activity.last_collection_date ? formatDisplayDate(customer.activity.last_collection_date) : '—' },
+                { label: 'Last Sales Visit', value: customer.activity.last_sales_visit ? formatDisplayDate(customer.activity.last_sales_visit) : '—' },
+              ]}
+            />
           </section>}
       </div>
 
       {customer.creditInfo && <section className="panel content-panel">
           <div className="panel-section-header"><h3>Credit Information</h3></div>
-          <ul className="info-grid">
-            <li><span className="info-item-label">Credit Limit</span><span className="info-item-value">{formatCurrency(Number(customer.creditInfo.credit_limit || 0))}</span></li>
-            <li><span className="info-item-label">Monthly Income</span><span className="info-item-value">{formatCurrency(Number(customer.creditInfo.monthly_income || 0))}</span></li>
-            <li><span className="info-item-label">Credit Score</span><span className="info-item-value">{customer.creditInfo.credit_score || '—'}</span></li>
-            <li><span className="info-item-label">Employment Status</span><span className="info-item-value">{customer.creditInfo.employment_status || '—'}</span></li>
-            <li><span className="info-item-label">Approved Date</span><span className="info-item-value">{customer.creditInfo.approved_date || '—'}</span></li>
-          </ul>
+          <DetailRowsTable rows={[
+            { label: 'Credit Limit', value: formatCurrency(Number(customer.creditInfo.credit_limit || 0)) },
+            { label: 'Monthly Income', value: formatCurrency(Number(customer.creditInfo.monthly_income || 0)) },
+            { label: 'Credit Score', value: customer.creditInfo.credit_score || '—' },
+            { label: 'Employment Status', value: customer.creditInfo.employment_status || '—' },
+            { label: 'Approved Date', value: customer.creditInfo.approved_date ? formatDisplayDate(customer.creditInfo.approved_date) : '—' },
+          ]} />
         </section>}
 
       <PageToolbar actions={[{
@@ -1434,7 +1490,11 @@ function CustomerDetailPage({
 function ProfilePage({
   showToast
 }) {
-  return <AccountProfilePanel showToast={showToast} title="Operating Manager Information" />;
+  return <AccountProfilePanel
+    showToast={showToast}
+    title="Operating Manager Profile"
+    subtitle="View your personal details and update your account password."
+  />;
 }
 const ANALYTIC_RANGE_OPTIONS = [{
   value: 'today',
@@ -1620,6 +1680,25 @@ function formatPctChangeValue(currentTotal, previousTotal) {
     label: `${change > 0 ? '+' : change < 0 ? '-' : ''}${formatted}%`,
     absLabel: `${formatted}%`
   };
+}
+
+/** Collections Summary Growth cell: 0% when branch collections are zero; else branch rate if present. */
+function formatBranchCollectionGrowth(branch, summary) {
+  const raw = branch?.totalCollections;
+  if (raw === null || raw === undefined) return '—';
+  const collections = Number(raw);
+  if (!Number.isFinite(collections)) return '—';
+  if (collections === 0) return '0%';
+
+  const branchRate = branch?.collectionGrowthRate;
+  const rate = branchRate !== null && branchRate !== undefined
+    ? Number(branchRate)
+    : summary?.collectionGrowthRate === null || summary?.collectionGrowthRate === undefined
+      ? null
+      : Number(summary.collectionGrowthRate);
+
+  if (rate === null || !Number.isFinite(rate)) return '—';
+  return `${rate >= 0 ? '+' : ''}${rate}%`;
 }
 
 function describePeriodChange({
@@ -1835,22 +1914,23 @@ function LiveOperationsDashboardPage({
           label: 'Outstanding Balance',
           value: formatCurrency(data.summary.totalOutstandingBalance),
           icon: 'credit-card',
-          title: 'Sum of current unpaid customer balances as of the reporting date. This is not new unpaid amounts recorded during the selected period.'
+          title: 'Total unpaid balances as of the reporting date.'
         }, {
           label: 'Overdue Accounts',
           value: String(data.summary.overdueCount),
           icon: 'clock',
-          title: 'Count of unique customer accounts with outstanding_balance > 0 as of the reporting date. This is not a due-date aging count of invoices.'
+          title: 'Number of customer accounts with outstanding balances.'
         }, {
           label: 'Route Compliance',
           value: `${data.summary.routeCompliance}%`,
           icon: 'route',
-          title: 'Route compliance = Completed visits ÷ Total scheduled visits × 100 for the selected period. A visit qualifies when its status is Completed.'
+          title: 'Route compliance = Completed visits ÷ Scheduled visits × 100.'
+          // Kindly check whether this is still applicable, it needs to be updated to reflect the new definition of route compliance.
         }, {
           label: 'Inventory Health',
           value: `${data.summary.inventoryHealth}%`,
           icon: 'package',
-          title: 'Inventory health = Items not out of stock ÷ Total monitored items × 100. 100% means no monitored items are out of stock; low-stock items may still be included.'
+          title: 'Inventory health = In-stock items ÷ Total monitored items × 100.'
         }]} />
       </section>
 
@@ -1911,7 +1991,7 @@ function LiveOperationsDashboardPage({
           return [{
             key: 'collections',
             label: 'Collections',
-            icon: 'dollar-sign',
+            icon: 'philippine-peso',
             trendIcon: data.summary.collectionGrowthRate > 0 ? 'trending-up' : data.summary.collectionGrowthRate < 0 ? 'trending-down' : 'minus',
             value: formatCurrency(data.summary.totalCollections),
             previousValue: data.summary.totalCollectionsPrevious != null ? formatCurrency(data.summary.totalCollectionsPrevious) : null,
@@ -2599,7 +2679,7 @@ function LiveReportsPage({
                 {(data.branchSummary || []).map(branch => <tr key={branch.branchId}>
                     <td>{branch.branchName}</td>
                     <td>{formatCurrency(branch.totalCollections)}</td>
-                    <td>{data.summary.collectionGrowthRate === null ? '—' : `${data.summary.collectionGrowthRate >= 0 ? '+' : ''}${data.summary.collectionGrowthRate}%`}</td>
+                    <td>{formatBranchCollectionGrowth(branch, data.summary)}</td>
                     <td>{branch.routeCompliance}%</td>
                   </tr>)}
               </tbody>
@@ -2826,92 +2906,6 @@ function LiveHistoricalTrendsPage() {
         </section> : null}
     </div>;
 }
-function LiveLeafletPage({
-  navigate,
-  subPage
-}) {
-  const [branches, setBranches] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [filters, setFilters] = useState({
-    branch: 'All Branches',
-    dateRange: 'This Month',
-    staffType: 'All Staff'
-  });
-  useEffect(() => {
-    let cancelled = false;
-    async function load() {
-      setLoading(true);
-      try {
-        const response = await apiClient.get('/dashboard/branches');
-        if (!cancelled && response.data.success) setBranches(response.data.data);
-      } catch (err) {
-        console.error('[LiveLeafletPage] load error:', err.message);
-      }
-      if (!cancelled) setLoading(false);
-    }
-    load();
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-  const markers = useMemo(() => branches.filter(branch => branch.latitude && branch.longitude).map(branch => ({
-    id: branch.id,
-    position: [Number(branch.latitude), Number(branch.longitude)],
-    label: (branch.branch_name || branch.name || '').slice(0, 2).toUpperCase(),
-    color: '#0c1031',
-    popup: `${branch.branch_name || branch.name} · ${branch.status}`
-  })), [branches]);
-  if (loading) return <LoadingState message="Loading map data…" />;
-  return <div className="page">
-      <section className="panel content-panel">
-        <div className="panel-section-header"><h3>Map Filters</h3></div>
-        <div className="accounts-filters">
-          <select className="filter-select" value={filters.branch} onChange={e => setFilters(current => ({
-          ...current,
-          branch: e.target.value
-        }))}>
-            <option>All Branches</option>
-            {branches.map(branch => <option key={branch.id}>{branch.branch_name || branch.name}</option>)}
-          </select>
-          <select className="filter-select" value={filters.dateRange} onChange={e => setFilters(current => ({
-          ...current,
-          dateRange: e.target.value
-        }))}>
-            {['Today', 'This Week', 'This Month', 'This Quarter', 'This Year'].map(value => <option key={value}>{value}</option>)}
-          </select>
-          <select className="filter-select" value={filters.staffType} onChange={e => setFilters(current => ({
-          ...current,
-          staffType: e.target.value
-        }))}>
-            {['All Staff', 'Collectors', 'Sales Agents'].map(value => <option key={value}>{value}</option>)}
-          </select>
-        </div>
-      </section>
-      <section className="panel content-panel">
-        <div className="panel-section-header">
-          <h3>{subPage ? {
-            delinquency: 'Delinquency Heatmap',
-            profitability: 'Profitability Analysis',
-            territory: 'Territory Analysis'
-          }[subPage] : 'Leaflet | OpenStreetMap'}</h3>
-        </div>
-        <LeafletMap markers={markers} center={[6.7534, 125.6558]} zoom={8} height={560} />
-      </section>
-      <PageToolbar actions={[{
-      label: 'Delinquency Heatmap',
-      to: '/operating-manager/leaflet/delinquency',
-      variant: 'secondary'
-    }, {
-      label: 'Profitability Analysis',
-      to: '/operating-manager/leaflet/profitability',
-      variant: 'secondary'
-    }, {
-      label: 'Territory Analysis',
-      to: '/operating-manager/leaflet/territory',
-      variant: 'secondary'
-    }]} onAction={action => navigate(action.to)} />
-    </div>;
-}
 
 // ── Digital Receipts ──────────────────────────────────────────────────────────
 function DigitalReceiptsPage({
@@ -2971,67 +2965,6 @@ function DigitalReceiptsPage({
               </tbody>
             </table>
           </div><Pagination {...pagination_receipts} /></>}
-      </section>
-    </div>;
-}
-
-// ── SAW Results (View-Only) ───────────────────────────────────────────────────
-function SawResultsPage({
-  navigate,
-  showToast
-}) {
-  const [results, setResults] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [search, setSearch] = useState('');
-  useEffect(() => {
-    async function load() {
-      setLoading(true);
-      try {
-        const result = await fetchSawResults(search ? {
-          search
-        } : {});
-        if (result.success) setResults(result.data || []);
-      } catch (err) {
-        showToast('Failed to load SAW results.', 'error');
-      }
-      setLoading(false);
-    }
-    const t = setTimeout(load, 300);
-    return () => clearTimeout(t);
-  }, [search]);
-  const pagination_results = usePagination(results);
-  const paginated_results = pagination_results.paginatedData;
-  if (loading) return <LoadingState message="Loading SAW results…" />;
-  return <div className="page">
-      <section className="panel content-panel">
-        <div className="list-section-header">
-          <h3>SAW Results <span className="text-ink/70" style={{
-              fontWeight: 400,
-              fontSize: '0.88rem'
-            }}>({results.length})</span></h3>
-        </div>
-        <div className="list-section-toolbar">
-          <p className="list-section-subtitle">Simple Additive Weighting — view only</p>
-          <div className="search-bar">
-            <NavIcon name="search" />
-            <input className="search-input" type="search" placeholder="Search by customer name…" value={search} onChange={e => setSearch(e.target.value)} />
-          </div>
-        </div>
-        {results.length === 0 ? <EmptyState title="No SAW results found" /> : <><div className="corvex-table-wrapper">
-            <table className="corvex-table">
-              <thead><tr><th>Rank</th><th>Customer</th><th>Score</th><th>Generated At</th></tr></thead>
-              <tbody>
-                {paginated_results.map(r => <tr key={r.result_id}>
-                    <td><strong>#{r.ranking}</strong></td>
-                    <td>{r.customer_name || `Customer #${r.customer_id}`}</td>
-                    <td style={{
-                  fontFamily: 'monospace'
-                }}>{Number(r.score).toFixed(4)}</td>
-                    <td>{formatDisplayDateTime(r.generated_at)}</td>
-                  </tr>)}
-              </tbody>
-            </table>
-          </div><Pagination {...pagination_results} /></>}
       </section>
     </div>;
 }
@@ -3152,6 +3085,9 @@ export function OperatingManagerPageBody({
   switch (page.pageType) {
     case 'dashboard':
       return <LiveOperationsDashboardPage {...props} />;
+    case 'inventoryCentralization':
+    case 'inventoryCentralizationRedirect':
+      return <HiddenPageRedirect navigate={navigate} to="/operating-manager/admin/inventory" />;
     case 'branchPerformance':
       return <LiveBranchComparisonPage {...props} />;
     case 'branchComparison':
@@ -3161,13 +3097,13 @@ export function OperatingManagerPageBody({
     case 'historicalTrends':
       return <LiveHistoricalTrendsPage {...props} />;
     case 'leafletMap':
-      return <LiveLeafletPage {...props} />;
+      return <OrgLeafletPage pageType="leafletMap" navigate={props.navigate} showToast={props.showToast} />;
     case 'leafletDelinquency':
-      return <LiveLeafletPage {...props} subPage="delinquency" />;
+      return <OrgLeafletPage pageType="leafletDelinquency" navigate={props.navigate} showToast={props.showToast} />;
     case 'leafletProfitability':
-      return <LiveLeafletPage {...props} subPage="profitability" />;
+      return <OrgLeafletPage pageType="leafletProfitability" navigate={props.navigate} showToast={props.showToast} />;
     case 'leafletTerritory':
-      return <LiveLeafletPage {...props} subPage="territory" />;
+      return <OrgLeafletPage pageType="leafletTerritory" navigate={props.navigate} showToast={props.showToast} />;
     case 'reports':
     case 'reportCollections':
     case 'reportSales':

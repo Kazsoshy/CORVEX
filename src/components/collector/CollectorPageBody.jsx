@@ -24,13 +24,14 @@ import {
   submitCollectorIncident,
 } from '../../api/collectorService';
 import { fetchNotifications } from '../../api/notificationService.js';
-import { fetchMyProfile, updateMyProfile } from '../../api/profileService.js';
-import { getCurrentUser, persistCurrentUserFromProfile, requestLogout } from '../../api/authService.js';
+import { getCurrentUser } from '../../api/authService.js';
 import { downloadPdf } from '../../utils/dataExport';
 import { collectorMapPath, openPhoneCall } from '../../utils/mapsNavigation';
 import { NotificationsInbox } from '../shared/NotificationsInbox';
 import { EmptyState } from '../shared/EmptyState';
 import { LoadingState } from '../shared/LoadingState';
+import { DetailRowsTable } from '../shared/DetailRowsTable';
+import { AccountProfilePanel } from '../shared/AccountProfilePanel';
 import { NavIcon } from '../../navIcons';
 import LeafletMap from '../common/LeafletMap';
 import CollectionRouteMap from './CollectionRouteMap';
@@ -82,7 +83,7 @@ function collectorOpenMap(account, navigate, parentContext = 'accounts') {
 
 function resolveCollectorNotificationPath(category) {
   const c = String(category || '').toLowerCase();
-  if (c.includes('route') || c.includes('visit')) return '/collector/route';
+  if (c.includes('schedule') || c.includes('route') || c.includes('visit')) return '/collector/route';
   if (c.includes('receipt') || c.includes('collection')) return '/collector/history';
   if (c.includes('ci') || c.includes('credit')) return '/collector/accounts';
   return '/collector/notifications';
@@ -96,6 +97,7 @@ function DashboardPage({
   const today = formatDisplayDate(new Date());
   const [dashboard, setDashboard] = useState(null);
   const [unreadCount, setUnreadCount] = useState(0);
+  const [scheduleNotices, setScheduleNotices] = useState([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -108,7 +110,9 @@ function DashboardPage({
       if (dashRes.success) setDashboard(dashRes.data);
       else if (showToast) showToast(dashRes.message || 'Failed to load dashboard.', 'error');
       if (notifRes.success) {
-        setUnreadCount((notifRes.data || []).filter(n => n.status !== 'Read').length);
+        const rows = notifRes.data || [];
+        setUnreadCount(rows.filter(n => n.status !== 'Read').length);
+        setScheduleNotices(rows.filter((n) => String(n.category || '').toLowerCase().includes('schedule')).slice(0, 4));
       }
       setLoading(false);
     }
@@ -124,7 +128,7 @@ function DashboardPage({
 
   if (loading) return <LoadingState message="Loading dashboard..." />;
 
-  return <div className="relative z-10 grid gap-[22px] w-full">
+  return <div className="page">
       <section className="panel dashboard-greeting">
         <div className="flex flex-col gap-1">
           <p className="text-[0.82rem] font-bold tracking-widest uppercase text-navy/60 m-0">Good morning</p>
@@ -150,6 +154,25 @@ function DashboardPage({
       label: 'Collections Today',
       value: String(summary.collectionsToday ?? 0)
     }]} />
+
+      {scheduleNotices.length ? (
+        <section className="panel content-panel relative overflow-hidden">
+          <div className="list-section-header">
+            <h3 style={{ margin: 0 }}>Today&apos;s schedule alerts</h3>
+            <button className="button secondary" type="button" onClick={() => navigate('/collector/route')}>Open route</button>
+          </div>
+          <ul className="notification-list" style={{ margin: 0 }}>
+            {scheduleNotices.map((n) => (
+              <li key={n.notification_id} className={`notification-item${n.status === 'Read' ? '' : ' unread'}`}>
+                <div>
+                  <strong>{n.title}</strong>
+                  <p className="muted">{n.message}</p>
+                </div>
+              </li>
+            ))}
+          </ul>
+        </section>
+      ) : null}
 
       <div className="flex flex-wrap gap-2 justify-end mt-2 mb-2">
         <button className="button secondary" type="button" onClick={() => navigate('/collector/accounts')}>View Accounts</button>
@@ -294,7 +317,7 @@ function FieldActivityReportsPage({
   const pagination_reports = usePagination(reports);
   const paginated_reports = pagination_reports.paginatedData;
   if (loading) return <LoadingState message="Loading field activity reports..." />;
-  return <div className="relative z-10 grid gap-[22px] w-full">
+  return <div className="page">
       <section className="panel content-panel relative overflow-hidden">
         <div className="flex flex-col md:flex-row justify-between gap-4 items-start md:items-center mb-4">
           <div>
@@ -464,6 +487,10 @@ function FieldActivityReportsPage({
         </section> : <EmptyState title="No field activity reports yet" description="Submit a report after completing a route stop." />}
     </div>;
 }
+function isRouteStopCompleted(stop) {
+  return stop.status === 'Completed' || stop.visitStatus === 'Completed';
+}
+
 function RoutePage({
   pageType,
   navigate,
@@ -529,9 +556,14 @@ function RoutePage({
 
   const filteredStops = useMemo(() => {
     if (filter === 'All') return customers;
-    if (filter === 'Pending') return customers.filter(s => s.status === 'Pending' || s.status === 'Overdue');
-    return customers.filter(s => s.status === 'Completed' || s.visitStatus === 'Completed');
+    if (filter === 'Pending') return customers.filter((s) => !isRouteStopCompleted(s));
+    return customers.filter(isRouteStopCompleted);
   }, [filter, customers]);
+  const routeCounts = useMemo(() => ({
+    All: customers.length,
+    Pending: customers.filter((s) => !isRouteStopCompleted(s)).length,
+    Completed: customers.filter(isRouteStopCompleted).length,
+  }), [customers]);
   const actions = [{
     label: 'Route List',
     to: '/collector/route',
@@ -552,7 +584,7 @@ function RoutePage({
 
   if (loading) return <LoadingState message="Loading route..." />;
   if (pageType === 'routeSummary') {
-    return <div className="relative z-10 grid gap-[22px] w-full">
+    return <div className="page">
         <div className="flex flex-wrap gap-2 justify-end mt-2 mb-2">
           {actions.map(a => <button key={a.label} className={a.variant === 'secondary' ? 'button secondary' : 'button'} type="button" onClick={() => navigate(a.to)}>{a.label}</button>)}
         </div>
@@ -577,15 +609,15 @@ function RoutePage({
           <div className="flex flex-col md:flex-row justify-between gap-4 items-start md:items-center mb-4">
             <h3>Route Summary</h3>
           </div>
-          <ul className="info-grid">
-            <li><span className="info-item-label">Total Outstanding on Route</span><span className="info-item-value">{formatCurrency(customers.reduce((sum, s) => sum + (s.outstandingBalance || 0), 0))}</span></li>
-            <li><span className="info-item-label">Pending / Overdue Visits</span><span className="info-item-value">{customers.filter(s => s.status !== 'Completed').length} stops</span></li>
-            <li><span className="info-item-label">Completed Visits</span><span className="info-item-value">{customers.filter(s => s.status === 'Completed').length} stops</span></li>
-          </ul>
+          <DetailRowsTable rows={[
+            { label: 'Total Outstanding on Route', value: formatCurrency(customers.reduce((sum, s) => sum + (s.outstandingBalance || 0), 0)) },
+            { label: 'Pending / Overdue Visits', value: `${routeCounts.Pending} stops` },
+            { label: 'Completed Visits', value: `${routeCounts.Completed} stops` },
+          ]} />
         </section>
       </div>;
   }
-  return <div className="relative z-10 grid gap-[22px] w-full">
+  return <div className="page">
       <div className="flex flex-wrap gap-2 justify-end mt-2 mb-2">
         {actions.map(a => <button key={a.label} className={a.variant === 'secondary' ? 'button secondary' : 'button'} type="button" onClick={() => navigate(a.to)}>{a.label}</button>)}
       </div>
@@ -598,24 +630,7 @@ function RoutePage({
     }, {
       label: 'Road distance',
       value: roadStats?.distanceKm != null ? `${roadStats.distanceKm} km` : '—'
-    }]} />
-      <section className="panel content-panel relative overflow-hidden" style={{
-      padding: '14px 20px'
-    }}>
-        <p style={{
-        margin: 0,
-        fontSize: '0.85rem',
-        color: '#818697'
-      }}>
-          <strong style={{
-          color: '#0c1031'
-        }}>Today&apos;s collection route</strong>
-        {' '}
-        {assignmentMode
-          ? '— BM assigns today’s stops; SAW sets collection priority; OSRM (OpenStreetMap roads) draws the driving path on the map.'
-          : '— Customers are ordered by outstanding balance and urgency.'}
-        </p>
-      </section>
+      }]} />
       {noAssignedRoute ? (
         <EmptyState
           title="No route assigned for today"
@@ -634,7 +649,7 @@ function RoutePage({
           <div className="inline-toolbar">
             <div className="segmented-control">
               {['All', 'Pending', 'Completed'].map(item => <button key={item} className={filter === item ? 'segment active' : 'segment'} type="button" onClick={() => setFilter(item)}>
-                  {item}
+                  {item} ({routeCounts[item]})
                 </button>)}
             </div>
             {pageType !== 'routeMap' ? <button className="button secondary" type="button" onClick={() => setShowMap(!showMap)}>
@@ -766,7 +781,7 @@ function CustomerMapPage({
     ? [{ id: 'nav-leg', positions: roadLeg.positions, color: '#0c1031', weight: 4 }]
     : [];
 
-  return <div className="relative z-10 grid gap-[22px] w-full">
+  return <div className="page">
       <section className="panel content-panel relative overflow-hidden">
         <div className="flex flex-col md:flex-row justify-between gap-4 items-start md:items-center mb-4">
           <div>
@@ -865,37 +880,18 @@ function AccountsPage({
   });
   const rows = pagination.paginatedData;
   if (loading) return <LoadingState message="Loading customers..." />;
-  return <div className="relative z-10 grid gap-[22px] w-full">
+  return <div className="page">
       <section className="panel content-panel relative overflow-hidden">
         <div className="list-section-header">
           <h3>Customer List <span className="text-ink/70">({filteredCustomers.length})</span></h3>
         </div>
-        <div className="list-section-toolbar" style={{
-        marginBottom: 12
-      }}>
+        <div className="list-section-toolbar">
           <div className="list-section-controls">
-            <input className="filter-input search" type="search" placeholder="Search by customer name, account number, or phone" value={search} onChange={e => setSearch(e.target.value)} style={{
-            padding: '8px 12px',
-            borderRadius: '6px',
-            border: '1px solid #c5c8d0',
-            fontSize: '0.9rem',
-            flex: 1,
-            minWidth: '200px'
-          }} />
-            <select className="filter-select" value={filter} onChange={e => setFilter(e.target.value)} style={{
-            padding: '8px 12px',
-            borderRadius: '6px',
-            border: '1px solid #c5c8d0',
-            fontSize: '0.9rem'
-          }}>
+            <input className="filter-input search" type="search" placeholder="Search by customer name, account number, or phone" value={search} onChange={e => setSearch(e.target.value)} />
+            <select className="filter-select" value={filter} onChange={e => setFilter(e.target.value)}>
               {['All Customers', 'Assigned Today', 'Pending', 'Completed', 'Overdue', 'Blacklisted'].map(option => <option key={option} value={option}>{option}</option>)}
             </select>
-            <select className="filter-select" value={sortBy} onChange={e => setSortBy(e.target.value)} style={{
-            padding: '8px 12px',
-            borderRadius: '6px',
-            border: '1px solid #c5c8d0',
-            fontSize: '0.9rem'
-          }}>
+            <select className="filter-select" value={sortBy} onChange={e => setSortBy(e.target.value)}>
               {['Name', 'Outstanding Balance', 'Days Overdue', 'Distance'].map(option => <option key={option} value={option}>Sort: {option}</option>)}
             </select>
           </div>
@@ -970,7 +966,7 @@ function AccountDetailPage({
   }
   const backTo = parentContext === 'route' ? '/collector/route' : '/collector/accounts';
   const contextQuery = `?from=${parentContext}`;
-  return <div className="relative z-10 grid gap-[22px] w-full">
+  return <div className="page">
       <StatsGrid stats={[{
       label: 'Outstanding Balance',
       value: formatCurrency(account.outstandingBalance || 0)
@@ -997,13 +993,13 @@ function AccountDetailPage({
           <p className="text-ink/70">{account.accountNumber}</p>
         </div>
         <div className="account-detail-grid two-up">
-          <div>
-            <p><strong>Address:</strong> {account.address}</p>
-            <p><strong>Contact:</strong> {account.phone}</p>
-            <p><strong>Branch:</strong> {account.branch_name || '—'}</p>
-            <p><strong>Account Manager:</strong> {account.account_manager_name || '—'}</p>
-            <p><strong>Last Visit:</strong> {account.lastVisitDate}</p>
-          </div>
+          <DetailRowsTable rows={[
+            { label: 'Address', value: account.address || '—' },
+            { label: 'Contact', value: account.phone || '—' },
+            { label: 'Branch', value: account.branch_name || '—' },
+            { label: 'Account Manager', value: account.account_manager_name || '—' },
+            { label: 'Last Visit', value: account.lastVisitDate || '—' },
+          ]} />
           <div style={{
           minHeight: 200,
           width: '100%',
@@ -1159,7 +1155,7 @@ function CollectionLogPage({
       navigate(`/collector/account-detail/${account.id}${contextQuery}`);
     }
   };
-  return <div className="relative z-10 grid gap-[22px] w-full">
+  return <div className="page">
       <FormPanel title="Log Payment Collection" formData={formData} onChange={handleChange} errors={errors} fields={[{
       name: 'customerName',
       label: 'Customer Name',
@@ -1254,7 +1250,7 @@ function ReceiptsListPage({
   if (error && !receipts.length) {
     return <EmptyState title="Unable to load receipts" description={error} actionLabel="Retry" onAction={() => window.location.reload()} />;
   }
-  return <div className="relative z-10 grid gap-[22px] w-full">
+  return <div className="page">
       <section className="panel content-panel relative overflow-hidden">
         <div className="list-section-header">
           <h3>Digital Receipts</h3>
@@ -1280,30 +1276,11 @@ function ReceiptsListPage({
             </button>
           </div>
         </div>
-        <div className="list-section-toolbar" style={{
-        marginBottom: 0
-      }}>
+        <div className="list-section-toolbar">
           <div className="list-section-controls">
-            <input className="filter-input search" type="search" placeholder="Search by receipt number, customer, or ID" value={search} onChange={e => setSearch(e.target.value)} style={{
-            padding: '8px 12px',
-            borderRadius: '6px',
-            border: '1px solid #c5c8d0',
-            fontSize: '0.9rem',
-            flex: 1,
-            minWidth: '200px'
-          }} />
-            <input className="filter-input" type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)} aria-label="From date" style={{
-            padding: '8px 12px',
-            borderRadius: '6px',
-            border: '1px solid #c5c8d0',
-            fontSize: '0.9rem'
-          }} />
-            <input className="filter-input" type="date" value={dateTo} onChange={e => setDateTo(e.target.value)} aria-label="To date" style={{
-            padding: '8px 12px',
-            borderRadius: '6px',
-            border: '1px solid #c5c8d0',
-            fontSize: '0.9rem'
-          }} />
+            <input className="filter-input search" type="search" placeholder="Search by receipt number, customer, or ID" value={search} onChange={e => setSearch(e.target.value)} />
+            <input className="filter-input" type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)} aria-label="From date" />
+            <input className="filter-input" type="date" value={dateTo} onChange={e => setDateTo(e.target.value)} aria-label="To date" />
           </div>
           <p className="list-section-subtitle">{receipts.length} record{receipts.length !== 1 ? 's' : ''} in database</p>
         </div>
@@ -1385,7 +1362,7 @@ function DigitalReceiptPage({
   if (error || !receipt) {
     return <EmptyState title="Receipt not found" description={error || 'This receipt does not exist.'} actionLabel="Back to Receipts" onAction={() => navigate('/collector/receipts')} />;
   }
-  return <div className="relative z-10 grid gap-[22px] w-full">
+  return <div className="page">
       {/* Header */}
       <section className="panel dashboard-greeting">
         <div className="flex flex-col gap-1">
@@ -1413,47 +1390,23 @@ function DigitalReceiptPage({
       {/* Full detail */}
       <section className="panel content-panel relative overflow-hidden">
         <div className="flex flex-col md:flex-row justify-between gap-4 items-start md:items-center mb-4"><h3>Receipt Detail</h3></div>
-        <ul className="info-grid">
-          <li><span className="info-item-label">Receipt ID</span>
-              <span className="info-item-value" style={{
-            fontFamily: 'monospace'
-          }}>{receipt.receipts_id}</span></li>
-          <li><span className="info-item-label">Receipt Number</span>
-              <span className="info-item-value" style={{
-            fontFamily: 'monospace'
-          }}>{receipt.receipt_number}</span></li>
-          <li><span className="info-item-label">Receipt Date</span>
-              <span className="info-item-value">{formatDisplayDate(receipt.receipt_date)}</span></li>
-          <li><span className="info-item-label">Generated By</span>
-              <span className="info-item-value">{receipt.generated_by_name || '—'}</span></li>
-          <li><span className="info-item-label">Customer</span>
-              <span className="info-item-value">{receipt.customer_name || '—'}</span></li>
-          <li><span className="info-item-label">Customer ID</span>
-              <span className="info-item-value" style={{
-            fontFamily: 'monospace'
-          }}>{receipt.customer_id}</span></li>
-          <li><span className="info-item-label">Customer Address</span>
-              <span className="info-item-value">{receipt.customer_address || '—'}</span></li>
-          <li><span className="info-item-label">Customer Phone</span>
-              <span className="info-item-value">{receipt.customer_phone || '—'}</span></li>
-          <li><span className="info-item-label">Branch</span>
-              <span className="info-item-value">{receipt.branch_name || '—'}</span></li>
-          <li><span className="info-item-label">Amount</span>
-              <span className="info-item-value" style={{
-            fontWeight: 700,
-            color: '#0c1031'
-          }}>{formatCurrency(Number(receipt.amount))}</span></li>
-          <li><span className="info-item-label">Payment Method</span>
-              <span className="info-item-value">{receipt.payment_method || '—'}</span></li>
-          <li><span className="info-item-label">Payment Date</span>
-              <span className="info-item-value">{formatDisplayDate(receipt.payment_date)}</span></li>
-          <li><span className="info-item-label">Payment Time</span>
-              <span className="info-item-value">{receipt.payment_time ? String(receipt.payment_time).slice(0, 8) : '—'}</span></li>
-          <li><span className="info-item-label">Payment Status</span>
-              <span className="info-item-value"><StatusBadge status={receipt.payment_status} /></span></li>
-          {receipt.notes && <li><span className="info-item-label">Notes</span>
-                <span className="info-item-value">{receipt.notes}</span></li>}
-        </ul>
+        <DetailRowsTable rows={[
+          { label: 'Receipt ID', value: <span style={{ fontFamily: 'monospace' }}>{receipt.receipts_id}</span> },
+          { label: 'Receipt Number', value: <span style={{ fontFamily: 'monospace' }}>{receipt.receipt_number}</span> },
+          { label: 'Receipt Date', value: formatDisplayDate(receipt.receipt_date) },
+          { label: 'Generated By', value: receipt.generated_by_name || '—' },
+          { label: 'Customer', value: receipt.customer_name || '—' },
+          { label: 'Customer ID', value: <span style={{ fontFamily: 'monospace' }}>{receipt.customer_id}</span> },
+          { label: 'Customer Address', value: receipt.customer_address || '—' },
+          { label: 'Customer Phone', value: receipt.customer_phone || '—' },
+          { label: 'Branch', value: receipt.branch_name || '—' },
+          { label: 'Amount', value: <span style={{ fontWeight: 700, color: '#0c1031' }}>{formatCurrency(Number(receipt.amount))}</span> },
+          { label: 'Payment Method', value: receipt.payment_method || '—' },
+          { label: 'Payment Date', value: formatDisplayDate(receipt.payment_date) },
+          { label: 'Payment Time', value: receipt.payment_time ? String(receipt.payment_time).slice(0, 8) : '—' },
+          { label: 'Payment Status', value: <StatusBadge status={receipt.payment_status} /> },
+          ...(receipt.notes ? [{ label: 'Notes', value: receipt.notes }] : []),
+        ]} />
       </section>
 
       <div className="flex flex-wrap justify-end gap-2 mt-4">
@@ -1524,7 +1477,7 @@ function CIFormPage({
   if (!account) {
     return <EmptyState title="Customer not found" actionLabel="Back to Customers" onAction={() => navigate('/collector/accounts')} />;
   }
-  return <div className="relative z-10 grid gap-[22px] w-full">
+  return <div className="page">
       <FormPanel title="Credit Investigation Form" formData={formData} onChange={(name, value) => setFormData(prev => ({
       ...prev,
       [name]: value
@@ -1546,7 +1499,7 @@ function CIFormPage({
       label: 'Monthly Income',
       type: 'number',
       required: true,
-      placeholder: 'PHP amount'
+      placeholder: '₱ amount'
     }, {
       name: 'businessType',
       label: 'Business Type',
@@ -1624,7 +1577,7 @@ function IncidentReportPage({
     load();
   }, [accountId]);
   if (accountId && loading) return <LoadingState message="Loading customer..." />;
-  return <div className="relative z-10 grid gap-[22px] w-full">
+  return <div className="page">
       {account ? <section className="panel content-panel relative overflow-hidden">
           <p className="text-ink/70">Reporting incident for <strong>{account.customerName}</strong> ({account.accountNumber})</p>
         </section> : null}
@@ -1736,7 +1689,7 @@ function CollectionHistoryPage({
   if (error && !payments.length) {
     return <EmptyState title="Unable to load collection payments" description={error} actionLabel="Retry" onAction={() => window.location.reload()} />;
   }
-  return <div className="relative z-10 grid gap-[22px] w-full">
+  return <div className="page">
       <section className="panel content-panel relative overflow-hidden">
         <div className="list-section-header">
           <h3>Collection Payments</h3>
@@ -1762,38 +1715,14 @@ function CollectionHistoryPage({
             </button>
           </div>
         </div>
-        <div className="list-section-toolbar" style={{
-        marginBottom: 12
-      }}>
+        <div className="list-section-toolbar">
           <div className="list-section-controls">
-            <input className="filter-input search" type="search" placeholder="Search by customer, receipt number, or ID" value={search} onChange={e => setSearch(e.target.value)} style={{
-            padding: '8px 12px',
-            borderRadius: '6px',
-            border: '1px solid #c5c8d0',
-            fontSize: '0.9rem',
-            flex: 1,
-            minWidth: '200px'
-          }} />
-            <select className="filter-select" value={statusFilter} onChange={e => setStatusFilter(e.target.value)} style={{
-            padding: '8px 12px',
-            borderRadius: '6px',
-            border: '1px solid #c5c8d0',
-            fontSize: '0.9rem'
-          }}>
+            <input className="filter-input search" type="search" placeholder="Search by customer, receipt number, or ID" value={search} onChange={e => setSearch(e.target.value)} />
+            <select className="filter-select" value={statusFilter} onChange={e => setStatusFilter(e.target.value)}>
               {['All', 'Pending', 'Completed', 'Cancelled'].map(option => <option key={option} value={option}>Status: {option}</option>)}
             </select>
-            <input className="filter-input" type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)} aria-label="From date" style={{
-            padding: '8px 12px',
-            borderRadius: '6px',
-            border: '1px solid #c5c8d0',
-            fontSize: '0.9rem'
-          }} />
-            <input className="filter-input" type="date" value={dateTo} onChange={e => setDateTo(e.target.value)} aria-label="To date" style={{
-            padding: '8px 12px',
-            borderRadius: '6px',
-            border: '1px solid #c5c8d0',
-            fontSize: '0.9rem'
-          }} />
+            <input className="filter-input" type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)} aria-label="From date" />
+            <input className="filter-input" type="date" value={dateTo} onChange={e => setDateTo(e.target.value)} aria-label="To date" />
           </div>
           <p className="list-section-subtitle">{payments.length} record{payments.length !== 1 ? 's' : ''} in database</p>
         </div>
@@ -1865,7 +1794,7 @@ function CollectionPaymentDetailPage({
   if (!payment) {
     return <EmptyState title="Payment not found" actionLabel="Back to History" onAction={() => navigate('/collector/history')} />;
   }
-  return <div className="relative z-10 grid gap-[22px] w-full">
+  return <div className="page">
       <StatsGrid stats={[{
       label: 'Payment ID',
       value: String(payment.collectionpayment_id)
@@ -1880,28 +1809,20 @@ function CollectionPaymentDetailPage({
         <div className="flex flex-col md:flex-row justify-between gap-4 items-start md:items-center mb-4">
           <h3>Collection Payment Detail</h3>
         </div>
-        <ul className="info-grid">
-          <li><span className="info-item-label">Receipt ID</span><span className="info-item-value" style={{
-            fontFamily: 'monospace'
-          }}>{payment.receipts_id ?? '—'}</span></li>
-          <li><span className="info-item-label">Receipt Number</span><span className="info-item-value" style={{
-            fontFamily: 'monospace'
-          }}>{payment.receipt_number || '—'}</span></li>
-          <li><span className="info-item-label">Customer</span><span className="info-item-value">{payment.customer_name || '—'}</span></li>
-          <li><span className="info-item-label">Customer ID</span><span className="info-item-value" style={{
-            fontFamily: 'monospace'
-          }}>{payment.customer_id ?? '—'}</span></li>
-          <li><span className="info-item-label">Collector</span><span className="info-item-value">{payment.collector_name || '—'}</span></li>
-          <li><span className="info-item-label">Branch</span><span className="info-item-value">{payment.branch_name || '—'}</span></li>
-          <li><span className="info-item-label">Branch ID</span><span className="info-item-value" style={{
-            fontFamily: 'monospace'
-          }}>{payment.branch_id ?? '—'}</span></li>
-          <li><span className="info-item-label">Payment Method</span><span className="info-item-value">{payment.payment_method || '—'}</span></li>
-          <li><span className="info-item-label">Timestamp</span><span className="info-item-value">{formatPaymentTimestamp(payment.payment_date, payment.payment_time)}</span></li>
-          <li><span className="info-item-label">Created At</span><span className="info-item-value">{formatDisplayDateTime(payment.created_at)}</span></li>
-          <li><span className="info-item-label">Updated At</span><span className="info-item-value">{formatDisplayDateTime(payment.updated_at)}</span></li>
-          {payment.notes ? <li><span className="info-item-label">Notes</span><span className="info-item-value">{payment.notes}</span></li> : null}
-        </ul>
+        <DetailRowsTable rows={[
+          { label: 'Receipt ID', value: <span style={{ fontFamily: 'monospace' }}>{payment.receipts_id ?? '—'}</span> },
+          { label: 'Receipt Number', value: <span style={{ fontFamily: 'monospace' }}>{payment.receipt_number || '—'}</span> },
+          { label: 'Customer', value: payment.customer_name || '—' },
+          { label: 'Customer ID', value: <span style={{ fontFamily: 'monospace' }}>{payment.customer_id ?? '—'}</span> },
+          { label: 'Collector', value: payment.collector_name || '—' },
+          { label: 'Branch', value: payment.branch_name || '—' },
+          { label: 'Branch ID', value: <span style={{ fontFamily: 'monospace' }}>{payment.branch_id ?? '—'}</span> },
+          { label: 'Payment Method', value: payment.payment_method || '—' },
+          { label: 'Timestamp', value: formatPaymentTimestamp(payment.payment_date, payment.payment_time) },
+          { label: 'Created At', value: formatDisplayDateTime(payment.created_at) },
+          { label: 'Updated At', value: formatDisplayDateTime(payment.updated_at) },
+          ...(payment.notes ? [{ label: 'Notes', value: payment.notes }] : []),
+        ]} />
       </section>
       <div className="flex flex-wrap justify-end gap-2 mt-4">
         <button className="button ghost" type="button" onClick={() => navigate('/collector/history')}>Back to History</button>
@@ -1925,71 +1846,12 @@ function ProfilePage({
   navigate,
   showToast
 }) {
-  const sessionUser = getCurrentUser();
-  const [profile, setProfile] = useState(null);
-  const [password, setPassword] = useState('');
-  const [editing, setEditing] = useState(false);
-  useEffect(() => {
-    async function load() {
-      const res = await fetchMyProfile();
-      if (res.success) setProfile(res.data);
-    }
-    load();
-  }, []);
-  const userName = profile
-    ? [profile.first_name, profile.last_name].filter(Boolean).join(' ')
-    : sessionUser?.fullName || 'Collector';
-  const userBranch = profile?.branch?.name || sessionUser?.branch?.name || '—';
-  const roleLabel = profile?.role?.name || sessionUser?.role?.name || 'Collector';
-  const userInitials = userName.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2);
-  const saveProfile = async () => {
-    if (!profile) return;
-    const payload = {
-      first_name: profile.first_name,
-      last_name: profile.last_name,
-      email: profile.email,
-      phone: profile.phone,
-    };
-    if (password.trim()) payload.password = password.trim();
-    const res = await updateMyProfile(payload);
-    if (res.success) {
-      persistCurrentUserFromProfile(res.data);
-      setProfile(res.data);
-      setPassword('');
-      setEditing(false);
-      showToast('Profile updated.', 'success');
-    } else showToast(res.message || 'Update failed.', 'error');
-  };
-  if (!profile) return <LoadingState message="Loading profile..." />;
-  return <div className="relative z-10 grid gap-[22px] w-full">
-      <section className="panel content-panel profile-panel">
-        <div className="profile-header">
-          <div className="profile-avatar">{userInitials}</div>
-          <div><h3>{userName}</h3><p className="text-ink/70">{roleLabel}</p></div>
-        </div>
-        {editing ? <div className="form-grid" style={{ marginTop: 16 }}>
-            <label>First name<input value={profile.first_name || ''} onChange={e => setProfile(p => ({ ...p, first_name: e.target.value }))} /></label>
-            <label>Last name<input value={profile.last_name || ''} onChange={e => setProfile(p => ({ ...p, last_name: e.target.value }))} /></label>
-            <label>Email<input type="email" value={profile.email || ''} onChange={e => setProfile(p => ({ ...p, email: e.target.value }))} /></label>
-            <label>Phone<input value={profile.phone || ''} onChange={e => setProfile(p => ({ ...p, phone: e.target.value }))} /></label>
-            <label>New password (optional)<input type="password" value={password} onChange={e => setPassword(e.target.value)} placeholder="Min. 8 characters" /></label>
-          </div>
-          : <ul className="info-grid">
-            <li><span className="info-item-label">Branch</span><span className="info-item-value">{userBranch}</span></li>
-            <li><span className="info-item-label">Email</span><span className="info-item-value">{profile.email}</span></li>
-            <li><span className="info-item-label">Phone</span><span className="info-item-value">{profile.phone || '—'}</span></li>
-            <li><span className="info-item-label">Status</span><span className="info-item-value">{profile.status || '—'}</span></li>
-          </ul>}
-      </section>
-      <div className="flex flex-wrap gap-2 justify-end mt-4 mb-2">
-        <button className="button ghost" type="button" onClick={() => navigate('/collector/settings')}>Settings</button>
-        <button className="button ghost" type="button" onClick={() => requestLogout()}>Logout</button>
-        {editing ? <>
-            <button className="button ghost" type="button" onClick={() => setEditing(false)}>Cancel</button>
-            <button className="button" type="button" onClick={saveProfile}>Save Profile</button>
-          </> : <button className="button" type="button" onClick={() => setEditing(true)}>Update Profile</button>}
-      </div>
-    </div>;
+  return <AccountProfilePanel
+    showToast={showToast}
+    title="Collector Profile"
+    subtitle="View your personal details and update your account password."
+    extraActions={<button className="button ghost" type="button" onClick={() => navigate('/collector/settings')}>Settings</button>}
+  />;
 }
 function SettingsPage({
   navigate
@@ -2005,7 +1867,7 @@ function SettingsPage({
     localStorage.setItem('corvex_collector_push', next.push ? '1' : '0');
     localStorage.setItem('corvex_collector_autosync', next.autosync ? '1' : '0');
   };
-  return <div className="relative z-10 grid gap-[22px] w-full">
+  return <div className="page">
       <section className="panel form-panel content-panel">
         <div className="flex flex-col md:flex-row justify-between gap-4 items-start md:items-center mb-4">
           <h3>Settings</h3>

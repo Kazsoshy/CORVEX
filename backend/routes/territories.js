@@ -60,7 +60,7 @@ router.get('/assignable-users', async (req, res) => {
 router.get('/', async (req, res) => {
   try {
     const pool = req.app.locals.pool;
-    const { branch_id, search } = req.query;
+    const { branch_id, search, status } = req.query;
     const user = req.currentUser;
 
     const conditions = [];
@@ -75,6 +75,14 @@ router.get('/', async (req, res) => {
       // Operating manager can filter by branch
       conditions.push(`t.branch_id = $${pIdx++}`);
       params.push(Number(branch_id));
+    }
+
+    // Default to active territories; pass status=all to include archived.
+    if (!status || String(status).toLowerCase() === 'active') {
+      conditions.push(`COALESCE(t.status, 'Active') = 'Active'`);
+    } else if (String(status).toLowerCase() !== 'all') {
+      conditions.push(`COALESCE(t.status, 'Active') = $${pIdx++}`);
+      params.push(status);
     }
 
     if (search) {
@@ -95,6 +103,7 @@ router.get('/', async (req, res) => {
          u.full_name AS assigned_user_name,
          r.role_name,
          t.coverage_area,
+         COALESCE(t.status, 'Active') AS status,
          COALESCE(
            JSON_AGG(
              JSON_BUILD_OBJECT(
@@ -113,7 +122,7 @@ router.get('/', async (req, res) => {
        LEFT JOIN users u2 ON u2.id = ta.user_id
        LEFT JOIN roles r2 ON r2.role_id = u2.role_id
        ${where}
-       GROUP BY t.territory_id, b.name, u.full_name, r.role_name
+       GROUP BY t.territory_id, t.status, b.name, u.full_name, r.role_name
        ORDER BY t.territory_name`,
       params
     );
@@ -283,14 +292,18 @@ router.put('/:id', async (req, res) => {
 });
 
 // ──────────────────────────────────────────────────────────────────────────────
-// DELETE /api/territories/:id
+// DELETE /api/territories/:id  — Soft archive (status = Inactive; record kept)
 // ──────────────────────────────────────────────────────────────────────────────
 router.delete('/:id', async (req, res) => {
   try {
     const pool = req.app.locals.pool;
     const user = req.currentUser;
+    const territoryId = Number(req.params.id);
 
-    const existing = await pool.query(`SELECT branch_id FROM territories WHERE territory_id = $1`, [Number(req.params.id)]);
+    const existing = await pool.query(
+      `SELECT branch_id, COALESCE(status, 'Active') AS status FROM territories WHERE territory_id = $1`,
+      [territoryId]
+    );
     if (existing.rows.length === 0) {
       return res.status(404).json({ success: false, message: 'Territory not found.' });
     }
@@ -299,22 +312,22 @@ router.delete('/:id', async (req, res) => {
     if (!isUnscoped(user) && Number(existing.rows[0].branch_id) !== Number(user.branchId)) {
       return res.status(403).json({ success: false, message: 'Access denied: you can only access data for your assigned branch.' });
     }
-
-    // Check if it's referenced in customers table
-    const refCheck = await pool.query(`SELECT customer_id FROM customers WHERE territory_id = $1 LIMIT 1`, [Number(req.params.id)]);
-    if (refCheck.rows.length > 0) {
-      return res.status(409).json({ success: false, message: 'Cannot delete territory. It is currently assigned to one or more customers.' });
+    if (existing.rows[0].status === 'Inactive') {
+      return res.status(400).json({ success: false, message: 'Territory is already archived.' });
     }
 
-    await pool.query(`DELETE FROM territories WHERE territory_id = $1`, [Number(req.params.id)]);
+    await pool.query(
+      `UPDATE territories SET status = 'Inactive' WHERE territory_id = $1`,
+      [territoryId]
+    );
 
     return res.status(200).json({
       success: true,
-      message: 'Territory deleted successfully.',
+      message: 'Territory archived successfully. The record and history are preserved.',
     });
   } catch (err) {
     console.error('[Territories] DELETE /:id error:', err.message);
-    return res.status(500).json({ success: false, message: 'Failed to delete territory.' });
+    return res.status(500).json({ success: false, message: 'Failed to archive territory.' });
   }
 });
 

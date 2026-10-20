@@ -1,0 +1,85 @@
+
+created_ TIM — Date and time Not Null last_nam VAR 50 Employee Not Null
+at EST the supplier e CHA last name
+AMP record was R
+created
+email VAR 150 Login Not Null,
+updated TIM — Date and time Not Null CHA email Unique
+_at EST the supplier R
+AMP record was
+last updated passwor VAR 255 Encrypted Not Null
+d CHA password
+R
+The Suppliers table stores the master information of
+suppliers that provide products for BH Marketing's status ENU — Active, Not Null
+inventory replenishment. Restock transactions M Inactive
+reference supplier records to identify the source of
+created_ TIME — Date Not Null,
+incoming inventory and support supplier traceability.
+at STA account Default
+Table 24. Territories Table MP created CURREN
+T_TIMES
+Field Data Size Description Constrai TAMP
+Name Typ nts
+e updated_ TIME — Date Not Null,
+at STA account On Update
+territory INT 11 Territory ID PK, MP last CURRENT
+_id Auto-incr updated _TIM M E P S TA
+ement
+territory VAR 100 Territory Not Null
+The users table stores the accounts of authorized
+_name CH name
+AR personnel who access CORVEX. Each user is
+associated with a system role and, where applicable, a
+branch_i INT 11 Assigned FK → branch, allowing the system to enforce role-based and
+d branch branches.b
+branch-level access to information and functions.
+ranch_id,
+Not Null
+Table 26. Roles Table
+assigned INT 11 Assigned FK →
+Field Dat Size Description Constrai
+_user personnel users.user
+_id Name a nts
+Typ
+coverage TEX — Service area Not Null e
+_area T
+role_id INT 11 Role ID PK,
+The territories table stores the service territories Auto-inc
+assigned to branches and field personnel. It supports rement
+map-based visualization, customer assignment,
+territory coordination, and route planning for field role_na VAR 50 Display Not Null
+activities. me CH name of the
+AR system role.
+Table 25. Users Table
+slug VAR 50 Machine-re Unique,
+Field Data Size Descriptio Constrai
+CH adable Not Null
+Name Type n nts
+AR identifier
+for the role
+user_id INT 11 User ID PK,
+Auto-incr created TIM — Date the Not Null
+ement _at EST role record
+AM was created
+branch_i INT 11 Assigned FK →
+P
+d branch branches.
+branch_id updated TIM — Date the Not Null
+, Not Null
+_at EST role record
+AM was last
+role_id INT 11 Assigned FK →
+P updated
+system role roles.role
+of the user _id, Not
+Null The Roles table stores the user roles defined within
+CORVEX, such as Operating Manager, Branch Head,
+first_na VARC 50 Employee Not Null
+Collector, Sales Agent, and Warehouse Personnel,
+me HAR first name
+along with a display name and a machine-readable
+middle_ VARC 50 Employee Nullable slug. The Users and Role Permissions tables reference
+name HAR middle it to enforce role-based access restrictions.
+name
+25

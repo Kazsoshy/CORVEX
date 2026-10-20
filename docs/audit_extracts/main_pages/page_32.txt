@@ -1,0 +1,70 @@
+
+external services, and a centralized database work allowing Collectors to receive a prioritized collection
+together to support field operations, Inventory list based on the calculated SAW scores. Sales Agents
+Centralization, and decision support for BH do not use the SAW engine; instead, they access
+Marketing’s multi-branch operations. The system assigned customers, service territories, schedules, and
+adopts a three-tier architecture consisting of the map-based location information to support sales field
+Presentation Layer, Application Layer, and Database activities. The application layer also integrates
+Layer to ensure scalability, centralized data Leaflet.js with OpenStreetMap to provide interactive
+management, and secure communication between map visualization of customer locations, territories,
+users and enterprise resources. Furthermore, the and field routes.
+architecture supports both online and offline field
+operations, enabling sales agents and collectors to 2.3.7.3. Database Layer
+continue recording transactions even when internet The database layer utilizes PostgreSQL as the
+connectivity is temporarily unavailable. centralized relational database management system
+that stores all enterprise information. It maintains
+records for users, branches, clients, products, branch
+inventory, inventory transfers, sales transactions,
+collection transactions, credit history, field visits,
+SAW computation results, notifications, audit logs,
+and performance summaries. By maintaining a
+centralized repository, the system ensures operational
+data from all branches remains synchronized and
+immediately available for reporting, monitoring, and
+decision support.
+2.3.7.4. External Services
+CORVEX integrates external technologies to enhance
+its operational capabilities. Leaflet.js and
+OpenStreetMap provide interactive geographic
+visualization for customer locations, branch locations,
+territories, and field routes, supporting location-based
+operational planning. The system also uses
+browser-based local storage in the mobile field portal
+to temporarily store collection and sales transactions.
+Offline mode allows uninterrupted field operations
+until synchronization with the central server is
+possible.
+2.3.7.5. Online Configuration
+Figure 7. CORVEX System Architecture During online operation, all user requests submitted
+through the web dashboard and mobile field portal are
+2.3.7.1. Presentation Layer transmitted to the application server via secure
+The presentation layer serves as the primary interface RESTful communication. The application server
+through which users interact with CORVEX. It validates each request, executes the necessary
+consists of two client applications: the React.js Web business logic—including SAW prioritization,
+Dashboard for administrators, operations managers, Inventory Centralization, mapping integrated
+and warehouse staff, and the React.js Mobile Field processing, and notification generation—and stores
+Portal for sales agents and collectors. The web the resulting information within the centralized
+dashboard provides modules for inventory PostgreSQL database. The system then returns
+management, operational dashboards, and data updated data to client applications in real time,
+visualization. At the same time, the mobile field allowing managers and field personnel across all
+portal enables collection recording, sales reporting, branches to access consistent, synchronized
+and interactive map visualization using Leaflet.js operational information.
+integrated with OpenStreetMap, and offline
+2.3.7.6. Offline Configuration
+synchronization. User requests are transmitted
+When internet connectivity is unavailable, the mobile
+securely to the server through RESTful web services
+field portal allows collectors and sales agents to
+whenever an internet connection is available.
+continue recording collections, sales activities,
+2.3.7.2. Application Layer (Server-Side) customer visits, and digital receipts using the offline
+The application layer contains the core business logic synchronization module. These records are
+that processes requests received from the client temporarily stored within the device's local storage
+applications. It manages user authentication and without interrupting field operations. Once network
+authorization, user management, collection connectivity is restored, the synchronization module
+processing, sales management, notification services, automatically uploads the locally stored transactions
+descriptive analytics, and audit logging. This layer to the application server, which validates the data and
+also integrates the SAW Decision Support Engine, updates the PostgreSQL database to ensure
+which evaluates and ranks eligible customer accounts consistency across all branches.
+for collection based on predefined collection criteria,
+32

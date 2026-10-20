@@ -1,0 +1,81 @@
+
+For Days Overdue computation, only sales invoices 2.3.2.4. Determination of Criteria Weights
+with a status of Unpaid or Partial are considered. The criterion weights were established during the
+Invoices with a Paid status are excluded, while requirements-gathering phase based on interviews
+records with an empty due_date are not used in the with the Operating Manager of BH Marketing.
+calculation. When multiple unpaid or partially paid During the interview, the manager explained that
+invoices exist for the same customer, CORVEX uses collection priorities are primarily influenced by the
+the earliest applicable due_date. Days Overdue is customer’s financial value, followed by payment
+calculated as the current system date minus the urgency. At the same time, travel distance is
+selected due date, with negative results treated as zero considered only after evaluating financial
+so that customers whose due dates have not yet considerations.
+passed are not considered overdue.
+Table 9. Criteria Weights
+Geographic Distance is calculated using the
+Criterion Weight Operational Basis
+Haversine method between the coordinates of the
+customer's assigned branch and the customer's
+Outstanding 40% Represents the financial value of the
+recorded location. The resulting value represents Balance account and contributes directly to cash
+straight-line geographic distance rather than road flow recovery.
+travel distance. OpenRouteService is used after the
+Days Overdue 30% Indicates the urgency of collection based
+priority ranking has been generated to provide route on payment delay.
+visualization and routing support and does not modify
+the SAW score. Geographic 30% Supports efficient field operations by
+Distance reducing unnecessary travel.
+When two customers obtain the same SAW
+preference score, the customer with the lower Table 9 presents the decision criteria and their
+customer_id is assigned the higher priority rank. To corresponding weights used in the SAW computation.
+avoid division-by-zero during normalization, a The weights were determined through interviews with
+zero-valued criterion is handled according to the the Operating Manager during the
+implemented normalization rule. When all Days requirements-gathering phase. Outstanding Balance
+Overdue values are zero, the Days Overdue criterion received the highest weight (40%) because customers
+is excluded from the computation and the remaining with larger unpaid balances contribute more to the
+applicable criteria are used. A record producing an company's cash flow recovery. Days Overdue
+invalid zero-distance condition is excluded from the received 30% because accounts with longer payment
+distance-based computation and the exclusion is delays require more immediate collection to reduce
+recorded. delinquency risk. Geographic Distance was also
+assigned 30% because minimizing unnecessary travel
+2.3.2.3. Basis for Selecting the Decision Criteria enables collectors to visit more customers within a
+The decision criteria implemented in CORVEX were working day while reducing transportation time and
+identified during the requirements gathering phase operational costs.
+through interviews with the Operating Manager and
+observations of the daily collection workflow at BH The Operating Manager ordered the criteria as
+Marketing. outstanding balance, then days overdue, then distance.
+Outstanding balance received the larger share, 40%.
+Outstanding Account Balance Days overdue and distance each received 30%
+During the requirements validation interview, the because both still determine whether a collector can
+Operating Manager ranked each collection criterion finish the day’s visits. The sample scores in Tables 11
+by operational importance based on actual collection and 12 use these weights.
+practices. Based on the interview, Outstanding
+2.3.2.5. Construction of the Decision Matrix
+Balance was considered the highest priority because
+larger receivables have the greatest effect on cash
+After establishing the criterion weights, CORVEX
+flow recovery. Days Overdue ranked second because
+retrieves the required operational records from the
+delayed accounts require more immediate collection
+centralized database and organizes them into a
+attention, while Geographic Distance ranked lower
+decision matrix. In the SAW method, each row
+than financial priorities to improve travel efficiency.
+represents one customer (alternative), while each
+column corresponds to one decision criterion. The
+Days Overdue
+resulting matrix serves as the input for the
+This number of overdue days represents the urgency
+normalization and preference score computation.
+of collection activities. Customers who have delayed
+payments longer require earlier collection to The values represented by xij are derived from
+minimize the risk of prolonged delinquency. collection-related records generated through the
+existing collection workflow of Bethuel-Herminihildo
+Geographic Distance (BH) Marketing and retrieved or computed by
+Although financial considerations remain the highest CORVEX. During collection activities, the system
+priority, collectors also consider travel distance when records customer payment and collection information
+planning their daily routes. Visiting closer customers and stores it in the centralized PostgreSQL database.
+geographically reduces travel time, transportation For each customer alternative i, CORVEX retrieves
+costs, and unnecessary movement during field the Outstanding Balance from the customer's payment
+operations. records, determines the Days Overdue by comparing
+the recorded payment due date with the current
+15

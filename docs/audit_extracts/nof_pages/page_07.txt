@@ -1,0 +1,97 @@
+
+location sketches, and familiarity with their assigned
+Table 3 presents the minimum hardware requirements
+territories during canvassing activities. Likewise, they
+for developing, deploying, and using the CORVEX
+verify inventory availability and customer payment
+system.
+information through phone calls, text messages, and
+manual coordination between branches because they
+2.2.3. Functional and Non-Functional
+maintain operational records independently. These
+Requirements
+existing practices result in delayed operational
+2.2.3.1. Functional Requirement information, fragmented inventory and customer
+This section presents CORVEX's functional payment records, inefficient field coordination, and
+requirements, which describe the specific behaviors limited management visibility over company-wide
+and services the system must perform based on the operations. The findings indicate that the organization
+identified user requirements. These requirements are can benefit from a centralized information system that
+organized by system module and written from the supports map-based field operations, customer
+system's perspective. Each functional requirement prioritization for collection activities, Inventory
+represents a specific, observable, and testable system Centralization, centralized customer payment
+behavior that supports BH Marketing's operational verification, and business activity monitoring across
+needs. all branches.
+Table 4. Functional Requirements The system is operationally feasible because it
+enhances BH Marketing's existing procedures without
+Table 4 presents the functional requirements of the
+significantly changing established personnel
+system, grouped by module, each specifying a
+responsibilities. Rather than replacing current
+capability the system must perform, such as user
+workflows, CORVEX digitizes and integrates
+authentication, account management, customer
+collection management, sales operations, Inventory
+prioritization, field operations, inventory management,
+Centralization, customer payment verification, and
+and notifications, to support the organization's
+business activity monitoring into a centralized
+collection, sales, and warehouse operations.
+platform. The system supports collectors by
+2.2.3.2. Non-Functional Requirement implementing the Simple Additive Weighting (SAW)
+method to prioritize daily collection schedules. At the
+Non-functional requirements define the quality
+same time, Sales Agents receive map-based customer
+attributes CORVEX must satisfy to ensure reliable,
+and territory visualization to support canvassing and
+secure, and efficient operation within BH Marketing.
+route planning. Warehouse Personnel can synchronize
+Unlike functional requirements, which describe the
+inventory records across branches, and the Operating
+services the system provides, these requirements
+Manager and Branch Heads can monitor consolidated
+specify the performance standards, security measures,
+operational information through a centralized
+usability, compatibility, maintainability, and reliability
+dashboard that provides insights into collection
+the system must meet. Each requirement is written
+performance, sales activities, inventory status,
+from the system's perspective and provides measurable
+customer payment records, branch performance, and
+conditions that can be evaluated during system testing.
+operational trends. During requirements-gathering
+Table 5. Non-Functional Requirements activities, BH Marketing management expressed
+support for developing the system and recognized its
+Table 5 presents the non-functional requirements of the
+potential to improve operational coordination and
+system, grouped by category (Performance, Security,
+decision-making. Given the positive responses from
+Usability, Reliability, Maintainability, Compatibility,
+intended users, the modules' alignment with the
+and Scalability), each specifying a quality attribute,
+organization's operational processes, and
+such as speed, data security, ease of use, data integrity,
+management's willingness to adopt the system,
+modularity, cross-platform compatibility, and
+CORVEX is considered operationally feasible for
+scalability, that the system must satisfy to operate
+implementation within BH Marketing.
+efficiently, securely, and reliably.
+2.2.4.2 Technical Feasibility
+2.2.4. Feasibility Requirements The technical feasibility of CORVEX was evaluated
+2.2.4.1. Operational Feasibility based on the available development resources, existing
+The operational feasibility of CORVEX was evaluated technical infrastructure, and the system requirements
+through interviews with the Operating Manager, identified through interviews, survey questionnaires,
+survey questionnaires administered to Collectors, and direct observations conducted at Bethuel-
+Sales Agents, Warehouse Personnel, and Branch Herminihildo (BH) Marketing. The system will be
+Heads, and direct observations conducted across the developed using React.js for the responsive web
+Davao City, General Santos City, and Davao Oriental interface, Node.js and Express.js for the application
+branches of Bethuel-Herminihildo (BH) Marketing. server and RESTful API, Python for implementing the
+The data gathered revealed that the company's daily Simple Additive Weighting (SAW) method used in
+operations remain highly dependent on manual customer prioritization, and PostgreSQL with PostGIS
+procedures for collection scheduling, sales canvassing, for centralized database and spatial data management.
+inventory monitoring, and cross-branch coordination. For the map-based field operations module, the system
+Collectors manually determine the sequence of uses Leaflet.js with OpenStreetMap for interactive
+customer visits based on payment information and map visualization, Nominatim to convert customer
+personal judgment. At the same time, Sales Agents rely addresses into geographic coordinates, and
+on written customer addresses, manually prepared OpenRouteService to generate recommended travel
+7

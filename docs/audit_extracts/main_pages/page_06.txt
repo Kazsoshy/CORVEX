@@ -1,0 +1,100 @@
+
+verification, business activity monitoring, and offline Phase 6: Review
+field transaction recording. The phase also identifies During the Review phase, the team collects user
+project objectives, scope, user roles, and the required feedback to evaluate the effectiveness, usability, and
+software and hardware resources. performance of the implemented system. Stakeholder
+suggestions and observations are analyzed to identify
+Phase 2: System Design enhancements for future development iterations. This
+During the Design phase, the researchers prepare phase ensures the system continuously evolves after
+CORVEX's overall architecture based on the deployment to meet operational needs while staying
+validated system requirements. This phase includes aligned with objectives to improve field operations,
+designing the PostgreSQL database, user interfaces, Inventory Centralization, customer payment
+system workflow, role-based access control, and verification, and management decision support across
+module interactions. The researchers also design the BH Marketing’s branches.
+customer prioritization process by integrating the
+Simple Additive Weighting (SAW) method to rank 2.1 Data Gathering
+collection accounts based on the customer’s amount This study's participants were personnel from
+due, days overdue, and travel distance from the Bethuel-Herminihildo (BH) Marketing across its
+collector’s current location. The map-based field Davao City, General Santos City, and Davao Oriental
+operations module will also integrate Nominatim for branches. Participants included the Operating
+address geocoding, Leaflet.js with OpenStreetMap for Manager, Branch Heads, Collectors, Sales Agents,
+map visualization, and OpenRouteService for route and Warehouse Personnel directly involved in the
+generation. These tools support both collectors and company's collection operations, sales activities,
+sales agents during field operations. inventory management, and branch coordination.
+They were selected through purposive sampling
+Phase 3: Development
+because they directly participate in the organization's
+During the Development phase, the researchers
+daily operational processes and can provide reliable
+implement the system using React.js for the
+information on existing workflows, operational
+web-based user interface and PostgreSQL for
+challenges, and system requirements. Before
+database management. The map-based field
+conducting the study, the researchers obtained formal
+operations module integrates Leaflet.js,
+permission from BH Marketing management to
+OpenStreetMap, Nominatim, and OpenRouteService
+administer the research instruments and conduct
+to visualize customer locations and territories and
+on-site observations.
+generate routes. The customer prioritization module
+implements the Simple Additive Weighting (SAW) To obtain comprehensive information on the
+method for prioritizing daily collection schedules. company's existing operations, the researchers used
+The team will develop additional functionalities multiple data-gathering techniques, including printed
+incrementally until all required modules are complete, survey questionnaires, semi-structured interviews,
+including the offline-capable Field Portal, Inventory and direct observation. The researchers administered
+Centralization, centralized customer payment printed survey questionnaires to the Branch Heads,
+verification, and the operations dashboard. Collectors, Sales Agents, and Warehouse Personnel to
+gather quantitative and qualitative data on their
+Phase 4: Testing
+operational responsibilities and the challenges
+During the Testing phase, the researchers conduct
+encountered during daily operations. The
+functional, integration, usability, performance, and
+questionnaires were divided into several sections
+User Acceptance Testing (UAT) to verify that the
+covering field collection activities, sales operations,
+developed system meets the identified operational
+inventory management, customer payment
+requirements. The SAW module can be validated by
+verification, branch coordination, cross-branch
+verifying the correctness of the generated customer
+information sharing, and business activity monitoring.
+ranking. In contrast, the map-based field operations
+The researchers used a five-point Likert scale to
+module can be evaluated for customer location
+measure respondents' level of agreement with existing
+visualization and route generation accuracy. Inventory
+operational practices. At the same time, open-ended
+Centralization, customer payment verification,
+questions allowed participants to describe operational
+dashboard reporting, and offline data synchronization
+issues and suggest improvements.
+can likewise be tested to ensure all modules perform
+accurately, reliably, and consistently before To further validate the survey findings, the
+deployment. researchers conducted a face-to-face semi-structured
+interview with the Operating Manager using a
+Phase 5: Deployment
+prepared interview guide. The interview focused on
+During the Deployment phase, the team deployed the
+the organization's overall operational workflow, the
+completed system for operational use at
+responsibilities of each operational role, existing
+Bethuel-Herminihildo (BH) Marketing. The team
+branch coordination procedures, Inventory
+conducted user orientation and training sessions for
+Centralization practices, customer payment
+the Operating Manager, Branch Heads, Warehouse
+verification, operational reporting, and the challenges
+Personnel, Collectors, and Sales Agents to familiarize
+of managing geographically distributed branches. The
+them with the system’s features and operational
+interview also validated the operational requirements
+procedures. The team also prepares technical
+identified through the survey responses and clarified
+documentation and user manuals to support system
+organizational policies that structured questionnaires
+operation, maintenance, and future enhancements.
+alone could not capture.
+6

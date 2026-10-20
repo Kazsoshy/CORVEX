@@ -1,0 +1,96 @@
+
+The Stock Movements table logs every change in
+created TIM — Date and Not Null
+product stock, whether from a sale deduction, restock,
+_at EST time the
+inter-branch transfer, adjustment, or damage write-off,
+AM inventory
+along with who performed the movement and when.
+P record was
+It provides the audit trail that supports real-time
+created
+Inventory Centralization across all branches.
+updated TIM — Date and Not Null
+_at EST time the Table 37. Inventory Transfers Table
+AM inventory Field Data Size Description Constrai
+record was
+P Name Type nts
+last updated
+transfer_ INT 11 Unique PK,
+The branch inventory table stores the current id identifier for Auto-incr
+inventory quantity and status of each product by BH the transfer ement
+request
+Marketing branch. It links branches and products and
+provides the inventory records needed for centralized transfer_ VAR 100 Reference Not Null
+stock monitoring, availability checks, and ref CHA number for
+R the transfer
+inter-branch inventory coordination.
+product_ INT 11 Product being FK →
+Table 36. Stock Movements Table
+id transferred products.p
+roduct_id,
+Field Data Size Description Constrai
+Not Null
+Name Type nts
+quantity INT 11 Quantity of Not Null
+stock_m INT 11 Unique PK, product being
+ovement identifier for Auto-incr transferred
+s_id the stock ement
+movement source_br INT 11 Branch the FK →
+anch_id product is branches.br
+perform INT 11 User who FK → being anch_id,
+transferred Not Null
+ed_by recorded the users.user
+from
+movement _id, Not
+Null destinati INT 11 Branch the FK →
+on_bran product is branches.
+product_ INT 11 Product FK →
+ch_id being branch_id
+id involved in products.p
+transferred to , Not Null
+the stock roduct_id,
+movement Not Null status VAR 30 Pending Not Null
+CHA Approval,
+branch INT 11 Branch FK →
+R Submitted,
+_id associated branches. Approved,
+with stock branch_id Completed,
+, Not Null
+movement Rejected
+quantity INT 11 Quantity Not Null submitte INT 11 User who FK →
+moved d_by submitted the users.user
+(positive = transfer _id, Not
+stock in, request Null
+negative =
+approve INT 11 User who FK →
+stock out)
+d_by approved the users.user
+type VAR 50 Sale Not Null transfer _id
+CHA Deduction, request
+R Restock,
+approval TEX — Additional Nullable
+Transfer In,
+_info T notes or details
+Transfer Out,
+related to the
+Stock Count approval
+Adjustment, decision
+Damage
+Write-Off submitte DAT — Date the Not Null
+d_date E transfer
+moveme VAR 100 Reference Not Null request was
+nt_ref CHA number for submitted
+R the stock
+movement complet DAT — Date the Nullable
+ed_date E transfer was
+moveme DAT — Date the Not Null completed
+nt_date E stock
+movement created_ TIM — Date and time Not Null
+occurred at EST the record
+AMP was created
+created_ TIM — Date and time Not Null
+at EST the record updated TIM — Date and time Not Null
+AMP was created _at EST the record was
+AMP last updated
+29

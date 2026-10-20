@@ -1,0 +1,133 @@
+
+customer payment verification, and business activity Likewise, Branch Heads and the Operating Manager
+monitoring. cannot readily visualize customer distribution, territory
+coverage, route assignments, or ongoing field activities
+Currency, Bethuel-Herminihildo (BH) Marketing
+for operational planning, workload distribution, and
+manages its collection operations, sales activities,
+field supervision. Consequently, field operations
+inventory monitoring, and branch coordination
+become more difficult to coordinate, resulting in
+through predominantly manual procedures. Based on
+unnecessary travel, overlapping service areas, reduced
+interviews conducted with the Operating Manager and
+field productivity, and limited managerial oversight.
+surveys and observations involving Branch Heads,
+Moreover, collection and sales transactions are
+collectors, sales agents, and warehouse personnel from
+initially recorded on paper before being submitted to
+the Davao City, General Santos City, and Davao
+their respective branches for encoding, delaying the
+Oriental branches, field collectors organize their daily
+availability of operational information and increasing
+collection schedules using receipts and payment due
+the risk of incomplete or inconsistent field records. In
+dates. In contrast, sales agents conduct canvassing
+addition, collectors and sales agents often work in
+activities within their assigned service territories by
+remote service areas where internet connectivity is
+identifying prospective and existing customers through
+intermittent or unavailable. As a result, personnel
+written addresses, manually prepared location
+cannot always transmit transaction details immediately
+sketches, and personal familiarity with the area.
+to the branch office, so they must temporarily record
+Collection and sales transactions are initially recorded
+collection and sales transactions manually and encode
+using paper-based documents before being submitted
+them once connectivity becomes available. This delay
+to their respective branches for encoding. Branch
+increases the possibility of incomplete, duplicated, or
+Heads supervise day-to-day operations, monitor field
+inconsistent operational records across branches.
+personnel, and coordinate operational concerns with
+Inventory management also remains inefficient
+the Operating Manager. For inventory operations,
+because each branch maintains inventory records
+warehouse personnel conduct physical stock counts,
+independently and updates them only after manual
+manually verify inventory records, and update stock
+stock counting and transaction encoding.
+information only after completing the counting
+Consequently, authorized warehouse personnel from
+process. Although the three branches operate under
+one branch cannot immediately access the inventory
+centralized management, each branch maintains
+records maintained by other branches. The inventory
+inventory and customer payment records
+information that needs to be shared across branches
+independently. Operational updates and inventory
+includes product availability, current stock quantities,
+confirmations are communicated through phone calls,
+stock movements, stock transfers, and inventory
+text messages, paper documents, and other manually
+adjustments. These records must currently be verified
+transferred records. At the same time, company-wide
+through phone calls and manual coordination with the
+customer payment verification requires manual
+concerned branch before inventory-related decisions
+coordination between Branch Heads, the Operating
+can be made. Because these inventory records are not
+Manager, and the Owner before credit-related
+immediately centralized and accessible across
+decisions can be made, as no centralized information
+branches, stock information may become outdated,
+system currently supports these operational processes.
+resulting in delayed inventory verification, inaccurate
+stock information, duplicate inventory records, and
+The existing operational procedures create several
+occasional overselling when another branch has
+challenges that affect the efficiency and coordination
+already sold products. Customer payment information,
+of daily business activities. During field operations,
+however, requires controlled, not unrestricted, cross-
+collectors manually determine the sequence of
+branch access. Each branch maintains customer
+customer collection visits from the list of accounts
+payment records, including outstanding balances,
+scheduled for collection by evaluating multiple
+payment history, credit status, and collection records,
+operational factors, including the customer's
+separately. When a customer purchases on credit or
+outstanding balance, the number of days the payment
+applies for additional credit through another branch,
+has been overdue, and the travel distance from the
+the Branch Head, Operating Manager, and Owner need
+collector's current location, without a standardized
+access to the customer’s consolidated payment and
+method for objectively determining which accounts
+credit information across branches to verify existing
+should be prioritized first. Because collectors assess
+obligations before approving or evaluating additional
+these factors based on individual judgment rather than
+credit. Other users are not authorized to access the
+a standardized prioritization process, they may assign
+customer’s consolidated payment records. Under the
+different priorities to the same set of accounts,
+existing process, this verification requires manual
+resulting in inconsistent collection schedules,
+coordination with the branch holding the customer’s
+inefficient travel routes, increased transportation costs,
+records, increasing processing time and the possibility
+and fewer customers served within a working day.
+of granting additional credit despite unsettled balances
+Similarly, sales agents canvass within their assigned
+in another branch. Collectively, these operational gaps
+service territories using written customer addresses,
+reduce field productivity, delay access to operational
+manually prepared location sketches, and personal
+information, increase operational costs, and prevent
+familiarity with the area to locate prospective and
+management from immediately consolidating
+existing customers. Because customer locations and
+collection performance, sales activities, inventory
+field activities are not organized through a centralized
+status, customer payment information, customer credit
+map-based visualization, both collectors and sales
+line records, and synchronized branch operational
+agents struggle to identify geographically adjacent
+records into a unified operational view. Without
+customers, plan efficient travel routes, and organize
+summarized, descriptive analytical insights,
+field activities within their assigned service territories.
+2

@@ -21,7 +21,9 @@ function parseDisplayDate(value) {
  * @returns {string} Formatted currency string (e.g., ₱1,234.56)
  */
 export function formatCurrency(amount) {
-  return `₱${Number(amount).toLocaleString('en-PH', {
+  const value = Number(amount);
+  const safe = Number.isFinite(value) ? value : 0;
+  return `₱${safe.toLocaleString('en-PH', {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   })}`;

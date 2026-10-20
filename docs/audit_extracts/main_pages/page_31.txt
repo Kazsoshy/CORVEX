@@ -1,0 +1,79 @@
+
+These notifications help users stay informed about Table 42. Offline Sync Queue Table
+pending tasks and important system activities.
+Field Data Size Description Constrai
+Table 41. Field Activity Reports Table Name Type nts
+Field Dat Size Description Constrai sync_qu INT 11 Sync queue PK,
+Name a nts eue_id record ID Auto-incr
+Typ ement
+e user_id INT 11 User/device FK →
+owner who users.user
+report_i INT 11 Report ID PK, recorded the _id, Not
+d Auto-inc offline Null
+rement transaction
+visit_id INT 11 Related FK → device_i VAR 100 Identifier of the Nullable
+field visit field_vis d CHA device the
+R transaction
+its.visit_i originated from
+d, Not
+table_na VAR 50 Target table the Not Null
+Null
+me CHA queued record
+user_id INT 11 Collector or FK → R belongs to (e.g.
+collection_pay
+sales agent users.use ment,
+who r_id, Not field_activity_r
+eports)
+submitted Null
+the report record_r VAR 100 Local/offline- Not Null
+eference CHA generated
+activity VAR 50 Type of Not Null R reference ID
+_type CH field for the
+AR activity pending
+performed record
+(e.g.
+Collection, payload TEX — Serialized Not Null
+Sales Visit, T (JSON) copy of
+Delivery, the
+offline-recorde
+Site Check)
+d data awaiting
+sync
+remark TEX — Notes Nullable
+s T submitted sync_sta VAR 20 Pending, Not Null
+by the field tus CHA Synced,
+agent about R Failed
+the visit
+attempte TIM — Date and time Nullable
+photo VAR 255 Path/URL Nullable d_at EST the last sync
+CH to an AMP attempt was
+AR optional made
+photo
+captured as
+evidence of
+synced_ TIM — Date and time Nullable
+the visit at EST the record
+AMP successfully
+sync_st VAR 20 Pending, Not Null
+synced
+atus CH Synced,
+AR Failed —
+whether this
+report has created_ TIM — Date and time Not Null
+reached the at EST the offline
+server yet AMP record was
+first queued
+created TIM — Date and Not Null
+_at EST time the
+AM report was
+P created on The Offline Sync Queue table temporarily stores field
+the device records created while connectivity is unavailable and
+tracks their synchronization state. Once connectivity
+The Field Activity Report table stores the field is restored, the system submits queued records to the
+activity reports submitted by Collectors and Sales application server for validation and synchronization
+Agents after a visit, including the activity type, with the centralized PostgreSQL database.
+remarks, and optional photographic evidence of the
+recorded field activity. Its sync_status field supports 2.3.7 Architecture Design
+the offline-capable Field Portal by tracking whether a The architectural design of CORVEX illustrates how
+report has successfully reached the central server. client-side applications, server-side components,
+31

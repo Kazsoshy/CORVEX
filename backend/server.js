@@ -29,6 +29,7 @@ import operationalAlertsRouter from './routes/operationalAlerts.js';
 import systemRouter from './routes/system.js';
 import { requireAuth, requireBranchScope } from './middleware/auth.js';
 import { ensureSchema } from './lib/ensureSchema.js';
+import { startOperationalNotificationSweep } from './lib/operationalNotifications.js';
 import { isMailConfigured } from './lib/mail.js';
 
 import path from 'path';
@@ -46,8 +47,9 @@ const app = express();
 // ──────────────────────────────────────────────────────────────────────────────
 app.use(cors({
   origin: ['http://localhost:5173', 'http://localhost:5174', 'http://127.0.0.1:5173'],
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization'],
+  exposedHeaders: ['X-Session-Token'],
   credentials: true,
 }));
 app.use(express.json({ limit: '1mb' }));
@@ -107,22 +109,22 @@ app.use('/api/auth',      authRouter);
 app.use('/api/users',     requireAuth, usersRouter);
 app.use('/api/roles',     requireAuth, rolesRouter);
 app.use('/api/permissions', requireAuth, permissionsRouter);
-app.use('/api/products',  requireAuth, productsRouter);
+app.use('/api/products',  requireAuth, requireBranchScope, productsRouter);
 app.use('/api/branches',  requireAuth, branchesRouter);
 app.use('/api/suppliers', requireAuth, suppliersRouter);
-app.use('/api/territories', requireAuth, territoriesRouter);
+app.use('/api/territories', requireAuth, requireBranchScope, territoriesRouter);
 app.use('/api/product-categories', requireAuth, productCategoriesRouter);
 app.use('/api/digital-receipts', requireAuth, digitalReceiptsRouter);
 app.use('/api/saw-results', requireAuth, sawResultsRouter);
 
 // Branch-scoped routes — identify + branch enforcement
 app.use('/api/customers', requireAuth, requireBranchScope, customersRouter);
-app.use('/api/dashboard', requireAuth, dashboardRouter);
-app.use('/api/branch-manager', requireAuth, branchManagerRouter);
-app.use('/api/reports', requireAuth, reportsRouter);
-app.use('/api/inventory', requireAuth, inventoryRouter);
-app.use('/api/sales',      requireAuth, salesRouter);
-app.use('/api/collector',  requireAuth, collectorRouter);
+app.use('/api/dashboard', requireAuth, requireBranchScope, dashboardRouter);
+app.use('/api/branch-manager', requireAuth, requireBranchScope, branchManagerRouter);
+app.use('/api/reports', requireAuth, requireBranchScope, reportsRouter);
+app.use('/api/inventory', requireAuth, requireBranchScope, inventoryRouter);
+app.use('/api/sales',      requireAuth, requireBranchScope, salesRouter);
+app.use('/api/collector',  requireAuth, requireBranchScope, collectorRouter);
 app.use('/api/customer-portal', requireAuth, customerPortalRouter);
 app.use('/api/notifications', requireAuth, notificationsRouter);
 app.use('/api/approvals', requireAuth, approvalsRouter);
@@ -209,6 +211,8 @@ async function startServer() {
   if (!dbReady) {
     process.exit(1);
   }
+
+  startOperationalNotificationSweep(pool);
 
   app.listen(PORT, () => {
     console.log(`🚀 CORVEX API running at http://localhost:${PORT}`);

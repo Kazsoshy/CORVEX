@@ -1,0 +1,40 @@
+
+Table 11. Normalized Decision Matrix
+Customer Outstanding Days Geographic
+Balance Overdue Distance
+Customer A 0.74 0.67 0.43
+Using the sample decision matrix presented in Table Customer B 0.48 0.33 0.28
+10, the maximum and minimum criterion values are
+first identified. Customer C 1.00 1.00 0.86
+● Maximum Outstanding Balance = ₱25,000 Customer D 0.62 0.50 0.51
+● Maximum Days Overdue = 30 Days
+● Minimum Geographic Distance = 1.8 km Customer E 0.34 0.17 1.00
+The normalized values for each customer are
+Table 11 presents the normalized decision matrix
+computed as follows.
+obtained after converting all criterion values into
+comparable scales using the SAW normalization
+process. These normalized values serve as the basis
+for computing the weighted preference scores in the
+next stage of the decision-support process. The
+computed preference score represents each customer's
+overall collection priority after simultaneously
+evaluating all selected decision criteria according to
+their assigned weights. Customers with higher
+preference scores receive higher collection priority
+during daily field operations.
+2.3.2.7. Computation of Weighted Preference
+Scores
+After normalization, CORVEX calculates each
+customer's preference score by multiplying each
+normalized criterion value by its corresponding
+weight and summing the results. This computation
+determines the overall priority score the Collection
+Dispatch Engine uses to rank customer accounts.
+Equation 4. Preference Value
+Using the weights established in Table 9:
+● Outstanding Balance = 0.40
+● Days Overdue = 0.30
+● Geographic Distance = 0.30
+The preference scores are computed as follows.
+17

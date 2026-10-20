@@ -1,0 +1,107 @@
+
+routes. Recharts will present operational dashboards, derived from the estimated workload of each
+performance reports, and analytical visualizations. development role and prevailing software
+These technologies were selected because they are development rates in the Philippines. This approach is
+open-source, widely adopted, scalable, and capable of consistent with industry practice, where software
+supporting the system's requirements for customer development costs are estimated based on personnel
+prioritization, map-based field operations, Inventory effort, project scope, and resource utilization rather
+Centralization, centralized customer payment than software licensing alone. Furthermore, the project
+verification, and business activity monitoring across utilizes open-source technologies including React.js,
+multiple branches. Node.js, Express.js, Python, PostgreSQL, PostGIS,
+Leaflet.js, OpenStreetMap, Nominatim, and
+Based on the site observations, BH Marketing already
+OpenRouteService, eliminating software licensing
+possesses the basic technical infrastructure necessary
+expenses and significantly reducing implementation
+to implement the system, including desktop computers
+costs. Although the organization incurs recurring costs
+for office operations, stable internet connectivity
+for internet connectivity and routine system
+across branches, and Android mobile devices used by
+maintenance, these expenses are considerably
+Collectors and Sales Agents during field activities. The
+outweighed by the anticipated benefits, including
+identified minimum hardware specifications, including
+improved field productivity, synchronized inventory
+an Intel Core i5 processor or equivalent, at least 8 GB
+information, centralized customer payment
+of RAM, stable broadband internet connectivity, and
+verification, reduced paper consumption, enhanced
+GPS-enabled mobile devices, are sufficient to support
+operational visibility, and faster managerial decision-
+the development and deployment of the system. The
+making. Therefore, CORVEX is considered
+researchers have developed the necessary
+economically feasible because its projected long-term
+competencies in web application development,
+operational benefits justify the estimated investment
+database management, software engineering, and map-
+required for its development and implementation.
+based application development through academic
+coursework and project experience, enabling them to
+Table 6. Estimated Development Cost
+design, implement, and maintain the system. Although
+Table 6 presents the estimated development and
+centralized synchronization depends on internet
+recurring operational costs for implementing
+connectivity, the Field Portal supports offline
+CORVEX. The development cost includes personnel,
+recording of collection and sales transactions, allowing
+deployment, documentation, testing, and training
+field personnel to continue their activities and
+expenses. In contrast, the operational subscription cost
+synchronize data automatically once network
+covers cloud hosting, domain registration, security
+connectivity is restored. Given the availability of the
+certificates, data backup, and technical maintenance
+required hardware and software resources, the
+necessary to keep the system available after
+organization's existing technical infrastructure, and the
+deployment. These recurring costs represent the
+researchers' technical capabilities, CORVEX is
+estimated amount BH Marketing would pay to operate
+technically feasible because the technologies and
+and maintain the system continuously in a production
+resources required for its development, deployment,
+environment.
+and long-term operation are readily available and
+appropriate for addressing BH Marketing's operational Table 7. Estimated Development Benefits
+requirements. Table 7 presents the anticipated operational benefits of
+implementing CORVEX. The expected benefits are
+2.2.4.3. Economic Feasibility
+classified as tangible, representing measurable
+The study evaluated CORVEX's economic feasibility
+improvements in operational efficiency and resource
+by comparing projected software development costs
+utilization, and intangible, referring to organizational
+with the operational benefits expected from its
+improvements such as enhanced coordination,
+implementation at Bethuel-Herminihildo (BH)
+decision-making, operational visibility, and service
+Marketing. Based on the interviews, survey
+quality. Collectively, these benefits demonstrate the
+questionnaires, and direct observations conducted
+system's value in addressing the operational challenges
+during the study, the organization incurs recurring
+identified at Bethuel-Herminihildo (BH) Marketing.
+operational costs associated with manual collection
+scheduling, repetitive inventory verification, 2.2.4.4. Schedule Feasibility
+fragmented communication among branches, delayed Figure 2 presents the Gantt Chart illustrating the
+customer payment verification, and paper-based development schedule of CORVEX: A Mapping-
+documentation. These manual activities require Integrated Field Operations and Inventory
+additional labor time, transportation, communication Centralization System for Multi-Branch Enterprises.
+expenses, and administrative effort, reducing The project follows the Agile Software Development
+operational efficiency. The system addresses these Life Cycle (Agile SDLC), beginning with project
+inefficiencies by automating customer prioritization planning and requirements gathering through
+for collectors, synchronizing inventory and customer interviews, survey questionnaires, and direct
+payment information across branches, and providing observations, followed by system design, iterative
+centralized monitoring of business activities to reduce development, system testing, deployment, and
+repetitive manual processes and improve resource documentation. More time is allocated to the
+utilization. development and testing phases because these involve
+implementing the system's major operational modules,
+The estimated development cost of CORVEX was
+including customer prioritization for collection
+prepared using an effort-based software cost
+activities using the Simple Additive Weighting (SAW)
+estimation approach, wherein project costs were
+8

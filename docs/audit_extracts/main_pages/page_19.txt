@@ -1,0 +1,72 @@
+
+Table 13. Data Sources for Descriptive Analysis The resulting ₱37,000 represents the total amount
+collected from the sample transactions during the
+Data Area Source Database/ Retrieved Data selected period. Comparing this measure across
+Module Table branches or reporting periods helps identify
+differences in recorded collection activity.
+Collection Collection Collection Collection
+Management Transaction Amount, 2.3.3.2.2 Sales Analysis
+Collection Date,
+Sales records are summarized to determine total sales
+Collector
+and changes in sales activity across reporting periods
+Sales Sales Sales Sales Amount, and branches. Total Sales is calculated by summing
+Management Transactions Product, Quantity, the recorded sales amounts within the selected
+Sales Date,
+Branch reporting period. The resulting total is then compared
+with the corresponding value from a previous
+Inventory Inventory Inventory Stock in, Stock reporting period to determine whether recorded sales
+Management Transactions Out, Stock
+Transfer, activity increased or decreased.
+Adjustment
+Equation 6. Total Sales
+Customer Customer Customer Payment Amount,
+Payment Payment Payments Outstanding
+Management Balance, Payment
+Status
+Customer Customer Credit Records Credit Line,
+Credit Credit Credit Status,
+Management Outstanding
+Credit
+Branch Branch Branch Branch Name,
+Management Information Branch
+Assignment
+Table 13 presents the records retrieved from the
+centralized database for descriptive analytics. The
+required analytical dimension groups the data and
+provides the source information used to calculate the
+Equation 7. Sales Growth Rate
+descriptive measures presented in the following
+subsection.
+2.3.3.2. Descriptive Measure Generation
+After aggregating the records, CORVEX calculates
+descriptive measures from the consolidated data to
+summarize collection, sales, inventory, customer
+payment and credit, and branch conditions. CORVEX
+generates the measures using the values stored in the
+corresponding transaction and master records. Total
+amounts are obtained by summing transaction values,
+transaction activity is determined by counting records,
+percentages are calculated from their corresponding
+totals, and trends are determined by comparing
+measures across reporting periods. These measures
+provide the numerical basis for the following
+The calculated 25% increase indicates that recorded
+visualization and analytical interpretation.
+sales activity increased during the current period
+2.3.3.2.1 Collection Analysis compared with the previous period. When this
+Equation 5. Total Collection positive change occurs across successive reporting
+periods, it indicates an upward sales trend and gives
+management evidence to review current sales
+activities and plan future sales activities.
+2.3.3.2.3 Inventory Analysis
+Inventory records are summarized to determine
+available stock and inventory movement by product
+and branch. The system calculates the current
+available quantity using recorded stock-in, stock-out,
+transfer, and adjustment transactions according to the
+inventory rules implemented in CORVEX. The
+system compares the resulting values across branches
+to identify differences in product availability and
+stock movement.
+19

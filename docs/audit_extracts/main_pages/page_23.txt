@@ -1,0 +1,78 @@
+
+outstanding_balance as a decision criterion. The
+created TIM — Date Not Null
+purchase_volume, last_collection_date, and
+_at EST account
+last_sales_visit fields support descriptive analytics
+AM created
+and field activity history. When a Collector saves a
+P
+collection_payment, the system reduces
+updated TIM — Date and Not Null customer_activity.outstanding_balance by the
+_at EST time last recorded payment amount and inserts a corresponding
+AM updated credit_history record. The
+P credit_history.remaining_balance preserves the
+resulting balance as an audit trail and is not used as a
+The Customers table stores customer account profiles, separate SAW input.
+contact information, assigned account managers,
+Table 19. Customer Credit Info Table
+branch and territory associations, and geographic
+coordinates. It supports customer identification, Field Data Size Description Constrain
+account management, service territory assignment, Name Type ts
+and location-based operations. The table also
+maintains customer account status and record credit_i INT 11 Record ID PK,
+timestamps to support monitoring and management of nfo_id Auto-inc
+customer information. The Customers table also rement
+records customer relationship classifications to
+custom INT 11 Owning FK →
+support segmentation and account management. This
+er_id customer customers.
+stored information supports sales transactions, customer_
+collection monitoring, and customer-related reporting id,
+across branches and service territories. Unique,
+Not Null
+Table 18. Customer Activity Table
+credit_l DEC 12,2 Maximum Not Null
+Field Data Size Description Constrain imit IMA approved
+Name Type ts
+L credit limit
+activity INT 11 Record ID PK,
+monthl DEC 12,2 Declared Nullable
+_id Auto-inc y_inco IMA monthly
+rement me L income used
+for credit
+custom INT 11 Owning FK → evaluation
+er_id customer customer
+s.custom employ VAR 50 e.g. Nullable
+er_id, ment_st CH Employed,
+Unique, atus AR Self-employe
+d, Business
+Not Null
+owner
+outstan DEC 12,2 Current Not Null credit_s INT 11 Internal or Nullable
+ding_b IMA balance core bureau
+alance L owed credit score
+purchas DEC 12,2 Total Not Null approv INT 11 User who FK →
+e_volu IMA volume of ed_by approved users.use
+me L purchases the credit r_id
+limit
+last_col DAT — Date of Not Null
+lection E most recent approv DAT — Date the Nullable
+_date payment ed_date E credit limit
+collection was
+approved
+last_sal DAT — Date of Not Null
+es_visit E most recent created TIM — Date Not Null
+sales agent _at EST created
+visit AMP
+updated TIM — Date and Not Null
+_at EST time last updated TIM — Date and Not Null
+AM recalculated _at EST time last
+P /updated AMP updated
+The Customer Activity table stores current The Customer Credit Info table stores each customer's
+customer-level summary indicators derived from credit evaluation information, including the approved
+recorded collection and sales activities, including credit limit, declared monthly income, employment
+outstanding balance, purchase volume, last collection status, credit score, approving user, and approval date.
+date, and last sales visit. For the SAW These records support authorized customer credit
+collection-prioritization process, CORVEX reads only verification and credit-related decision-making.
+23

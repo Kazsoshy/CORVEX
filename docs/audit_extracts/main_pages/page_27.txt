@@ -1,0 +1,94 @@
+
+Sales Invoice Items table, which stores the individual
+status EN — Pending, Not
+products included in each sale.
+UM Completed Null
+Table 30.Sales Invoice Items Table
+created TIM — Date and Not Null
+Field Data Size Description Constrai _at EST time the
+Name Type nts AM visit record
+P was created
+sales_in INT 11 Unique PK,
+updated TIM — Date and Not Null
+voices_i identifier of Auto-incr
+tems_id the invoice ement _at EST time the
+item AM visit record
+P was last
+invoice_ INT 11 Sales invoice FK →
+updated
+id containing sales_invo
+the item ices.invoi
+The field visit table stores scheduled customer visits
+ce_id, Not
+Null assigned to Collectors and Sales Agents, including the
+customer, assigned personnel, visit type, schedule
+product_ INT 11 Product FK → date, and visit status. Collection visits may be
+id included in products.p
+generated from SAW-based customer priority results,
+the sale roduct_id,
+while sales visits are managed based on assigned field
+Not Null
+activities and service territories.
+quantity INT — Quantity of Not Null
+product sold Table 32. Collection Payment Table
+unit_pri DEC 12,2 Selling price Not Null Field Data Size Description Constrain
+ce IMA per unit at the Name Type ts
+L time of salet
+collectio INT 11 Collection PK,
+line_tota DEC 12,2 Total amount Not Null
+npayme payment ID Auto-incre
+l IMA of the line
+nt_id ment
+L item
+custome INT 11 Customer FK →
+created_ TIM — Date and time Not Null
+r_id who made the customers.
+at EST the line item
+payment customer_i
+AMP record was
+d
+created
+collector INT 11 Collector FK →
+The Sales Invoice Items table stores the individual _id who received users.user_
+products included in each sales invoice, including the the payment id, Not
+product, quantity, unit price, and line total. It provides Null
+the item-level details needed for product-based sales
+branch_i INT 11 Branch where FK →
+reporting and links to the Sales Invoices table through d the payment branches.b
+the invoice identifier. was collected ranch_id,
+Not Null
+Table 31. Field Visits Table
+payment INT 11 Payment FK →
+Field Dat Size Description Constrai _method method used payment_m
+Name a nts _id ethods.paym
+ent_method
+Typ
+_id, Not
+e Null
+visit_id INT 11 Visit ID PK, receipts INT 11 Reference FK →
+_id number of the digital_rec
+Auto-inc digital receipt eipts.recei
+rement associated with
+pt_number
+the collection
+, Not Null
+custom INT 11 Customer FK → payment
+er_id customer
+amount DEC 12,2 Amount Not Null
+s.custom
+IMA collected
+er_id L from the
+customer
+user_i INT 11 Assigned FK →
+d personnel users.us payment DAT — Date and time Not Null
+_date_ti ETI the payment
+er_id
+me ME was received
+visit_t EN — Collection, Not status VAR 20 Pending, Not Null
+ype UM Sales Null CHA Completed,
+R Cancelled
+schedu DA — Visit date Not
+notes TEX — Additional Nullable
+led_da TE Null T remarks about
+te the payment
+27

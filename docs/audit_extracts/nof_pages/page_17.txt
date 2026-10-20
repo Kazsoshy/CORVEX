@@ -1,0 +1,80 @@
+
+collection activity and incident reports. Collectors use Demonstration of an Automated Shuttle-
+this screen at the start of their field day and throughout Conveyor-Belt Operation for Inventory Control
+to get an at-a-glance view of progress and launch core of Multiple Stockpiles: A Proof of Concept,"
+Field Portal actions such as starting today's route, IEEE Access, vol. 10, pp. 127636–127653,
+reporting an incident, or reviewing assigned accounts. 2022, doi: 10.1109/ACCESS.2022.3226942.
+The system is expected to update all summary figures [7] J. Nascimento, N. Frazão, S. Teixeira, and A. C.
+and the route progress bar in real time as the collector Ribeiro, "Dashboard for the Management and
+logs collections and completes visits through the Acceptance of Customer Orders," Business
+offline-capable Field Portal. Systems Research, vol. 13, no. 3, pp. 116–129,
+2022.
+Figure 11. Collector's Collection Log Screen [8] M. AlManei, K. Salonitis, and Y. Xu, "Digital
+This form lets the collector record a payment received transformation challenges for small and medium
+from a client during a field visit. The collector enters enterprises: A systematic review,"
+the amount collected, selects the payment method Sustainability, vol. 15, no. 4, Art. no. 3159,
+(cash, check, bank transfer, mobile), uploads a photo 2023, doi: 10.3390/su15043159.
+of the proof of payment, and optionally marks it as a [9] Department of Trade and Industry (DTI). 2023
+partial payment. On submission, the system validates MSME Statistics. Available:
+the amount against the outstanding balance, logs the https://www.dti.gov.ph/resources/msme-
+transaction, generates a digital receipt, and deducts the statistics/
+collected amount from the client's outstanding balance [10] S. Das, A. Baral, I. M. Rafizul, and S. Berner,
+in real time. "Efficiency enhancement in waste management
+through GIS-based route optimization," Cleaner
+Figure 12. Warehouse Staff's Inventory Screen
+Engineering and Technology, vol. 21, Art. no.
+This is the warehouse personnel's primary working
+100775, 2024, doi: 10.1016/j.clet.2024.100775.
+screen, showing all furniture products assigned to their
+[11] S. C. Cha, Y. H. Hsuan, K. H. Yeh, T. Ishihara,
+branch with current stock levels, reorder thresholds,
+O. Yoshihiro, and W. N. Chen, "An
+and status badges (Sufficient, Low Stock, Critical, Out
+Evolutionary Risk-based Access Control
+of Stock). Staff use it to monitor which items need
+Framework for Enterprise File Systems," in
+restocking or transferring and to perform stock counts.
+Proc. IEEE 8th World Forum on Internet of
+The system automatically flags any item at or below its
+Things (WF-IoT), Yokohama, Japan, 2022, doi:
+reorder point with a warning, and items at zero stock
+10.1109/WF-IoT54382.2022.10152041.
+trigger a critical alert that propagates up to the Branch
+[12] Pepperi Ltd., Pepperi Route & Activity Planning
+Manager and Operating Manager.
+Module and Direct Store Delivery (DSD)
+Software. [Online]. Available:
+References https://support.pepperi.com/hc/en-
+[1] M. Zhang, E. H. Grosse, and C. H. Glock, us/articles/5030322903708-Pepperi-s-Route-
+"Potential of mobile applications in human- and-Activity-Planning-
+centric production and logistics management," Moduleandhttps://www.pepperi.com/route-
+IFAC-PapersOnLine, vol. 55, no. 10, pp. 151– accounting-dsd.
+156, 2022, doi: 10.1016/j.ifacol.2022.09.382. [13] Odoo S.A., Odoo Inventory Documentation –
+[2] Elragal, A., & Haddara, M. (2023). The Routes and Push/Pull Rules. [Online].
+digital transformation of enterprise systems: A Available:https://www.odoo.com/documentatio
+systematic literature review. Information n/18.0/applications/inventory_and_mrp/invento
+Systems Frontiers, 25(6), 2149–2170. ry/shipping_receiving/daily_operations/use_rou
+https://doi.org/10.1007/s10796-022-10293-2 tes.html.
+[3] P. K. Choudhary, S. Routray, P. Upadhyay, [14] Badger Maps Inc., Badger Maps Features.
+and A. K. Pani, "Adoption of enterprise mobile [Online]. Available:
+systems – An alternative theoretical https://www.badgermapping.com/features/
+perspective," International Journal of [15] M. Kuhrmann, P. Tell, R. Hebig, et al., “What
+Information Management, vol. 67, Art. no. Makes Agile Software Development Agile?,”
+102539, Dec. 2022, doi: IEEE Transactions on Software Engineering,
+10.1016/j.ijinfomgt.2022.102539. vol. 48, no. 9, pp. 3523–3539, Sept. 2022, doi:
+[4] D. Valle Enrique, et al., "Being digital and flexible 10.1109/TSE.2021.3110305.
+to navigate the storm: How digital [16] H. Edison, X. Wang, and K. Conboy,
+transformation enhances supply chain flexibility “Comparing Methods for Large-Scale Agile
+in turbulent environments," International Software Development: A Systematic
+Journal of Production Economics, vol. 250, Literature Review,” IEEE Transactions on
+2022. Software Engineering, vol. 48, no. 8, pp. 2709–
+[5] S. Kar, S. Bhimrajka, A. Kumar, and S. Mukherjee, 2731, Aug. 2022, doi:
+"Mobile Based Inventory Management System 10.1109/TSE.2021.3069039
+with QR Code," in Proc. IEEE Int. Conf.
+Electronics, Computing and Communication
+Technologies (CONECCT), Bengaluru, India, [17] S. Singh and A. Sharma, “Review of an Agile
+2022, doi: Software Development Methodology with
+10.1109/CONECCT55679.2022.9865739. Scrum & Extreme Programming,” in Proc.
+[6] M. Yaqot, R. E. Franzoi, A. Islam, and B. C. 2022 IEEE Int. Conf. on Current Development
+Menezes, "Cyber-Physical System in Engineering and Technology (CCET), 2022,
+17

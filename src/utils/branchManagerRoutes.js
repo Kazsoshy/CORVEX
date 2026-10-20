@@ -8,6 +8,8 @@ const ROUTE_DEFINITIONS = [
   { pattern: /^\/branch-manager\/customers$/, pageType: 'customers' },
   { pattern: /^\/branch-manager\/customers\/([^/]+)$/, pageType: 'customerDetail', params: ['customerId'] },
   { pattern: /^\/branch-manager\/territories$/, pageType: 'territories' },
+  { pattern: /^\/branch-manager\/field-activity-reports$/, pageType: 'fieldActivityReports' },
+  { pattern: /^\/branch-manager\/branch-inventory$/, pageType: 'branchInventory' },
   { pattern: /^\/branch-manager\/field-operations$/, pageType: 'fieldOperations' },
   { pattern: /^\/branch-manager\/field-operations\/performance$/, pageType: 'routePerformance' },
   { pattern: /^\/branch-manager\/field-operations\/collectors$/, pageType: 'collectorRoutes' },
@@ -74,6 +76,8 @@ export function buildBranchManagerBreadcrumbs(pageType, params = {}) {
     case 'territories': return [...crumbs, { label: 'Territories', to: '/branch-manager/territories' }];
     case 'creditHistory': return [...crumbs, ...creditCrumbs];
     case 'creditDetail': return [...crumbs, ...creditCrumbs, { label: 'Credit Record', to: `/branch-manager/credit-history/${params.creditId}` }];
+    case 'fieldActivityReports': return [...crumbs, { label: 'Field Activity Reports', to: '/branch-manager/field-activity-reports' }];
+    case 'branchInventory': return [...crumbs, { label: 'Branch Inventory', to: '/branch-manager/branch-inventory' }];
     case 'fieldOperations': return [...crumbs, ...fieldOps];
     case 'routePerformance': return [...crumbs, ...fieldOps, { label: 'Route Performance', to: '/branch-manager/field-operations/performance' }];
     case 'collectorRoutes': return [...crumbs, ...fieldOps, { label: 'Collector Route Overview', to: '/branch-manager/field-operations/collectors' }];
@@ -114,6 +118,8 @@ export function resolveBranchManagerPage(pathname) {
     auditLog: 'Audit Log',
     customers: 'Customers',
     customerDetail: 'Customer Detail',
+    fieldActivityReports: 'Field Activity Reports',
+    branchInventory: 'Branch Inventory',
     fieldOperations: 'Field Operations',
     routePerformance: 'Route Performance',
     collectorRoutes: 'Collector Route Overview',
@@ -159,6 +165,8 @@ export function isBranchManagerNavActive(fullPath, navTo) {
   }
   if (navTo === '/branch-manager/customers') return pathname.startsWith('/branch-manager/customers');
   if (navTo === '/branch-manager/field-operations') return pathname.startsWith('/branch-manager/field-operations');
+  if (navTo === '/branch-manager/field-activity-reports') return pathname.startsWith('/branch-manager/field-activity-reports');
+  if (navTo === '/branch-manager/branch-inventory') return pathname === '/branch-manager/branch-inventory';
   if (navTo === '/branch-manager/ci-approvals') return pathname.startsWith('/branch-manager/ci-approvals');
   if (navTo === '/branch-manager/leaflet') return pathname.startsWith('/branch-manager/leaflet');
   if (navTo === '/branch-manager/reports') return pathname.startsWith('/branch-manager/reports');

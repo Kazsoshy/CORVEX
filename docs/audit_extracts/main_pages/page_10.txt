@@ -1,0 +1,118 @@
+
+operational information through a centralized
+Warehouse Personnel.
+dashboard that provides insights into collection
+performance, sales activities, inventory status,
+NFR-1 Scalabilit support additional branches, customers,
+7 y inventory records, and users without customer payment records, branch performance, and
+significant degradation in system operational trends. During requirements-gathering
+performance. activities, BH Marketing management expressed
+support for developing the system and recognized its
+Table 5 presents the non-functional requirements of potential to improve operational coordination and
+the system, grouped by category (Performance, decision-making. Given the positive responses from
+Security, Usability, Reliability, Maintainability, intended users, the modules' alignment with the
+Compatibility, and Scalability), each specifying a organization's operational processes, and
+quality attribute, such as speed, data security, ease of management's willingness to adopt the system,
+use, data integrity, modularity, cross-platform CORVEX is considered operationally feasible for
+compatibility, and scalability, that the system must implementation within BH Marketing.
+satisfy to operate efficiently, securely, and reliably.
+2.2.4.2 Technical Feasibility
+2.2.4. Feasibility Requirements The technical feasibility of CORVEX was evaluated
+2.2.4.1. Operational Feasibility based on the available development resources,
+existing technical infrastructure, and the system
+The operational feasibility of CORVEX was
+requirements identified through interviews, survey
+evaluated through interviews with the Operating
+questionnaires, and direct observations conducted at
+Manager, survey questionnaires administered to
+Bethuel-Herminihildo (BH) Marketing. The system
+Collectors, Sales Agents, Warehouse Personnel, and
+will be developed using React.js for the responsive
+Branch Heads, and direct observations conducted
+web interface, Node.js and Express.js for the
+across the Davao City, General Santos City, and
+application server and RESTful API, Python for
+Davao Oriental branches of Bethuel-Herminihildo
+implementing the Simple Additive Weighting (SAW)
+(BH) Marketing. The data gathered revealed that the
+method used in customer prioritization, and
+company's daily operations remain highly dependent
+PostgreSQL with PostGIS for centralized database
+on manual procedures for collection scheduling, sales
+and spatial data management. For the map-based field
+canvassing, inventory monitoring, and cross-branch
+operations module, the system uses Leaflet.js with
+coordination. Collectors manually determine the
+OpenStreetMap for interactive map visualization,
+sequence of customer visits based on payment
+Nominatim to convert customer addresses into
+information and personal judgment. At the same time,
+geographic coordinates, and OpenRouteService to
+Sales Agents rely on written customer addresses,
+generate recommended travel routes. Recharts will
+manually prepared location sketches, and familiarity
+present operational dashboards, performance reports,
+with their assigned territories during canvassing
+and analytical visualizations. These technologies were
+activities. Likewise, they verify inventory availability
+selected because they are open-source, widely
+and customer payment information through phone
+adopted, scalable, and capable of supporting the
+calls, text messages, and manual coordination
+system's requirements for customer prioritization,
+between branches because they maintain operational
+map-based field operations, Inventory Centralization,
+records independently. These existing practices result
+centralized customer payment verification, and
+in delayed operational information, fragmented
+business activity monitoring across multiple branches.
+inventory and customer payment records, inefficient
+field coordination, and limited management visibility
+Based on the site observations, BH Marketing already
+over company-wide operations. The findings indicate
+possesses the basic technical infrastructure necessary
+that the organization can benefit from a centralized
+to implement the system, including desktop
+information system that supports map-based field
+computers for office operations, stable internet
+operations, customer prioritization for collection
+connectivity across branches, and Android mobile
+activities, Inventory Centralization, centralized
+devices used by Collectors and Sales Agents during
+customer payment verification, and business activity
+field activities. The identified minimum hardware
+monitoring across all branches.
+specifications, including an Intel Core i5 processor or
+equivalent, at least 8 GB of RAM, stable broadband
+The system is operationally feasible because it
+internet connectivity, and GPS-enabled mobile
+enhances BH Marketing's existing procedures without
+devices, are sufficient to support the development and
+significantly changing established personnel
+deployment of the system. The researchers have
+responsibilities. Rather than replacing current
+developed the necessary competencies in web
+workflows, CORVEX digitizes and integrates
+application development, database management,
+collection management, sales operations, Inventory
+software engineering, and map-based application
+Centralization, customer payment verification, and
+development through academic coursework and
+business activity monitoring into a centralized
+project experience, enabling them to design,
+platform. The system supports collectors by
+implement, and maintain the system. Although
+implementing the Simple Additive Weighting (SAW)
+centralized synchronization depends on internet
+method to prioritize daily collection schedules. At the
+connectivity, the Field Portal supports offline
+same time, Sales Agents receive map-based customer
+recording of collection and sales transactions,
+and territory visualization to support canvassing and
+allowing field personnel to continue their activities
+route planning. Warehouse Personnel can synchronize
+and synchronize data automatically once network
+inventory records across branches, and the Operating
+connectivity is restored. Given the availability of the
+Manager and Branch Heads can monitor consolidated
+10

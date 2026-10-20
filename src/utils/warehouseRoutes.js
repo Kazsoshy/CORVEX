@@ -3,6 +3,7 @@ const ROUTE_DEFINITIONS = [
   { pattern: /^\/warehouse\/settings$/, pageType: 'settings' },
   { pattern: /^\/warehouse\/inventory$/, pageType: 'branchInventory' },
   { pattern: /^\/warehouse\/branch-inventory$/, pageType: 'branchInventory' },
+  { pattern: /^\/warehouse\/central-inventory$/, pageType: 'centralInventory' },
   { pattern: /^\/warehouse\/products$/, pageType: 'products' },
   { pattern: /^\/warehouse\/add-product$/, pageType: 'addProduct' },
   { pattern: /^\/warehouse\/product\/([^/]+)\/edit$/, pageType: 'editProduct', params: ['productId'] },
@@ -61,6 +62,8 @@ export function buildWarehouseBreadcrumbs(pageType, params = {}) {
       return [...crumbs, { label: 'Settings', to: '/warehouse/settings' }];
     case 'branchInventory':
       return [...crumbs, { label: 'Branch Inventory', to: '/warehouse/branch-inventory' }];
+    case 'centralInventory':
+      return [...crumbs, { label: 'Inventory Management', to: '/warehouse/central-inventory' }];
     case 'products':
       return [...crumbs, { label: 'Products', to: '/warehouse/products' }];
     case 'addProduct':
@@ -166,6 +169,7 @@ export function resolveWarehousePage(pathname, search = '') {
     dashboard: 'Dashboard',
     settings: 'Settings',
     branchInventory: 'Branch Inventory',
+    centralInventory: 'Inventory Management',
     products: 'Products',
     addProduct: 'Add Product',
     editProduct: 'Edit Product',
@@ -208,6 +212,7 @@ export function isWarehouseNavActive(fullPath, navTo) {
   if (navTo === '/warehouse/branch-inventory') {
     return pathname === '/warehouse/branch-inventory' || pathname === '/warehouse/inventory';
   }
+  if (navTo === '/warehouse/central-inventory') return pathname === '/warehouse/central-inventory';
   if (navTo === '/warehouse/products') {
     return pathname === '/warehouse/products'
       || pathname === '/warehouse/add-product'

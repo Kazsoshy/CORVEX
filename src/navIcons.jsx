@@ -16,10 +16,26 @@ const ICONS = {
       <rect x="3" y="17" width="18" height="5" rx="1" />
     </>
   ),
+  // Philippine peso (₱) — kept as 'dollar-sign' for existing call sites
   'dollar-sign': (
     <>
-      <line x1="12" y1="2" x2="12" y2="22" />
-      <path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6" />
+      <path d="M20 11H4" />
+      <path d="M20 7H4" />
+      <path d="M7 21V4a1 1 0 0 1 1-1h4a1 1 0 0 1 0 12H7" />
+    </>
+  ),
+  peso: (
+    <>
+      <path d="M20 11H4" />
+      <path d="M20 7H4" />
+      <path d="M7 21V4a1 1 0 0 1 1-1h4a1 1 0 0 1 0 12H7" />
+    </>
+  ),
+  'philippine-peso': (
+    <>
+      <path d="M20 11H4" />
+      <path d="M20 7H4" />
+      <path d="M7 21V4a1 1 0 0 1 1-1h4a1 1 0 0 1 0 12H7" />
     </>
   ),
   'shopping-cart': (
@@ -554,6 +570,12 @@ const ICONS = {
       <line x1="14" y1="11" x2="14" y2="17" />
     </>
   ),
+  ban: (
+    <>
+      <circle cx="12" cy="12" r="10" />
+      <line x1="4.93" y1="4.93" x2="19.07" y2="19.07" />
+    </>
+  ),
   archive: (
     <>
       <polyline points="21 8 21 21 3 21 3 8" />
@@ -574,6 +596,13 @@ const ICONS = {
     <>
       <line x1="18" y1="6" x2="6" y2="18" />
       <line x1="6" y1="6" x2="18" y2="18" />
+    </>
+  ),
+  menu: (
+    <>
+      <line x1="4" y1="7" x2="20" y2="7" />
+      <line x1="4" y1="12" x2="20" y2="12" />
+      <line x1="4" y1="17" x2="20" y2="17" />
     </>
   ),
 

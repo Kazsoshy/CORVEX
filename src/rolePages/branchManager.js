@@ -18,6 +18,8 @@ export const branchManagerRole = {
       title: 'Operations',
       items: [
         { label: 'Field Operations',               to: '/branch-manager/field-operations' },
+        { label: 'Field Activity Reports',         to: '/branch-manager/field-activity-reports' },
+        { label: 'Branch Inventory',               to: '/branch-manager/branch-inventory' },
         { label: 'Customers',                      to: '/branch-manager/customers' },
         { label: 'Territories',                    to: '/branch-manager/territories' },
         { label: 'Credit Investigation Approvals', to: '/branch-manager/ci-approvals' },
@@ -52,6 +54,8 @@ export const branchManagerRole = {
   navPages: [
     { label: 'Dashboard',                          to: '/branch-manager/dashboard' },
     { label: 'Field Operations',                   to: '/branch-manager/field-operations' },
+    { label: 'Field Activity Reports',             to: '/branch-manager/field-activity-reports' },
+    { label: 'Branch Inventory',                   to: '/branch-manager/branch-inventory' },
     { label: 'Customers',                          to: '/branch-manager/customers' },
     { label: 'Territories',                        to: '/branch-manager/territories' },
     { label: 'Credit Investigation Approvals',     to: '/branch-manager/ci-approvals' },

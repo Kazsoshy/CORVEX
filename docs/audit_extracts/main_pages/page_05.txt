@@ -1,0 +1,69 @@
+
+exposure, and facilitate informed at BH Marketing to minimize costs; therefore, the
+decision-making across all branches. system excludes commercial enterprise software,
+proprietary mapping services, and paid analytics
+1.4. Scope and Limitations platforms.
+This study covers the design and development of 2. METHODS
+CORVEX: A Mapping-Integrated Field Operations
+and Inventory Centralization System for
+Multi-Branch Enterprises for Bethuel-Herminihildo
+(BH) Marketing. The system supports daily collection
+activities, sales field activities, inventory
+centralization, customer payment verification, and
+field monitoring through four major functional
+components: (1) a map-based field operations module
+that visualizes customer locations, service territories,
+and travel routes while assisting collectors in
+prioritizing collection schedules using the Simple
+Additive Weighting (SAW) method and supporting
+sales agents in scheduling field activities within their
+designated locations; (2) an offline-capable field Figure 1. Agile Model
+transaction module for recording collection and sales
+transactions; (3) an inventory centralization and Figure 1 illustrates the Agile software development
+customer payment verification module that maintains methodology used to develop CORVEX: A
+updated inventory information across branches while Mapping-Integrated Field Operations and Inventory
+allowing only the Operating Manager to access Centralization System for Multi-Branch Enterprises.
+consolidated customer payment records; and (4) a The researchers selected Agile because the
+management dashboard that applies descriptive operational requirements of Bethuel-Herminihildo
+analytics to consolidate collection performance, sales (BH) Marketing were progressively refined during
+activities, inventory status, customer payment requirements gathering through interviews, surveys,
+information, branch performance, and operating and direct observations involving the Operating
+expense reports to support managerial Manager, Branch Heads, Collectors, Sales Agents,
+decision-making. The system accommodates six user and Warehouse Personnel. Rather than completing the
+roles: Operating Manager, Branch Head, Collector, system in a single development cycle, Agile enables
+Sales Agent, Warehouse Personnel, and Customer, the researchers to develop the system incrementally
+each provided with role-based access according to through iterative phases of planning, design,
+their assigned responsibilities. The system is intended development, testing, deployment, and review. This
+for deployment at BH Marketing's branches in Davao allows stakeholders to evaluate and refine completed
+City, General Santos City, and Davao Oriental, and it functionality continuously based on feedback. This
+manages records generated from the implementation iterative approach suits CORVEX because its major
+period onward. modules—including the map-based field operations
+module, customer prioritization module, offline field
+This study is limited to the requirements identified portal, Inventory Centralization module, centralized
+during the requirements-gathering phase at customer payment verification module, and
+Bethuel-Herminihildo (BH) Marketing. It does not operations dashboard—can be implemented,
+include modules for accounting transactions, payroll validated, and improved independently before moving
+processing, procurement management, taxation, or to subsequent iterations. Recent studies have shown
+financial auditing. The mapping component is limited that Agile software development improves
+to visualizing customer locations, service territories, adaptability to changing requirements, promotes
+and travel routes generated from customer addresses stakeholder collaboration, supports incremental
+through geocoding services and displayed using software delivery, and enhances software quality
+Leaflet.js and OpenStreetMap. It does not perform through continuous feedback and iterative refinement
+advanced Geographic Information System (GIS) [15], [16], [17], [18].
+spatial analysis, continuous GPS tracking, or live
+location monitoring; instead, it uses stored geographic Phase 1: Planning and Requirements Gathering
+coordinates for route visualization and field planning. During the Planning phase, the researchers identify
+The system is designed specifically for BH the operational problems and system requirements of
+Marketing's workflow and organizational structure, Bethuel-Herminihildo (BH) Marketing through
+and its applicability to other organizations may interviews with the Operating Manager, surveys
+require modifications to accommodate different involving Branch Heads, Collectors, Sales Agents,
+business processes, policies, and requirements. The and Warehouse Personnel, and direct observations
+system also assumes that authorized users provide conducted across the Davao City, General Santos
+accurate records, maintain updated customer City, and Davao Oriental branches. The collected
+addresses, and have internet connectivity for data information will be analyzed to determine the
+synchronization; however, the field transaction system's functional and non-functional requirements.
+module supports offline recording and These include map-based field operations, customer
+synchronization once connectivity is restored. Finally, prioritization for collection scheduling using the
+implementation is limited to open-source software Simple Additive Weighting (SAW) method, Inventory
+technologies and the existing hardware infrastructure Centralization, centralized customer payment
+5

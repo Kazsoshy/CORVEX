@@ -1,0 +1,81 @@
+
+created_ TIM — Date and time Not Null collecti INT 11 Related FK →
+at EST the record on_id payment collection
+AMP was created _payment.
+collection
+payment_i
+updated TIM — Date and time Not Null
+d
+_at EST the record
+AMP was last
+previou DEC 10,2 Balance Not Null
+updated
+s_balan IMA prior to
+ce L this
+The Collection Payment table stores the individual payment
+payments received from customers, including the
+payment DEC 10,2 Amount Not Null
+amount, payment method, payment date and time,
+_amount IMA paid
+receiving collector branch, and transaction status. It L
+serves as the source record for digital receipt
+generation and customer payment history. remaini DEC 10,2 Remaining Not Null
+Table 33. Digital Receipts Table ng_bala IMA balance
+nce L
+Field Dat Size Description Constrai
+Name a nts paymen EN — Paid, Not Null
+Typ t_status UM Partial,
+e Overdue
+transact DAT — Date Not Null
+receipts INT 11 Receipt ID PK,
+ion_dat E
+_id Auto-inc
+e
+rement
+collecti INT 11 Collection FK → The credit history table stores historical customer
+on_id reference collectio credit-related payment events, including the balance
+n_payme before payment, payment amount, remaining balance,
+nt.collect payment status, and transaction date. It references
+ionpaym related sales and collection records to provide an
+ent_id auditable history of customer credit activity and
+support authorized payment and credit verification.
+receipt VAR 25 Receipt Unique,
+_numb CH number Not Null Table 35. Branch Inventory Table
+er AR
+Field Dat Size Descriptio Constrai
+receipt DAT — Date issued Not Null Name a n nts
+_date ETI Typ
+ME e
+generat INT 11 Collector FK → inventor INT 11 Unique PK,
+ed_by users.use y_id inventory Auto-incr
+r_id record ement
+identifier
+The digital receipts table stores electronic receipts
+branch_ INT 11 Branch FK →
+generated after successful collection transactions. It id where the branches.b
+provides proof of payment in the offline-capable Field inventory is ranches_id
+Portal and links directly to collection records. maintained , Not Null
+Table 34. Credit History Table product INT 11 Product ID FK →
+_id products.p
+Field Dat Size Descriptio Constrai roduct_id,
+Name a n nts Not Null
+Typ
+quantity INT — Current Not Null
+e
+quantity of
+the product
+credit_i INT 11 Credit PK,
+available at
+d record ID Auto-inc the branch
+rement
+reorder INT — Minimum Not Null
+custom INT 11 Customer FK → _level stock
+er_id customer quantity
+s.custom used
+er_id
+status EN — Current Not Null
+sales_i INT 11 Related FK → UM Inventory
+d sale sales_invoi Status
+ces.sales_in
+voices_id
+28

@@ -9,7 +9,7 @@ export function resolveStatIcon(label = '', explicitIcon) {
   if (/(restock|replenish)/.test(text)) return 'restock';
   if (/(stock|inventory|sku|product|tracked|catalog)/.test(text)) return 'inventory';
   if (/(movement|sales|sold|invoice|order|cart)/.test(text)) return 'shopping-cart';
-  if (/(collection|collected|payment|paid|receipt|amount|balance|revenue|₱|php|peso|credit)/.test(text)) return 'dollar-sign';
+  if (/(collection|collected|payment|paid|receipt|amount|balance|revenue|₱|php|peso|credit)/.test(text)) return 'philippine-peso';
   if (/(customer|account|user|staff|agent|collector)/.test(text)) return 'users';
   if (/(alert|critical|low|warning|overdue|risk)/.test(text)) return 'alert-triangle';
   if (/(pending|await|queue|today|schedule|visit|clock)/.test(text)) return 'clock';
@@ -42,11 +42,11 @@ export function StatsGrid({ stats, className = '' }) {
             style={{ '--stat-index': index }}
             title={stat.title || undefined}
           >
-            <span className="stat-label">{stat.label}</span>
-            <strong className="stat-value">{stat.value}</strong>
             <div className="stat-card-icon" aria-hidden="true">
               <NavIcon name={icon} />
             </div>
+            <strong className="stat-value">{stat.value}</strong>
+            <span className="stat-label">{stat.label}</span>
           </article>
         );
       })}

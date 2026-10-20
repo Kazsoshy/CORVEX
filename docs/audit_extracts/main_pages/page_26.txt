@@ -1,0 +1,89 @@
+
+Table 27. Permissions Table
+invoice VAR 30 Human-read Unique,
+Field Data Size Description Constrai _numb CH able invoice Not Null
+Name Type nts er AR number, e.g.
+INV-2026-0
+permissi INT 11 Permission PK, 00001
+on_id ID Auto-incr
+ement custom INT 11 Customer FK →
+er_id associated customer
+label VAR 100 Display name Not Null
+with the s.custom
+CHA of the
+sale er_id,
+R permission
+Not Null
+descripti TEX — Explanation Not Null
+on T of what the sales_a INT 11 Sales agent FK →
+permission gent_id who users.use
+allows recorded the r_id, Not
+sale Null
+created_ TIM — Date and time Not Null
+at EST the
+branch INT 11 Branch FK →
+AMP permission
+_id where the branches.
+record was
+sale was branch_id
+created
+, Not Null
+made
+updated TIM — Date and time Not Null
+_at EST the total_a DEC 12,2 Total Not Null
+AMP permission mount IMA amount of
+record was L the sales
+updated invoice
+The Permissions table stores the individual, granular paymen INT 11 Payment FK →
+permissions available within the system, including a t_meth method payment_
+display label and a description of what each od_id used methods.p
+permission allows. It works together with the Roles ayment_m
+and Role Permissions tables to implement role-based ethod_id,
+Not Null
+access control.
+status EN — Invoice Not Null
+Table 28. Role Permissions Table
+UM payment
+Field Data Size Description Constrai status:
+Name Type nts Unpaid,
+Partial, or
+role_id INT 11 Role ID PK, FK
+Paid
+→
+roles.role
+invoice DAT — Date the Not Null
+_id
+s_date E invoice was
+permissi INT 11 Permission PK, FK issued
+on_id ID →
+permissio due_dat DAT — Payment Nullable
+ns.permis e E due date for
+sion_id credit sales
+granted BOO — Whether the Not Null notes TEX — Additional Nullable
+LEA permission is T remarks
+N currently
+granted (true) about the
+or revoked invoice
+(false)
+created TIM — Date and Not Null
+The Role Permissions table maps roles to their _at EST time the
+assigned permissions, with a granted flag indicating AM invoice
+whether a specific permission is currently active or P record was
+revoked for that role. It forms the operational core of created
+the system's role-based access control.
+updated TIM — Date and Not Null
+Table 29.Sales Invoices Table _at EST time the
+AM invoice
+Field Dat Size Description Constrai
+P record was
+Name a nts
+last updated
+Typ
+e
+The Sales Invoices table stores the header-level
+invoice INT 11 Unique PK, information of each sales transaction recorded by a
+_id identifier of Auto-inc Sales Agent, including the customer, branch, sales
+the sales rement agent, total amount, payment method, status, and
+invoice
+invoice dates. It serves as the parent record for the
+26

@@ -5,9 +5,61 @@ import { getCreditHistory } from '../../api/reportsService';
 import { NavIcon } from '../../navIcons';
 import { EmptyState } from '../shared/EmptyState';
 import { LoadingState } from '../shared/LoadingState';
+import { DetailRowsTable } from '../shared/DetailRowsTable';
 import { StatusBadge } from '../StatusBadge';
 import { StatsGrid } from '../shared/StatsGrid';
 import { formatCurrency, formatDisplayDate } from '../../utils/formatters.js';
+import { downloadPdf } from '../../utils/dataExport.js';
+
+function dash(value) {
+  return value == null || value === '' ? '—' : String(value);
+}
+
+/** Build a label/value PDF body from a credit history record (no mock data). */
+function buildCreditHistoryPdfRows(record) {
+  if (!record) return [];
+  return [
+    { Field: 'Credit ID', Value: dash(record.credit_id) },
+    { Field: 'Customer', Value: dash(record.customer_name) },
+    { Field: 'Customer ID', Value: dash(record.customer_id) },
+    { Field: 'Branch', Value: dash(record.branch_name) },
+    { Field: 'Sales ID', Value: dash(record.sales_id) },
+    { Field: 'Invoice Number', Value: dash(record.invoice_number) },
+    { Field: 'Collection ID', Value: dash(record.collection_id) },
+    { Field: 'Receipt Number', Value: dash(record.receipt_number) },
+    { Field: 'Previous Balance', Value: formatCurrency(record.previous_balance) },
+    { Field: 'Payment Amount', Value: formatCurrency(record.payment_amount) },
+    { Field: 'Remaining Balance', Value: formatCurrency(record.remaining_balance) },
+    { Field: 'Payment Status', Value: dash(record.payment_status) },
+    { Field: 'Transaction Date', Value: formatDisplayDate(record.transaction_date) },
+  ];
+}
+
+function downloadCreditHistoryPdf(record, showToast) {
+  try {
+    const rows = buildCreditHistoryPdfRows(record);
+    if (!rows.length) {
+      if (showToast) showToast('Nothing to export.', 'error');
+      return false;
+    }
+    const creditId = record.credit_id ?? 'record';
+    const ok = downloadPdf(rows, {
+      filename: `credit-history-${creditId}.pdf`,
+      title: 'Credit History Record',
+      subtitle: `Credit ID ${creditId}${record.customer_name ? ` · ${record.customer_name}` : ''}`,
+    });
+    if (ok) {
+      if (showToast) showToast('Credit history exported as PDF.', 'success');
+      return true;
+    }
+    if (showToast) showToast('Unable to generate PDF.', 'error');
+    return false;
+  } catch (err) {
+    console.error('[CreditHistory] PDF export failed:', err);
+    if (showToast) showToast('Unable to generate PDF.', 'error');
+    return false;
+  }
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // List Page — shows all credit_history rows with every schema column
@@ -25,6 +77,7 @@ export function CreditHistoryListPage({
   const [statusFilter, setStatusFilter] = useState('All');
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo] = useState('');
+  const [selectedRecord, setSelectedRecord] = useState(null);
   useEffect(() => {
     async function load() {
       setLoading(true);
@@ -59,15 +112,13 @@ export function CreditHistoryListPage({
   if (error && !records.length) {
     return <EmptyState title="Unable to load credit history" description={error} actionLabel="Retry" onAction={() => window.location.reload()} />;
   }
-  return <div className="relative z-10 grid gap-[22px] w-full">
+  return <div className="page">
       <section className="panel content-panel relative overflow-hidden">
         <div className="list-section-header">
           <h3>Credit History</h3>
           <p className="text-ink/70">{records.length} record{records.length !== 1 ? 's' : ''} in database</p>
         </div>
-        <div className="list-section-toolbar" style={{
-        marginBottom: 12
-      }}>
+        <div className="list-section-toolbar">
           <div className="list-section-controls">
             <input className="filter-input search" type="search" placeholder="Search by customer, invoice #, receipt #, or ID" value={search} onChange={e => setSearch(e.target.value)} />
             <select className="filter-select" value={statusFilter} onChange={e => setStatusFilter(e.target.value)}>
@@ -83,14 +134,9 @@ export function CreditHistoryListPage({
                 <tr>
                   <th>Credit ID</th>
                   <th>Customer</th>
-                  <th>Branch</th>
-                  <th>Invoice #</th>
-                  <th>Receipt #</th>
-                  <th>Previous Balance</th>
                   <th>Payment Amount</th>
-                  <th>Remaining Balance</th>
-                  <th>Payment Status</th>
-                  <th>Transaction Date</th>
+                  <th>Status</th>
+                  <th>Date</th>
                   <th>Actions</th>
                 </tr>
               </thead>
@@ -101,31 +147,24 @@ export function CreditHistoryListPage({
                     fontSize: '0.82rem'
                   }}>{r.credit_id}</span></td>
                     <td><strong>{r.customer_name}</strong></td>
-                    <td>{r.branch_name || '—'}</td>
-                    <td><span style={{
-                    fontFamily: 'monospace',
-                    fontSize: '0.82rem'
-                  }}>{r.invoice_number || '—'}</span></td>
-                    <td><span style={{
-                    fontFamily: 'monospace',
-                    fontSize: '0.82rem'
-                  }}>{r.receipt_number || '—'}</span></td>
-                    <td>{formatCurrency(r.previous_balance)}</td>
                     <td style={{
                   fontWeight: 600,
                   color: '#255684'
                 }}>{formatCurrency(r.payment_amount)}</td>
-                    <td style={{
-                  fontWeight: 600,
-                  color: Number(r.remaining_balance) > 0 ? '#dc2626' : '#4A6B12'
-                }}>
-                      {formatCurrency(r.remaining_balance)}
-                    </td>
                     <td><StatusBadge status={r.payment_status} /></td>
                     <td>{formatDisplayDate(r.transaction_date)}</td>
                     <td className="table-actions">
-                      <button className="icon-action-button" type="button" title="View" onClick={() => navigate(`${basePath}/${r.credit_id}`)}>
+                      <button className="icon-action-button" type="button" title="View details" onClick={() => setSelectedRecord(r)}>
                         <NavIcon name="view" />
+                      </button>
+                      <button
+                        className="icon-action-button"
+                        type="button"
+                        title="Download PDF"
+                        aria-label={`Download PDF for credit ${r.credit_id}`}
+                        onClick={() => downloadCreditHistoryPdf(r, showToast)}
+                      >
+                        <NavIcon name="download" />
                       </button>
                     </td>
                   </tr>)}
@@ -134,6 +173,58 @@ export function CreditHistoryListPage({
           </div><Pagination {...pagination_filtered} /></>
         : <EmptyState title="No records found" description="Adjust your search or filters." />}
       </section>
+
+      {selectedRecord ? <div
+        className="modal-overlay"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="credit-history-detail-title"
+        onClick={() => setSelectedRecord(null)}
+      >
+          <div className="modal-content" style={{ maxWidth: 640 }} onClick={(e) => e.stopPropagation()}>
+            <div className="flex flex-col md:flex-row justify-between gap-4 items-start md:items-center mb-4">
+              <div>
+                <h3 id="credit-history-detail-title" style={{ margin: 0 }}>Credit Record Details</h3>
+                <p className="text-ink/70" style={{ margin: '4px 0 0', fontSize: '0.82rem' }}>
+                  Credit ID {selectedRecord.credit_id} · {selectedRecord.customer_name}
+                </p>
+              </div>
+              <StatusBadge status={selectedRecord.payment_status} />
+            </div>
+            <DetailRowsTable rows={[
+              { label: 'Credit ID', value: <span style={{ fontFamily: 'monospace' }}>{selectedRecord.credit_id}</span> },
+              { label: 'Customer', value: selectedRecord.customer_name },
+              { label: 'Customer ID', value: <span style={{ fontFamily: 'monospace' }}>{selectedRecord.customer_id}</span> },
+              { label: 'Branch', value: selectedRecord.branch_name || '—' },
+              { label: 'Sales ID', value: <span style={{ fontFamily: 'monospace' }}>{selectedRecord.sales_id ?? '—'}</span> },
+              { label: 'Invoice Number', value: <span style={{ fontFamily: 'monospace' }}>{selectedRecord.invoice_number || '—'}</span> },
+              { label: 'Collection ID', value: <span style={{ fontFamily: 'monospace' }}>{selectedRecord.collection_id ?? '—'}</span> },
+              { label: 'Receipt Number', value: <span style={{ fontFamily: 'monospace' }}>{selectedRecord.receipt_number || '—'}</span> },
+              { label: 'Previous Balance', value: formatCurrency(selectedRecord.previous_balance) },
+              { label: 'Payment Amount', value: <span style={{ fontWeight: 700, color: '#255684' }}>{formatCurrency(selectedRecord.payment_amount)}</span> },
+              { label: 'Remaining Balance', value: (
+                <span style={{
+                  fontWeight: 700,
+                  color: Number(selectedRecord.remaining_balance) > 0 ? '#dc2626' : '#4A6B12'
+                }}>
+                  {formatCurrency(selectedRecord.remaining_balance)}
+                </span>
+              ) },
+              { label: 'Payment Status', value: <StatusBadge status={selectedRecord.payment_status} /> },
+              { label: 'Transaction Date', value: formatDisplayDate(selectedRecord.transaction_date) },
+            ]} />
+            <div className="modal-actions">
+              <button
+                className="button secondary"
+                type="button"
+                onClick={() => downloadCreditHistoryPdf(selectedRecord, showToast)}
+              >
+                Download PDF
+              </button>
+              <button className="button" type="button" onClick={() => setSelectedRecord(null)}>Close</button>
+            </div>
+          </div>
+        </div> : null}
     </div>;
 }
 
@@ -173,27 +264,12 @@ export function CreditHistoryDetailPage({
   if (error || !record) {
     return <EmptyState title="Record not found" description={error || 'This credit history record does not exist.'} actionLabel="Back to Credit History" onAction={() => navigate(basePath)} />;
   }
-  const statusColor = {
-    Paid: {
-      color: '#4A6B12'
-    },
-    Partial: {
-      color: '#d97706'
-    },
-    Overdue: {
-      color: '#dc2626'
-    }
-  }[record.payment_status] ?? {
-    color: '#818697'
-  };
-  return <div className="relative z-10 grid gap-[22px] w-full">
+  return <div className="page">
       {/* Header */}
       <section className="panel dashboard-greeting">
         <div className="flex flex-col gap-1">
-          <p className="text-[0.82rem] font-bold tracking-widest uppercase text-navy/60 m-0" style={{
-          color: statusColor.color
-        }}>
-            {record.payment_status} · Credit ID {record.credit_id}
+          <p className="text-[0.82rem] font-bold tracking-widest uppercase text-navy/60 m-0">
+            <StatusBadge status={record.payment_status} /> · Credit ID {record.credit_id}
           </p>
           <h2>{record.customer_name}</h2>
           <p className="text-ink/70">{record.branch_name} · Customer ID {record.customer_id}</p>
@@ -212,7 +288,7 @@ export function CreditHistoryDetailPage({
         value: formatCurrency(record.remaining_balance)
       }, {
         label: 'Payment Status',
-        value: record.payment_status
+        value: <StatusBadge status={record.payment_status} />
       }, {
         label: 'Transaction Date',
         value: formatDisplayDate(record.transaction_date)
@@ -221,56 +297,28 @@ export function CreditHistoryDetailPage({
       {/* Full record */}
       <section className="panel content-panel relative overflow-hidden">
         <div className="flex flex-col md:flex-row justify-between gap-4 items-start md:items-center mb-4"><h3>Credit Record Detail</h3></div>
-        <ul className="info-grid">
-          <li><span className="info-item-label">Credit ID</span>
-              <span className="info-item-value" style={{
-            fontFamily: 'monospace'
-          }}>{record.credit_id}</span></li>
-          <li><span className="info-item-label">Customer</span>
-              <span className="info-item-value">{record.customer_name}</span></li>
-          <li><span className="info-item-label">Customer ID</span>
-              <span className="info-item-value" style={{
-            fontFamily: 'monospace'
-          }}>{record.customer_id}</span></li>
-          <li><span className="info-item-label">Branch</span>
-              <span className="info-item-value">{record.branch_name || '—'}</span></li>
-          <li><span className="info-item-label">Sales ID</span>
-              <span className="info-item-value" style={{
-            fontFamily: 'monospace'
-          }}>{record.sales_id ?? '—'}</span></li>
-          <li><span className="info-item-label">Invoice Number</span>
-              <span className="info-item-value" style={{
-            fontFamily: 'monospace'
-          }}>{record.invoice_number || '—'}</span></li>
-          <li><span className="info-item-label">Collection ID</span>
-              <span className="info-item-value" style={{
-            fontFamily: 'monospace'
-          }}>{record.collection_id ?? '—'}</span></li>
-          <li><span className="info-item-label">Receipt Number</span>
-              <span className="info-item-value" style={{
-            fontFamily: 'monospace'
-          }}>{record.receipt_number || '—'}</span></li>
-          <li><span className="info-item-label">Previous Balance</span>
-              <span className="info-item-value">{formatCurrency(record.previous_balance)}</span></li>
-          <li><span className="info-item-label">Payment Amount</span>
-              <span className="info-item-value" style={{
-            fontWeight: 700,
-            color: '#255684'
-          }}>{formatCurrency(record.payment_amount)}</span></li>
-          <li><span className="info-item-label">Remaining Balance</span>
-              <span className="info-item-value" style={{
-            fontWeight: 700,
-            color: Number(record.remaining_balance) > 0 ? '#dc2626' : '#4A6B12'
-          }}>
-                {formatCurrency(record.remaining_balance)}
-              </span></li>
-          <li><span className="info-item-label">Payment Status</span>
-              <span className="info-item-value">
-                <StatusBadge status={record.payment_status} />
-              </span></li>
-          <li><span className="info-item-label">Transaction Date</span>
-              <span className="info-item-value">{formatDisplayDate(record.transaction_date)}</span></li>
-        </ul>
+        <DetailRowsTable rows={[
+          { label: 'Credit ID', value: <span style={{ fontFamily: 'monospace' }}>{record.credit_id}</span> },
+          { label: 'Customer', value: record.customer_name },
+          { label: 'Customer ID', value: <span style={{ fontFamily: 'monospace' }}>{record.customer_id}</span> },
+          { label: 'Branch', value: record.branch_name || '—' },
+          { label: 'Sales ID', value: <span style={{ fontFamily: 'monospace' }}>{record.sales_id ?? '—'}</span> },
+          { label: 'Invoice Number', value: <span style={{ fontFamily: 'monospace' }}>{record.invoice_number || '—'}</span> },
+          { label: 'Collection ID', value: <span style={{ fontFamily: 'monospace' }}>{record.collection_id ?? '—'}</span> },
+          { label: 'Receipt Number', value: <span style={{ fontFamily: 'monospace' }}>{record.receipt_number || '—'}</span> },
+          { label: 'Previous Balance', value: formatCurrency(record.previous_balance) },
+          { label: 'Payment Amount', value: <span style={{ fontWeight: 700, color: '#255684' }}>{formatCurrency(record.payment_amount)}</span> },
+          { label: 'Remaining Balance', value: (
+            <span style={{
+              fontWeight: 700,
+              color: Number(record.remaining_balance) > 0 ? '#dc2626' : '#4A6B12'
+            }}>
+              {formatCurrency(record.remaining_balance)}
+            </span>
+          ) },
+          { label: 'Payment Status', value: <StatusBadge status={record.payment_status} /> },
+          { label: 'Transaction Date', value: formatDisplayDate(record.transaction_date) },
+        ]} />
       </section>
 
       <div className="flex justify-end mt-4">

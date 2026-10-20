@@ -1,0 +1,56 @@
+
+This is the warehouse personnel's primary working
+screen, showing all furniture products assigned to
+their branch with current stock levels, reorder
+thresholds, and status badges (Sufficient, Low Stock,
+Critical, Out of Stock). Staff use it to monitor which
+items need restocking or transferring and to perform
+stock counts. The system automatically flags any item
+at or below its reorder point with a warning, and items
+at zero stock trigger a critical alert that propagates up
+to the Branch Manager and Operating Manager.
+Figure 15. Operating Manager’s Dashboard
+Screen
+This executive-level command center consolidates
+performance data from all three branches into a single
+view, showing enterprise-wide KPI stat cards, a
+branch KPI comparison bar chart, a revenue
+distribution donut chart, weekly collection and sales
+completion trend lines, top vs. bottom branch cards,
+and a live critical alerts feed. The operating manager
+uses it every morning to get an immediate health
+Figure 13. Account’s View Detail in Collector’s
+check of the entire operation, spotting which branch
+Screen
+needs intervention before drilling down into
+This screen gives the collector a full profile of a branch-specific data. The system computes all
+single client account, including their outstanding displayed values from the aggregated branch data in
+balance, number of days overdue, delinquency status, real time, and alerts are color-coded by severity so
+address, contact number, and complete payment critical issues are immediately visible at the top of the
+history table. The collector uses it before or during a page.
+visit to understand the client's payment behavior and
+decide the appropriate approach. The system
+highlights overdue accounts in red and shows a
+blacklisted flag for accounts flagged by the branch
+manager, preventing the collector from accepting new
+arrangements without manager approval.
+Figure 16. Operating Manager’s Branch
+Performance Screen
+This screen provides a detailed performance analysis
+of all three branches through three tabs: Overview
+Figure 14. Operating Manager’s Leaflet (horizontal bar charts of performance and growth
+integrated with OpenStreetMap scores), Comparison (6-month area and line charts of
+revenue and collections), and Trends (a radar chart
+This screen extends the branch-level map to show all comparing all five KPI dimensions simultaneously
+three branches simultaneously, with branch-level plus a delinquency trend area chart). The operating
+coverage areas, cross-branch territory boundaries, and manager uses it when a branch appears in the
+organization-wide data layers. The operating manager dashboard alerts to understand whether poor
+uses it to compare Leaflet.js integrated with performance is in collections, sales, inventory, route
+OpenStreetMap across Davao City, General Santos, compliance, or growth. The system color-codes each
+and Davao Oriental, identifying underperforming branch consistently across all charts so patterns are
+territories and where high-value client concentrations easy to track: General Santos in green, Davao City in
+are located. The system supports filtering by branch, blue, Davao Oriental in red.
+date range, and staff type, and the toolbar provides
+sub-views for Delinquency Heatmap, Profitability
+Analysis, and Territory Analysis.
+34

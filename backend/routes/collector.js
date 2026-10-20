@@ -1,6 +1,7 @@
 import express from 'express';
 import { requireRole } from '../middleware/auth.js';
 import { insertUserNotification, notifyCreditInvestigationSubmitted } from '../lib/creditInvestigationNotifications.js';
+import { clearOverdueDedup, notifyOverdueAccounts } from '../lib/operationalNotifications.js';
 import {
   computeCollectorSawPriority,
   computeAssignedSawRoute,
@@ -904,6 +905,9 @@ router.post('/payments', async (req, res) => {
     );
 
     await client.query('COMMIT');
+
+    if (remainingBalance === 0) await clearOverdueDedup(pool, customerId);
+    await notifyOverdueAccounts(pool);
 
     return res.status(201).json({
       success: true,

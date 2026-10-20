@@ -1,0 +1,86 @@
+
+information, increase operational costs, and prevent Without summarized, descriptive analytical insights,
+management from immediately consolidating management struggles to monitor operational
+collection performance, sales activities, inventory performance, identify branch-level issues, evaluate
+status, customer payment information, customer customer credit exposure, and make timely
+credit line records, and synchronized branch operational decisions across all branches.
+operational records into a unified operational view.
+Table 1. Feature Comparison Matrix
+Features Pepperi B2B Platform Odoo Inventory & Sales Badger Maps CORVEX
+Primary Purpose Unifies route accounting, Enterprise inventory app Mobile-first mapping Field operations, Inventory
+mobile order taking, retail managing storage, software for outside Centralization, and operational
+execution, and mobile CRM replenishment, and warehouse sales/field teams centered monitoring built for BH
+into a single field-sales/Direct operations via configurable on routing, mapping, Marketing's branch structure.
+Sales Delivery (DSD) platform Routes and Rules [13]. territory alignment, and CORVEX does not provide DSD
+[12]. lead routing [14]. execution, general warehouse
+routing, or a standalone
+CRM/lead platform.
+Route Sequencing Reps manually build the day's Not applicable — "Routes" Automatically reorders Uses OpenRouteService to
+Mechanism stop order on a map/calendar, move stock between warehouse up to 120 stops for the sequence the SAW-ranked list
+then hand off to GPS locations, not field visits [13]. fastest sequence, layered from stored coordinates.
+navigation; no automatic with real-time traffic and CORVEX does not use a
+sequencing algorithm is turn-by-turn handoff to real-time traffic-aware
+described [12]. Google optimization engine.
+Maps/Waze/Apple Maps
+[14].
+Customer/Account Applies transaction-level rules Not applicable [13]. Ranks new leads by Uses SAW, Outstanding Balance
+Prioritization Mechanism (e.g., blocking orders on opportunity size, product (40%), Days Overdue (30%),
+outstanding debt), but no type, and geography — Distance (30%), for a
+disclosed weighted scoring not collection priority for documented, weighted rank.
+formula [12]. existing accounts [14].
+Territory Handling No territory-balancing tool Not applicable [13]. Auto-generates Territories are visualized but
+described [12]. population-balanced manually defined by Branch
+territory models with Heads. CORVEX does not use
+weighted, an automated territory-balancing
+constraint-based algorithm.
+optimization [14].
+CRM / Lead Management Provides account-level CRM Not covered in cited Routes Native two-way CRM CORVEX does not include
+data (history, cross-sell, documentation [13]. sync plus dedicated lead CRM or lead-generation
+commission tracking) [12]. generation/routing tools functionality.
+[14].
+Inventory / Stock Real-time multi-warehouse Automated via configurable Not applicable — no Synchronizes inventory via
+Movement Mechanism van/fleet inventory visibility Push/Pull rules triggered by inventory module [14]. direct PostgreSQL updates.
+[12]. demand [13]. CORVEX does not use a
+configurable push/pull rule
+engine.
+Product Catalog & Multiple configurable catalogs, Not covered in cited Not applicable [14]. Product table stores name,
+Pricing price lists, and trade promotions documentation [13]. category, and unit price only.
+[12]. CORVEX does not include
+catalog configuration or
+promotion rules.
+Payment / Collections Blocks orders on outstanding Not covered in cited Not applicable [14]. Records collections, computes
+Handling debt; accepts payments via documentation [13]. SAW priority, restricts
+gateway integration [12]. consolidated payment view to
+Operating Manager.
+Automated Procurement / Not covered in cited Reordering rules automatically Not applicable — no CORVEX does not include
+Replenishment documentation [12]. generate a Purchase Order (or inventory or procurement procurement/purchasing
+Manufacturing Order) once feature exists [14]. functionality; This system
+forecasted stock falls below a excludes procurement
+defined minimum, replenishing management from scope, so
+quantity back up to a set restocking from suppliers must
+maximum — a fully be handled outside the system.
+rule-driven procurement
+mechanism requiring no
+manual purchase requests [13].
+Open API / Third-Party REST-based API plus an iPaaS External API Native two-way CRM CORVEX does not include an
+System Integration platform with 50+ pre-built (XML-RPC/JSON-RPC) integrations, a Zapier external/open API; its
+connectors to external ERP, exposing all models/data for connector to 5,000+ apps, architecture defines only internal
+CRM, and accounting systems, integration with outside tools and an FTP/REST API RESTful communication
+and real-time webhook [13]. [14]. between its own clients and
+integration [12]. server.
+Table 1 shows that the reviewed commercial systems map-based visualization using a Maps API to display
+provide specialized capabilities for different aspects customer locations, recommended collection routes,
+of business operations. Pepperi primarily supports sales territories, and field activities, (3) Inventory
+mobile field sales, customer visit management, and Centralization tailored to the company's branch
+payment collection; Odoo provides comprehensive operations, (4) centralized customer payment
+enterprise resource planning through integrated sales, verification restricted to authorized management, and
+inventory, warehousing, and accounting modules, (5) a unified operational dashboard that consolidates
+while Badger Maps specializes in customer mapping, collection performance, sales activities, inventory
+territory visualization, and route optimization for field status, customer payment information, and branch
+personnel. Although these systems effectively address operational records into a single solution. These
+their respective operational domains, none is designed identified gaps demonstrate the need for the
+to support BH Marketing's integrated operational CORVEX system, which integrates these
+workflow. In particular, the reviewed systems do not business-specific operational requirements into a
+combine (1) SAW-based collection prioritization single enterprise information system designed for BH
+using the company's operational criteria, (2) Marketing.
+3

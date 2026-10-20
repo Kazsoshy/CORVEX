@@ -190,7 +190,7 @@ export const NOTIFICATIONS = [
   { id: 'n1', type: 'assignment', title: 'New accounts assigned', message: '3 new accounts added to your route for today.', time: '8:00 AM', read: false, relatedTo: '/collector/route' },
   { id: 'n2', type: 'route', title: 'Route updated', message: 'Stop order updated for Davao City cluster.', time: '7:45 AM', read: false, relatedTo: '/collector/route' },
   { id: 'n3', type: 'incident', title: 'Incident acknowledged', message: 'Branch manager acknowledged your report for ACC-1006 (Mabuhay Sala Sets).', time: 'Yesterday', read: true, relatedTo: '/collector/incident/6?from=accounts' },
-  { id: 'n4', type: 'collection', title: 'Collection confirmed', message: 'Payment of PHP 9,200 for Soledad Furniture Gallery has been confirmed.', time: 'Yesterday', read: true, relatedTo: '/collector/history/RCP-2024-0042' },
+  { id: 'n4', type: 'collection', title: 'Collection confirmed', message: 'Payment of ₱9,200.00 for Soledad Furniture Gallery has been confirmed.', time: 'Yesterday', read: true, relatedTo: '/collector/history/RCP-2024-0042' },
   { id: 'n5', type: 'assignment', title: 'Weekly target reminder', message: 'You are at 72% of your weekly collection target.', time: 'Jun 23', read: true, relatedTo: '/collector/dashboard' },
 ];
 

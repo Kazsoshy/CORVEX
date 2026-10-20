@@ -6,7 +6,11 @@ export async function fetchMyProfile() {
     return response.data;
   } catch (error) {
     console.error('Failed to fetch profile:', error);
-    return { success: false, data: null };
+    return {
+      success: false,
+      data: null,
+      message: error.response?.data?.message || 'Could not load your profile.',
+    };
   }
 }
 

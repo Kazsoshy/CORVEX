@@ -44,9 +44,9 @@ export const STATEMENTS = [
 ];
 
 export const NOTIFICATIONS = [
-  { id: 'cn1', type: 'Payment Reminders', message: 'Your payment of PHP 12,000 is due on July 5, 2026.',       read: false, relatedTo: '/customer/home' },
+  { id: 'cn1', type: 'Payment Reminders', message: 'Your payment of ₱12,000.00 is due on July 5, 2026.',       read: false, relatedTo: '/customer/home' },
   { id: 'cn2', type: 'Due Date Alerts',   message: '11 days remaining until your next due date.',               read: false, relatedTo: '/customer/home' },
-  { id: 'cn3', type: 'Receipt Generated', message: 'Receipt RCP-001 for PHP 12,000 is available for download.', read: true,  relatedTo: '/customer/receipts' },
+  { id: 'cn3', type: 'Receipt Generated', message: 'Receipt RCP-001 for ₱12,000.00 is available for download.', read: true,  relatedTo: '/customer/receipts' },
   { id: 'cn4', type: 'Account Updates',   message: 'Your contact number was updated successfully.',              read: true,  relatedTo: '/customer/account-details' },
 ];
 

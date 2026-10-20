@@ -1,0 +1,85 @@
+
+2.4 Development 5. REFERENCES
+The [1] M. Zhang, E. H. Grosse, and C. H. Glock,
+Table 43. Sprint "Potential of mobile applications in
+2.5 Testing human-centric production and logistics
+2.5.1 Hardware Compatibility Testing management," IFAC-PapersOnLine, vol. 55,
+no. 10, pp. 151–156, 2022, doi:
+2.5.2 Web Browser (Non-Functional)
+10.1016/j.ifacol.2022.09.382.
+Compatibility
+2.5.3 Internet Connectivity Testing [2] Elragal, A., & Haddara, M. (2023). The
+digital transformation of enterprise systems: A
+2.5.3.1 Mobile Browser Testing
+systematic literature review. Information
+2.5.4 Speed Performance Testing Systems Frontiers, 25(6), 2149–2170.
+2.5.5 GTmetrix Website Performance https://doi.org/10.1007/s10796-022-10293-2
+[3] P. K. Choudhary, S. Routray, P. Upadhyay,
+Testing
+and A. K. Pani, "Adoption of enterprise mobile
+2.5.6 Data Visualization Testing systems – An alternative theoretical
+2.5.7 User Testing (Base on Functional perspective," International Journal of
+Information Management, vol. 67, Art. no.
+Requirements)
+102539, Dec. 2022, doi:
+2.5.8 Simple Additive Weighting (SAW) 10.1016/j.ijinfomgt.2022.102539.
+Testing [4] D. Valle Enrique, et al., "Being digital and
+flexible to navigate the storm: How digital
+2.5.9 Descriptive Analytics Testing
+transformation enhances supply chain
+2.5.10 Software Testing flexibility in turbulent environments,"
+2.5.11 Notification Testing International Journal of Production
+Economics, vol. 250, 2022.
+2.5.12
+[5] S. Kar, S. Bhimrajka, A. Kumar, and S.
+2.5.13 Alpha Testing Mukherjee, "Mobile Based Inventory
+2.5.14 Beta Testing Management System with QR Code," in Proc.
+IEEE Int. Conf. Electronics, Computing and
+2.5.15 User Acceptance Testing
+Communication Technologies (CONECCT),
+2.5 Implementation Bengaluru, India, 2022, doi:
+2.6.1 Frontend Installation 10.1109/CONECCT55679.2022.9865739.
+[6] M. Yaqot, R. E. Franzoi, A. Islam, and B. C.
+2.6.2 Network and Domain
+Menezes, "Cyber-Physical System
+Configuration Demonstration of an Automated
+2.6.3 Database Setup Shuttle-Conveyor-Belt Operation for Inventory
+Control of Multiple Stockpiles: A Proof of
+2.6.4 User’s Manual and Turnover
+Concept," IEEE Access, vol. 10, pp.
+Activities 127636–127653, 2022, doi:
+2.7 Deployment 10.1109/ACCESS.2022.3226942.
+[7] J. Nascimento, N. Frazão, S. Teixeira, and A. C.
+2.8 User Acceptance
+Ribeiro, "Dashboard for the Management and
+3. RESULTS AND DISCUSSION Acceptance of Customer Orders," Business
+3.1 Hardware Compatibility Testing for Systems Research, vol. 13, no. 3, pp. 116–129,
+Desktop 2022.
+[8] M. AlManei, K. Salonitis, and Y. Xu, "Digital
+3.2 Mobile Hardware Compatibility
+transformation challenges for small and
+Testing
+medium enterprises: A systematic review,"
+3.3 Web Browser Compatibility Testing Sustainability, vol. 15, no. 4, Art. no. 3159,
+3.4 Internet Connectivity Testing 2023, doi: 10.3390/su15043159.
+[9] Department of Trade and Industry (DTI). 2023
+3.5 Mobile Browser Performance Testing
+MSME Statistics. Available:
+3.6 Page Speed Performance Test
+https://www.dti.gov.ph/resources/msme-statistic
+3.7 Software Testing s/
+3.8 Alpha Testing [10] S. Das, A. Baral, I. M. Rafizul, and S. Berner,
+3.9 Beta Testing "Efficiency enhancement in waste management
+through GIS-based route optimization,"
+4. CONCLUSION AND
+Cleaner Engineering and Technology, vol. 21,
+RECOMMENDATION Art. no. 100775, 2024, doi:
+4.1 Conclusion 10.1016/j.clet.2024.100775.
+[11] S. C. Cha, Y. H. Hsuan, K. H. Yeh, T. Ishihara,
+4.2 Recommendation
+O. Yoshihiro, and W. N. Chen, "An
+4.2.1 Researcher Recommendation
+Evolutionary Risk-based Access Control
+4.2.2 User’s Recommendation Framework for Enterprise File Systems," in
+4.2.3 Public Defense Recommendation Proc. IEEE 8th World Forum on Internet of
+35

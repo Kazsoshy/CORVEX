@@ -3,6 +3,7 @@ import { StatsGrid, Stats } from '../shared/StatsGrid';
 import { usePagination, useServerPagination, DEFAULT_PAGE_SIZE } from '../../hooks/usePagination';
 import { useEffect, useMemo, useState, useCallback } from 'react';
 import apiClient from '../../api/apiClient';
+import { getCurrentUser } from '../../api/authService.js';
 import { AreaChart, Area, BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 import { ADMIN_BRANCHES, ADMIN_INVENTORY, ADMIN_PROFILE, BRANCH_PERFORMANCE_CHART, TRANSFER_REQUESTS, USER_GROWTH, USER_STATS } from '../../data/adminMockData';
 import { fetchAuditLogs } from '../../api/adminService';
@@ -15,6 +16,52 @@ import { getOperatingManagerAnalytics } from '../../api/reportsService.js';
 import { NotificationsInbox } from '../shared/NotificationsInbox';
 import { AccountProfilePanel } from '../shared/AccountProfilePanel';
 import { StatusBadge } from '../StatusBadge';
+import { CentralInventoryPanel } from '../inventory/CentralInventoryPanel';
+import { DetailRowsTable } from '../shared/DetailRowsTable';
+
+function formatUserDisplayName(user) {
+  return [user?.first_name, user?.middle_name, user?.last_name].filter(Boolean).join(' ').trim() || 'User';
+}
+
+/** Whether the signed-in admin may disable/enable this row (mirrors API guards). */
+function canToggleUserStatus(actor, user) {
+  if (!actor || !user) return false;
+  if (Number(actor.id) === Number(user.user_id)) return false;
+  const targetSlug = user.role?.slug;
+  const actorSlug = actor.role?.slug;
+  if (targetSlug === 'super_admin' && actorSlug !== 'super_admin') return false;
+  if (actorSlug === 'operating_manager' && (targetSlug === 'super_admin' || targetSlug === 'operating_manager')) {
+    return false;
+  }
+  return true;
+}
+
+/** Whether the signed-in admin may open the edit form for this user (mirrors API guards). */
+function canEditUserRecord(actor, user) {
+  if (!actor || !user) return false;
+  const targetSlug = user.role?.slug;
+  const actorSlug = actor.role?.slug;
+  if (targetSlug === 'super_admin' && actorSlug !== 'super_admin') return false;
+  return true;
+}
+
+function buildUserDetailRows(user) {
+  if (!user) return [];
+  return [
+    { key: 'id', label: 'User ID', value: user.user_id ?? '—' },
+    { key: 'name', label: 'Full Name', value: formatUserDisplayName(user) },
+    { key: 'first', label: 'First Name', value: user.first_name || '—' },
+    { key: 'middle', label: 'Middle Name', value: user.middle_name || '—' },
+    { key: 'last', label: 'Last Name', value: user.last_name || '—' },
+    { key: 'email', label: 'Email', value: user.email || '—' },
+    { key: 'phone', label: 'Contact', value: user.phone || '—' },
+    { key: 'role', label: 'Role', value: user.role?.name || '—' },
+    { key: 'branch', label: 'Branch', value: user.branch?.name || '—' },
+    { key: 'status', label: 'Status', value: <StatusPill status={user.status} /> },
+    { key: 'created', label: 'Created At', value: formatDisplayDate(user.created_at) },
+    { key: 'updated', label: 'Updated At', value: formatDisplayDate(user.updated_at) },
+  ];
+}
 function btn(v) {
   if (v === 'secondary') return 'button secondary';
   if (v === 'ghost') return 'button ghost';
@@ -94,7 +141,7 @@ function DashboardPage({
   navigate,
   showToast
 }) {
-  return <div className="relative z-10 grid gap-[22px] w-full">
+  return <div className="page">
       <section className="panel dashboard-greeting">
         <div className="flex flex-col gap-1">
           <p className="text-[0.82rem] font-bold tracking-widest uppercase text-navy/60 m-0">Operating Manager Administration</p>
@@ -223,23 +270,40 @@ function UserListPage({
   navigate,
   showToast
 }) {
+  const currentUser = getCurrentUser();
   const [search, setSearch] = useState('');
   const [roleFilter, setRoleFilter] = useState('All');
   const [branchFilter, setBranchFilter] = useState('All');
   const [statusFilter, setStatusFilter] = useState('All');
-  const [confirmDisable, setConfirmDisable] = useState(null);
+  const [confirmAction, setConfirmAction] = useState(null);
+  const [actionBusy, setActionBusy] = useState(false);
   const [users, setUsers] = useState([]);
   const [roles, setRoles] = useState([]);
   const [branches, setBranches] = useState([]);
   const [totalRecords, setTotalRecords] = useState(0);
   const [loading, setLoading] = useState(true);
   const [showAddUserModal, setShowAddUserModal] = useState(false);
+  const [viewingUser, setViewingUser] = useState(null);
+  const [viewLoading, setViewLoading] = useState(false);
+  const [editingUserId, setEditingUserId] = useState(null);
   const filterResetKey = `${search}|${roleFilter}|${branchFilter}|${statusFilter}`;
   const pagination = useServerPagination({
     totalRecords,
     pageSize: DEFAULT_PAGE_SIZE,
     resetKey: filterResetKey,
   });
+
+  const buildListParams = useCallback((page = pagination.currentPage) => {
+    const params = {
+      page,
+      limit: DEFAULT_PAGE_SIZE,
+    };
+    if (search.trim()) params.search = search.trim();
+    if (roleFilter !== 'All') params.role = roleFilter;
+    if (branchFilter !== 'All') params.branch_id = branchFilter;
+    if (statusFilter !== 'All') params.status = statusFilter;
+    return params;
+  }, [pagination.currentPage, search, roleFilter, branchFilter, statusFilter]);
 
   useEffect(() => {
     async function loadMeta() {
@@ -266,15 +330,7 @@ function UserListPage({
     async function loadUsers() {
       setLoading(true);
       try {
-        const params = {
-          page: pagination.currentPage,
-          limit: DEFAULT_PAGE_SIZE,
-        };
-        if (search.trim()) params.search = search.trim();
-        if (roleFilter !== 'All') params.role = roleFilter;
-        if (branchFilter !== 'All') params.branch_id = branchFilter;
-        if (statusFilter !== 'All') params.status = statusFilter;
-        const usersRes = await apiClient.get('/users', { params });
+        const usersRes = await apiClient.get('/users', { params: buildListParams() });
         if (!active) return;
         if (usersRes.data?.success) {
           setUsers(usersRes.data.data || []);
@@ -295,50 +351,99 @@ function UserListPage({
     }
     loadUsers();
     return () => { active = false; };
-  }, [pagination.currentPage, search, roleFilter, branchFilter, statusFilter, showToast]);
+  }, [buildListParams, showToast]);
 
-  const handleDisable = async user => {
-    try {
-      await apiClient.delete(`/users/${user.user_id}`);
-      showToast(`${user.first_name} ${user.last_name} disabled.`, 'success');
-      setConfirmDisable(null);
-      const usersRes = await apiClient.get('/users', {
-        params: { page: pagination.currentPage, limit: DEFAULT_PAGE_SIZE },
-      });
-      if (usersRes.data.success) {
-        setUsers(usersRes.data.data || []);
-        setTotalRecords(Number(usersRes.data.pagination?.total) || 0);
-      }
-    } catch (err) {
-      console.error('Error disabling user:', err);
-      showToast('Failed to disable user.', 'error');
-    }
-  };
   const refreshUsers = async () => {
     try {
-      const usersRes = await apiClient.get('/users', {
-        params: { page: pagination.currentPage, limit: DEFAULT_PAGE_SIZE },
-      });
+      const usersRes = await apiClient.get('/users', { params: buildListParams() });
       if (usersRes.data.success) {
         setUsers(usersRes.data.data || []);
         setTotalRecords(Number(usersRes.data.pagination?.total) || 0);
       }
     } catch (err) {
       console.error('Error refreshing users:', err);
-      showToast('User was created, but the list could not be refreshed.', 'error');
+      showToast('User list could not be refreshed.', 'error');
     }
   };
-  if (loading) return <div className="relative z-10 grid gap-[22px] w-full"><section className="panel content-panel relative overflow-hidden"><p>Loading users...</p></section></div>;
-  return <div className="relative z-10 grid gap-[22px] w-full">
-      {confirmDisable && <section className="panel content-panel relative overflow-hidden" style={{
-      borderColor: '#fca5a5',
-      background: 'rgba(220,38,38,0.04)',
+
+  const openViewUser = async (user) => {
+    if (!user?.user_id) return;
+    setViewLoading(true);
+    setViewingUser(user);
+    try {
+      const res = await apiClient.get(`/users/${user.user_id}`);
+      if (res.data?.success && res.data.data) {
+        setViewingUser(res.data.data);
+      }
+    } catch (err) {
+      console.error('Error loading user details:', err);
+      showToast(err.response?.data?.message || 'Failed to load user details.', 'error');
+      setViewingUser(null);
+    } finally {
+      setViewLoading(false);
+    }
+  };
+
+  const openEditUser = (user) => {
+    if (!canEditUserRecord(currentUser, user)) {
+      showToast('You are not authorized to edit this account.', 'error');
+      return;
+    }
+    setEditingUserId(user.user_id);
+  };
+
+  const handleConfirmStatusChange = async () => {
+    if (!confirmAction?.user || actionBusy) return;
+    const { user, action } = confirmAction;
+    const name = formatUserDisplayName(user);
+    setActionBusy(true);
+    try {
+      if (action === 'disable') {
+        await apiClient.delete(`/users/${user.user_id}`);
+        showToast(`${name} disabled. They can no longer sign in.`, 'success');
+      } else {
+        await apiClient.put(`/users/${user.user_id}`, { status: 'Active' });
+        showToast(`${name} re-enabled. Access restored with their existing role.`, 'success');
+      }
+      setConfirmAction(null);
+      await refreshUsers();
+    } catch (err) {
+      console.error(`Error ${action === 'disable' ? 'disabling' : 'enabling'} user:`, err);
+      showToast(err.response?.data?.message || `Failed to ${action} user.`, 'error');
+    } finally {
+      setActionBusy(false);
+    }
+  };
+
+  if (loading) return <div className="page"><LoadingState message="Loading users..." /></div>;
+  return <div className="page">
+      {confirmAction && <section className="panel content-panel relative overflow-hidden" style={{
+      borderColor: confirmAction.action === 'disable' ? '#fca5a5' : 'rgba(37, 86, 132, 0.35)',
+      background: confirmAction.action === 'disable' ? 'rgba(220,38,38,0.04)' : 'rgba(37, 86, 132, 0.04)',
       marginBottom: 24
     }}>
-          <p>Disable <strong>{confirmDisable.first_name} {confirmDisable.last_name}</strong>? They will lose system access immediately.</p>
-          <div style={{ display: 'flex', gap: 10, marginTop: 12 }}>
-            <button className="button danger" type="button" onClick={() => handleDisable(confirmDisable)}>Confirm Disable</button>
-            <button className="button secondary" type="button" onClick={() => setConfirmDisable(null)}>Cancel</button>
+          {confirmAction.action === 'disable' ? <>
+              <h3 style={{ margin: '0 0 8px' }}>Disable user</h3>
+              <p style={{ margin: 0 }}>
+                Disable <strong>{formatUserDisplayName(confirmAction.user)}</strong>? Their account will be set to Inactive and they will lose system access immediately.
+                Their record, role, permissions, and history are kept — this does not permanently delete the user.
+              </p>
+            </> : <>
+              <h3 style={{ margin: '0 0 8px' }}>Re-enable user</h3>
+              <p style={{ margin: 0 }}>
+                Re-enable <strong>{formatUserDisplayName(confirmAction.user)}</strong>? They will be able to sign in again with their existing role and permissions.
+              </p>
+            </>}
+          <div style={{ display: 'flex', gap: 10, marginTop: 12, flexWrap: 'wrap' }}>
+            <button
+              className={confirmAction.action === 'disable' ? 'button danger' : 'button'}
+              type="button"
+              disabled={actionBusy}
+              onClick={handleConfirmStatusChange}
+            >
+              {actionBusy ? 'Working…' : confirmAction.action === 'disable' ? 'Confirm Disable' : 'Confirm Enable'}
+            </button>
+            <button className="button secondary" type="button" disabled={actionBusy} onClick={() => setConfirmAction(null)}>Cancel</button>
           </div>
         </section>}
 
@@ -348,21 +453,21 @@ function UserListPage({
         </div>
 
         <div className="list-section-controls" style={{ marginBottom: 16 }}>
-            <input className="filter-input search" style={{ flex: '1 1 320px', height: 40 }} type="search" placeholder="Search by name or email…" value={search} onChange={e => setSearch(e.target.value)} />
-            <select className="filter-select" style={{ flex: '0 1 180px', height: 40 }} value={statusFilter} onChange={e => setStatusFilter(e.target.value)}>
+            <input className="filter-input search" type="search" placeholder="Search by name or email…" value={search} onChange={e => setSearch(e.target.value)} />
+            <select className="filter-select" value={statusFilter} onChange={e => setStatusFilter(e.target.value)}>
               {['All', 'Active', 'Inactive'].map(s => <option key={s}>{s}</option>)}
             </select>
-            <select className="filter-select" style={{ flex: '0 1 180px', height: 40 }} value={roleFilter} onChange={e => setRoleFilter(e.target.value)}>
+            <select className="filter-select" value={roleFilter} onChange={e => setRoleFilter(e.target.value)}>
               <option value="All">All Roles</option>
               {roles.map(r => <option key={r.id ?? r.role_id} value={r.slug}>{r.name ?? r.role_name}</option>)}
             </select>
-            <select className="filter-select" style={{ flex: '0 1 180px', height: 40 }} value={branchFilter} onChange={e => setBranchFilter(e.target.value)}>
+            <select className="filter-select" value={branchFilter} onChange={e => setBranchFilter(e.target.value)}>
               <option value="All">All Branches</option>
               {branches.map(b => <option key={b.branch_id ?? b.id} value={b.branch_id ?? b.id}>{b.branch_name ?? b.name}</option>)}
             </select>
             <button
               className="button"
-              style={{ flex: '0 0 auto', height: 40, whiteSpace: 'nowrap' }}
+              style={{ flex: '0 0 auto', whiteSpace: 'nowrap' }}
               type="button"
               onClick={() => setShowAddUserModal(true)}
             >
@@ -371,30 +476,115 @@ function UserListPage({
         </div>
 
         {totalRecords ? <><div className="corvex-table-wrapper">
-            <table className="corvex-table">
+            <table className="corvex-table corvex-table-users">
               <thead>
-              <tr><th>User ID</th><th>First Name</th><th>Middle Name</th><th>Last Name</th><th>Email</th><th>Role</th><th>Branch</th><th>Status</th><th>Created At</th><th>Updated At</th><th>Actions</th></tr>
+              <tr>
+                <th className="cell-name">Name</th>
+                <th className="cell-email">Email</th>
+                <th className="cell-role">Role</th>
+                <th className="cell-branch">Branch</th>
+                <th className="cell-status">Status</th>
+                <th className="cell-actions">Actions</th>
+              </tr>
               </thead>
               <tbody>
-                {users.map(u => <tr key={u.user_id} className="clickable-row" onClick={() => navigate(`/operating-manager/admin/users/${u.user_id}`)}>
-                    <td>{u.user_id}</td>
-                    <td>{u.first_name}</td>
-                    <td>{u.middle_name || '—'}</td>
-                    <td>{u.last_name}</td>
-                    <td>{u.email}</td>
-                    <td>{u.role?.name || '—'}</td>
-                    <td>{u.branch?.name || '—'}</td>
-                    <td><StatusPill status={u.status} /></td>
-                    <td>{formatDisplayDate(u.created_at)}</td>
-                    <td>{formatDisplayDate(u.updated_at)}</td>
-                    <td className="table-actions" onClick={e => e.stopPropagation()}>
-                      <button className="icon-action-button danger" type="button" title="Disable" onClick={() => setConfirmDisable(u)}><NavIcon name="trash" /></button>
+                {users.map(u => {
+                  const displayName = formatUserDisplayName(u);
+                  const isInactive = String(u.status).toLowerCase() === 'inactive';
+                  const canToggle = canToggleUserStatus(currentUser, u);
+                  const canEdit = canEditUserRecord(currentUser, u);
+                  return <tr key={u.user_id} className="clickable-row" onClick={() => openViewUser(u)}>
+                    <td className="cell-name">
+                      <strong>{displayName}</strong>
+                      <span className="user-meta-id">ID {u.user_id}</span>
                     </td>
-                  </tr>)}
+                    <td className="cell-email" title={u.email}>{u.email}</td>
+                    <td className="cell-role">{u.role?.name || '—'}</td>
+                    <td className="cell-branch">{u.branch?.name || '—'}</td>
+                    <td className="cell-status"><StatusPill status={u.status} /></td>
+                    <td className="table-actions cell-actions" onClick={e => e.stopPropagation()}>
+                      <button
+                        className="icon-action-button"
+                        type="button"
+                        title="View"
+                        aria-label={`View ${displayName}`}
+                        onClick={() => openViewUser(u)}
+                      >
+                        <NavIcon name="view" />
+                      </button>
+                      {canEdit ? <button
+                        className="icon-action-button"
+                        type="button"
+                        title="Edit"
+                        aria-label={`Edit ${displayName}`}
+                        onClick={() => openEditUser(u)}
+                      >
+                        <NavIcon name="edit" />
+                      </button> : null}
+                      {canToggle && (isInactive
+                        ? <button
+                            className="icon-action-button"
+                            type="button"
+                            title="Enable"
+                            aria-label={`Enable ${displayName}`}
+                            onClick={() => setConfirmAction({ user: u, action: 'enable' })}
+                          >
+                            <NavIcon name="check" />
+                          </button>
+                        : <button
+                            className="icon-action-button danger"
+                            type="button"
+                            title="Disable"
+                            aria-label={`Disable ${displayName}`}
+                            onClick={() => setConfirmAction({ user: u, action: 'disable' })}
+                          >
+                            <NavIcon name="ban" />
+                          </button>)}
+                    </td>
+                  </tr>;
+                })}
               </tbody>
             </table>
           </div><Pagination {...pagination} /></> : <EmptyState title="No users found" description="Adjust your search or filters." />}
       </section>
+
+      {viewingUser ? <div className="modal-overlay" onClick={() => !viewLoading && setViewingUser(null)}>
+          <div
+            className="modal-content"
+            style={{ maxWidth: 560 }}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="user-view-title"
+            onClick={e => e.stopPropagation()}
+          >
+            <h3 id="user-view-title" style={{ marginTop: 0 }}>User Details</h3>
+            <p className="text-ink/70" style={{ margin: '0 0 16px', fontSize: '0.88rem' }}>
+              Read-only account information. Use Edit to make changes.
+            </p>
+            {viewLoading ? <LoadingState message="Loading user details..." /> : (
+              <DetailRowsTable rows={buildUserDetailRows(viewingUser)} />
+            )}
+            <div className="modal-actions" style={{ marginTop: 16 }}>
+              {canEditUserRecord(currentUser, viewingUser) ? (
+                <button
+                  className="button"
+                  type="button"
+                  disabled={viewLoading}
+                  onClick={() => {
+                    const id = viewingUser.user_id;
+                    setViewingUser(null);
+                    setEditingUserId(id);
+                  }}
+                >
+                  Edit User
+                </button>
+              ) : null}
+              <button className="button secondary" type="button" disabled={viewLoading} onClick={() => setViewingUser(null)}>
+                Close
+              </button>
+            </div>
+          </div>
+        </div> : null}
 
       {showAddUserModal ? <div className="modal-overlay" onClick={() => setShowAddUserModal(false)}>
           <div className="modal-content" style={{ maxWidth: 720 }} onClick={e => e.stopPropagation()}>
@@ -404,6 +594,19 @@ function UserListPage({
               isModal
               onCancel={() => setShowAddUserModal(false)}
               onSuccess={() => { setShowAddUserModal(false); refreshUsers(); }}
+            />
+          </div>
+        </div> : null}
+
+      {editingUserId ? <div className="modal-overlay" onClick={() => setEditingUserId(null)}>
+          <div className="modal-content" style={{ maxWidth: 720 }} onClick={e => e.stopPropagation()}>
+            <UserFormPage
+              userId={editingUserId}
+              navigate={navigate}
+              showToast={showToast}
+              isModal
+              onCancel={() => setEditingUserId(null)}
+              onSuccess={() => { setEditingUserId(null); refreshUsers(); }}
             />
           </div>
         </div> : null}
@@ -510,12 +713,14 @@ function UserFormPage({
     }
   };
   if (loading) {
-    if (isModal) return <p>Loading user form...</p>;
-    return <div className="relative z-10 grid gap-[22px] w-full"><section className="panel content-panel relative overflow-hidden"><p>Loading...</p></section></div>;
+    if (isModal) return <LoadingState message="Loading user form..." />;
+    return <div className="page"><LoadingState message="Loading..." /></div>;
   }
-  return <div className={isModal ? '' : 'relative z-10 grid gap-[22px] w-full'}>
+  return <div className={isModal ? '' : 'page'}>
       <section className={isModal ? '' : 'panel form-panel content-panel'}>
-        {!isModal && <div className="flex flex-col md:flex-row justify-between gap-4 items-start md:items-center mb-4"><h3>{userId ? 'Edit User' : 'Add New User'}</h3></div>}
+        {isModal
+          ? <h3 style={{ marginTop: 0 }}>{userId ? 'Edit User' : 'Add New User'}</h3>
+          : <div className="flex flex-col md:flex-row justify-between gap-4 items-start md:items-center mb-4"><h3>{userId ? 'Edit User' : 'Add New User'}</h3></div>}
         <div className="grid two-up">
           <div className="form-group">
             <label>First Name <span className="required">*</span></label>
@@ -563,7 +768,9 @@ function UserFormPage({
             role_id: e.target.value
           })}>
               <option value="">Select role</option>
-              {roles.map(r => <option key={r.id ?? r.role_id} value={r.id ?? r.role_id}>{r.name ?? r.role_name}</option>)}
+              {roles
+                .filter(r => !['super_admin', 'operating_manager', 'client'].includes(r.slug) || String(r.id ?? r.role_id) === String(form.role_id))
+                .map(r => <option key={r.id ?? r.role_id} value={r.id ?? r.role_id}>{r.name ?? r.role_name}</option>)}
             </select>
             {errors.role_id && <p className="form-error">{errors.role_id}</p>}
           </div>
@@ -599,6 +806,25 @@ function UserFormPage({
     </div>;
 }
 
+function buildBranchDetailRows(branch) {
+  if (!branch) return [];
+  return [
+    { key: 'id', label: 'Branch ID', value: branch.branch_id ?? '—' },
+    { key: 'name', label: 'Branch Name', value: branch.branch_name || '—' },
+    { key: 'address', label: 'Address', value: branch.address || '—' },
+    { key: 'lat', label: 'Latitude', value: branch.latitude ?? '—' },
+    { key: 'lng', label: 'Longitude', value: branch.longitude ?? '—' },
+    { key: 'contact', label: 'Contact No', value: branch.contact_no || '—' },
+    { key: 'email', label: 'Email', value: branch.email || '—' },
+    { key: 'manager', label: 'Manager', value: branch.manager_name || '—' },
+    { key: 'staff', label: 'Active Staff', value: branch.active_staff ?? '—' },
+    { key: 'customers', label: 'Customers', value: branch.customer_count ?? '—' },
+    { key: 'status', label: 'Status', value: <StatusPill status={branch.status} /> },
+    { key: 'created', label: 'Created At', value: formatDisplayDateTime(branch.created_at) },
+    { key: 'updated', label: 'Updated At', value: formatDisplayDateTime(branch.updated_at) },
+  ];
+}
+
 // ── Branch Management ─────────────────────────────────────────────────────────
 function BranchListPage({
   navigate,
@@ -608,11 +834,13 @@ function BranchListPage({
   const [branches, setBranches] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
-  const [confirmDisable, setConfirmDisable] = useState(null);
+  const [confirmArchive, setConfirmArchive] = useState(null);
+  const [viewingBranch, setViewingBranch] = useState(null);
   const [branchFormOpen, setBranchFormOpen] = useState(false);
   const [branchForm, setBranchForm] = useState(EMPTY_BRANCH_FORM);
   const [editingBranchId, setEditingBranchId] = useState(null);
   const [savingBranch, setSavingBranch] = useState(false);
+  const [archiveBusy, setArchiveBusy] = useState(false);
   const pagination = usePagination(branches);
   const paginatedBranches = pagination.paginatedData;
   const loadBranches = useCallback(async () => {
@@ -641,6 +869,7 @@ function BranchListPage({
   };
   const openEditBranch = (branch, e) => {
     e?.stopPropagation?.();
+    setViewingBranch(null);
     setEditingBranchId(branch.branch_id);
     setBranchForm({
       branch_name: branch.branch_name || '',
@@ -653,6 +882,9 @@ function BranchListPage({
       manager_id: branch.manager_id ? String(branch.manager_id) : '',
     });
     setBranchFormOpen(true);
+  };
+  const openViewBranch = (branch) => {
+    setViewingBranch(branch);
   };
   const saveBranch = async (e) => {
     e.preventDefault();
@@ -687,31 +919,25 @@ function BranchListPage({
       setSavingBranch(false);
     }
   };
-  const disableBranch = async () => {
-    if (!confirmDisable) return;
+  const archiveBranch = async () => {
+    if (!confirmArchive || archiveBusy) return;
+    setArchiveBusy(true);
     try {
-      await apiClient.put(`/branches/${confirmDisable.branch_id}`, { status: 'Inactive' });
-      showToast(`${confirmDisable.branch_name} disabled.`, 'success');
-      setConfirmDisable(null);
+      await apiClient.put(`/branches/${confirmArchive.branch_id}`, { status: 'Inactive' });
+      showToast(`${confirmArchive.branch_name} archived. The record is preserved.`, 'success');
+      setConfirmArchive(null);
       loadBranches();
     } catch (err) {
-      showToast(err.response?.data?.message || 'Failed to disable branch.', 'error');
+      showToast(err.response?.data?.message || 'Failed to archive branch.', 'error');
+    } finally {
+      setArchiveBusy(false);
     }
   };
   if (loading) {
-    return <div className="relative z-10 grid gap-[22px] w-full">
-        <section className="panel content-panel relative overflow-hidden">
-          <div className="flex flex-col md:flex-row justify-between gap-4 items-start md:items-center mb-4"><h3>All Branches</h3></div>
-          <div style={{
-          padding: '40px',
-          textAlign: 'center',
-          color: '#818697'
-        }}>Loading branches...</div>
-        </section>
-      </div>;
+    return <div className="page"><LoadingState message="Loading branches..." /></div>;
   }
   if (error) {
-    return <div className="relative z-10 grid gap-[22px] w-full">
+    return <div className="page">
         <section className="panel content-panel relative overflow-hidden">
           <div className="flex flex-col md:flex-row justify-between gap-4 items-start md:items-center mb-4"><h3>All Branches</h3></div>
           <div style={{
@@ -722,7 +948,25 @@ function BranchListPage({
         </section>
       </div>;
   }
-  return <div className="relative z-10 grid gap-[22px] w-full">
+  return <div className="page">
+      {confirmArchive && <section className="panel content-panel relative overflow-hidden" style={{
+      borderColor: '#fca5a5',
+      background: 'rgba(220,38,38,0.04)',
+      marginBottom: 24
+    }}>
+          <h3 style={{ margin: '0 0 8px' }}>Archive branch</h3>
+          <p style={{ margin: 0 }}>
+            Archive <strong>{confirmArchive.branch_name}</strong>? Branch operations will be restricted.
+            The branch record and related history are kept — this does not permanently delete the branch.
+          </p>
+          <div style={{ display: 'flex', gap: 10, marginTop: 12, flexWrap: 'wrap' }}>
+            <button className="button danger" type="button" disabled={archiveBusy} onClick={archiveBranch}>
+              {archiveBusy ? 'Working…' : 'Confirm Archive'}
+            </button>
+            <button className="button secondary" type="button" disabled={archiveBusy} onClick={() => setConfirmArchive(null)}>Cancel</button>
+          </div>
+        </section>}
+
       <section className="panel content-panel relative overflow-hidden">
         <div className="list-section-header">
           <h3>All Branches <span className="text-ink/70" style={{
@@ -732,32 +976,114 @@ function BranchListPage({
           <button className="button" type="button" onClick={openCreateBranch}>+ Add Branch</button>
         </div>
         <><div className="corvex-table-wrapper">
-          <table className="corvex-table">
-            <thead><tr><th>Branch ID</th><th>Branch Name</th><th>Address</th><th>Latitude</th><th>Longitude</th><th>Contact No</th><th>Email</th><th>Status</th><th>Created At</th><th>Actions</th></tr></thead>
+          <table className="corvex-table corvex-table-branches">
+            <thead>
+              <tr>
+                <th className="cell-name">Branch</th>
+                <th className="cell-address">Address</th>
+                <th className="cell-contact">Contact</th>
+                <th className="cell-status">Status</th>
+                <th className="cell-actions">Actions</th>
+              </tr>
+            </thead>
             <tbody>
-              {branches.length === 0 ? <tr><td colSpan="10" style={{
+              {branches.length === 0 ? <tr><td colSpan="5" style={{
                   textAlign: 'center',
                   padding: '40px',
                   color: '#818697'
-                }}>No branches found</td></tr> : paginatedBranches.map(b => <tr key={b.branch_id} className="clickable-row" onClick={() => navigate(`${adminBase}/branches/${b.branch_id}`)}>
-                    <td>{b.branch_id}</td>
-                    <td><strong>{b.branch_name}</strong></td>
-                    <td>{b.address}</td>
-                    <td>{b.latitude}</td>
-                    <td>{b.longitude}</td>
-                    <td>{b.contact_no}</td>
-                    <td>{b.email}</td>
-                    <td><StatusPill status={b.status} /></td>
-                    <td>{formatDisplayDateTime(b.created_at)}</td>
-                    <td className="table-actions" onClick={e => e.stopPropagation()}>
-                      <button className="icon-action-button" type="button" title="Edit" onClick={(e) => openEditBranch(b, e)}><NavIcon name="edit" /></button>
-                      <button className="icon-action-button danger" type="button" title="Disable" onClick={() => setConfirmDisable(b)}><NavIcon name="trash" /></button>
+                }}>No branches found</td></tr> : paginatedBranches.map(b => {
+                  const isInactive = String(b.status).toLowerCase() === 'inactive';
+                  return <tr key={b.branch_id} className="clickable-row" onClick={() => openViewBranch(b)}>
+                    <td className="cell-name">
+                      <strong>{b.branch_name}</strong>
+                      <span className="user-meta-id">ID {b.branch_id}</span>
                     </td>
-                  </tr>)}
+                    <td className="cell-address" title={b.address}>{b.address || '—'}</td>
+                    <td className="cell-contact" title={b.contact_no || b.email}>
+                      {b.contact_no || '—'}
+                      {b.email ? <span className="user-meta-id">{b.email}</span> : null}
+                    </td>
+                    <td className="cell-status"><StatusPill status={b.status} /></td>
+                    <td className="table-actions cell-actions" onClick={e => e.stopPropagation()}>
+                      <button className="icon-action-button" type="button" title="View" aria-label={`View ${b.branch_name}`} onClick={() => openViewBranch(b)}>
+                        <NavIcon name="view" />
+                      </button>
+                      <button className="icon-action-button" type="button" title="Edit" aria-label={`Edit ${b.branch_name}`} onClick={(e) => openEditBranch(b, e)}>
+                        <NavIcon name="edit" />
+                      </button>
+                      {!isInactive ? (
+                        <button
+                          className="icon-action-button danger"
+                          type="button"
+                          title="Archive"
+                          aria-label={`Archive ${b.branch_name}`}
+                          onClick={() => setConfirmArchive(b)}
+                        >
+                          <NavIcon name="archive" />
+                        </button>
+                      ) : (
+                        <button
+                          className="icon-action-button"
+                          type="button"
+                          title="Restore"
+                          aria-label={`Restore ${b.branch_name}`}
+                          onClick={async () => {
+                            try {
+                              await apiClient.put(`/branches/${b.branch_id}`, { status: 'Active' });
+                              showToast(`${b.branch_name} restored.`, 'success');
+                              loadBranches();
+                            } catch (err) {
+                              showToast(err.response?.data?.message || 'Failed to restore branch.', 'error');
+                            }
+                          }}
+                        >
+                          <NavIcon name="reset" />
+                        </button>
+                      )}
+                    </td>
+                  </tr>;
+                })}
             </tbody>
           </table>
         </div><Pagination {...pagination} /></>
       </section>
+
+      {viewingBranch && <div className="modal-overlay" onClick={() => setViewingBranch(null)}>
+          <div
+            className="modal-content"
+            style={{ maxWidth: 560 }}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="branch-view-title"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3 id="branch-view-title" style={{ marginTop: 0 }}>Branch Details</h3>
+            <p className="text-ink/70" style={{ margin: '0 0 16px', fontSize: '0.88rem' }}>
+              Read-only branch information. Use Edit to make changes.
+            </p>
+            <DetailRowsTable rows={buildBranchDetailRows(viewingBranch)} />
+            <div className="modal-actions" style={{ marginTop: 16 }}>
+              <button
+                className="button"
+                type="button"
+                onClick={() => openEditBranch(viewingBranch)}
+              >
+                Edit Branch
+              </button>
+              <button
+                className="button secondary"
+                type="button"
+                onClick={() => navigate(`${adminBase}/branches/${viewingBranch.branch_id}`)}
+              >
+                Open Full Page
+              </button>
+              <button className="button secondary" type="button" onClick={() => setViewingBranch(null)}>
+                Close
+              </button>
+            </div>
+          </div>
+        </div>}
+
       {branchFormOpen && <div className="modal-overlay" onClick={() => !savingBranch && setBranchFormOpen(false)}>
           <div className="modal-content" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 520 }}>
             <h3>{editingBranchId ? 'Edit Branch' : 'Add Branch'}</h3>
@@ -799,22 +1125,6 @@ function BranchListPage({
             </form>
           </div>
         </div>}
-      {confirmDisable && <section className="panel content-panel relative overflow-hidden" style={{
-      borderColor: '#fca5a5',
-      background: 'rgba(220,38,38,0.04)'
-    }}>
-          <p>Disable <strong>{confirmDisable.branch_name}</strong>? This will restrict all branch operations.</p>
-          <div style={{
-        display: 'flex',
-        gap: 10,
-        marginTop: 12
-      }}>
-            <button className="button" type="button" style={{
-          background: '#dc2626'
-        }} onClick={disableBranch}>Confirm Disable</button>
-            <button className="button secondary" type="button" onClick={() => setConfirmDisable(null)}>Cancel</button>
-          </div>
-        </section>}
     </div>;
 }
 function BranchDetailPage({
@@ -897,7 +1207,7 @@ function BranchDetailPage({
       showToast(err.response?.data?.message || 'Failed to update branch.', 'error');
     }
   };
-  return <div className="relative z-10 grid gap-[22px] w-full">
+  return <div className="page">
       <section className="panel dashboard-greeting">
         <div className="flex flex-col gap-1">
           <p className="text-[0.82rem] font-bold tracking-widest uppercase text-navy/60 m-0">{branch.region || 'Branch'}</p>
@@ -976,8 +1286,11 @@ function InventoryPage({
   navigate,
   showToast
 }) {
-  const [tab, setTab] = useState('products');
+  const [tab, setTab] = useState('overview');
   const tabs = [{
+    key: 'overview',
+    label: 'Overview'
+  }, {
     key: 'products',
     label: 'Products'
   }, {
@@ -993,6 +1306,8 @@ function InventoryPage({
   const [loadingTab, setLoadingTab] = useState(false);
   const [showProductForm, setShowProductForm] = useState(false);
   const [editingProductId, setEditingProductId] = useState(null);
+  const [productStatusFilter, setProductStatusFilter] = useState('All');
+  const [confirmProductAction, setConfirmProductAction] = useState(null);
   const [productForm, setProductForm] = useState({
     name: '',
     sku: '',
@@ -1003,13 +1318,15 @@ function InventoryPage({
   const loadProducts = useCallback(async () => {
     setLoadingTab(true);
     try {
-      const res = await apiClient.get('/products?limit=200');
+      const res = await apiClient.get('/products', {
+        params: { limit: 200, product_status: productStatusFilter },
+      });
       if (res.data.success) setProducts(res.data.data || []);
     } catch (err) {
       showToast('Failed to load products.', 'error');
     }
     setLoadingTab(false);
-  }, [showToast]);
+  }, [showToast, productStatusFilter]);
   const loadTransfers = useCallback(async () => {
     setLoadingTab(true);
     try {
@@ -1084,6 +1401,25 @@ function InventoryPage({
       showToast(err.response?.data?.message || 'Failed to update transfer.', 'error');
     }
   };
+  const handleArchiveProduct = async (product) => {
+    try {
+      await apiClient.delete(`/products/${product.product_id}`, { params: { mode: 'archive' } });
+      showToast('Product archived.', 'success');
+      setConfirmProductAction(null);
+      loadProducts();
+    } catch (err) {
+      showToast(err.response?.data?.message || 'Failed to archive product.', 'error');
+    }
+  };
+  const handleRestoreProduct = async (product) => {
+    try {
+      await apiClient.put(`/products/${product.product_id}`, { status: 'Active' });
+      showToast('Product restored.', 'success');
+      loadProducts();
+    } catch (err) {
+      showToast(err.response?.data?.message || 'Failed to restore product.', 'error');
+    }
+  };
   const pagination_products = usePagination(products);
   const paginated_products = pagination_products.paginatedData;
   const pagination_TRANSFER_REQUESTS = usePagination(transfers);
@@ -1091,16 +1427,27 @@ function InventoryPage({
   const pagination_RESTOCK_REQUESTS = usePagination(restocks);
   const paginated_RESTOCK_REQUESTS = pagination_RESTOCK_REQUESTS.paginatedData;
   const pendingTransfer = (t) => ['Pending Approval', 'Submitted'].includes(t.status);
-  return <div className="relative z-10 grid gap-[22px] w-full">
+  return <div className="page">
       <div className="segmented-control">
         {tabs.map(t => <button key={t.key} className={tab === t.key ? 'segment active' : 'segment'} type="button" onClick={() => setTab(t.key)}>{t.label}</button>)}
       </div>
+
+      {tab === 'overview' && <CentralInventoryPanel title="Inventory Management" onToast={showToast} />}
 
       {tab === 'products' && <>
           <section className="panel content-panel relative overflow-hidden">
             <div className="list-section-header">
               <h3>All Products</h3>
-              <div className="list-section-actions">
+              <div className="list-section-actions" style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+                <select
+                  className="filter-select"
+                  value={productStatusFilter}
+                  onChange={(e) => setProductStatusFilter(e.target.value)}
+                >
+                  <option value="All">All Statuses</option>
+                  <option value="Active">Active</option>
+                  <option value="Inactive">Archived</option>
+                </select>
                 <button className="button" type="button" onClick={openCreateProduct}>+ Add Product</button>
               </div>
             </div>
@@ -1112,13 +1459,46 @@ function InventoryPage({
                       <td><strong>{p.product_name}</strong></td><td>{p.sku}</td><td>{p.category_name || '—'}</td>
                       <td>{p.unit_price != null ? Number(p.unit_price).toFixed(2) : '—'}</td>
                       <td>{p.total_quantity ?? p.quantity ?? '—'}</td>
-                      <td><StatusPill status={p.stock_status || p.status} /></td>
-                      <td className="table-actions"><button className="icon-action-button" type="button" title="Edit" onClick={() => openEditProduct(p)}><NavIcon name="edit" /></button></td>
+                      <td><StatusPill status={p.status || p.stock_status} /></td>
+                      <td className="table-actions">
+                        <button className="icon-action-button" type="button" title="Edit" onClick={() => openEditProduct(p)}><NavIcon name="edit" /></button>
+                        {String(p.status) === 'Inactive' ? (
+                          <button className="icon-action-button" type="button" title="Restore" onClick={() => handleRestoreProduct(p)}><NavIcon name="reset" /></button>
+                        ) : (
+                          <button
+                            className="icon-action-button danger"
+                            type="button"
+                            title="Archive"
+                            onClick={() => setConfirmProductAction({ type: 'archive', product: p })}
+                          >
+                            <NavIcon name="archive" />
+                          </button>
+                        )}
+                      </td>
                     </tr>)}
                 </tbody>
               </table>
             </div><Pagination {...pagination_products} /></>}
           </section>
+
+          {confirmProductAction ? <div className="modal-overlay" onClick={() => setConfirmProductAction(null)}>
+            <div className="modal-content" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 440 }}>
+              <h3>Archive Product</h3>
+              <p className="text-ink/70">
+                Archive “{confirmProductAction.product.product_name}”? It will be hidden from active catalogs but the record is preserved and can be restored later.
+              </p>
+              <div className="modal-actions">
+                <button type="button" className="button secondary" onClick={() => setConfirmProductAction(null)}>Cancel</button>
+                <button
+                  type="button"
+                  className="button"
+                  onClick={() => handleArchiveProduct(confirmProductAction.product)}
+                >
+                  Confirm Archive
+                </button>
+              </div>
+            </div>
+          </div> : null}
 
           {showProductForm && <div className="modal-overlay" onClick={() => setShowProductForm(false)}>
               <div className="modal-content" onClick={e => e.stopPropagation()} style={{
@@ -1301,7 +1681,7 @@ function ReportsPage({
   if (loading) return <LoadingState message="Loading system reports..." />;
   if (error || !analytics) return <EmptyState title="Reports unavailable" description={error || 'No report data is available.'} />;
   const employeeRows = reportRows('employees', analytics, users);
-  return <div className="relative z-10 grid gap-[22px] w-full">
+  return <div className="page">
       <div className="segmented-control">
         {tabs.map(t => <button key={t.key} className={tab === t.key ? 'segment active' : 'segment'} type="button" onClick={() => setTab(t.key)}>{t.label}</button>)}
       </div>
@@ -1423,19 +1803,10 @@ function AuditLogsPage({
   const pagination_filtered = usePagination(filtered);
   const paginated_filtered = pagination_filtered.paginatedData;
   if (loading) {
-    return <div className="relative z-10 grid gap-[22px] w-full">
-        <section className="panel content-panel relative overflow-hidden">
-          <div className="flex flex-col md:flex-row justify-between gap-4 items-start md:items-center mb-4"><h3>Audit Logs</h3></div>
-          <div style={{
-          padding: '40px',
-          textAlign: 'center',
-          color: '#818697'
-        }}>Loading audit logs...</div>
-        </section>
-      </div>;
+    return <div className="page"><LoadingState message="Loading audit logs..." /></div>;
   }
   if (error) {
-    return <div className="relative z-10 grid gap-[22px] w-full">
+    return <div className="page">
         <section className="panel content-panel relative overflow-hidden">
           <div className="flex flex-col md:flex-row justify-between gap-4 items-start md:items-center mb-4"><h3>Audit Logs</h3></div>
           <div style={{
@@ -1446,7 +1817,7 @@ function AuditLogsPage({
         </section>
       </div>;
   }
-  return <div className="relative z-10 grid gap-[22px] w-full">
+  return <div className="page">
       <section className="panel content-panel relative overflow-hidden">
         <div className="list-section-header">
           <h3>Audit Log <span className="text-ink/70" style={{
@@ -1466,8 +1837,10 @@ function AuditLogsPage({
             else showToast('Nothing to export.', 'error');
           }}>Export PDF</button>
         </div>
-        <div className="list-section-controls" style={{ marginBottom: 12 }}>
-          <input className="filter-input search" type="search" placeholder="Search by action or status..." value={searchFilter} onChange={e => setSearchFilter(e.target.value)} />
+        <div className="list-section-toolbar">
+          <div className="list-section-controls">
+            <input className="filter-input search" type="search" placeholder="Search by action or status..." value={searchFilter} onChange={e => setSearchFilter(e.target.value)} />
+          </div>
         </div>
         <><div className="corvex-table-wrapper">
           <table className="corvex-table">
@@ -1502,7 +1875,11 @@ function NotificationsPage({
 function ProfilePage({
   showToast
 }) {
-  return <AccountProfilePanel showToast={showToast} title="Profile Information" />;
+  return <AccountProfilePanel
+    showToast={showToast}
+    title="Admin Profile"
+    subtitle="View your personal details and update your account password."
+  />;
 }
 
 // ── Product Categories (Admin) ────────────────────────────────────────────────
@@ -1573,7 +1950,7 @@ function ProductCategoriesPage({
   };
   const pagination_categories = usePagination(categories);
   const paginated_categories = pagination_categories.paginatedData;
-  return <div className="relative z-10 grid gap-[22px] w-full">
+  return <div className="page">
       <section className="panel content-panel relative overflow-hidden">
         <div className="list-section-header">
           <h3>Product Categories <span className="text-ink/70" style={{
@@ -1589,7 +1966,7 @@ function ProductCategoriesPage({
             <input className="filter-input search" type="search" placeholder="Search categories…" value={search} onChange={e => setSearch(e.target.value)} />
           </div>
         </div>
-        {loading ? <p>Loading…</p> : categories.length === 0 ? <EmptyState title="No categories found" /> : <><div className="corvex-table-wrapper">
+        {loading ? <LoadingState message="Loading categories..." /> : categories.length === 0 ? <EmptyState title="No categories found" /> : <><div className="corvex-table-wrapper">
             <table className="corvex-table">
               <thead><tr><th>ID</th><th>Category Name</th><th>Status</th><th>Created At</th><th>Updated At</th><th>Actions</th></tr></thead>
               <tbody>
@@ -1638,7 +2015,7 @@ function SuppliersAdminPage({
   const [search, setSearch] = useState('');
   const [showForm, setShowForm] = useState(false);
   const [editingSupplierId, setEditingSupplierId] = useState(null);
-  const [confirmDelete, setConfirmDelete] = useState(null);
+  const [confirmArchive, setConfirmArchive] = useState(null);
   const [errors, setErrors] = useState({});
   const [submitting, setSubmitting] = useState(false);
   const [form, setForm] = useState({
@@ -1751,7 +2128,7 @@ function SuppliersAdminPage({
   };
   const pagination_suppliers = usePagination(suppliers);
   const paginated_suppliers = pagination_suppliers.paginatedData;
-  return <div className="relative z-10 grid gap-[22px] w-full">
+  return <div className="page">
       <section className="panel content-panel relative overflow-hidden">
         <div className="list-section-header">
           <h3>Suppliers <span className="text-ink/70" style={{
@@ -1767,7 +2144,7 @@ function SuppliersAdminPage({
             <input className="filter-input search" type="search" placeholder="Search suppliers…" value={search} onChange={e => setSearch(e.target.value)} />
           </div>
         </div>
-        {loading ? <p>Loading…</p> : suppliers.length === 0 ? <EmptyState title="No suppliers found" /> : <><div className="corvex-table-wrapper">
+        {loading ? <LoadingState message="Loading suppliers..." /> : suppliers.length === 0 ? <EmptyState title="No suppliers found" /> : <><div className="corvex-table-wrapper">
             <table className="corvex-table">
               <thead><tr><th>ID</th><th>Supplier Name</th><th>Contact</th><th>Email</th><th>Address</th><th>Status</th><th>Actions</th></tr></thead>
               <tbody>
@@ -1780,7 +2157,28 @@ function SuppliersAdminPage({
                     <td><StatusPill status={s.status || 'Active'} /></td>
                     <td className="table-actions">
                       <button className="icon-action-button" type="button" title="Edit" onClick={() => openForm(s)}><NavIcon name="edit" /></button>
-                      <button className="icon-action-button danger" type="button" title="Delete" onClick={() => setConfirmDelete(s)}><NavIcon name="trash" /></button>
+                      {String(s.status || 'Active').toLowerCase() === 'inactive' ? (
+                        <button
+                          className="icon-action-button"
+                          type="button"
+                          title="Restore"
+                          onClick={async () => {
+                            try {
+                              await apiClient.put(`/suppliers/${s.suppliers_id ?? s.supplier_id}`, { status: 'Active' });
+                              showToast('Supplier restored.', 'success');
+                              loadData();
+                            } catch (err) {
+                              showToast(err.response?.data?.message || 'Failed to restore supplier.', 'error');
+                            }
+                          }}
+                        >
+                          <NavIcon name="reset" />
+                        </button>
+                      ) : (
+                        <button className="icon-action-button danger" type="button" title="Archive" onClick={() => setConfirmArchive(s)}>
+                          <NavIcon name="archive" />
+                        </button>
+                      )}
                     </td>
                   </tr>)}
               </tbody>
@@ -1826,20 +2224,23 @@ function SuppliersAdminPage({
             </form>
           </div>
         </div>}
-      {confirmDelete && <section className="panel content-panel" style={{ borderColor: '#fca5a5' }}>
-          <p>Delete supplier <strong>{confirmDelete.supplier_name}</strong>? This cannot be undone.</p>
+      {confirmArchive && <section className="panel content-panel" style={{ borderColor: '#fca5a5', background: 'rgba(220,38,38,0.04)' }}>
+          <h3 style={{ margin: '0 0 8px' }}>Archive supplier</h3>
+          <p style={{ margin: 0 }}>
+            Archive supplier <strong>{confirmArchive.supplier_name}</strong>? The record is preserved and can be restored later.
+          </p>
           <div className="flex gap-2 mt-4">
-            <button className="button" type="button" style={{ background: '#dc2626' }} onClick={async () => {
+            <button className="button danger" type="button" onClick={async () => {
               try {
-                await apiClient.delete(`/suppliers/${confirmDelete.suppliers_id ?? confirmDelete.supplier_id}`);
-                showToast('Supplier deleted.', 'success');
-                setConfirmDelete(null);
+                await apiClient.delete(`/suppliers/${confirmArchive.suppliers_id ?? confirmArchive.supplier_id}`);
+                showToast('Supplier archived.', 'success');
+                setConfirmArchive(null);
                 loadData();
               } catch (err) {
-                showToast(err.response?.data?.message || 'Failed to delete supplier.', 'error');
+                showToast(err.response?.data?.message || 'Failed to archive supplier.', 'error');
               }
-            }}>Confirm Delete</button>
-            <button className="button secondary" type="button" onClick={() => setConfirmDelete(null)}>Cancel</button>
+            }}>Confirm Archive</button>
+            <button className="button secondary" type="button" onClick={() => setConfirmArchive(null)}>Cancel</button>
           </div>
         </section>}
     </div>;

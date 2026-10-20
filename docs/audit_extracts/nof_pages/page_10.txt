@@ -1,0 +1,95 @@
+
+method as the decision-support mechanism for indicators serve as input variables for the SAW
+customer prioritization during collection operations. algorithm to generate the daily collection priority
+The SAW method is a Multi-Criteria Decision-Making ranking.
+(MCDM) technique that evaluates multiple
+Table 8. Operational Data Sources
+alternatives by normalizing criterion values, applying
+Table 8 presents the operational data sources
+predefined weights, and computing a weighted
+CORVEX retrieves before executing the Simple
+preference score to produce a ranked list of
+Additive Weighting (SAW) computation. Each
+alternatives. Because of its computational simplicity,
+decision criterion is associated with its corresponding
+transparency, and effectiveness in evaluating multiple
+system module, database table, retrieved field, and
+operational criteria simultaneously, SAW has been
+operational purpose. The system first processes the
+widely applied in decision-support systems involving
+retrieved records through descriptive analytics to
+resource allocation, scheduling, customer
+compute the decision variables, then supplies them as
+prioritization, and operational planning [19], [20].
+inputs to the SAW decision-support process, ensuring
+Unlike conventional decision support systems, where customer prioritization is based on current, validated
+the algorithm operates independently, this operational data.
+implementation integrates descriptive analytics with
+the SAW method. Before ranking, CORVEX first After retrieving and validating the required operational
+summarizes operational information retrieved from the records, CORVEX transforms each customer's
+centralized database, including customer payment Outstanding Balance, Days Overdue, and Geographic
+records, collection history, and geographic Distance into numerical criterion values. These values
+information. These descriptive indicators provide are automatically assigned to the corresponding
+management with an overview of each customer’s columns of the decision matrix, where each customer
+financial obligation, payment urgency, and travel represents an alternative, and each criterion represents
+accessibility. The summarized operational data then an evaluation variable. The completed decision matrix
+become input variables for the SAW algorithm, which then becomes the direct input to the SAW
+generates an objective customer priority ranking for normalization and weighted preference computations.
+daily collection activities.
+2.3.2.2. Basis for Selecting the Decision Criteria
+This implementation directly addresses the operational The decision criteria implemented in CORVEX were
+problems identified during the requirements gathering identified during the requirements gathering phase
+conducted at Bethuel-Herminihildo (BH) Marketing. through interviews with the Operating Manager and
+Based on interviews with the Operating Manager and observations of the daily collection workflow at BH
+field personnel, collectors currently determine Marketing.
+collection priorities using personal judgment,
+considering outstanding balances, overdue payments, Outstanding Account Balance
+and travel distance without any standardized decision- During the requirements validation interview, the
+support mechanism. As a result, different collectors Operating Manager ranked each collection criterion by
+may produce different collection schedules for similar operational importance based on actual collection
+customer conditions, leading to inconsistent practices. Based on the interview, Outstanding Balance
+prioritization, inefficient travel, and reduced collection was considered the highest priority because larger
+productivity. Through descriptive analytics and the receivables have the greatest effect on cash flow
+SAW method, CORVEX standardizes this decision- recovery. Days Overdue ranked second because
+making process by automatically generating a ranked delayed accounts require more immediate collection
+customer list based on operational data retrieved from attention, while Geographic Distance ranked lower
+the centralized information system. The generated than financial priorities to improve travel efficiency.
+ranking is subsequently displayed in the Collector’s
+Field Portal to support daily collection planning. Days Overdue
+This number of overdue days represents the urgency of
+2.3.2.1. Operational Data Retrieval
+collection activities. Customers who have delayed
+Before performing any mathematical computation,
+payments longer require earlier collection to minimize
+CORVEX retrieves operational records from its
+the risk of prolonged delinquency.
+centralized PostgreSQL database. Data is collected
+from the Payment Repository, Collection Transaction
+Geographic Distance
+Records, Customer Geographic Coordinates, and the
+Although financial considerations remain the highest
+Collector’s Current Location. The system validates
+priority, collectors also consider travel distance when
+these records for completeness and consistency before
+planning their daily routes. Visiting closer customers
+descriptive analytics and decision-support processing.
+geographically reduces travel time, transportation
+costs, and unnecessary movement during field
+The system first aggregates and summarizes the
+operations.
+retrieved operational information through descriptive
+analytics. The system computes the customer's
+2.3.2.3. Determination of Criteria Weights
+Outstanding Balance from the recorded billing and
+The criterion weights were established during the
+payment transactions, calculates the number of Days
+requirements-gathering phase based on interviews
+Overdue by comparing the current system date with the
+with the Operating Manager of BH Marketing. During
+recorded due date, and determines the Geographic
+the interview, the manager explained that collection
+Distance using the stored coordinates of both the
+priorities are primarily influenced by the customer’s
+assigned collector and the customer. These descriptive
+financial value, followed by payment urgency. At the
+10

@@ -1,0 +1,102 @@
+
+same time, travel distance is considered only after ensuring that subsequent computations are based on
+evaluating financial considerations. actual customer records.
+Table 9. Criteria Weights For the sample computation, Customer A has an
+Table 9 presents the decision criteria and their Outstanding Balance of ₱18,500, 20 Days Overdue,
+corresponding weights used in the SAW computation. and a Geographic Distance of 4.2 kilometers. The same
+The weights were determined through interviews with retrieval and computation process is applied to
+the Operating Manager during the requirements- Customers B through E. These values constitute the xij
+gathering phase. Outstanding Balance received the entries used in the sample decision matrix.
+highest weight (40%) because customers with larger
+Table 10. Sample Decision Matrix
+unpaid balances contribute more to the company's cash
+Table 10 presents the sample decision matrix
+flow recovery. Days Overdue received 30% because
+constructed from the operational records retrieved by
+accounts with longer payment delays require more
+CORVEX. The table illustrates the actual criterion
+immediate collection to reduce delinquency risk.
+values for each customer before normalization and
+Geographic Distance was also assigned 30% because
+serves as the initial dataset processed by the SAW
+minimizing unnecessary travel enables collectors to
+algorithm.
+visit more customers within a working day while
+reducing transportation time and operational costs.
+The corresponding decision matrix is represented as:
+2.3.2.4. Construction of the Decision Matrix
+Where:
+After establishing the criterion weights, CORVEX ● Column 1 represents the customers’ Outstanding
+retrieves the required operational records from the Balance.
+centralized database and organizes them into a decision ● Column 2 represents the number of Days Overdue.
+matrix. In the SAW method, each row represents one ● Column 3 represents the Geographic Distance
+customer (alternative), while each column corresponds between the collector’s assigned location and the
+to one decision criterion. The resulting matrix serves customer’s address.
+as the input for the normalization and preference score
+The decision matrix becomes the direct input to the
+computation.
+SAW algorithm. Each element xij corresponds to an
+The values represented by xij are derived from operational value retrieved from the centralized
+collection-related records generated through the database, which is then normalized before CORVEX
+existing collection workflow of Bethuel-Herminihildo calculates the weighted preference scores.
+(BH) Marketing and retrieved or computed by
+2.3.2.5 Normalization of Decision Criteria
+CORVEX. During collection activities, the system
+records customer payment and collection information
+Since the selected decision criteria use different units
+and stores it in the centralized PostgreSQL database.
+of measurement, CORVEX first converts all criterion
+For each customer alternative i, CORVEX retrieves the
+values into a common scale ranging from 0 to 1 before
+Outstanding Balance from the customer's payment
+calculating the final preference score. This process,
+records, determines the Days Overdue by comparing
+known as normalization, ensures that no single
+the recorded payment due date with the current system
+criterion dominates the computation because of
+date, and obtains the Geographic Distance using the
+differences in measurement units. In the Collection
+customer's stored coordinates and the assigned
+Dispatch Engine, Outstanding Balance and Days
+collector's current location. The system then validates
+Overdue are treated as benefit criteria, where higher
+and assigns these values to their corresponding
+values indicate higher collection priority. Conversely,
+criterion columns in the decision matrix, where each
+Geographic Distance is treated as a cost criterion,
+row represents a customer and each column represents
+where shorter travel distances receive higher
+a criterion. Thus, each xij represents a measurable
+normalized values to improve field operation
+condition of a BH Marketing customer account at the
+efficiency.
+time of collection prioritization and serves as the
+original criterion value processed through SAW Since the selected decision criteria use different units
+normalization and weighted preference computation. of measurement, the retrieved operational values
+cannot be directly compared. Therefore, the SAW
+Equation 1: Decision Matrix algorithm normalizes each criterion into a common
+scale ranging from 0 to 1 while preserving their relative
+importance. Outstanding Balance and Days Overdue
+Using operational records retrieved from the database,
+are treated as benefit criteria because higher values
+the decision matrix is constructed by arranging each
+indicate greater collection priority, whereas
+customer's values according to the selected criteria.
+Geographic Distance is treated as a cost criterion. After
+Table 10 shows a sample decision matrix the
+all, shorter travel distances improve field operation
+Collection Dispatch Engine used before normalization.
+efficiency.
+The decision matrix serves as the direct mathematical
+Equation 2. Benefit Criterion
+input to the SAW algorithm. Each row represents one
+customer retrieved from the centralized database,
+Equation 3. Cost Criterion
+while each column corresponds to one decision
+Using the sample decision matrix presented in Table
+criterion: Outstanding Balance, Days Overdue, and
+10, the maximum and minimum criterion values are
+Geographic Distance. The matrix preserves the
+first identified.
+original operational values before normalization,
+11

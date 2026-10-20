@@ -1,0 +1,58 @@
+
+Table 14. Sample Branch Descriptive Summary
+Branch Total Total Available Outstandin
+Collectio Sales Inventory g Balance
+n
+Davao ₱500,000 ₱750,000 1,250 ₱180,000
+City
+General ₱620,000 ₱900,000 1,840 ₱140,000
+Santos
+The resulting 400 units represent the available stock Davao ₱250,000 ₱420,000 720 ₱210,000
+Oriental
+based on the recorded inventory transactions.
+Comparing available stock across branches identifies
+differences in inventory availability, allowing Table 14 presents the descriptive measures grouped
+authorized personnel to review branches with lower by branch. The comparison shows differences in
+stock levels and coordinate inventory requirements recorded collections, sales, inventory availability, and
+when necessary. outstanding customer balances among the three
+branches, giving management a basis for identifying
+2.3.3.2.4 Customer Payment and Credit Analysis
+branch-level differences that may require further
+Customer payment and credit records are summarized
+review.
+to determine outstanding customer balances, payment
+status, delinquent accounts, and credit exposure. The 2.3.3.3 Analytical Visualization
+system calculates the total outstanding balance by The Executive Dashboard presents descriptive
+aggregating remaining unpaid customer balances and measures from the aggregated records through key
+identifies delinquent accounts from records with performance indicators, comparative charts, tables,
+overdue payment obligations. The resulting measures and trend visualizations. The dashboard displays
+provide authorized personnel with a summarized view collection and sales measures through numerical
+of customer payment and credit conditions across totals, branch comparisons, and period trends. It also
+branches. presents inventory and customer payment and credit
+measures through summarized availability, balance,
+Equation 8. Total Outstanding Balance
+and status indicators. The dashboard functions as the
+visualization layer of the descriptive analytics
+process, presenting the calculated measures in a form
+that allows authorized personnel to examine
+differences and changes across branches and reporting
+periods.
+The resulting ₱43,000 represents the total outstanding
+balance within the sample customer records.
+Comparing this measure across branches allows
+authorized management personnel to identify where
+customer payment obligations are more concentrated
+and determine whether further payment or credit
+review is necessary.
+2.3.3.2.5 Branch-Level Descriptive Comparison Figure 4. Executive Dashboard Showing
+CORVEX groups the calculated descriptive measures Descriptive Analytics
+by branch to compare collection, sales, inventory, and Figure 4 shows that the Executive Dashboard presents
+customer payment and credit conditions among the the calculated descriptive measures through key
+Davao City, General Santos City, and Davao Oriental performance indicators, branch-level comparisons,
+branches. The same measures generated from the and trend visualizations. It summarizes collection,
+underlying records are presented side by side to sales, available inventory, outstanding balances,
+identify differences among branches and changes customer counts, and related status indicators,
+across reporting periods. allowing authorized personnel to compare branch
+performance and observe changes across reporting
+periods.
+20

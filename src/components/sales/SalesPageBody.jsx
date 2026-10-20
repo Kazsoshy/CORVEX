@@ -19,6 +19,8 @@ import {
   fetchSalesPurchaseRequestById,
   fetchSalesPurchaseRequests,
   fetchTerritories,
+  fetchSalesFieldReports,
+  submitSalesFieldReport,
   submitSalesCreditInvestigation,
   updateFieldVisit,
   updateSalesPurchaseRequestStatus,
@@ -26,8 +28,8 @@ import {
 import { lookupCustomersForDuplicate, resendCustomerPortalInvitation } from '../../api/customerPortalService';
 import { fetchNotifications, markNotificationRead, markAllNotificationsRead, mapNotificationRow } from '../../api/notificationService.js';
 import { mapCreditInvestigationRow } from '../../api/approvalsService.js';
-import { fetchMyProfile, updateMyProfile } from '../../api/profileService.js';
-import { getCurrentUser, persistCurrentUserFromProfile, requestLogout } from '../../api/authService.js';
+import { getCurrentUser } from '../../api/authService.js';
+import { AccountProfilePanel } from '../shared/AccountProfilePanel';
 import apiClient from '../../api/apiClient.js';
 import { CONTACT_RELATIONSHIP_OPTIONS, formatContactPersonName, formatCustomerDisplayId, formatCustomerFullName, formatMiddleNameDisplay, formatPurchaseVolumeUnits, formatSecondaryContactName } from '../../utils/customerDisplay';
 import { downloadPdf } from '../../utils/dataExport';
@@ -36,6 +38,7 @@ import { formatCurrency, formatDisplayDate, formatDisplayDateTime } from '../../
 import { InvoiceDetailsPage } from './InvoiceDetailsPage';
 import { EmptyState } from '../shared/EmptyState';
 import { LoadingState } from '../shared/LoadingState';
+import { DetailRowsTable } from '../shared/DetailRowsTable';
 import { StatusBadge } from '../StatusBadge';
 import { NavIcon } from '../../navIcons';
 import LeafletMap from '../common/LeafletMap';
@@ -59,6 +62,7 @@ function DashboardPage({
   const today = formatDisplayDate(new Date());
   const [dashboard, setDashboard] = useState(null);
   const [unreadCount, setUnreadCount] = useState(0);
+  const [scheduleNotices, setScheduleNotices] = useState([]);
   const [loading, setLoading] = useState(true);
   useEffect(() => {
     async function load() {
@@ -66,7 +70,9 @@ function DashboardPage({
       const [dashRes, notifRes] = await Promise.all([fetchSalesDashboard(), fetchNotifications()]);
       if (dashRes.success) setDashboard(dashRes.data);
       if (notifRes.success) {
-        setUnreadCount((notifRes.data || []).filter(n => n.status !== 'Read').length);
+        const rows = notifRes.data || [];
+        setUnreadCount(rows.filter(n => n.status !== 'Read').length);
+        setScheduleNotices(rows.filter((n) => String(n.category || '').toLowerCase().includes('schedule')).slice(0, 4));
       }
       setLoading(false);
     }
@@ -108,6 +114,23 @@ function DashboardPage({
       value: String(summary.creditInvestigationsPending ?? 0)
     }]} />
 
+      {scheduleNotices.length ? <section className="panel content-panel relative overflow-hidden">
+          <div className="list-section-header">
+            <h3 style={{ margin: 0 }}>Today&apos;s schedule alerts</h3>
+            <button className="button secondary" type="button" onClick={() => navigate('/sales/schedule')}>Open schedule</button>
+          </div>
+          <ul className="notification-list" style={{ margin: 0 }}>
+            {scheduleNotices.map((n) => (
+              <li key={n.notification_id} className={`notification-item${n.status === 'Read' ? '' : ' unread'}`}>
+                <div>
+                  <strong>{n.title}</strong>
+                  <p className="muted">{n.message}</p>
+                </div>
+              </li>
+            ))}
+          </ul>
+        </section> : null}
+
       {(summary.creditInvestigationsPending ?? 0) > 0 ? <section className="panel content-panel alert-panel">
           <div className="panel-section-header">
             <h3>Credit investigations awaiting approval</h3>
@@ -126,7 +149,7 @@ function DashboardPage({
                   <strong>{item.name}</strong>
                   <span className="muted">{item.sku} · {item.branch}</span>
                 </div>
-                <span className={`stock-status stock-${item.status.toLowerCase()}`}>{item.stock} units · {item.status}</span>
+                <span className="muted">{item.stock} units · <StatusBadge status={item.status} /></span>
               </li>)}
           </ul>
         </section> : null}
@@ -207,6 +230,13 @@ function haversine(a, b) {
   const x = Math.sin(dLat / 2) ** 2 + Math.cos(la1) * Math.cos(la2) * Math.sin(dLon / 2) ** 2;
   return R * 2 * Math.atan2(Math.sqrt(x), Math.sqrt(1 - x));
 }
+const SCHEDULE_PAGE_SIZE_OPTIONS = [5, 10, 25, 50];
+const SCHEDULE_STATUS_OPTIONS = ['All', 'Pending', 'Completed'];
+
+function getVisitCustomerName(visit) {
+  return visit?.customer_name || `${visit?.first_name || ''} ${visit?.last_name || ''}`.trim() || '';
+}
+
 function SchedulePage({
   pageType,
   navigate,
@@ -215,6 +245,15 @@ function SchedulePage({
   const [visits, setVisits] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [search, setSearch] = useState('');
+  const [customerFilter, setCustomerFilter] = useState('');
+  const [statusFilter, setStatusFilter] = useState('All');
+  const [agentFilter, setAgentFilter] = useState('All');
+  const [dateFrom, setDateFrom] = useState('');
+  const [dateTo, setDateTo] = useState('');
+  const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE);
+  const [showMap, setShowMap] = useState(pageType === 'scheduleMap');
+
   useEffect(() => {
     async function load() {
       setLoading(true);
@@ -230,31 +269,155 @@ function SchedulePage({
     }
     load();
   }, [showToast]);
-  const [filter, setFilter] = useState('All');
-  const [showMap, setShowMap] = useState(pageType === 'scheduleMap');
+
+  const agentOptions = useMemo(() => {
+    const names = [...new Set(visits.map((v) => v.agent_name).filter(Boolean))];
+    names.sort((a, b) => a.localeCompare(b));
+    return names;
+  }, [visits]);
+
   const filtered = useMemo(() => {
-    if (filter === 'All') return visits;
-    return visits.filter(v => v.status === filter);
-  }, [filter, visits]);
-  const completed = visits.filter(v => v.status === 'Completed').length;
-  const coordVisits = visits.filter(v => Number(v.latitude) && Number(v.longitude));
-  const mapCenter = coordVisits.length ? [coordVisits.reduce((s, v) => s + Number(v.latitude), 0) / coordVisits.length, coordVisits.reduce((s, v) => s + Number(v.longitude), 0) / coordVisits.length] : [7.1907, 125.4553];
+    const query = search.trim().toLowerCase();
+    const customerQuery = customerFilter.trim().toLowerCase();
+    return visits.filter((v) => {
+      const customerName = getVisitCustomerName(v);
+      const customerNameLower = customerName.toLowerCase();
+      const agentName = String(v.agent_name || '').toLowerCase();
+      const visitType = String(v.visit_type || '').toLowerCase();
+      const visitId = String(v.visit_id || '');
+      const matchesSearch = !query
+        || customerNameLower.includes(query)
+        || agentName.includes(query)
+        || visitType.includes(query)
+        || visitId.includes(query);
+      const matchesCustomer = !customerQuery || customerNameLower.includes(customerQuery);
+      const matchesStatus = statusFilter === 'All' || v.status === statusFilter;
+      const matchesAgent = agentFilter === 'All' || v.agent_name === agentFilter;
+      const scheduled = String(v.scheduled_date || '');
+      const matchesFrom = !dateFrom || scheduled >= dateFrom;
+      const matchesTo = !dateTo || scheduled <= dateTo;
+      return matchesSearch && matchesCustomer && matchesStatus && matchesAgent && matchesFrom && matchesTo;
+    });
+  }, [visits, search, customerFilter, statusFilter, agentFilter, dateFrom, dateTo]);
+
+  const filterResetKey = `${search}|${customerFilter}|${statusFilter}|${agentFilter}|${dateFrom}|${dateTo}|${pageSize}`;
+  const pagination = usePagination(filtered, { pageSize, resetKey: filterResetKey });
+  const rows = pagination.paginatedData;
+
+  const clearScheduleFilters = () => {
+    setSearch('');
+    setCustomerFilter('');
+    setStatusFilter('All');
+    setAgentFilter('All');
+    setDateFrom('');
+    setDateTo('');
+  };
+
+  const completed = visits.filter((v) => v.status === 'Completed').length;
+  const coordVisits = visits.filter((v) => Number(v.latitude) && Number(v.longitude));
+  const mapCenter = coordVisits.length
+    ? [
+      coordVisits.reduce((s, v) => s + Number(v.latitude), 0) / coordVisits.length,
+      coordVisits.reduce((s, v) => s + Number(v.longitude), 0) / coordVisits.length,
+    ]
+    : [7.1907, 125.4553];
   const totalDistance = useMemo(() => {
     const sorted = [...coordVisits].sort((a, b) => new Date(a.scheduled_date || 0) - new Date(b.scheduled_date || 0));
     let sum = 0;
     for (let i = 1; i < sorted.length; i++) {
-      sum += haversine([Number(sorted[i - 1].latitude), Number(sorted[i - 1].longitude)], [Number(sorted[i].latitude), Number(sorted[i].longitude)]);
+      sum += haversine(
+        [Number(sorted[i - 1].latitude), Number(sorted[i - 1].longitude)],
+        [Number(sorted[i].latitude), Number(sorted[i].longitude)]
+      );
     }
     return sum;
   }, [coordVisits]);
-  const visitColor = v => v.status === 'Completed' ? '#255684' : v.status === 'Pending' ? '#0c1031' : '#f59e0b';
-  const mapMarkers = filtered.filter(v => Number(v.latitude) && Number(v.longitude)).map(v => ({
+  const visitColor = (v) => (v.status === 'Completed' ? '#255684' : v.status === 'Pending' ? '#0c1031' : '#f59e0b');
+  const mapMarkers = filtered.filter((v) => Number(v.latitude) && Number(v.longitude)).map((v) => ({
     id: v.visit_id,
     position: [Number(v.latitude), Number(v.longitude)],
     label: String(v.visit_id),
     color: visitColor(v),
-    popup: `<strong>Visit #${v.visit_id}</strong> · ${v.visit_type || '—'}<br/>${v.customer_name || `${v.first_name || ''} ${v.last_name || ''}`.trim() || '—'}<br/>${v.agent_name || '—'} · ${v.status}`
+    popup: `<strong>Visit #${v.visit_id}</strong> · ${v.visit_type || '—'}<br/>${getVisitCustomerName(v) || '—'}<br/>${v.agent_name || '—'} · ${v.status}`,
   }));
+
+  const scheduleFiltersToolbar = (
+    <div className="list-section-toolbar">
+      <div className="list-section-controls">
+        <input
+          className="filter-input search"
+          type="search"
+          placeholder="Search by visit ID, customer, agent, or type"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          aria-label="Search schedule"
+        />
+        <input
+          className="filter-input"
+          type="search"
+          placeholder="Customer name"
+          value={customerFilter}
+          onChange={(e) => setCustomerFilter(e.target.value)}
+          aria-label="Filter by customer name"
+        />
+        <select
+          className="filter-select"
+          value={statusFilter}
+          onChange={(e) => setStatusFilter(e.target.value)}
+          aria-label="Filter by status"
+        >
+          {SCHEDULE_STATUS_OPTIONS.map((option) => (
+            <option key={option} value={option}>{option === 'All' ? 'All Statuses' : option}</option>
+          ))}
+        </select>
+        <select
+          className="filter-select"
+          value={agentFilter}
+          onChange={(e) => setAgentFilter(e.target.value)}
+          aria-label="Filter by assigned staff"
+        >
+          <option value="All">All Staff</option>
+          {agentOptions.map((name) => (
+            <option key={name} value={name}>{name}</option>
+          ))}
+        </select>
+        <input
+          className="filter-input"
+          type="date"
+          value={dateFrom}
+          onChange={(e) => setDateFrom(e.target.value)}
+          aria-label="Schedule from date"
+        />
+        <input
+          className="filter-input"
+          type="date"
+          value={dateTo}
+          onChange={(e) => setDateTo(e.target.value)}
+          aria-label="Schedule to date"
+        />
+        <select
+          className="filter-select"
+          value={pageSize}
+          onChange={(e) => setPageSize(Number(e.target.value) || DEFAULT_PAGE_SIZE)}
+          aria-label="Records per page"
+        >
+          {SCHEDULE_PAGE_SIZE_OPTIONS.map((size) => (
+            <option key={size} value={size}>{size} per page</option>
+          ))}
+        </select>
+      </div>
+    </div>
+  );
+
+  const scheduleEmptyState = (
+    <EmptyState
+      title="No visits match these filters"
+      description="Try adjusting search, status, staff, or date range."
+      actionLabel="Clear filters"
+      onAction={clearScheduleFilters}
+    />
+  );
+
   if (loading) return <LoadingState message="Loading schedule..." />;
   if (error && !visits.length) {
     return <EmptyState title="Unable to load schedule" description={error} actionLabel="Retry" onAction={() => window.location.reload()} />;
@@ -264,7 +427,6 @@ function SchedulePage({
   }
   if (pageType === 'scheduleMap' || showMap) {
     return <div className="page">
-        {/* Removed redundant top Schedule/Map buttons */}
         <StatsGrid stats={[{
         label: 'Visits Scheduled',
         value: String(visits.length)
@@ -276,17 +438,14 @@ function SchedulePage({
         value: String(completed)
       }]} />
         <section className="panel content-panel">
-          <div className="panel-section-header">
-            <div className="inline-toolbar">
-              <div className="segmented-control">
-                {['All', 'Pending', 'Completed'].map(item => <button key={item} className={filter === item ? 'segment active' : 'segment'} type="button" onClick={() => setFilter(item)}>{item}</button>)}
-              </div>
+          <div className="list-section-header">
+            <h3>Territory Map</h3>
+            <div className="list-section-actions">
               <button className="button secondary" type="button" onClick={() => setShowMap(false)}>Show List View</button>
             </div>
           </div>
-          <div style={{
-          marginTop: 16
-        }}>
+          {scheduleFiltersToolbar}
+          <div style={{ marginTop: 16 }}>
             <LeafletMap center={mapCenter} zoom={13} height={500} markers={mapMarkers} polylines={totalDistance ? [{
             id: 'route',
             positions: [...coordVisits].sort((a, b) => new Date(a.scheduled_date || 0) - new Date(b.scheduled_date || 0)).map(v => [Number(v.latitude), Number(v.longitude)]),
@@ -310,12 +469,12 @@ function SchedulePage({
                   </tr>
                 </thead>
                 <tbody>
-                  {filtered.map(v => <tr key={v.visit_id} className="clickable-row" onClick={() => navigate(`/sales/visit-log/${v.visit_id}`)}>
+                  {rows.map(v => <tr key={v.visit_id} className="clickable-row" onClick={() => navigate(`/sales/visit-log/${v.visit_id}`)}>
                       <td><span style={{
                     fontFamily: 'monospace',
                     fontSize: '0.82rem'
                   }}>{v.visit_id}</span></td>
-                      <td>{v.customer_name || `${v.first_name || ''} ${v.last_name || ''}`.trim() || '—'}</td>
+                      <td>{getVisitCustomerName(v) || '—'}</td>
                       <td>{v.visit_type || '—'}</td>
                       <td>{v.scheduled_date ? formatDisplayDate(v.scheduled_date) : '—'}</td>
                       <td><StatusBadge status={v.status} /></td>
@@ -329,12 +488,12 @@ function SchedulePage({
                 </tbody>
               </table>
             </div>
-          </> : <EmptyState title="No visits match this filter" description="Try a different status filter." />}
+            <Pagination {...pagination} />
+          </> : scheduleEmptyState}
         </section>
       </div>;
   }
   return <div className="page">
-      {/* Removed redundant top Schedule/Map buttons */}
       <StatsGrid stats={[{
       label: 'Visits Scheduled',
       value: String(visits.length)
@@ -346,16 +505,13 @@ function SchedulePage({
       value: String(completed)
     }]} />
 
-      <section className="panel content-panel">
-        <div className="panel-section-header">
-          <div className="inline-toolbar">
-            <div className="segmented-control">
-              {['All', 'Pending', 'Completed'].map(item => <button key={item} className={filter === item ? 'segment active' : 'segment'} type="button" onClick={() => setFilter(item)}>{item}</button>)}
-            </div>
-            <button className="button secondary" type="button" onClick={() => navigate('/sales/schedule/map')}>Territory Map View</button>
-          </div>
+      <section className="panel content-panel relative overflow-hidden">
+        <div className="list-section-header">
+          <h3>Today&apos;s Schedule <span className="text-ink/70">({filtered.length})</span></h3>
         </div>
-        {filtered.length ? <div className="table-shell">
+        {scheduleFiltersToolbar}
+        {filtered.length ? <>
+          <div className="corvex-table-wrapper">
             <table className="corvex-table">
               <thead>
                 <tr>
@@ -371,7 +527,7 @@ function SchedulePage({
                 </tr>
               </thead>
               <tbody>
-                {filtered.map(v => <tr key={v.visit_id} className="clickable-row" onClick={() => navigate(`/sales/visit-log/${v.visit_id}`)}>
+                {rows.map(v => <tr key={v.visit_id} className="clickable-row" onClick={() => navigate(`/sales/visit-log/${v.visit_id}`)}>
                     <td><span style={{
                   fontFamily: 'monospace',
                   fontSize: '0.82rem'
@@ -379,7 +535,7 @@ function SchedulePage({
                     <td>{v.visit_type || '—'}</td>
                     <td>{v.scheduled_date ? formatDisplayDate(v.scheduled_date) : '—'}</td>
                     <td><StatusBadge status={v.status} /></td>
-                    <td>{v.customer_name || `${v.first_name || ''} ${v.last_name || ''}`.trim() || '—'}</td>
+                    <td>{getVisitCustomerName(v) || '—'}</td>
                     <td>{v.agent_name || '—'}</td>
                     <td>{formatDisplayDateTime(v.created_at)}</td>
                     <td>{formatDisplayDateTime(v.updated_at)}</td>
@@ -391,7 +547,9 @@ function SchedulePage({
                   </tr>)}
               </tbody>
             </table>
-          </div> : <EmptyState title="No visits match this filter" description="Try a different status filter." />}
+          </div>
+          <Pagination {...pagination} />
+        </> : scheduleEmptyState}
       </section>
     </div>;
 }
@@ -452,7 +610,16 @@ function CustomersPage({
       <section className="panel content-panel relative overflow-hidden">
         <div className="list-section-header">
           <h3>Customer List <span className="text-ink/70">({totalRecords})</span></h3>
-          <div className="list-section-actions">
+        </div>
+        <div className="list-section-toolbar">
+          <div className="list-section-controls">
+            <input className="filter-input search" type="search" placeholder="Search by ID, name, territory, or contact" value={search} onChange={e => setSearch(e.target.value)} />
+            <select className="filter-select" value={filter} onChange={e => setFilter(e.target.value)}>
+              {['Active Customers', 'Inactive Customers', 'All Customers'].map(o => <option key={o} value={o}>{o}</option>)}
+            </select>
+            <select className="filter-select" value={sortBy} onChange={e => setSortBy(e.target.value)}>
+              {['Name'].map(o => <option key={o} value={o}>Sort: {o}</option>)}
+            </select>
             <button className="button" type="button" onClick={() => navigate('/sales/customers/new')}>Add Customer</button>
             <button
               className="button secondary"
@@ -472,36 +639,6 @@ function CustomersPage({
             >
               Export PDF
             </button>
-          </div>
-        </div>
-        <div className="list-section-toolbar" style={{
-        marginBottom: 12
-      }}>
-          <div className="list-section-controls">
-            <input className="filter-input search" type="search" placeholder="Search by ID, name, territory, or contact" value={search} onChange={e => setSearch(e.target.value)} style={{
-            padding: '8px 12px',
-            borderRadius: '6px',
-            border: '1px solid #c5c8d0',
-            fontSize: '0.9rem',
-            flex: 1,
-            minWidth: '200px'
-          }} />
-            <select className="filter-select" value={filter} onChange={e => setFilter(e.target.value)} style={{
-            padding: '8px 12px',
-            borderRadius: '6px',
-            border: '1px solid #c5c8d0',
-            fontSize: '0.9rem'
-          }}>
-              {['Active Customers', 'Inactive Customers', 'All Customers'].map(o => <option key={o} value={o}>{o}</option>)}
-            </select>
-            <select className="filter-select" value={sortBy} onChange={e => setSortBy(e.target.value)} style={{
-            padding: '8px 12px',
-            borderRadius: '6px',
-            border: '1px solid #c5c8d0',
-            fontSize: '0.9rem'
-          }}>
-              {['Name'].map(o => <option key={o} value={o}>Sort: {o}</option>)}
-            </select>
           </div>
         </div>
         {totalRecords ? <>
@@ -696,14 +833,26 @@ function CustomerFormPage({
         {duplicateMatches.length ? (
           <section className="panel content-panel" style={{ borderColor: '#fcd34d', background: 'rgba(245,158,11,0.06)', marginBottom: 16 }}>
             <h4 style={{ marginTop: 0 }}>Possible existing customers</h4>
-            <ul className="detail-list">
-              {duplicateMatches.map((match) => (
-                <li key={match.customer_id}>
-                  <span>{match.customer_code || match.customer_id}</span>
-                  <strong>{match.first_name} {match.last_name} · {match.contact_phone}</strong>
-                </li>
-              ))}
-            </ul>
+            <div className="corvex-table-wrapper">
+              <table className="corvex-table">
+                <thead>
+                  <tr>
+                    <th>Customer Code</th>
+                    <th>Name</th>
+                    <th>Phone</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {duplicateMatches.map((match) => (
+                    <tr key={match.customer_id}>
+                      <td><span style={{ fontFamily: 'monospace', fontSize: '0.82rem' }}>{match.customer_code || match.customer_id}</span></td>
+                      <td>{match.first_name} {match.last_name}</td>
+                      <td>{match.contact_phone || '—'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           </section>
         ) : null}
         <div className="account-detail-grid two-up">
@@ -945,41 +1094,48 @@ function CustomerDetailPage({
       <section className="panel content-panel account-detail-panel">
         <div className="panel-section-header">
           <h3>{ownerName}</h3>
-          <p className="muted">{displayId} · {customer.branch_name || '—'} · Status: {customer.status}</p>
+          <p className="muted">{displayId} · {customer.branch_name || '—'} · Status: <StatusBadge status={customer.status} /></p>
         </div>
         <div className="account-detail-grid two-up">
           <div>
-            <p><strong>Customer ID:</strong> {displayId}</p>
-            <p><strong>First Name:</strong> {customer.first_name || '—'}</p>
-            <p><strong>Middle Name:</strong> {formatMiddleNameDisplay(customer.middle_name)}</p>
-            <p><strong>Last Name:</strong> {customer.last_name || '—'}</p>
-            <p><strong>Branch:</strong> {customer.branch_name || '—'}</p>
-            <p><strong>Account Manager:</strong> {customer.account_manager_name || '—'}</p>
-            <p><strong>Assigned Sales Agent:</strong> {customer.assigned_sales_agent_name || '—'}</p>
-            <p><strong>Territory:</strong> {customer.territory_name || '—'}</p>
-            <p><strong>Business Phone:</strong> {customer.contact_phone}</p>
-            <p><strong>Status:</strong> {customer.status}</p>
-            <p><strong>Portal access:</strong> {portalStatusLabel(customer.portal_status)}</p>
-            {customer.portal_email ? <p><strong>Portal email:</strong> {customer.portal_email}</p> : null}
-            <p><strong>Created At:</strong> {customer.created_at ? formatDisplayDateTime(customer.created_at) : 'N/A'}</p>
-            <p><strong>Updated At:</strong> {customer.updated_at ? formatDisplayDateTime(customer.updated_at) : 'N/A'}</p>
+            <h4 className="subsection-title">Account Information</h4>
+            <DetailRowsTable rows={[
+              { label: 'Customer ID', value: displayId },
+              { label: 'First Name', value: customer.first_name || '—' },
+              { label: 'Middle Name', value: formatMiddleNameDisplay(customer.middle_name) },
+              { label: 'Last Name', value: customer.last_name || '—' },
+              { label: 'Branch', value: customer.branch_name || '—' },
+              { label: 'Account Manager', value: customer.account_manager_name || '—' },
+              { label: 'Assigned Sales Agent', value: customer.assigned_sales_agent_name || '—' },
+              { label: 'Territory', value: customer.territory_name || '—' },
+              { label: 'Business Phone', value: customer.contact_phone || '—' },
+              { label: 'Status', value: <StatusBadge status={customer.status} /> },
+              { label: 'Portal access', value: <StatusBadge status={portalStatusLabel(customer.portal_status)} /> },
+              ...(customer.portal_email ? [{ label: 'Portal email', value: customer.portal_email }] : []),
+              { label: 'Created At', value: customer.created_at ? formatDisplayDateTime(customer.created_at) : 'N/A' },
+              { label: 'Updated At', value: customer.updated_at ? formatDisplayDateTime(customer.updated_at) : 'N/A' },
+              { label: 'Address', value: customer.address || '—' },
+              { label: 'Latitude', value: customer.latitude ?? '—' },
+              { label: 'Longitude', value: customer.longitude ?? '—' },
+            ]} />
           </div>
           <div>
-            <p><strong>Address:</strong> {customer.address}</p>
-            <p><strong>Latitude:</strong> {customer.latitude}</p>
-            <p><strong>Longitude:</strong> {customer.longitude}</p>
             <h4 className="subsection-title">Primary Contact</h4>
-            <p><strong>Name:</strong> {primaryContactName}</p>
-            <p><strong>Middle Name:</strong> {formatMiddleNameDisplay(customer.contact_person_mname)}</p>
-            <p><strong>Phone:</strong> {customer.contact_person_phone || '—'}</p>
-            {secondaryName ? <>
-                <h4 className="subsection-title" style={{
-              marginTop: 12
-            }}>Secondary Contact</h4>
-                <p><strong>Name:</strong> {secondaryName}</p>
-                <p><strong>Phone:</strong> {customer.secondary_contact_phone || '—'}</p>
-                <p><strong>Relationship:</strong> {customer.secondary_contact_relationship || '—'}</p>
-              </> : null}
+            <DetailRowsTable rows={[
+              { label: 'Name', value: primaryContactName },
+              { label: 'Middle Name', value: formatMiddleNameDisplay(customer.contact_person_mname) },
+              { label: 'Phone', value: customer.contact_person_phone || '—' },
+            ]} />
+            {secondaryName ? (
+              <>
+                <h4 className="subsection-title" style={{ marginTop: 12 }}>Secondary Contact</h4>
+                <DetailRowsTable rows={[
+                  { label: 'Name', value: secondaryName },
+                  { label: 'Phone', value: customer.secondary_contact_phone || '—' },
+                  { label: 'Relationship', value: customer.secondary_contact_relationship || '—' },
+                ]} />
+              </>
+            ) : null}
           </div>
         </div>
       </section>
@@ -1008,20 +1164,24 @@ function CustomerDetailPage({
           <h3>Customer Activity</h3>
         </div>
         <div className="account-detail-grid two-up">
-          <div>
-            <p><strong>Purchase Volume (units):</strong> {formatPurchaseVolumeUnits(purchaseVolumeUnits)}</p>
-            <p><strong>Outstanding Balance:</strong> {formatCurrency(outstandingBalance)}</p>
-            <p><strong>Last Sales Visit:</strong> {lastVisit}</p>
-            <p><strong>Last Collection Date:</strong> {customer.activity?.last_collection_date ? formatDisplayDate(customer.activity.last_collection_date) : 'N/A'}</p>
-            <p><strong>Activity Updated At:</strong> {activityUpdatedAt ? formatDisplayDateTime(activityUpdatedAt) : '—'}</p>
-          </div>
+          <DetailRowsTable
+            fieldHeader="Activity"
+            detailsHeader="Details"
+            rows={[
+              { label: 'Purchase Volume (units)', value: formatPurchaseVolumeUnits(purchaseVolumeUnits) },
+              { label: 'Outstanding Balance', value: formatCurrency(outstandingBalance) },
+              { label: 'Last Sales Visit', value: lastVisit },
+              { label: 'Last Collection Date', value: customer.activity?.last_collection_date ? formatDisplayDate(customer.activity.last_collection_date) : 'N/A' },
+              { label: 'Activity Updated At', value: activityUpdatedAt ? formatDisplayDateTime(activityUpdatedAt) : '—' },
+            ]}
+          />
           <div>
             <h4 className="subsection-title">Credit Performance</h4>
-            <p>Credit Limit: {formatCurrency(creditLimit)}</p>
-            <p>Outstanding Balance: {formatCurrency(outstandingBalance)}</p>
-            <div className="progress-bar-container" style={{
-            marginTop: 8
-          }}>
+            <DetailRowsTable rows={[
+              { label: 'Credit Limit', value: formatCurrency(creditLimit) },
+              { label: 'Outstanding Balance', value: formatCurrency(outstandingBalance) },
+            ]} />
+            <div className="progress-bar-container" style={{ marginTop: 8 }}>
               <div className="progress-bar" style={{
               width: `${Math.min(outstandingBalance / (creditLimit || 1) * 100, 100)}%`,
               backgroundColor: outstandingBalance > creditLimit * 0.8 ? '#ef4444' : '#255684'
@@ -1035,21 +1195,17 @@ function CustomerDetailPage({
           <div className="panel-section-header">
             <h3>Credit Information</h3>
           </div>
-          <div className="account-detail-grid two-up">
-            <div>
-              <p><strong>Credit Limit:</strong> {formatCurrency(Number(customer.creditInfo.credit_limit || 0))}</p>
-              <p><strong>Monthly Income:</strong> {formatCurrency(Number(customer.creditInfo.monthly_income || 0))}</p>
-              <p><strong>Credit Score:</strong> {customer.creditInfo.credit_score || '—'}</p>
-              <p><strong>Employment Status:</strong> {customer.creditInfo.employment_status || '—'}</p>
-            </div>
-            <div>
-              <p><strong>Approved By:</strong> {customer.creditInfo.approved_by_name || '—'}</p>
-              <p><strong>Approved Date:</strong> {formatDisplayDate(customer.creditInfo.approved_date)}</p>
-              <p><strong>Credit Info ID:</strong> {customer.creditInfo.credit_info_id || '—'}</p>
-              <p><strong>Created At:</strong> {formatDisplayDateTime(customer.creditInfo.created_at)}</p>
-              <p><strong>Updated At:</strong> {formatDisplayDateTime(customer.creditInfo.updated_at)}</p>
-            </div>
-          </div>
+          <DetailRowsTable rows={[
+            { label: 'Credit Limit', value: formatCurrency(Number(customer.creditInfo.credit_limit || 0)) },
+            { label: 'Monthly Income', value: formatCurrency(Number(customer.creditInfo.monthly_income || 0)) },
+            { label: 'Credit Score', value: customer.creditInfo.credit_score || '—' },
+            { label: 'Employment Status', value: customer.creditInfo.employment_status || '—' },
+            { label: 'Approved By', value: customer.creditInfo.approved_by_name || '—' },
+            { label: 'Approved Date', value: formatDisplayDate(customer.creditInfo.approved_date) },
+            { label: 'Credit Info ID', value: customer.creditInfo.credit_info_id || '—' },
+            { label: 'Created At', value: formatDisplayDateTime(customer.creditInfo.created_at) },
+            { label: 'Updated At', value: formatDisplayDateTime(customer.creditInfo.updated_at) },
+          ]} />
         </section>}
 
       <section className="panel content-panel">
@@ -1488,20 +1644,22 @@ function VisitLogPage({
           <h3>Visit Details</h3>
         </div>
         <div className="account-detail-grid two-up">
-          <div>
-            <p><strong>Visit ID:</strong> {visit.visit_id}</p>
-            <p><strong>User ID:</strong> {visit.user_id ?? '—'}</p>
-            <p><strong>Visit Type:</strong> {visit.visit_type || '—'}</p>
-            <p><strong>Scheduled Date:</strong> {formatDisplayDate(visit.scheduled_date)}</p>
-            <p><strong>Status:</strong> <StatusBadge status={visit.status} /></p>
-            <p><strong>Created At:</strong> {formatDisplayDateTime(visit.created_at)}</p>
-            <p><strong>Updated At:</strong> {formatDisplayDateTime(visit.updated_at)}</p>
-          </div>
+          <DetailRowsTable rows={[
+            { label: 'Visit ID', value: visit.visit_id },
+            { label: 'User ID', value: visit.user_id ?? '—' },
+            { label: 'Visit Type', value: visit.visit_type || '—' },
+            { label: 'Scheduled Date', value: formatDisplayDate(visit.scheduled_date) },
+            { label: 'Status', value: <StatusBadge status={visit.status} /> },
+            { label: 'Created At', value: formatDisplayDateTime(visit.created_at) },
+            { label: 'Updated At', value: formatDisplayDateTime(visit.updated_at) },
+          ]} />
           <div>
             <h4 className="subsection-title">Agent</h4>
-            <p><strong>User ID:</strong> {visit.user_id ?? '—'}</p>
-            <p><strong>Agent Name:</strong> {visit.agent_name || '—'}</p>
-            <p><strong>Agent:</strong> {visit.agent_first_name || visit.agent_last_name ? `${visit.agent_first_name || ''} ${visit.agent_last_name || ''}`.trim() : '—'}</p>
+            <DetailRowsTable rows={[
+              { label: 'User ID', value: visit.user_id ?? '—' },
+              { label: 'Agent Name', value: visit.agent_name || '—' },
+              { label: 'Agent', value: visit.agent_first_name || visit.agent_last_name ? `${visit.agent_first_name || ''} ${visit.agent_last_name || ''}`.trim() : '—' },
+            ]} />
           </div>
         </div>
       </section>
@@ -1511,23 +1669,22 @@ function VisitLogPage({
           <h3>Customer Information</h3>
         </div>
         <div className="account-detail-grid two-up">
+          <DetailRowsTable rows={[
+            { label: 'Customer ID', value: visit.customer_id ?? '—' },
+            { label: 'Name', value: customerName },
+            { label: 'Address', value: visit.address || '—' },
+            { label: 'Contact Phone', value: visit.contact_phone || '—' },
+            { label: 'Contact Person', value: visit.contact_person_fname ? `${visit.contact_person_fname} ${visit.contact_person_lname || ''}` : '—' },
+            { label: 'Contact Person Phone', value: visit.contact_person_phone || '—' },
+            { label: 'Customer Status', value: <StatusBadge status={visit.customer_status || '—'} /> },
+            { label: 'Latitude', value: visit.latitude ?? '—' },
+            { label: 'Longitude', value: visit.longitude ?? '—' },
+          ]} />
           <div>
-            <p><strong>Customer ID:</strong> {visit.customer_id ?? '—'}</p>
-            <p><strong>Name:</strong> {customerName}</p>
-            <p><strong>Address:</strong> {visit.address || '—'}</p>
-            <p><strong>Contact Phone:</strong> {visit.contact_phone || '—'}</p>
-            <p><strong>Contact Person:</strong> {visit.contact_person_fname ? `${visit.contact_person_fname} ${visit.contact_person_lname || ''}` : '—'}</p>
-            <p><strong>Contact Person Phone:</strong> {visit.contact_person_phone || '—'}</p>
-            <p><strong>Customer Status:</strong> {visit.customer_status || '—'}</p>
-          </div>
-          <div>
-            <p><strong>Latitude:</strong> {visit.latitude ?? '—'}</p>
-            <p><strong>Longitude:</strong> {visit.longitude ?? '—'}</p>
             {visit.latitude && visit.longitude ? <div style={{
             minHeight: 240,
             borderRadius: 8,
             overflow: 'hidden',
-            marginTop: 12
           }}>
                 <LeafletMap center={[Number(visit.latitude), Number(visit.longitude)]} zoom={15} height={240} markers={[{
               id: visit.visit_id,
@@ -1651,13 +1808,13 @@ function SalesCIDetailPage({
           <h3>CI #{ci.ciId} · {ci.customerName}</h3>
           <p className="muted">Submitted {formatDisplayDateTime(ci.submissionDate)} · Branch review by manager</p>
         </div>
-        <ul className="info-grid">
-          <li><span className="info-item-label">Purpose</span><span className="info-item-value">{ci.purpose || '—'}</span></li>
-          <li><span className="info-item-label">Business type</span><span className="info-item-value">{ci.businessType || '—'}</span></li>
-          <li><span className="info-item-label">References</span><span className="info-item-value">{ci.references || '—'}</span></li>
-          <li><span className="info-item-label">Remarks</span><span className="info-item-value">{ci.formRemarks || '—'}</span></li>
-          {ci.rejectionReason ? <li><span className="info-item-label">Decision notes</span><span className="info-item-value">{ci.rejectionReason}</span></li> : null}
-        </ul>
+        <DetailRowsTable rows={[
+          { label: 'Purpose', value: ci.purpose || '—' },
+          { label: 'Business type', value: ci.businessType || '—' },
+          { label: 'References', value: ci.references || '—' },
+          { label: 'Remarks', value: ci.formRemarks || '—' },
+          ...(ci.rejectionReason ? [{ label: 'Decision notes', value: ci.rejectionReason }] : []),
+        ]} />
       </section>
       <div className="flex flex-wrap justify-end gap-2 mt-4">
         <button className="button ghost" type="button" onClick={() => navigate('/sales/credit-investigations')}>Back to list</button>
@@ -1698,7 +1855,7 @@ function CIFormPage({
           ...p,
           purpose: e.target.value
         }))}><option value="">Select purpose</option>{['Credit Limit Increase', 'New Account', 'Delinquency Review'].map(o => <option key={o}>{o}</option>)}</select></div>
-        <div className="form-group"><label>Monthly Income</label><input type="number" placeholder="PHP amount" value={formData.income ?? ''} onChange={e => setFormData(p => ({
+        <div className="form-group"><label>Monthly Income</label><input type="number" placeholder="₱ amount" value={formData.income ?? ''} onChange={e => setFormData(p => ({
           ...p,
           income: e.target.value
         }))} /></div>
@@ -1800,33 +1957,14 @@ function InventoryPage({
             </button>
           </div>
         </div>
-        <div className="list-section-toolbar" style={{
-        marginBottom: 0
-      }}>
+        <div className="list-section-toolbar">
           <div className="list-section-controls">
-            <input className="filter-input search" type="search" placeholder="Search products by name or category" value={search} onChange={e => setSearch(e.target.value)} style={{
-            padding: '8px 12px',
-            borderRadius: '6px',
-            border: '1px solid #c5c8d0',
-            fontSize: '0.9rem',
-            flex: 1,
-            minWidth: '200px'
-          }} />
-            <select className="filter-select" value={category} onChange={e => setCategory(e.target.value)} style={{
-            padding: '8px 12px',
-            borderRadius: '6px',
-            border: '1px solid #c5c8d0',
-            fontSize: '0.9rem'
-          }}>
+            <input className="filter-input search" type="search" placeholder="Search products by name or category" value={search} onChange={e => setSearch(e.target.value)} />
+            <select className="filter-select" value={category} onChange={e => setCategory(e.target.value)}>
               <option value="All">All Categories</option>
               {categories.map(c => <option key={c.category_id} value={c.category_id}>{c.category_name}</option>)}
             </select>
-            <select className="filter-select" value={sortBy} onChange={e => setSortBy(e.target.value)} style={{
-            padding: '8px 12px',
-            borderRadius: '6px',
-            border: '1px solid #c5c8d0',
-            fontSize: '0.9rem'
-          }}>
+            <select className="filter-select" value={sortBy} onChange={e => setSortBy(e.target.value)}>
               {['Product Name', 'Unit Price'].map(o => <option key={o} value={o}>Sort: {o}</option>)}
             </select>
           </div>
@@ -1857,14 +1995,14 @@ function InventoryPage({
             <h3>{selectedProduct.name}</h3>
             <button className="toast-dismiss" type="button" onClick={() => setSelectedProduct(null)} aria-label="Close">×</button>
           </div>
-          <ul className="info-grid">
-            <li><span className="info-item-label">SKU</span><span className="info-item-value">{selectedProduct.sku}</span></li>
-            <li><span className="info-item-label">Category</span><span className="info-item-value">{selectedProduct.category}</span></li>
-            <li><span className="info-item-label">Stock</span><span className="info-item-value">{selectedProduct.stock} units</span></li>
-            <li><span className="info-item-label">Unit Price</span><span className="info-item-value">{formatCurrency(selectedProduct.unitPrice)}</span></li>
-            <li><span className="info-item-label">Branch</span><span className="info-item-value">{selectedProduct.branch}</span></li>
-            <li><span className="info-item-label">Status</span><span className="info-item-value">{selectedProduct.status}</span></li>
-          </ul>
+          <DetailRowsTable rows={[
+            { label: 'SKU', value: selectedProduct.sku },
+            { label: 'Category', value: selectedProduct.category },
+            { label: 'Stock', value: `${selectedProduct.stock} units` },
+            { label: 'Unit Price', value: formatCurrency(selectedProduct.unitPrice) },
+            { label: 'Branch', value: selectedProduct.branch },
+            { label: 'Status', value: <StatusBadge status={selectedProduct.status} /> },
+          ]} />
           <button className="button" type="button" onClick={() => navigate(`/sales/inventory/${selectedProduct.id}`)}>Open Product Details</button>
         </aside> : null}
     </div>;
@@ -1904,13 +2042,13 @@ function ProductDetailsPage({
       value: branchStock?.stock_status || product.status
     }]} />
       <section className="panel content-panel">
-        <ul className="info-grid">
-          <li><span className="info-item-label">Product</span><span className="info-item-value">{product.product_name}</span></li>
-          <li><span className="info-item-label">SKU</span><span className="info-item-value">{product.sku}</span></li>
-          <li><span className="info-item-label">Category</span><span className="info-item-value">{product.category_name || '—'}</span></li>
-          <li><span className="info-item-label">Branch</span><span className="info-item-value">{branchStock?.branch_name || getCurrentUser()?.branch?.name || '—'}</span></li>
-          <li><span className="info-item-label">Reorder Level</span><span className="info-item-value">{branchStock?.reorder_level ?? product.reorder_point ?? '—'} units</span></li>
-        </ul>
+        <DetailRowsTable rows={[
+          { label: 'Product', value: product.product_name },
+          { label: 'SKU', value: product.sku },
+          { label: 'Category', value: product.category_name || '—' },
+          { label: 'Branch', value: branchStock?.branch_name || getCurrentUser()?.branch?.name || '—' },
+          { label: 'Reorder Level', value: `${branchStock?.reorder_level ?? product.reorder_point ?? '—'} units` },
+        ]} />
       </section>
       <div className="flex justify-end mt-4">
         <button className="button ghost" type="button" onClick={() => navigate('/sales/inventory')}>Back to Inventory</button>
@@ -2011,7 +2149,7 @@ export function SalesHistoryPage({
             </button>
           </div>
         </div>
-        <div className="list-section-toolbar" style={{ marginBottom: 12 }}>
+        <div className="list-section-toolbar">
           <div className="list-section-controls">
             <input className="filter-input search" type="search" placeholder="Search by customer or invoice number" value={search} onChange={e => setSearch(e.target.value)} />
             <select className="filter-select" value={statusFilter} onChange={e => setStatusFilter(e.target.value)}>{['All', 'Confirmed', 'Pending Review', 'Draft', 'Cancelled'].map(o => <option key={o}>{o}</option>)}</select>
@@ -2045,6 +2183,190 @@ export function SalesHistoryPage({
       </section>
     </div>;
 }
+function manilaToday() {
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Manila',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(new Date());
+}
+
+function FieldActivityReportsPage({ showToast }) {
+  const [reports, setReports] = useState([]);
+  const [visits, setVisits] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [submitting, setSubmitting] = useState(false);
+  const [form, setForm] = useState({
+    visit_id: '',
+    activity_type: '',
+    remarks: '',
+    photo: '',
+    photoName: '',
+  });
+  const [errors, setErrors] = useState({});
+
+  async function loadReports() {
+    setLoading(true);
+    const today = manilaToday();
+    const [reportsResult, visitsResult] = await Promise.all([
+      fetchSalesFieldReports(),
+      fetchFieldVisits({ scheduled_date: today, status: 'All' }),
+    ]);
+    if (reportsResult.success) setReports(reportsResult.data || []);
+    if (visitsResult.success) setVisits(visitsResult.data || []);
+    setLoading(false);
+  }
+
+  useEffect(() => {
+    loadReports();
+  }, []);
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    const nextErrors = {};
+    if (!form.visit_id) nextErrors.visit_id = 'Select a visit.';
+    if (!form.activity_type) nextErrors.activity_type = 'Select an activity type.';
+    if (!form.remarks.trim()) nextErrors.remarks = 'Remarks are required.';
+    if (!form.photo) nextErrors.photo = 'Photo evidence is required.';
+    setErrors(nextErrors);
+    if (Object.keys(nextErrors).length) return;
+    setSubmitting(true);
+    const result = await submitSalesFieldReport({
+      visit_id: Number(form.visit_id),
+      activity_type: form.activity_type,
+      remarks: form.remarks.trim(),
+      photo: form.photo,
+    });
+    setSubmitting(false);
+    if (result.success) {
+      showToast(result.message || 'Report submitted.', 'success');
+      setForm({ visit_id: '', activity_type: '', remarks: '', photo: '', photoName: '' });
+      loadReports();
+    } else {
+      showToast(result.message || 'Failed to submit report.', 'error');
+    }
+  };
+
+  const pagination = usePagination(reports);
+  if (loading) return <LoadingState message="Loading field activity reports..." />;
+
+  return <div className="page">
+    <section className="panel content-panel">
+      <div className="panel-section-header">
+        <h3>Field Activity Reports</h3>
+        <p className="muted">Submit visit activity for today's sales schedule ({reports.length} report{reports.length === 1 ? '' : 's'} on file).</p>
+      </div>
+      <form className="grid gap-3" onSubmit={handleSubmit}>
+        <div className="form-group">
+          <label>Visit / Customer<span className="required">*</span></label>
+          <select className="filter-select" value={form.visit_id} onChange={(e) => setForm((p) => ({ ...p, visit_id: e.target.value }))}>
+            <option value="">Select today's visit</option>
+            {visits.map((v) => <option key={v.visit_id} value={v.visit_id}>
+              {v.customer_name} — {v.visit_type} ({formatDisplayDate(v.scheduled_date)}, {v.status})
+            </option>)}
+          </select>
+          {errors.visit_id ? <p className="form-error">{errors.visit_id}</p> : null}
+          {!visits.length ? <p className="muted">No visits scheduled for today. Reports can be filed once a visit is assigned.</p> : null}
+        </div>
+        <div className="form-group">
+          <label>Activity Type<span className="required">*</span></label>
+          <select className="filter-select" value={form.activity_type} onChange={(e) => setForm((p) => ({ ...p, activity_type: e.target.value }))}>
+            <option value="">Select activity type</option>
+            {['Sales Visit', 'Canvassing', 'Delivery', 'Site Check', 'Follow-up', 'Customer Not Available'].map((t) => <option key={t} value={t}>{t}</option>)}
+          </select>
+          {errors.activity_type ? <p className="form-error">{errors.activity_type}</p> : null}
+        </div>
+        <div className="form-group">
+          <label>Remarks<span className="required">*</span></label>
+          <textarea rows={3} placeholder="Describe the visit outcome, order taken, or follow-up needed..." value={form.remarks} onChange={(e) => setForm((p) => ({ ...p, remarks: e.target.value }))} />
+          {errors.remarks ? <p className="form-error">{errors.remarks}</p> : null}
+        </div>
+        <div className="form-group">
+          <label>Photo Evidence<span className="required">*</span></label>
+          <input
+            type="file"
+            accept="image/*"
+            capture="environment"
+            onChange={(e) => {
+              const file = e.target.files?.[0];
+              if (!file) {
+                setForm((p) => ({ ...p, photo: '', photoName: '' }));
+                return;
+              }
+              if (!file.type.startsWith('image/')) {
+                setErrors((prev) => ({ ...prev, photo: 'Please select an image file.' }));
+                return;
+              }
+              if (file.size > 700_000) {
+                setErrors((prev) => ({ ...prev, photo: 'Image must be 700 KB or smaller.' }));
+                return;
+              }
+              const reader = new FileReader();
+              reader.onload = () => {
+                setForm((p) => ({
+                  ...p,
+                  photo: typeof reader.result === 'string' ? reader.result : '',
+                  photoName: file.name,
+                }));
+                setErrors((prev) => {
+                  const next = { ...prev };
+                  delete next.photo;
+                  return next;
+                });
+              };
+              reader.readAsDataURL(file);
+            }}
+          />
+          {form.photoName ? <p className="muted">Selected: {form.photoName}</p> : null}
+          {form.photo ? <img src={form.photo} alt="Report preview" style={{ marginTop: 8, maxWidth: 200, maxHeight: 140, borderRadius: 8, border: '1px solid #c5c8d0' }} /> : null}
+          {errors.photo ? <p className="form-error">{errors.photo}</p> : null}
+        </div>
+        <div className="flex justify-end">
+          <button className="button" type="submit" disabled={submitting || !visits.length}>
+            {submitting ? 'Submitting…' : 'Submit Report'}
+          </button>
+        </div>
+      </form>
+    </section>
+    {reports.length ? <section className="panel content-panel">
+      <div className="corvex-table-wrapper">
+        <table className="corvex-table">
+          <thead>
+            <tr>
+              <th>Customer</th>
+              <th>Activity</th>
+              <th>Visit Date</th>
+              <th>Sync</th>
+              <th>Photo</th>
+              <th>Submitted</th>
+              <th>Remarks</th>
+            </tr>
+          </thead>
+          <tbody>
+            {pagination.paginatedData.map((r) => <tr key={r.report_id}>
+              <td>{r.customer_name}</td>
+              <td>{r.activity_type}</td>
+              <td>{formatDisplayDate(r.scheduled_date)}</td>
+              <td><StatusBadge status={r.sync_status} /></td>
+              <td>
+                {r.photo ? (
+                  <a href={r.photo} target="_blank" rel="noreferrer">
+                    <img src={r.photo} alt="Report" style={{ width: 48, height: 48, objectFit: 'cover', borderRadius: 6, border: '1px solid #c5c8d0' }} />
+                  </a>
+                ) : '—'}
+              </td>
+              <td>{formatDisplayDateTime(r.created_at)}</td>
+              <td style={{ maxWidth: 220, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={r.remarks}>{r.remarks || '—'}</td>
+            </tr>)}
+          </tbody>
+        </table>
+      </div>
+      <Pagination {...pagination} />
+    </section> : <EmptyState title="No field activity reports yet" description="Submit a report after a scheduled sales visit." />}
+  </div>;
+}
+
 function NotificationsPage({
   navigate,
   showToast
@@ -2107,69 +2429,15 @@ function ProfilePage({
   navigate,
   showToast
 }) {
-  const sessionUser = getCurrentUser();
-  const [profile, setProfile] = useState(null);
-  const [password, setPassword] = useState('');
-  const [editing, setEditing] = useState(false);
-  useEffect(() => {
-    async function load() {
-      const res = await fetchMyProfile();
-      if (res.success) setProfile(res.data);
-    }
-    load();
-  }, []);
-  const displayName = profile
-    ? [profile.first_name, profile.last_name].filter(Boolean).join(' ')
-    : sessionUser?.fullName || 'Sales Agent';
-  const save = async () => {
-    if (!profile) return;
-    const payload = {
-      first_name: profile.first_name,
-      last_name: profile.last_name,
-      email: profile.email,
-      phone: profile.phone,
-    };
-    if (password.trim()) payload.password = password.trim();
-    const res = await updateMyProfile(payload);
-    if (res.success) {
-      persistCurrentUserFromProfile(res.data);
-      setProfile(res.data);
-      setPassword('');
-      setEditing(false);
-      showToast('Profile updated.', 'success');
-    } else showToast(res.message || 'Update failed.', 'error');
-  };
-  if (!profile) return <LoadingState message="Loading profile..." />;
-  return <div className="page">
+  return <>
       <OfflineBanner />
-      <section className="panel content-panel profile-panel">
-        <div className="profile-header">
-          <div className="profile-avatar">{displayName.split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase()}</div>
-          <div><h3>{displayName}</h3><p className="muted">{profile.email || ''}</p></div>
-        </div>
-        {editing ? <div className="form-grid" style={{ marginTop: 16 }}>
-            <label>First name<input value={profile.first_name || ''} onChange={e => setProfile(p => ({ ...p, first_name: e.target.value }))} /></label>
-            <label>Last name<input value={profile.last_name || ''} onChange={e => setProfile(p => ({ ...p, last_name: e.target.value }))} /></label>
-            <label>Email<input type="email" value={profile.email || ''} onChange={e => setProfile(p => ({ ...p, email: e.target.value }))} /></label>
-            <label>Phone<input value={profile.phone || ''} onChange={e => setProfile(p => ({ ...p, phone: e.target.value }))} /></label>
-            <label>New password<input type="password" value={password} onChange={e => setPassword(e.target.value)} placeholder="Min. 8 characters" /></label>
-          </div>
-          : <ul className="info-grid">
-          <li><span className="info-item-label">Assigned Branch</span><span className="info-item-value">{profile.branch?.name || '—'}</span></li>
-          <li><span className="info-item-label">Role</span><span className="info-item-value">{profile.role?.name || '—'}</span></li>
-          <li><span className="info-item-label">Phone</span><span className="info-item-value">{profile.phone || '—'}</span></li>
-          <li><span className="info-item-label">Status</span><span className="info-item-value">{profile.status || '—'}</span></li>
-        </ul>}
-      </section>
-      <div className="flex justify-end gap-2 mt-4">
-        <button className="button ghost" type="button" onClick={() => navigate('/sales/audit-log')}>Audit Log</button>
-        <button className="button ghost" type="button" onClick={() => requestLogout()}>Logout</button>
-        {editing ? <>
-            <button className="button ghost" type="button" onClick={() => setEditing(false)}>Cancel</button>
-            <button className="button" type="button" onClick={save}>Save Profile</button>
-          </> : <button className="button" type="button" onClick={() => setEditing(true)}>Update Profile</button>}
-      </div>
-    </div>;
+      <AccountProfilePanel
+        showToast={showToast}
+        title="Sales Profile"
+        subtitle="View your personal details and update your account password."
+        extraActions={<button className="button ghost" type="button" onClick={() => navigate('/sales/audit-log')}>Audit Log</button>}
+      />
+    </>;
 }
 function RouteTrackingPage({
   navigate
@@ -2424,6 +2692,8 @@ export function SalesPageBody({
     case 'scheduleList':
     case 'scheduleMap':
       return <SchedulePage pageType={page.pageType} {...props} />;
+    case 'fieldActivityReports':
+      return <FieldActivityReportsPage {...props} />;
     case 'customers':
       return <CustomersPage {...props} />;
     case 'purchaseRequests':

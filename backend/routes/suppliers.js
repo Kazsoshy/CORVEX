@@ -186,26 +186,36 @@ router.put('/:id', async (req, res) => {
 });
 
 // ──────────────────────────────────────────────────────────────────────────────
-// DELETE /api/suppliers/:id
+// DELETE /api/suppliers/:id  — Soft archive (status = Inactive; record kept)
 // ──────────────────────────────────────────────────────────────────────────────
 router.delete('/:id', async (req, res) => {
   try {
     const pool = req.app.locals.pool;
+    const supplierId = Number(req.params.id);
 
-    const existing = await pool.query(`SELECT suppliers_id FROM suppliers WHERE suppliers_id = $1`, [Number(req.params.id)]);
+    const existing = await pool.query(
+      `SELECT suppliers_id, status FROM suppliers WHERE suppliers_id = $1`,
+      [supplierId]
+    );
     if (existing.rows.length === 0) {
       return res.status(404).json({ success: false, message: 'Supplier not found.' });
     }
+    if (existing.rows[0].status === 'Inactive') {
+      return res.status(400).json({ success: false, message: 'Supplier is already archived.' });
+    }
 
-    await pool.query(`DELETE FROM suppliers WHERE suppliers_id = $1`, [Number(req.params.id)]);
+    await pool.query(
+      `UPDATE suppliers SET status = 'Inactive', updated_at = NOW() WHERE suppliers_id = $1`,
+      [supplierId]
+    );
 
     return res.status(200).json({
       success: true,
-      message: 'Supplier deleted successfully.',
+      message: 'Supplier archived successfully. The record is preserved.',
     });
   } catch (err) {
     console.error('[Suppliers] DELETE /:id error:', err.message);
-    return res.status(500).json({ success: false, message: 'Failed to delete supplier.' });
+    return res.status(500).json({ success: false, message: 'Failed to archive supplier.' });
   }
 });
 

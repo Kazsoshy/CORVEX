@@ -10,6 +10,7 @@
 import crypto from 'crypto';
 
 const TOKEN_TTL_MS = 12 * 60 * 60 * 1000;
+const IDLE_TTL_MS = 15 * 60 * 1000;
 
 export const UNSCOPED_ROLES = ['super_admin', 'operating_manager'];
 
@@ -24,7 +25,7 @@ export const ROLE_SETS = {
   categoriesWrite: ['super_admin', 'operating_manager'],
   customerRead: ['super_admin', 'operating_manager', 'branch_manager', 'sales_staff', 'collector'],
   customerWrite: ['super_admin', 'operating_manager', 'branch_manager', 'sales_staff'],
-  territoryRead: ['super_admin', 'operating_manager', 'branch_manager', 'sales_staff'],
+  territoryRead: ['super_admin', 'operating_manager', 'branch_manager', 'sales_staff', 'collector'],
   territoryWrite: ['super_admin', 'operating_manager', 'branch_manager'],
   reportsBranch: ['super_admin', 'operating_manager', 'branch_manager', 'inventory_staff'],
   reportsOrg: ['super_admin', 'operating_manager'],
@@ -48,10 +49,14 @@ function authSecret() {
   return globalThis.__corvexAuthSecret;
 }
 
-export function issueSessionToken(userId) {
+export function issueSessionToken(userId, issuedAt = Date.now()) {
+  const now = Date.now();
+  const iat = Number(issuedAt) || now;
   const payload = Buffer.from(JSON.stringify({
     sub: Number(userId),
-    exp: Date.now() + TOKEN_TTL_MS,
+    iat,
+    la: now,
+    exp: iat + TOKEN_TTL_MS,
   })).toString('base64url');
   const signature = crypto.createHmac('sha256', authSecret()).update(payload).digest('base64url');
   return `${payload}.${signature}`;
@@ -71,9 +76,14 @@ function readSessionToken(header) {
   }
   try {
     const data = JSON.parse(Buffer.from(payload, 'base64url').toString('utf8'));
-    if (!data?.sub || !data?.exp || Date.now() > Number(data.exp)) return null;
-    const userId = Number(data.sub);
-    return Number.isInteger(userId) && userId > 0 ? userId : null;
+    const userId = Number(data?.sub);
+    const iat = Number(data?.iat);
+    const la = Number(data?.la);
+    const exp = Number(data?.exp);
+    if (!Number.isInteger(userId) || userId <= 0 || !iat || !la || !exp) return null;
+    if (Date.now() > exp) return { error: 'expired' };
+    if (Date.now() - la > IDLE_TTL_MS) return { error: 'idle' };
+    return { userId, iat };
   } catch {
     return null;
   }
@@ -86,13 +96,16 @@ export function isUnscoped(user) {
 export async function requireAuth(req, res, next) {
   if (req.currentUser) return next();
 
-  const userId = readSessionToken(req.headers.authorization);
-  if (!userId) {
+  const session = readSessionToken(req.headers.authorization);
+  if (!session?.userId) {
     return res.status(401).json({
       success: false,
-      message: 'Authentication required. No valid user session found.',
+      message: session?.error === 'idle'
+        ? 'Your session ended after 15 minutes of inactivity. Sign in again.'
+        : 'Authentication required. No valid user session found.',
     });
   }
+  const userId = session.userId;
 
   try {
     const pool = req.app.locals.pool;
@@ -122,6 +135,7 @@ export async function requireAuth(req, res, next) {
       roleSlug: user.role_slug,
       branchId: user.branch_id,
     };
+    res.setHeader('X-Session-Token', issueSessionToken(user.id, session.iat));
     next();
   } catch (err) {
     console.error('[Auth Middleware] requireAuth error:', err.message);

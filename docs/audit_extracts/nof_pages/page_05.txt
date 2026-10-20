@@ -1,0 +1,92 @@
+
+software development improves adaptability to module can be evaluated for customer location
+changing requirements, promotes stakeholder visualization and route generation accuracy. Inventory
+collaboration, supports incremental software delivery, Centralization, customer payment verification,
+and enhances software quality through continuous dashboard reporting, and offline data synchronization
+feedback and iterative refinement [15], [16], [17], [18]. can likewise be tested to ensure all modules perform
+accurately, reliably, and consistently before
+Phase 1: Planning and Requirements Gathering deployment.
+During the Planning phase, the researchers identify the
+operational problems and system requirements of Phase 5: Deployment
+Bethuel-Herminihildo (BH) Marketing through During the Deployment phase, the team deployed the
+interviews with the Operating Manager, surveys completed system for operational use at Bethuel-
+involving Branch Heads, Collectors, Sales Agents, and Herminihildo (BH) Marketing. The team conducted
+Warehouse Personnel, and direct observations user orientation and training sessions for the Operating
+conducted across the Davao City, General Santos City, Manager, Branch Heads, Warehouse Personnel,
+and Davao Oriental branches. The collected Collectors, and Sales Agents to familiarize them with
+information will be analyzed to determine the system's the system’s features and operational procedures. The
+functional and non-functional requirements. These team also prepares technical documentation and user
+include map-based field operations, customer manuals to support system operation, maintenance,
+prioritization for collection scheduling using the and future enhancements.
+Simple Additive Weighting (SAW) method, Inventory
+Phase 6: Review
+Centralization, centralized customer payment
+During the Review phase, the team collects user
+verification, business activity monitoring, and offline
+feedback to evaluate the effectiveness, usability, and
+field transaction recording. The phase also identifies
+performance of the implemented system. Stakeholder
+project objectives, scope, user roles, and the required
+suggestions and observations are analyzed to identify
+software and hardware resources.
+enhancements for future development iterations. This
+Phase 2: System Design phase ensures the system continuously evolves after
+During the Design phase, the researchers prepare deployment to meet operational needs while staying
+CORVEX's overall architecture based on the validated aligned with objectives to improve field operations,
+system requirements. This phase includes designing Inventory Centralization, customer payment
+the PostgreSQL database, user interfaces, system verification, and management decision support across
+workflow, role-based access control, and module BH Marketing’s branches.
+interactions. The researchers also design the customer
+2.1 Data Gathering
+prioritization process by integrating the Simple
+This study's participants were personnel from Bethuel-
+Additive Weighting (SAW) method to rank collection
+Herminihildo (BH) Marketing across its Davao City,
+accounts based on the customer’s amount due, days
+General Santos City, and Davao Oriental branches.
+overdue, and travel distance from the collector’s
+Participants included the Operating Manager, Branch
+current location. The map-based field operations
+Heads, Collectors, Sales Agents, and Warehouse
+module will also integrate Nominatim for address
+Personnel directly involved in the company's
+geocoding, Leaflet.js with OpenStreetMap for map
+collection operations, sales activities, inventory
+visualization, and OpenRouteService for route
+management, and branch coordination. They were
+generation. These tools support both collectors and
+selected through purposive sampling because they
+sales agents during field operations.
+directly participate in the organization's daily
+Phase 3: Development operational processes and can provide reliable
+During the Development phase, the researchers information on existing workflows, operational
+implement the system using React.js for the web-based challenges, and system requirements. Before
+user interface and PostgreSQL for database conducting the study, the researchers obtained formal
+management. The map-based field operations module permission from BH Marketing management to
+integrates Leaflet.js, OpenStreetMap, Nominatim, and administer the research instruments and conduct on-
+OpenRouteService to visualize customer locations and site observations.
+territories and generate routes. The customer
+To obtain comprehensive information on the
+prioritization module implements the Simple Additive
+company's existing operations, the researchers used
+Weighting (SAW) method for prioritizing daily
+multiple data-gathering techniques, including printed
+collection schedules. The team will develop additional
+survey questionnaires, semi-structured interviews, and
+functionalities incrementally until all required modules
+direct observation. The researchers administered
+are complete, including the offline-capable Field
+printed survey questionnaires to the Branch Heads,
+Portal, Inventory Centralization, centralized customer
+Collectors, Sales Agents, and Warehouse Personnel to
+payment verification, and the operations dashboard.
+gather quantitative and qualitative data on their
+Phase 4: Testing operational responsibilities and the challenges
+During the Testing phase, the researchers conduct encountered during daily operations. The
+functional, integration, usability, performance, and questionnaires were divided into several sections
+User Acceptance Testing (UAT) to verify that the covering field collection activities, sales operations,
+developed system meets the identified operational inventory management, customer payment
+requirements. The SAW module can be validated by verification, branch coordination, cross-branch
+verifying the correctness of the generated customer information sharing, and business activity monitoring.
+ranking. In contrast, the map-based field operations The researchers used a five-point Likert scale to
+5

@@ -1,0 +1,3027 @@
+
+
+===== PAGE 1 / 36 =====
+
+CORVEX: A Mapping-Integrated Field Operations and
+Inventory Centralization System for
+Multi-Branch Enterprises
+John Misael A. Bacaron Rameses II N. Bernabe James M. Omosay
+BS Information Technology BS Information Technology BS Information Technology
+University of Mindanao University of Mindanao University of Mindanao
+Matina, Davao City, 8000 M atina, Davao City, 8000 Matina, Davao City, 8000
+j.bacaron.543152@umindanao.edu.ph r.bernabe.546886@umindanao.edu.ph j.omosay.547594@umindanao.edu.ph
+Ramcis N. Vilchez, DIT
+University of Mindanao
+Matina, Davao City, 8000
+ramcis_vilchez@umindanao.edu.ph
+CCS Concepts simultaneously, directly addressing the discrepancies
+that arise when inventory is tracked independently at
+CCS(cid:0)Information Systems(cid:0)Information Systems
+each site [6]. Dashboard-based order management
+Applications(cid:0)Enterprise Information Systems
+systems have likewise been shown to reduce
+General Terms operational delays by consolidating scattered
+Algorithms, Management, Performance, Design, transaction records into a single, centrally accessible
+Human Factors interface for management review [7]. In the
+Philippines, however, many micro, small, and
+Keywords medium-sized enterprises (MSMEs) still face
+CORVEX; Mapping-Integrated; Multi-Branch challenges adopting integrated digital technologies
+Enterprises; Field Operations; Inventory because of fragmented business processes, limited
+Centralization technological capabilities, and reliance on manual
+operational procedures [8]. These challenges are
+1. INTRODUCTION significant considering that MSMEs account for
+1.1 Project Context 99.59% of all registered business establishments in
+the country, making digital transformation an
+The increasing adoption of digital technologies has important factor in improving operational efficiency
+transformed how organizations manage field and business competitiveness [9]. Similar operational
+operations, inventory, and business processes across conditions were observed at Bethuel-Herminihildo
+geographically distributed branches. Recent studies (BH) Marketing, a multi-branch distribution
+have shown that enterprise information systems, enterprise operating in Davao City, General Santos
+cloud-based platforms, and mobile technologies City, and Davao Oriental. Based on interviews with
+improve organizational performance by enabling the Operating Manager, field personnel, and
+timely information sharing, operational coordination, warehouse staff, together with direct observations
+and data-driven decision-making across business conducted by the researchers, the company continues
+functions [1]. Organizations operating across multiple to rely on manual field coordination, inventory
+branches require integrated enterprise information monitoring, and branch information exchange,
+systems to centralize operational data, improve resulting in unplanned collector routes and no
+coordination among departments, and provide controlled, centralized visibility into customer
+consistent access to information that supports payment history across branches. In comparable
+efficient business operations [2], with employee field-operation contexts, GIS-based route
+use-context identified as one of the strongest optimization has been shown to reduce travel distance
+predictors of successful enterprise mobile system by up to 9.40% and fuel costs by 11.6% when
+adoption, reinforcing positive effects on field system-generated routes replace driver-dependent
+employee engagement and performance when such planning [10]. At the same time, risk-based access
+platforms are properly integrated into daily operations control frameworks have demonstrated the ability to
+[3]. Likewise, digital transformation has become a restrict sensitive financial and customer data to
+key strategy for improving supply chain flexibility, authorized personnel based on contextual risk level
+operational responsiveness, and organizational rather than blanket access [11] — both illustrating
+resilience, particularly among small and measurable improvements a mapping- and
+medium-sized enterprises (SMEs) operating in access-controlled approach could offer BH
+dynamic business environments [4]; this is supported Marketing's current unplanned routes and
+by evidence that mobile, QR-based inventory uncontrolled cross-branch payment visibility. These
+management applications allow real-time stock operational gaps collectively contribute to
+updates and secure multi-organization tracking inconsistent field scheduling, delayed operational
+through mobile devices [5], and that cyber-physical information, fragmented inventory and customer
+inventory control systems can extend this payment records across branches, and limited
+synchronization across multiple physical locations management visibility over field activities,
+1
+
+===== PAGE 2 / 36 =====
+
+highlighting the need for an integrated enterprise organized through a centralized map-based
+information system that supports map-based field visualization, both collectors and sales agents struggle
+operations, Inventory Centralization, centralized to identify geographically adjacent customers, plan
+customer payment verification, and business activity efficient travel routes, and organize field activities
+monitoring. within their assigned service territories. Likewise,
+Branch Heads and the Operating Manager cannot
+Currency, Bethuel-Herminihildo (BH) Marketing
+readily visualize customer distribution, territory
+manages its collection operations, sales activities,
+coverage, route assignments, or ongoing field
+inventory monitoring, and branch coordination
+activities for operational planning, workload
+through predominantly manual procedures. Based on
+distribution, and field supervision. Consequently,
+interviews conducted with the Operating Manager
+field operations become more difficult to coordinate,
+and surveys and observations involving Branch
+resulting in unnecessary travel, overlapping service
+Heads, collectors, sales agents, and warehouse
+areas, reduced field productivity, and limited
+personnel from the Davao City, General Santos City,
+managerial oversight. Moreover, collection and sales
+and Davao Oriental branches, field collectors
+transactions are initially recorded on paper before
+organize their daily collection schedules using
+being submitted to their respective branches for
+receipts and payment due dates. In contrast, sales
+encoding, delaying the availability of operational
+agents conduct canvassing activities within their
+information and increasing the risk of incomplete or
+assigned service territories by identifying prospective
+inconsistent field records. In addition, collectors and
+and existing customers through written addresses,
+sales agents often work in remote service areas where
+manually prepared location sketches, and personal
+internet connectivity is intermittent or unavailable. As
+familiarity with the area. Collection and sales
+a result, personnel cannot always transmit transaction
+transactions are initially recorded using paper-based
+details immediately to the branch office, so they must
+documents before being submitted to their respective
+temporarily record collection and sales transactions
+branches for encoding. Branch Heads supervise
+manually and encode them once connectivity
+day-to-day operations, monitor field personnel, and
+becomes available. This delay increases the
+coordinate operational concerns with the Operating
+possibility of incomplete, duplicated, or inconsistent
+Manager. For inventory operations, warehouse
+operational records across branches. Inventory
+personnel conduct physical stock counts, manually
+management also remains inefficient because each
+verify inventory records, and update stock
+branch maintains inventory records independently and
+information only after completing the counting
+updates them only after manual stock counting and
+process. Although the three branches operate under
+transaction encoding. Consequently, authorized
+centralized management, each branch maintains
+warehouse personnel from one branch cannot
+inventory and customer payment records
+immediately access the inventory records maintained
+independently. Operational updates and inventory
+by other branches. The inventory information that
+confirmations are communicated through phone calls,
+needs to be shared across branches includes product
+text messages, paper documents, and other manually
+availability, current stock quantities, stock
+transferred records. At the same time, company-wide
+movements, stock transfers, and inventory
+customer payment verification requires manual
+adjustments. These records must currently be verified
+coordination between Branch Heads, the Operating
+through phone calls and manual coordination with the
+Manager before credit-related decisions can be made,
+concerned branch before inventory-related decisions
+as no centralized information system currently
+can be made. Because these inventory records are not
+supports these operational processes.
+immediately centralized and accessible across
+branches, stock information may become outdated,
+The existing operational procedures create several
+resulting in delayed inventory verification, inaccurate
+challenges that affect the efficiency and coordination
+stock information, duplicate inventory records, and
+of daily business activities. During field operations,
+occasional overselling when another branch has
+collectors manually determine the sequence of
+already sold products. Customer payment
+customer collection visits from the list of accounts
+information, however, requires controlled, not
+scheduled for collection by evaluating multiple
+unrestricted, cross-branch access. Each branch
+operational factors, including the customer's
+maintains customer payment records, including
+outstanding balance, the number of days the payment
+outstanding balances, payment history, credit status,
+has been overdue, and the travel distance from the
+and collection records, separately. When a customer
+collector's current location, without a standardized
+purchases on credit or applies for additional credit
+method for objectively determining which accounts
+through another branch, the Branch Head, Operating
+should be prioritized first. Because collectors assess
+Manager need access to the customer’s consolidated
+these factors based on individual judgment rather than
+payment and credit information across branches to
+a standardized prioritization process, they may assign
+verify existing obligations before approving or
+different priorities to the same set of accounts,
+evaluating additional credit. Other users are not
+resulting in inconsistent collection schedules,
+authorized to access the customer’s consolidated
+inefficient travel routes, increased transportation
+payment records. Under the existing process, this
+costs, and fewer customers served within a working
+verification requires manual coordination with the
+day. Similarly, sales agents canvass within their
+branch holding the customer’s records, increasing
+assigned service territories using written customer
+processing time and the possibility of granting
+addresses, manually prepared location sketches, and
+additional credit despite unsettled balances in another
+personal familiarity with the area to locate
+branch. Collectively, these operational gaps reduce
+prospective and existing customers. Because
+field productivity, delay access to operational
+customer locations and field activities are not
+2
+
+===== PAGE 3 / 36 =====
+
+information, increase operational costs, and prevent Without summarized, descriptive analytical insights,
+management from immediately consolidating management struggles to monitor operational
+collection performance, sales activities, inventory performance, identify branch-level issues, evaluate
+status, customer payment information, customer customer credit exposure, and make timely
+credit line records, and synchronized branch operational decisions across all branches.
+operational records into a unified operational view.
+Table 1. Feature Comparison Matrix
+Features Pepperi B2B Platform Odoo Inventory & Sales Badger Maps CORVEX
+Primary Purpose Unifies route accounting, Enterprise inventory app Mobile-first mapping Field operations, Inventory
+mobile order taking, retail managing storage, software for outside Centralization, and operational
+execution, and mobile CRM replenishment, and warehouse sales/field teams centered monitoring built for BH
+into a single field-sales/Direct operations via configurable on routing, mapping, Marketing's branch structure.
+Sales Delivery (DSD) platform Routes and Rules [13]. territory alignment, and CORVEX does not provide DSD
+[12]. lead routing [14]. execution, general warehouse
+routing, or a standalone
+CRM/lead platform.
+Route Sequencing Reps manually build the day's Not applicable — "Routes" Automatically reorders Uses OpenRouteService to
+Mechanism stop order on a map/calendar, move stock between warehouse up to 120 stops for the sequence the SAW-ranked list
+then hand off to GPS locations, not field visits [13]. fastest sequence, layered from stored coordinates.
+navigation; no automatic with real-time traffic and CORVEX does not use a
+sequencing algorithm is turn-by-turn handoff to real-time traffic-aware
+described [12]. Google optimization engine.
+Maps/Waze/Apple Maps
+[14].
+Customer/Account Applies transaction-level rules Not applicable [13]. Ranks new leads by Uses SAW, Outstanding Balance
+Prioritization Mechanism (e.g., blocking orders on opportunity size, product (40%), Days Overdue (30%),
+outstanding debt), but no type, and geography — Distance (30%), for a
+disclosed weighted scoring not collection priority for documented, weighted rank.
+formula [12]. existing accounts [14].
+Territory Handling No territory-balancing tool Not applicable [13]. Auto-generates Territories are visualized but
+described [12]. population-balanced manually defined by Branch
+territory models with Heads. CORVEX does not use
+weighted, an automated territory-balancing
+constraint-based algorithm.
+optimization [14].
+CRM / Lead Management Provides account-level CRM Not covered in cited Routes Native two-way CRM CORVEX does not include
+data (history, cross-sell, documentation [13]. sync plus dedicated lead CRM or lead-generation
+commission tracking) [12]. generation/routing tools functionality.
+[14].
+Inventory / Stock Real-time multi-warehouse Automated via configurable Not applicable — no Synchronizes inventory via
+Movement Mechanism van/fleet inventory visibility Push/Pull rules triggered by inventory module [14]. direct PostgreSQL updates.
+[12]. demand [13]. CORVEX does not use a
+configurable push/pull rule
+engine.
+Product Catalog & Multiple configurable catalogs, Not covered in cited Not applicable [14]. Product table stores name,
+Pricing price lists, and trade promotions documentation [13]. category, and unit price only.
+[12]. CORVEX does not include
+catalog configuration or
+promotion rules.
+Payment / Collections Blocks orders on outstanding Not covered in cited Not applicable [14]. Records collections, computes
+Handling debt; accepts payments via documentation [13]. SAW priority, restricts
+gateway integration [12]. consolidated payment view to
+Operating Manager.
+Automated Procurement / Not covered in cited Reordering rules automatically Not applicable — no CORVEX does not include
+Replenishment documentation [12]. generate a Purchase Order (or inventory or procurement procurement/purchasing
+Manufacturing Order) once feature exists [14]. functionality; This system
+forecasted stock falls below a excludes procurement
+defined minimum, replenishing management from scope, so
+quantity back up to a set restocking from suppliers must
+maximum — a fully be handled outside the system.
+rule-driven procurement
+mechanism requiring no
+manual purchase requests [13].
+Open API / Third-Party REST-based API plus an iPaaS External API Native two-way CRM CORVEX does not include an
+System Integration platform with 50+ pre-built (XML-RPC/JSON-RPC) integrations, a Zapier external/open API; its
+connectors to external ERP, exposing all models/data for connector to 5,000+ apps, architecture defines only internal
+CRM, and accounting systems, integration with outside tools and an FTP/REST API RESTful communication
+and real-time webhook [13]. [14]. between its own clients and
+integration [12]. server.
+Table 1 shows that the reviewed commercial systems map-based visualization using a Maps API to display
+provide specialized capabilities for different aspects customer locations, recommended collection routes,
+of business operations. Pepperi primarily supports sales territories, and field activities, (3) Inventory
+mobile field sales, customer visit management, and Centralization tailored to the company's branch
+payment collection; Odoo provides comprehensive operations, (4) centralized customer payment
+enterprise resource planning through integrated sales, verification restricted to authorized management, and
+inventory, warehousing, and accounting modules, (5) a unified operational dashboard that consolidates
+while Badger Maps specializes in customer mapping, collection performance, sales activities, inventory
+territory visualization, and route optimization for field status, customer payment information, and branch
+personnel. Although these systems effectively address operational records into a single solution. These
+their respective operational domains, none is designed identified gaps demonstrate the need for the
+to support BH Marketing's integrated operational CORVEX system, which integrates these
+workflow. In particular, the reviewed systems do not business-specific operational requirements into a
+combine (1) SAW-based collection prioritization single enterprise information system designed for BH
+using the company's operational criteria, (2) Marketing.
+3
+
+===== PAGE 4 / 36 =====
+
+This study is motivated by the need to improve the module. Sales Agents use the mapping module to
+efficiency of field operations, inventory management, visualize customer locations, organize canvassing
+and operational coordination across the activities within their assigned service territories,
+geographically dispersed branches of record sales transactions, and submit field activity
+Bethuel-Herminihildo (BH) Marketing. Through the reports, while Warehouse Personnel manage
+development of a centralized platform for map-based inventory records, update stock movements, monitor
+field operations, Inventory Centralization, centralized product availability, and synchronize inventory
+customer payment verification, and business activity information across branches. Customers can view
+monitoring, the system is expected to reduce manual their own outstanding balance and payment history.
+operational processes, improve the accuracy and Role-based access control ensures each user can
+availability of operational information, strengthen access only the information and functions needed to
+inter-branch coordination, and support more informed perform their assigned responsibilities, while
+managerial decision-making for Branch Heads, maintaining data security and operational integrity.
+collectors, sales agents, warehouse personnel, the
+1.3. Objectives
+Operating Manager. Furthermore, the study supports
+United Nations Sustainable Development Goal (SDG) 1.3.1 General Objectives
+9: Industry, Innovation and Infrastructure by
+This study aims to develop CORVEX, a
+promoting digital transformation through information
+Mapping-Integrated Field Operations and Inventory
+and communication technologies, and it aligns with
+Centralization System for Multi-Branch Enterprises,
+the University of Mindanao’s research thrust on
+for Bethuel-Herminihildo (BH) Marketing to improve
+ICT-enabled solutions that enhance organizational
+field operations, inventory management, customer
+efficiency, innovation, and sustainable development.
+payment monitoring, and operational decision-making
+1.2. Purpose and Description through a centralized enterprise information system
+with map-based visualization.
+This study aims to develop CORVEX: A
+1.3.2 Specific Objectives
+Mapping-Integrated Field Operations and Inventory
+Centralization System for Multi-Branch Enterprises
+To achieve the general objective, the researchers
+for Bethuel-Herminihildo (BH) Marketing to improve
+specifically design, develop, implement, and integrate
+field operations, collection account prioritization,
+the following:
+Inventory Centralization, centralized customer
+payment verification, and operational coordination 1.3.2.1. Develop a map-based field operations module
+through a centralized enterprise information system. using Leaflet.js integrated with the Simple
+The system supports the United Nations Sustainable Additive Weighting (SAW) method that
+Development Goal (SDG) 9: Industry, Innovation and generates a prioritized daily collection list
+Infrastructure by promoting digital transformation and and corresponding route visualization for
+strengthening information and communication collectors.
+technologies. Furthermore, the study aligns with the
+University of Mindanao’s research agenda on 1.3.2.2. Develop an offline-capable Field Portal using
+ICT-Enabled Systems and Services by developing an React.js to enable collectors and sales agents
+integrated information system that enhances to digitally record collection transactions,
+organizational efficiency, operational productivity, sales transactions, and field activities with
+and technology-driven service delivery. automatic synchronization once network
+connectivity becomes available.
+CORVEX is a web-based and mobile-accessible
+information system developed for 1.3.2.3. Develop an Inventory Centralization module
+Bethuel-Herminihildo (BH) Marketing to support using PostgreSQL to maintain accurate and
+map-based field operations, Inventory Centralization, updated inventory records across all
+customer payment verification, and business activity branches, reducing delayed stock updates,
+monitoring across its geographically distributed duplicate inventory records, inaccurate stock
+branches. The system provides six role-based user information, and overselling.
+accounts: Operating Manager, Branch Head,
+1.3.2.4. Develop a centralized customer payment
+Collector, Sales Agent, Warehouse Personnel, and
+monitoring module using PostgreSQL that
+Customer. The Operating Manager has
+enables authorized management personnel to
+enterprise-wide access to monitor branch operations,
+verify company-wide customer payment
+review operational dashboards and reports, verify
+records for timely credit verification and
+company-wide customer payment records, and
+informed credit decision-making.
+oversee inventory, sales, collections, and operational
+performance. Branch Heads can monitor field 1.3.2.5. Develop an Inventory and Sales Dashboard
+personnel, supervise branch operations, verify branch using React.js and PostgreSQL that applies
+inventory, review branch-level operational reports, descriptive analytics to summarize collection
+and coordinate operational activities with the performance, sales activities, inventory
+Operating Manager. Collectors receive daily status, customer payment information,
+collection assignments prioritized using the Simple customer credit line records, and centralized
+Additive Weighting (SAW) method, record collection branch records to support sales and inventory
+transactions, update customer payment information, monitoring, identify branch-level sales and
+generate digital receipts, and navigate assigned inventory issues, evaluate customer credit
+customer locations through the integrated mapping
+4
+
+===== PAGE 5 / 36 =====
+
+exposure, and facilitate informed at BH Marketing to minimize costs; therefore, the
+decision-making across all branches. system excludes commercial enterprise software,
+proprietary mapping services, and paid analytics
+1.4. Scope and Limitations platforms.
+This study covers the design and development of 2. METHODS
+CORVEX: A Mapping-Integrated Field Operations
+and Inventory Centralization System for
+Multi-Branch Enterprises for Bethuel-Herminihildo
+(BH) Marketing. The system supports daily collection
+activities, sales field activities, inventory
+centralization, customer payment verification, and
+field monitoring through four major functional
+components: (1) a map-based field operations module
+that visualizes customer locations, service territories,
+and travel routes while assisting collectors in
+prioritizing collection schedules using the Simple
+Additive Weighting (SAW) method and supporting
+sales agents in scheduling field activities within their
+designated locations; (2) an offline-capable field Figure 1. Agile Model
+transaction module for recording collection and sales
+transactions; (3) an inventory centralization and Figure 1 illustrates the Agile software development
+customer payment verification module that maintains methodology used to develop CORVEX: A
+updated inventory information across branches while Mapping-Integrated Field Operations and Inventory
+allowing only the Operating Manager to access Centralization System for Multi-Branch Enterprises.
+consolidated customer payment records; and (4) a The researchers selected Agile because the
+management dashboard that applies descriptive operational requirements of Bethuel-Herminihildo
+analytics to consolidate collection performance, sales (BH) Marketing were progressively refined during
+activities, inventory status, customer payment requirements gathering through interviews, surveys,
+information, branch performance, and operating and direct observations involving the Operating
+expense reports to support managerial Manager, Branch Heads, Collectors, Sales Agents,
+decision-making. The system accommodates six user and Warehouse Personnel. Rather than completing the
+roles: Operating Manager, Branch Head, Collector, system in a single development cycle, Agile enables
+Sales Agent, Warehouse Personnel, and Customer, the researchers to develop the system incrementally
+each provided with role-based access according to through iterative phases of planning, design,
+their assigned responsibilities. The system is intended development, testing, deployment, and review. This
+for deployment at BH Marketing's branches in Davao allows stakeholders to evaluate and refine completed
+City, General Santos City, and Davao Oriental, and it functionality continuously based on feedback. This
+manages records generated from the implementation iterative approach suits CORVEX because its major
+period onward. modules—including the map-based field operations
+module, customer prioritization module, offline field
+This study is limited to the requirements identified portal, Inventory Centralization module, centralized
+during the requirements-gathering phase at customer payment verification module, and
+Bethuel-Herminihildo (BH) Marketing. It does not operations dashboard—can be implemented,
+include modules for accounting transactions, payroll validated, and improved independently before moving
+processing, procurement management, taxation, or to subsequent iterations. Recent studies have shown
+financial auditing. The mapping component is limited that Agile software development improves
+to visualizing customer locations, service territories, adaptability to changing requirements, promotes
+and travel routes generated from customer addresses stakeholder collaboration, supports incremental
+through geocoding services and displayed using software delivery, and enhances software quality
+Leaflet.js and OpenStreetMap. It does not perform through continuous feedback and iterative refinement
+advanced Geographic Information System (GIS) [15], [16], [17], [18].
+spatial analysis, continuous GPS tracking, or live
+location monitoring; instead, it uses stored geographic Phase 1: Planning and Requirements Gathering
+coordinates for route visualization and field planning. During the Planning phase, the researchers identify
+The system is designed specifically for BH the operational problems and system requirements of
+Marketing's workflow and organizational structure, Bethuel-Herminihildo (BH) Marketing through
+and its applicability to other organizations may interviews with the Operating Manager, surveys
+require modifications to accommodate different involving Branch Heads, Collectors, Sales Agents,
+business processes, policies, and requirements. The and Warehouse Personnel, and direct observations
+system also assumes that authorized users provide conducted across the Davao City, General Santos
+accurate records, maintain updated customer City, and Davao Oriental branches. The collected
+addresses, and have internet connectivity for data information will be analyzed to determine the
+synchronization; however, the field transaction system's functional and non-functional requirements.
+module supports offline recording and These include map-based field operations, customer
+synchronization once connectivity is restored. Finally, prioritization for collection scheduling using the
+implementation is limited to open-source software Simple Additive Weighting (SAW) method, Inventory
+technologies and the existing hardware infrastructure Centralization, centralized customer payment
+5
+
+===== PAGE 6 / 36 =====
+
+verification, business activity monitoring, and offline Phase 6: Review
+field transaction recording. The phase also identifies During the Review phase, the team collects user
+project objectives, scope, user roles, and the required feedback to evaluate the effectiveness, usability, and
+software and hardware resources. performance of the implemented system. Stakeholder
+suggestions and observations are analyzed to identify
+Phase 2: System Design enhancements for future development iterations. This
+During the Design phase, the researchers prepare phase ensures the system continuously evolves after
+CORVEX's overall architecture based on the deployment to meet operational needs while staying
+validated system requirements. This phase includes aligned with objectives to improve field operations,
+designing the PostgreSQL database, user interfaces, Inventory Centralization, customer payment
+system workflow, role-based access control, and verification, and management decision support across
+module interactions. The researchers also design the BH Marketing’s branches.
+customer prioritization process by integrating the
+Simple Additive Weighting (SAW) method to rank 2.1 Data Gathering
+collection accounts based on the customer’s amount This study's participants were personnel from
+due, days overdue, and travel distance from the Bethuel-Herminihildo (BH) Marketing across its
+collector’s current location. The map-based field Davao City, General Santos City, and Davao Oriental
+operations module will also integrate Nominatim for branches. Participants included the Operating
+address geocoding, Leaflet.js with OpenStreetMap for Manager, Branch Heads, Collectors, Sales Agents,
+map visualization, and OpenRouteService for route and Warehouse Personnel directly involved in the
+generation. These tools support both collectors and company's collection operations, sales activities,
+sales agents during field operations. inventory management, and branch coordination.
+They were selected through purposive sampling
+Phase 3: Development
+because they directly participate in the organization's
+During the Development phase, the researchers
+daily operational processes and can provide reliable
+implement the system using React.js for the
+information on existing workflows, operational
+web-based user interface and PostgreSQL for
+challenges, and system requirements. Before
+database management. The map-based field
+conducting the study, the researchers obtained formal
+operations module integrates Leaflet.js,
+permission from BH Marketing management to
+OpenStreetMap, Nominatim, and OpenRouteService
+administer the research instruments and conduct
+to visualize customer locations and territories and
+on-site observations.
+generate routes. The customer prioritization module
+implements the Simple Additive Weighting (SAW) To obtain comprehensive information on the
+method for prioritizing daily collection schedules. company's existing operations, the researchers used
+The team will develop additional functionalities multiple data-gathering techniques, including printed
+incrementally until all required modules are complete, survey questionnaires, semi-structured interviews,
+including the offline-capable Field Portal, Inventory and direct observation. The researchers administered
+Centralization, centralized customer payment printed survey questionnaires to the Branch Heads,
+verification, and the operations dashboard. Collectors, Sales Agents, and Warehouse Personnel to
+gather quantitative and qualitative data on their
+Phase 4: Testing
+operational responsibilities and the challenges
+During the Testing phase, the researchers conduct
+encountered during daily operations. The
+functional, integration, usability, performance, and
+questionnaires were divided into several sections
+User Acceptance Testing (UAT) to verify that the
+covering field collection activities, sales operations,
+developed system meets the identified operational
+inventory management, customer payment
+requirements. The SAW module can be validated by
+verification, branch coordination, cross-branch
+verifying the correctness of the generated customer
+information sharing, and business activity monitoring.
+ranking. In contrast, the map-based field operations
+The researchers used a five-point Likert scale to
+module can be evaluated for customer location
+measure respondents' level of agreement with existing
+visualization and route generation accuracy. Inventory
+operational practices. At the same time, open-ended
+Centralization, customer payment verification,
+questions allowed participants to describe operational
+dashboard reporting, and offline data synchronization
+issues and suggest improvements.
+can likewise be tested to ensure all modules perform
+accurately, reliably, and consistently before To further validate the survey findings, the
+deployment. researchers conducted a face-to-face semi-structured
+interview with the Operating Manager using a
+Phase 5: Deployment
+prepared interview guide. The interview focused on
+During the Deployment phase, the team deployed the
+the organization's overall operational workflow, the
+completed system for operational use at
+responsibilities of each operational role, existing
+Bethuel-Herminihildo (BH) Marketing. The team
+branch coordination procedures, Inventory
+conducted user orientation and training sessions for
+Centralization practices, customer payment
+the Operating Manager, Branch Heads, Warehouse
+verification, operational reporting, and the challenges
+Personnel, Collectors, and Sales Agents to familiarize
+of managing geographically distributed branches. The
+them with the system’s features and operational
+interview also validated the operational requirements
+procedures. The team also prepares technical
+identified through the survey responses and clarified
+documentation and user manuals to support system
+organizational policies that structured questionnaires
+operation, maintenance, and future enhancements.
+alone could not capture.
+6
+
+===== PAGE 7 / 36 =====
+
+In addition, the researchers conducted on-site and collection issues requiring management
+observations across the company's branches to attention.
+examine how collection activities, sales canvassing,
+2.2.1.3. The Collector needs to identify and prioritize
+inventory management, and branch coordination are
+customers for daily collection activities, view
+executed in practice. Particular attention was given to
+customer locations and recommended travel
+how collectors prioritize customer visits, how sales
+routes, access authorized customer payment
+agents conduct canvassing within assigned service
+information, and review collection history to
+territories, how warehouse personnel verify inventory,
+prepare for field visits. The Collector also
+and how operational information is communicated
+needs to record collection transactions and
+among branches. These observations enabled the
+synchronize completed collection records
+researchers to compare actual operational practices
+with the centralized database.
+with the information gathered from the surveys and
+interviews, thereby strengthening the validity of the
+2.2.1.4. The Sales Agent needs to identify customers
+collected data.
+and prospective customers within assigned
+service territories, view customer locations
+The information from the surveys, interviews, and
+and recommended travel routes, and access
+direct observations served as the basis for identifying
+authorized customer account information to
+the system's functional and non-functional
+support canvassing activities. The Sales
+requirements. The findings guided the design and
+Agent also needs to record sales transactions,
+development of the map-based field operations
+submit field activity information, and
+module, customer prioritization using the Simple
+synchronize completed sales records with the
+Additive Weighting (SAW) method, Inventory
+centralized database.
+Centralization, centralized customer payment
+verification, operations dashboard, and role-based
+2.2.1.5. The Warehouse Personnel needs to maintain
+access control to address the operational challenges
+accurate inventory records by recording
+identified at Bethuel-Herminihildo (BH) Marketing.
+stock movements, stock transfers, and
+inventory adjustments, viewing current
+2.2 Analysis
+inventory and restock history, and checking
+2.2.1 User Requirements product availability across branches. The
+This section presents the user requirements identified Inventory Staff also needs synchronized
+through the interviews, survey questionnaires, and inventory information to coordinate stock
+direct observations conducted at availability and movement between
+Bethuel-Herminihildo (BH) Marketing. These branches.
+requirements describe the information, activities, and
+2.2.1.6. The Customer needs to access relevant
+system functions intended users need based on their
+account information maintained by the
+respective responsibilities. The requirements support
+system, including payment history and
+collection management, sales field activities,
+outstanding balance, to review the status of
+inventory centralization, customer payment and credit
+their account and transactions with BH
+verification, field operations, and branch-level
+Marketing.
+monitoring. The system's intended users are the
+Operating Manager, Branch Manager, Customer,
+2.2.2 Hardware and Software Requirement
+Collector, Sales Agent, and Inventory Staff, with
+2.2.2.1. Software Requirement
+access and functions assigned according to their roles.
+2.2.1.1. The Operating Manager needs consolidated Table 2. Software Requirements
+information on collection performance, sales Software Purpose
+activities, inventory status, customer
+payment and credit records, field activities, Visual Used as the Integrated Development
+staff performance, and branch performance Studio Code Environment (IDE) for developing the
+system.
+to monitor activities across branches,
+evaluate sales, collection, inventory, and
+React.js Used to develop the interactive and
+credit conditions, and support management
+responsive web user interface.
+decision-making. The Operating Manager
+also needs to manage customer and branch
+Python Used to implement the SAW method for
+records and approve credit investigation customer prioritization.
+requests according to authorized
+responsibilities. Node.js and Used to develop the backend services and
+Exp ress.js RESTFUL API of the system.
+2.2.1.2. The Branch Head needs branch-level
+information on collection activities, sales
+activities, inventory availability and PostgreSQL Used as the primary relational database
+management system to store and manage
+movements, customer payment information,
+user accounts, customer records, collection
+staff performance, and field activities to transactions, sales activities, inventory data,
+supervise collection, sales, inventory, and credit history, branch information, and
+field activities within the assigned branch, system logs.
+coordinate branch resources, monitor branch
+performance, and identify sales, inventory, PostGIS Used as the spatial database extension of
+7
+
+===== PAGE 8 / 36 =====
+
+behavior that supports BH Marketing's operational
+PostgreSQL to store, manage, and process
+needs.
+geographic information such as customer
+coordinate, branch location, collection
+routes, and sales territories.
+Table 4. Functional Requirements
+Module FR No. The system shall…
+Leaflet.js Used to provide interactive map
+visualization of customer locations, service User Authentication FR-01 authenticate authorized users using
+territories, and operational activities. their registered username and
+password before granting system
+access.
+OpenStreet Used as the base map provider for
+Map displaying geographic information.
+FR-02 allow authenticated users to
+securely sign out of the system.
+Nominatim Used to convert customer and branch
+addresses into geographic coordinates FR-03 deny access when invalid login
+(geocoding). credentials are entered.
+User Account FR-04 allow the Operating Manager to
+OpenRouteS Used to calculate and display recommended
+Management create user accounts for Branch
+ervice travel routes between customer locations. Heads, Collectors, Sales Agents,
+and Warehouse Personnel. The
+system shall also allow a Customer
+Recharts Used to generate analytical charts and to view only their own outstanding
+dashboard visualizations. balance and payment history.
+Git & Used for version control, collaborative FR-05 allow the Operating Manager to
+GitHub development, and source code update user account information.
+management.
+FR-06 allow the Operating Manager to
+activate or deactivate user
+Table 2 presents the software requirements needed to
+accounts.
+develop and deploy the CORVEX system.
+FR-07 assign role-based access
+2.2.2.2. Hardware Requirement permissions according to the user's
+designated role.
+Table 3. Hardware Software
+Profile Management FR-08 allow users to view their personal
+profile information.
+Hardware Minimum Specifications
+FR-09 allow users to update their profile
+Development Operating System: Windows 10/11 information and account password.
+Computer (64-bit); Processor: Intel Core i5
+(11th Generation) or AMD Ryzen 5 Customer FR-10 retrieve customer records required
+(or higher); Memory: Minimum 8 Prioritization (SAW for SAW computation.
+GB RAM; Storage: 256 GB SSD or Module)
+higher. FR-11 normalize customer criteria values
+using the Simple Additive
+Weighting (SAW) method.
+Mobile Device Android 10 or later with internet
+connectivity for collectors and sales
+FR-12 calculate the weighted preference
+agents during field operations.
+score of every customer.
+GPS-Enabled Required to obtain the current FR-13 rank customers according to their
+computed SAW scores.
+Smartphone location of collectors and sales
+agents for route visualization and
+collection scheduling. FR-14 generate the daily prioritized
+collection schedule for Collectors.
+Internet Minimum 10 Mbps download/upload
+FR-15 The system shall display customer
+Connection speed to support database locations and assigned service
+synchronization, dashboard territories to support sales
+monitoring, and cloud canvassing activities.
+communication.
+Field Portal FR-16 The system shall display the
+prioritized collection schedule for
+Table 3 presents the minimum hardware requirements Collectors and the assigned
+for developing, deploying, and using the CORVEX customer locations and service
+territories for Sales Agents.
+system.
+FR-17 Display recommended travel
+2.2.3. Functional and Non-Functional routes using OpenRouteService.
+Requirements
+FR-18 allow Collectors to record
+2.2.3.1. Functional Requirement collection transactions.
+This section presents CORVEX's functional
+requirements, which describe the specific behaviors FR-19 allow Sales Agents to record sales
+transactions.
+and services the system must perform based on the
+identified user requirements. These requirements are
+FR-20 allow users to submit field activity
+organized by system module and written from the reports.
+system's perspective. Each functional requirement
+represents a specific, observable, and testable system FR-21 generate digital receipts for
+completed collection transactions.
+8
+
+===== PAGE 9 / 36 =====
+
+the system must meet. Each requirement is written
+Inventory FR-22 allow Warehouse Personnel to add
+Management inventory records. from the system's perspective and provides
+measurable conditions that can be evaluated during
+FR-23 allow Warehouse Personnel to system testing.
+update inventory records.
+Table 5. Non-Functional Requirements
+FR-24 The system shall automatically
+synchronize inventory transactions NFR Category The system shall…
+and stock quantities across all No.
+branches.
+FR-25 display current inventory NFR-0 Performa load dashboard pages and system
+availability for all branches. 1 nce modules within 3 seconds under normal
+network conditions.
+Credit History FR-26 record customer payment histories. NFR-0 generate customer prioritization results
+Repository 2 using the SAW algorithm within 5
+FR-27 Display consolidated customer seconds after processing customer
+payment history and outstanding records.
+balances across all branches.
+NFR-0 within an acceptable response time
+Map-Based Field FR-28 Display customer locations using 3 under normal network conditions.
+Operations an interactive map.
+NFR-0 Security require authenticated username and
+FR-29 Display recommended collection 4 password credentials before granting
+routes.
+access to any system module.
+FR-30 Display assigned sales territories
+NFR-0 enforce role-based access control to
+and branch coverage.
+5 ensure users can only access modules
+assigned to their designated roles.
+Operations FR-31 display collection performance
+Dashboard summaries.
+NFR-0 encrypt user passwords before storing
+6 them in the PostgreSQL database.
+FR-32 display sales performance
+summaries.
+NFR-0 automatically terminate inactive user
+FR-33 display inventory status across 7 sessions after 15 minutes of inactivity.
+branches.
+NFR-0 Usability provide a responsive and intuitive
+FR-34 display delinquent customer 8 interface that allows first-time users to
+reports. complete core operational tasks with
+minimal guidance.
+FR-35 Generate operational insights by
+consolidating inventory, sales,
+NFR-0 display clear validation messages and
+collection, customer credit,
+salaries and wages, operating 9 user-friendly error notifications
+expenses, and branch performance. whenever invalid input or system errors
+occur.
+Notification Module FR-36 notify Collectors and Sales Agents
+of their daily assigned schedules. NFR-1 Reliabilit maintain the accuracy and integrity of
+0 y operational records during normal
+FR-37 notify Warehouse Personnel when system operation.
+inventory reaches predefined
+threshold levels.
+NFR-1 prevent data inconsistency during
+1 Inventory Centralization and customer
+FR-38 notify the Operating Manager of transaction processing across all
+overdue customer accounts.
+branches.
+FR-39 notify authorized users of
+operational updates through the NFR-1 prevent duplicate inventory and
+dashboard. 2 customer payment records during
+concurrent transactions and
+synchronization across branches.
+Table 4 presents the functional requirements of the
+system, grouped by module, each specifying a
+NFR-1 maintain consistent inventory
+capability the system must perform, such as user 3 information and customer payment
+authentication, account management, customer records across all branches after
+synchronization.
+prioritization, field operations, inventory
+management, and notifications, to support the
+NFR-1 Maintaina be developed using modular software
+organization's collection, sales, and warehouse
+4 bility components to allow future
+operations. enhancements and maintenance without
+affecting existing system functions.
+2.2.3.2. Non-Functional Requirement
+Non-functional requirements define the quality NFR-1 Compatib operate correctly on modern web
+attributes CORVEX must satisfy to ensure reliable, 5 ility browsers including Google Chrome,
+Microsoft Edge, and Mozilla Firefox.
+secure, and efficient operation within BH Marketing.
+Unlike functional requirements, which describe the
+NFR-1 support desktop and mobile devices
+services the system provides, these requirements 6 with responsive layouts for the
+specify the performance standards, security measures, Operating Manager, Branch Head,
+usability, compatibility, maintainability, and reliability Collectors, Sales Agents, and
+9
+
+===== PAGE 10 / 36 =====
+
+operational information through a centralized
+Warehouse Personnel.
+dashboard that provides insights into collection
+performance, sales activities, inventory status,
+NFR-1 Scalabilit support additional branches, customers,
+7 y inventory records, and users without customer payment records, branch performance, and
+significant degradation in system operational trends. During requirements-gathering
+performance. activities, BH Marketing management expressed
+support for developing the system and recognized its
+Table 5 presents the non-functional requirements of potential to improve operational coordination and
+the system, grouped by category (Performance, decision-making. Given the positive responses from
+Security, Usability, Reliability, Maintainability, intended users, the modules' alignment with the
+Compatibility, and Scalability), each specifying a organization's operational processes, and
+quality attribute, such as speed, data security, ease of management's willingness to adopt the system,
+use, data integrity, modularity, cross-platform CORVEX is considered operationally feasible for
+compatibility, and scalability, that the system must implementation within BH Marketing.
+satisfy to operate efficiently, securely, and reliably.
+2.2.4.2 Technical Feasibility
+2.2.4. Feasibility Requirements The technical feasibility of CORVEX was evaluated
+2.2.4.1. Operational Feasibility based on the available development resources,
+existing technical infrastructure, and the system
+The operational feasibility of CORVEX was
+requirements identified through interviews, survey
+evaluated through interviews with the Operating
+questionnaires, and direct observations conducted at
+Manager, survey questionnaires administered to
+Bethuel-Herminihildo (BH) Marketing. The system
+Collectors, Sales Agents, Warehouse Personnel, and
+will be developed using React.js for the responsive
+Branch Heads, and direct observations conducted
+web interface, Node.js and Express.js for the
+across the Davao City, General Santos City, and
+application server and RESTful API, Python for
+Davao Oriental branches of Bethuel-Herminihildo
+implementing the Simple Additive Weighting (SAW)
+(BH) Marketing. The data gathered revealed that the
+method used in customer prioritization, and
+company's daily operations remain highly dependent
+PostgreSQL with PostGIS for centralized database
+on manual procedures for collection scheduling, sales
+and spatial data management. For the map-based field
+canvassing, inventory monitoring, and cross-branch
+operations module, the system uses Leaflet.js with
+coordination. Collectors manually determine the
+OpenStreetMap for interactive map visualization,
+sequence of customer visits based on payment
+Nominatim to convert customer addresses into
+information and personal judgment. At the same time,
+geographic coordinates, and OpenRouteService to
+Sales Agents rely on written customer addresses,
+generate recommended travel routes. Recharts will
+manually prepared location sketches, and familiarity
+present operational dashboards, performance reports,
+with their assigned territories during canvassing
+and analytical visualizations. These technologies were
+activities. Likewise, they verify inventory availability
+selected because they are open-source, widely
+and customer payment information through phone
+adopted, scalable, and capable of supporting the
+calls, text messages, and manual coordination
+system's requirements for customer prioritization,
+between branches because they maintain operational
+map-based field operations, Inventory Centralization,
+records independently. These existing practices result
+centralized customer payment verification, and
+in delayed operational information, fragmented
+business activity monitoring across multiple branches.
+inventory and customer payment records, inefficient
+field coordination, and limited management visibility
+Based on the site observations, BH Marketing already
+over company-wide operations. The findings indicate
+possesses the basic technical infrastructure necessary
+that the organization can benefit from a centralized
+to implement the system, including desktop
+information system that supports map-based field
+computers for office operations, stable internet
+operations, customer prioritization for collection
+connectivity across branches, and Android mobile
+activities, Inventory Centralization, centralized
+devices used by Collectors and Sales Agents during
+customer payment verification, and business activity
+field activities. The identified minimum hardware
+monitoring across all branches.
+specifications, including an Intel Core i5 processor or
+equivalent, at least 8 GB of RAM, stable broadband
+The system is operationally feasible because it
+internet connectivity, and GPS-enabled mobile
+enhances BH Marketing's existing procedures without
+devices, are sufficient to support the development and
+significantly changing established personnel
+deployment of the system. The researchers have
+responsibilities. Rather than replacing current
+developed the necessary competencies in web
+workflows, CORVEX digitizes and integrates
+application development, database management,
+collection management, sales operations, Inventory
+software engineering, and map-based application
+Centralization, customer payment verification, and
+development through academic coursework and
+business activity monitoring into a centralized
+project experience, enabling them to design,
+platform. The system supports collectors by
+implement, and maintain the system. Although
+implementing the Simple Additive Weighting (SAW)
+centralized synchronization depends on internet
+method to prioritize daily collection schedules. At the
+connectivity, the Field Portal supports offline
+same time, Sales Agents receive map-based customer
+recording of collection and sales transactions,
+and territory visualization to support canvassing and
+allowing field personnel to continue their activities
+route planning. Warehouse Personnel can synchronize
+and synchronize data automatically once network
+inventory records across branches, and the Operating
+connectivity is restored. Given the availability of the
+Manager and Branch Heads can monitor consolidated
+10
+
+===== PAGE 11 / 36 =====
+
+required hardware and software resources, the Table 6. Estimated Development Cost
+organization's existing technical infrastructure, and
+Development Estimate Estimated Estimated
+the researchers' technical capabilities, CORVEX is
+Role Resource d Effort Rate Cost (PHP)
+technically feasible because the technologies and
+resources required for its development, deployment, Development Costs
+and long-term operation are readily available and
+appropriate for addressing BH Marketing's Systems Analyst / 20 hours ₱500/hour ₱10,000
+operational requirements. Project Manager
+2.2.4.3. Economic Feasibility Full Stack 80 hours ₱500/hour ₱40,000
+The study evaluated CORVEX's economic feasibility Developer
+by comparing projected software development costs
+with the operational benefits expected from its Database 30 hours ₱500/hour ₱15,000
+implementation at Bethuel-Herminihildo (BH) Developer
+Marketing. Based on the interviews, survey
+questionnaires, and direct observations conducted Quality Assurance 20 hours ₱500/hour ₱10,000
+Tester
+during the study, the organization incurs recurring
+operational costs associated with manual collection
+Documentation 10 hours ₱400/hour ₱4,000
+scheduling, repetitive inventory verification, and Technical
+fragmented communication among branches, delayed Writing
+customer payment verification, and paper-based
+documentation. These manual activities require Internet and Fixed — ₱4,500
+Electricity Cost
+additional labor time, transportation, communication
+expenses, and administrative effort, reducing
+System Testing Fixed — ₱5,000
+operational efficiency. The system addresses these and Deployment Cost
+inefficiencies by automating customer prioritization
+for collectors, synchronizing inventory and customer User Orientation Fixed — ₱3,000
+payment information across branches, and providing and Training Cost
+Materials
+centralized monitoring of business activities to reduce
+repetitive manual processes and improve resource
+Contingency — — ₱5,000
+utilization. (approximately
+5%)
+The estimated development cost of CORVEX was
+prepared using an effort-based software cost Subtotal (Development Cost) ₱96,500.00
+estimation approach, wherein project costs were
+derived from the estimated workload of each Operational Subscription (After Deployment)
+development role and prevailing software
+development rates in the Philippines. This approach is Cloud Hosting Monthly ₱2,500/mon ₱2,500
+consistent with industry practice, where software (VPS/Cloud th
+Server)
+development costs are estimated based on personnel
+effort, project scope, and resource utilization rather
+Domain Name Monthly ₱125/month ₱125
+than software licensing alone. Furthermore, the Equivalen
+project utilizes open-source technologies including t
+React.js, Node.js, Express.js, Python, PostgreSQL,
+PostGIS, Leaflet.js, OpenStreetMap, Nominatim, and SSL Certificate Monthly ₱250/month ₱250
+Equivalen
+OpenRouteService, eliminating software licensing
+t
+expenses and significantly reducing implementation
+costs. Although the organization incurs recurring Database Backup Monthly ₱500/month ₱500
+costs for internet connectivity and routine system and Cloud Storage
+maintenance, these expenses are considerably
+outweighed by the anticipated benefits, including System Monthly ₱3,000/mon ₱3,000
+Maintenance and th
+improved field productivity, synchronized inventory
+Technical Support
+information, centralized customer payment
+verification, reduced paper consumption, enhanced
+Total Monthly Subscription Cost ₱6,375/
+operational visibility, and faster managerial month
+decision-making. Therefore, CORVEX is considered
+economically feasible because its projected long-term Estimated Annual Operational Cost ₱76,500/
+operational benefits justify the estimated investment year
+required for its development and implementation.
+11
+
+===== PAGE 12 / 36 =====
+
+Table 6 presents the estimated development and decision-making, operational visibility, and service
+recurring operational costs for implementing quality. Collectively, these benefits demonstrate the
+CORVEX. The development cost includes personnel, system's value in addressing the operational
+deployment, documentation, testing, and training challenges identified at Bethuel-Herminihildo (BH)
+expenses. In contrast, the operational subscription Marketing.
+cost covers cloud hosting, domain registration,
+2.2.4.4. Schedule Feasibility
+security certificates, data backup, and technical
+maintenance necessary to keep the system available Figure 2 presents the Gantt Chart illustrating the
+after deployment. These recurring costs represent the development schedule of CORVEX: A
+estimated amount BH Marketing would pay to Mapping-Integrated Field Operations and Inventory
+operate and maintain the system continuously in a Centralization System for Multi-Branch Enterprises.
+production environment. The project follows the Agile Software Development
+Life Cycle (Agile SDLC), beginning with project
+Table 7. Estimated Development Benefits planning and requirements gathering through
+interviews, survey questionnaires, and direct
+Benefit Category Expected Benefit Classification
+observations, followed by system design, iterative
+Expected Benefits development, system testing, deployment, and
+documentation. More time is allocated to the
+Field Collection Reduced time required to Tangible development and testing phases because these involve
+Operations prepare daily collection
+schedules through SAW-assisted implementing the system's major operational
+customer prioritization
+modules, including customer prioritization for
+collection activities using the Simple Additive
+Sales Field Improved customer visit Tangible
+Operations planning through map-based Weighting (SAW) method, map-based field
+customer and territory
+visualization operations for collectors and sales agents, Inventory
+Centralization across branches, centralized customer
+Inventory Reduced manual inventory Tangible payment verification, and the Operations Dashboard
+Management verification and faster stock
+availability checking across for management monitoring. Continuous testing
+branches throughout the development process verifies
+completed modules, identifies defects early, and
+Cross-Branch Reduced time spent verifying Tangible incorporates stakeholder feedback before proceeding
+Coordination inventory availability and
+customer payment records to subsequent iterations, consistent with Agile
+through centralized information
+sharing principles.
+The development schedule is feasible because it
+Documentation Reduced paper consumption and Tangible
+manual encoding of collection aligns with the academic calendar, the study's defined
+and sales transactions
+scope, and the development team's estimated
+workload. Each development activity follows a
+Customer Credit Faster verification of customer Tangible
+logical sequence in which the identified operational
+Monitoring payment history before
+approving sales transactions requirements serve as the basis for system design,
+implementation, testing, and deployment. The
+Management and Improved visibility of collection Intangible iterative nature of the Agile methodology enables
+Monitoring performance, sales activities,
+inventory status, customer independent evaluation of completed modules,
+payment information, and branch
+allowing requirement refinements and operational
+operations through a centralized
+dashboard improvements to be incorporated without
+substantially affecting the overall project timeline.
+Decision Support More consistent operational Intangible This approach also reduces project risk by validating
+decision-making through each module before integrating it into the complete
+standardized customer
+prioritization and consolidated system. Based on the planned activities, available
+operational information
+resources, and allotted capstone period, the schedule
+is considered feasible because all core system
+Inventory Accuracy Improved consistency of Intangible functionalities can be developed, tested, evaluated,
+synchronized inventory records
+across all branches and documented within the prescribed development
+timeline.
+Customer Service Reduced overselling incidents Intangible
+and improved customer
+satisfaction through
+synchronized inventory
+information
+Organizational Enhanced coordination and Intangible
+Productivity communication among the
+Operating Manager, Collectors,
+Sales Agents, and Warehouse
+Personnel
+Table 7 presents the anticipated operational benefits
+of implementing CORVEX. The expected benefits are
+classified as tangible, representing measurable
+improvements in operational efficiency and resource
+utilization, and intangible, referring to organizational
+improvements such as enhanced coordination, Figure 2. Gantt Chart
+12
+
+===== PAGE 13 / 36 =====
+
+2.3 Design support customer identification, territory
+management, and route planning within their assigned
+2.3.1 Conceptual Framework
+service areas. The system synchronizes inventory
+The study's conceptual framework serves as the
+records and customer payment information across all
+blueprint for developing CORVEX: A
+branches through a centralized PostgreSQL database
+Mapping-Integrated Field Operations and Inventory
+with PostGIS, ensuring that authorized users have
+Centralization System for Multi-Branch Enterprises.
+access to updated operational information. Role-based
+It adopts the Input–Process–Output (IPO) model to
+access control regulates user permissions, while the
+illustrate how operational data collected from various
+map-based field operations module visualizes
+users are processed into information that supports
+customer locations, branch locations, territories, and
+daily field operations, Inventory Centralization,
+field activities using Leaflet.js with OpenStreetMap
+cross-branch coordination, and business activity
+services. Before storing and synchronizing
+monitoring. The framework demonstrates how
+information, the system validates submitted records to
+operational records are captured, validated, processed,
+ensure data completeness, consistency, and integrity
+synchronized, and transformed into decision-support
+across all operational modules.
+information that addresses the operational challenges
+identified at Bethuel-Herminihildo (BH) Marketing. 2.3.1.3. Output
+Figure 3 presents the system's conceptual framework. As shown in Figure 3, the Output component delivers
+processed information through CORVEX's
+operational modules. Collectors receive prioritized
+daily collection schedules generated using the Simple
+Additive Weighting (SAW) method. At the same
+time, Sales Agents receive map-based customer and
+territory visualizations to support canvassing and field
+planning. Warehouse Personnel access synchronized
+inventory information and stock availability across all
+branches. At the same time, the Operating Manager
+monitors collection performance, sales activities,
+inventory status, customer payment information,
+branch performance, and operational trends through
+the centralized Operations Dashboard. These outputs
+Figure 3. Conceptual Framework
+are presented through web-based dashboards,
+2.3.1.1. Input interactive maps, reports, tables, charts, and digital
+records that support business activity monitoring and
+As shown in Figure 3, the Input component consists
+management decision-making. Collectively, these
+of operational data captured from the system's four
+outputs address the operational gaps identified during
+user groups. Collectors record customer payment
+the requirements gathering phase by improving
+transactions, collection activities, payment
+customer prioritization, Inventory Centralization,
+commitments, outstanding balances, and field activity
+cross-branch information sharing, field coordination,
+reports through the Field Portal. Sales Agents record
+and centralized business activity monitoring
+sales transactions, customer visit reports, prospective
+throughout Bethuel-Herminihildo (BH) Marketing.
+customer information, and territory activities.
+Warehouse Personnel manage inventory transactions,
+2.3.2 Schedule and Route Generation Using the
+including stock receipts, stock releases, stock
+Simple Additive Weighting (SAW) Model
+transfers, inventory adjustments, and product
+The primary capstone element of CORVEX: A
+availability. The Operating Manager maintains
+Mapping-Integrated Field Operations and Inventory
+customer information, branch records, user accounts,
+Centralization System for Multi-Branch Enterprise is
+operational parameters, and customer payment
+implementing the Simple Additive Weighting (SAW)
+records. The system also maintains customer
+method as the decision-support mechanism for
+addresses and branch locations as geographic
+customer prioritization during collection operations.
+information to support map-based field operations.
+The SAW method is a Multi-Criteria
+The system validates and stores all operational data in
+Decision-Making (MCDM) technique that evaluates
+the centralized database as the primary inputs for
+multiple alternatives by normalizing criterion values,
+customer prioritization, Inventory Centralization,
+applying predefined weights, and computing a
+customer payment verification, map-based field
+weighted preference score to produce a ranked list of
+operations, and business activity monitoring.
+alternatives. Because of its computational simplicity,
+2.3.1.2. Process transparency, and effectiveness in evaluating multiple
+As shown in Figure 3, the Process component operational criteria simultaneously, SAW has been
+transforms collected operational data into meaningful widely applied in decision-support systems involving
+operational information through CORVEX's resource allocation, scheduling, customer
+integrated modules. The system applies the Simple prioritization, and operational planning [19], [20].
+Additive Weighting (SAW) method to prioritize
+Unlike conventional decision support systems, where
+customer collection schedules by evaluating each
+the algorithm operates independently, this
+customer's outstanding balance, number of overdue
+implementation integrates descriptive analytics with
+days, and travel distance from the collector's current
+the SAW method. Before ranking, CORVEX first
+location. For Sales Agents, the system provides
+summarizes operational information retrieved from
+map-based customer and territory visualization to
+13
+
+===== PAGE 14 / 36 =====
+
+the centralized database, including customer payment Table 8. Operational Data Sources
+records, collection history, and geographic
+Decision Source Database/ Retrieved Purpose
+information. These descriptive indicators provide Criterion Module Table Field
+management with an overview of each customer’s
+financial obligation, payment urgency, and travel Outstanding Customer customer_a outstanding__ Current
+Balance Activity ctivity balance unpaid
+accessibility. The summarized operational data then amount used
+as the benefit
+become input variables for the SAW algorithm, which criterion
+generates an objective customer priority ranking for
+daily collection activities. Days Sales sales_invoi Due_date, Determines
+Overdue ces status the earliest
+due date
+This implementation directly addresses the among
+operational problems identified during the unpaid or
+partially paid
+requirements gathering conducted at invoices
+Bethuel-Herminihildo (BH) Marketing. Based on
+Distance, Customer customers Latitude, Provides the
+interviews with the Operating Manager and field
+customer records longitude customer's
+personnel, collectors currently determine collection geographic
+coordinates
+priorities using personal judgment, considering
+outstanding balances, overdue payments, and travel Distance, Branch branches Latitude, Provides the
+distance without any standardized decision-support reference records longitude geographic
+point reference
+mechanism. As a result, different collectors may point
+associated
+produce different collection schedules for similar with the
+customer conditions, leading to inconsistent customer's
+branch
+prioritization, inefficient travel, and reduced
+collection productivity. Through descriptive analytics
+Table 8 presents the operational data sources retrieved
+and the SAW method, CORVEX standardizes this
+by CORVEX before executing the Simple Additive
+decision-making process by automatically generating
+Weighting (SAW) computation. Each decision
+a ranked customer list based on operational data
+criterion is associated with the database records
+retrieved from the centralized information system.
+required to obtain or derive its value. The Outstanding
+The generated ranking is subsequently displayed in
+Balance is retrieved from the maintained customer
+the Collector’s Field Portal to support daily collection
+activity summary, the applicable due date is identified
+planning.
+from sales invoices according to invoice status, and
+2.3.2.1. Operational Data Retrieval geographic distance is derived from the coordinates of
+Before performing the SAW computation, CORVEX the customer's assigned branch and the customer.
+retrieves the operational records required to construct These prepared values are then supplied to the SAW
+the collection decision matrix from its centralized decision-support process.
+PostgreSQL database. The system retrieves the
+After retrieving and validating the required
+customer's current Outstanding Balance from
+operational records, CORVEX transforms each
+customer_activity.outstanding_balance, the applicable
+customer's Outstanding Balance, Days Overdue, and
+invoice due date from sales_invoices.due_date, the
+Geographic Distance into numerical criterion values.
+customer's geographic coordinates from
+These values are automatically assigned to the
+customers.latitude and customers.longitude, and the
+corresponding columns of the decision matrix, where
+assigned branch's geographic coordinates from
+each customer represents an alternative and each
+branches.latitude and branches.longitude. The
+criterion represents an evaluation variable. The
+retrieved records are validated for completeness and
+completed decision matrix serves as the direct input
+consistency before being processed by the SAW
+to the SAW normalization and weighted preference
+decision-support procedure.
+computations.
+The system uses the retrieved records to prepare the
+2.3.2.2. SAW Eligibility and Computation Rules
+three SAW criteria. The Outstanding Balance is read
+Before generating the collection priority ranking,
+directly from customer_activity.outstanding_balance
+CORVEX applies predefined eligibility and
+as the current unpaid amount maintained by the
+computation rules to ensure that only valid customer
+system rather than being recomputed from raw
+records are included in the SAW decision matrix. A
+payment transactions during ranking. The Days
+customer is eligible for ranking only when
+Overdue value is derived by identifying the applicable
+customers.status is Active, the current
+unpaid sales invoice and comparing its due date with
+outstanding_balance is greater than zero, the
+the current system date. The Geographic Distance is
+customer's account_manager_id corresponds to the
+calculated from the assigned branch coordinates to the
+Collector for whom the priority list is being
+customer's coordinates using the Haversine method.
+generated, the customer has valid geographic
+These prepared criterion values are then supplied to
+coordinates, and the customer's assigned branch has
+the SAW computation to generate the daily collection
+valid geographic coordinates.
+priority ranking.
+14
+
+===== PAGE 15 / 36 =====
+
+For Days Overdue computation, only sales invoices 2.3.2.4. Determination of Criteria Weights
+with a status of Unpaid or Partial are considered. The criterion weights were established during the
+Invoices with a Paid status are excluded, while requirements-gathering phase based on interviews
+records with an empty due_date are not used in the with the Operating Manager of BH Marketing.
+calculation. When multiple unpaid or partially paid During the interview, the manager explained that
+invoices exist for the same customer, CORVEX uses collection priorities are primarily influenced by the
+the earliest applicable due_date. Days Overdue is customer’s financial value, followed by payment
+calculated as the current system date minus the urgency. At the same time, travel distance is
+selected due date, with negative results treated as zero considered only after evaluating financial
+so that customers whose due dates have not yet considerations.
+passed are not considered overdue.
+Table 9. Criteria Weights
+Geographic Distance is calculated using the
+Criterion Weight Operational Basis
+Haversine method between the coordinates of the
+customer's assigned branch and the customer's
+Outstanding 40% Represents the financial value of the
+recorded location. The resulting value represents Balance account and contributes directly to cash
+straight-line geographic distance rather than road flow recovery.
+travel distance. OpenRouteService is used after the
+Days Overdue 30% Indicates the urgency of collection based
+priority ranking has been generated to provide route on payment delay.
+visualization and routing support and does not modify
+the SAW score. Geographic 30% Supports efficient field operations by
+Distance reducing unnecessary travel.
+When two customers obtain the same SAW
+preference score, the customer with the lower Table 9 presents the decision criteria and their
+customer_id is assigned the higher priority rank. To corresponding weights used in the SAW computation.
+avoid division-by-zero during normalization, a The weights were determined through interviews with
+zero-valued criterion is handled according to the the Operating Manager during the
+implemented normalization rule. When all Days requirements-gathering phase. Outstanding Balance
+Overdue values are zero, the Days Overdue criterion received the highest weight (40%) because customers
+is excluded from the computation and the remaining with larger unpaid balances contribute more to the
+applicable criteria are used. A record producing an company's cash flow recovery. Days Overdue
+invalid zero-distance condition is excluded from the received 30% because accounts with longer payment
+distance-based computation and the exclusion is delays require more immediate collection to reduce
+recorded. delinquency risk. Geographic Distance was also
+assigned 30% because minimizing unnecessary travel
+2.3.2.3. Basis for Selecting the Decision Criteria enables collectors to visit more customers within a
+The decision criteria implemented in CORVEX were working day while reducing transportation time and
+identified during the requirements gathering phase operational costs.
+through interviews with the Operating Manager and
+observations of the daily collection workflow at BH The Operating Manager ordered the criteria as
+Marketing. outstanding balance, then days overdue, then distance.
+Outstanding balance received the larger share, 40%.
+Outstanding Account Balance Days overdue and distance each received 30%
+During the requirements validation interview, the because both still determine whether a collector can
+Operating Manager ranked each collection criterion finish the day’s visits. The sample scores in Tables 11
+by operational importance based on actual collection and 12 use these weights.
+practices. Based on the interview, Outstanding
+2.3.2.5. Construction of the Decision Matrix
+Balance was considered the highest priority because
+larger receivables have the greatest effect on cash
+After establishing the criterion weights, CORVEX
+flow recovery. Days Overdue ranked second because
+retrieves the required operational records from the
+delayed accounts require more immediate collection
+centralized database and organizes them into a
+attention, while Geographic Distance ranked lower
+decision matrix. In the SAW method, each row
+than financial priorities to improve travel efficiency.
+represents one customer (alternative), while each
+column corresponds to one decision criterion. The
+Days Overdue
+resulting matrix serves as the input for the
+This number of overdue days represents the urgency
+normalization and preference score computation.
+of collection activities. Customers who have delayed
+payments longer require earlier collection to The values represented by xij are derived from
+minimize the risk of prolonged delinquency. collection-related records generated through the
+existing collection workflow of Bethuel-Herminihildo
+Geographic Distance (BH) Marketing and retrieved or computed by
+Although financial considerations remain the highest CORVEX. During collection activities, the system
+priority, collectors also consider travel distance when records customer payment and collection information
+planning their daily routes. Visiting closer customers and stores it in the centralized PostgreSQL database.
+geographically reduces travel time, transportation For each customer alternative i, CORVEX retrieves
+costs, and unnecessary movement during field the Outstanding Balance from the customer's payment
+operations. records, determines the Days Overdue by comparing
+the recorded payment due date with the current
+15
+
+===== PAGE 16 / 36 =====
+
+system date, and obtains the Geographic Distance The corresponding decision matrix is represented as:
+using the customer's stored coordinates. The system
+then validates and assigns these values to their
+corresponding criterion columns in the decision
+matrix, where each row represents a customer and
+each column represents a criterion. Thus, each xij
+represents a measurable condition of a BH Marketing
+customer account at the time of collection Where:
+prioritization and serves as the original criterion value ● Column 1 represents the customers’ Outstanding
+processed through SAW normalization and weighted Balance.
+preference computation. ● Column 2 represents the number of Days
+Overdue.
+● Column 3 represents the Geographic Distance
+Equation 1: Decision Matrix between the branch’s assigned location and the
+customer’s address.
+The decision matrix becomes the direct input to the
+SAW algorithm. Each element xij corresponds to an
+operational value retrieved from the centralized
+database, which is then normalized before CORVEX
+calculates the weighted preference scores.
+2.3.2.6 Normalization of Decision Criteria
+Using operational records retrieved from the database,
+Since the selected decision criteria use different units
+the decision matrix is constructed by arranging each
+of measurement, CORVEX first converts all criterion
+customer's values according to the selected criteria.
+values into a common scale ranging from 0 to 1
+Table 10 shows a sample decision matrix the
+before calculating the final preference score. This
+Collection Dispatch Engine used before
+process, known as normalization, ensures that no
+normalization.
+single criterion dominates the computation because of
+The decision matrix serves as the direct mathematical differences in measurement units. In the Collection
+input to the SAW algorithm. Each row represents one Dispatch Engine, Outstanding Balance and Days
+customer retrieved from the centralized database, Overdue are treated as benefit criteria, where higher
+while each column corresponds to one decision values indicate higher collection priority. Conversely,
+criterion: Outstanding Balance, Days Overdue, and Geographic Distance is treated as a cost criterion,
+Geographic Distance. The matrix preserves the where shorter travel distances receive higher
+original operational values before normalization, normalized values to improve field operation
+ensuring that subsequent computations are based on efficiency.
+actual customer records.
+Since the selected decision criteria use different units
+For the sample computation, Customer A has an of measurement, the retrieved operational values
+Outstanding Balance of ₱18,500, 20 Days Overdue, cannot be directly compared. Therefore, the SAW
+and a Geographic Distance of 4.2 kilometers. The algorithm normalizes each criterion into a common
+same retrieval and computation process is applied to scale ranging from 0 to 1 while preserving their
+Customers B through E. These values constitute the relative importance. Outstanding Balance and Days
+xij entries used in the sample decision matrix. Overdue are treated as benefit criteria because higher
+values indicate greater collection priority, whereas
+Table 10. Sample Decision Matrix Geographic Distance is treated as a cost criterion.
+After all, shorter travel distances improve field
+Customer Outstanding Days Geographic
+Balance (₱) Overdue Distance operation efficiency.
+(km)
+Equation 2. Benefit Criterion
+Customer A 18,500 20 4.2
+Customer B 12,000 10 6.4
+Customer C 25,000 30 2.1
+Customer D 15,500 15 3.5
+Customer E 8,500 5 1.8
+Table 10 presents the sample decision matrix
+constructed from the operational records retrieved by
+Equation 3. Cost Criterion
+CORVEX. The table illustrates the actual criterion
+values for each customer before normalization and
+serves as the initial dataset processed by the SAW
+algorithm.
+16
+
+===== PAGE 17 / 36 =====
+
+Table 11. Normalized Decision Matrix
+Customer Outstanding Days Geographic
+Balance Overdue Distance
+Customer A 0.74 0.67 0.43
+Using the sample decision matrix presented in Table Customer B 0.48 0.33 0.28
+10, the maximum and minimum criterion values are
+first identified. Customer C 1.00 1.00 0.86
+● Maximum Outstanding Balance = ₱25,000 Customer D 0.62 0.50 0.51
+● Maximum Days Overdue = 30 Days
+● Minimum Geographic Distance = 1.8 km Customer E 0.34 0.17 1.00
+The normalized values for each customer are
+Table 11 presents the normalized decision matrix
+computed as follows.
+obtained after converting all criterion values into
+comparable scales using the SAW normalization
+process. These normalized values serve as the basis
+for computing the weighted preference scores in the
+next stage of the decision-support process. The
+computed preference score represents each customer's
+overall collection priority after simultaneously
+evaluating all selected decision criteria according to
+their assigned weights. Customers with higher
+preference scores receive higher collection priority
+during daily field operations.
+2.3.2.7. Computation of Weighted Preference
+Scores
+After normalization, CORVEX calculates each
+customer's preference score by multiplying each
+normalized criterion value by its corresponding
+weight and summing the results. This computation
+determines the overall priority score the Collection
+Dispatch Engine uses to rank customer accounts.
+Equation 4. Preference Value
+Using the weights established in Table 9:
+● Outstanding Balance = 0.40
+● Days Overdue = 0.30
+● Geographic Distance = 0.30
+The preference scores are computed as follows.
+17
+
+===== PAGE 18 / 36 =====
+
+for generating the recommended daily collection
+schedule and route visualization.
+2.3.2.9. Generation of Priority List and Route
+After computing the preference scores, CORVEX
+arranges customers from highest to lowest priority
+score. The resulting ranked customer list becomes the
+daily collection schedule presented in the Collector's
+Field Portal. Based on the generated priority list, the
+system retrieves the geographic coordinates of the
+prioritized customers and submits them to the routing
+service to determine an efficient travel sequence. The
+generated priority list, together with the
+recommended route, enables collectors to perform
+daily collection activities using a standardized,
+data-driven schedule instead of relying on subjective
+judgment.
+The SAW model produces the prioritized customer
+list and recommended route for collection activities.
+Separately, CORVEX processes the recorded
+collection, sales, inventory, customer payment and
+The computed preference scores indicate each credit, and branch records through a descriptive
+customer's relative collection priority based on the analytics module. The descriptive analytics process
+combined influence of the selected decision criteria does not use SAW preference scores as input; instead,
+and their corresponding priorities, and the Collection it analyzes the underlying recorded transactions to
+Dispatch Engine schedules them earlier. generate summarized measures, comparisons, and
+trends. These analytical results are then visualized
+2.3.2.8. Final Customer Ranking and interpreted to support management
+The final step of the Simple Additive Weighting decision-making within the system's defined scope.
+(SAW) method is ranking the customers according to
+their computed preference scores. After calculating 2.3.3. Descriptive Analytics Module
+the weighted preference values, CORVEX The Descriptive Analytics Module of CORVEX
+automatically arranges customers from highest to transforms recorded collection, sales, inventory,
+lowest score. Customers with the highest preference customer payment and credit, and branch records into
+scores are considered higher collection priorities summarized information for management analysis.
+because they satisfy the established decision criteria The module retrieves validated records from the
+more effectively based on their outstanding balance, centralized PostgreSQL database, aggregates them
+payment delay, and travel distance. The resulting according to relevant dimensions such as branch,
+ranked list forms the basis for the daily collection date, product, and customer, and computes descriptive
+schedule presented in the Field Portal. measures including totals, counts, percentages,
+comparisons, and trends. The system then presents the
+Table 12. Final Customer Ranking calculated measures through numerical summaries,
+tables, charts, and trend visualizations, and interprets
+Rank Customer Preference Interpretation
+Score them to identify differences and changes in the
+recorded data. The resulting analytical information
+1 Customer C 0.958 Highest collection supports authorized management personnel in
+priority evaluating collection, sales, inventory, customer
+payment and credit conditions, and branch
+2 Customer A 0.626 High Collection
+performance..
+Priority
+2.3.3.1. Data Aggregation
+3 Customer D 0.551 Moderate Collection
+Before generating descriptive measures, CORVEX
+Priority
+retrieves validated records from the centralized
+4 Customer E 0.487 Lower Collection PostgreSQL database. The records include collection
+Priority transactions, sales transactions, inventory movements,
+customer payment records, customer credit
+5 Customer B 0.375 Lowest Collection information, and branch records. The system groups
+Priority these records by the dimension required for each
+analytical measure, such as branch, transaction, date,
+Table 12 presents the final customer ranking product, or customer. The aggregated records serve as
+generated by the SAW algorithm. Customers are the source data for calculating the descriptive
+arranged from the highest to the lowest preference measures.
+score, where higher scores indicate higher collection
+priority. The ranked list is automatically transmitted
+to the Collector's Field Portal and serves as the basis
+18
+
+===== PAGE 19 / 36 =====
+
+Table 13. Data Sources for Descriptive Analysis The resulting ₱37,000 represents the total amount
+collected from the sample transactions during the
+Data Area Source Database/ Retrieved Data selected period. Comparing this measure across
+Module Table branches or reporting periods helps identify
+differences in recorded collection activity.
+Collection Collection Collection Collection
+Management Transaction Amount, 2.3.3.2.2 Sales Analysis
+Collection Date,
+Sales records are summarized to determine total sales
+Collector
+and changes in sales activity across reporting periods
+Sales Sales Sales Sales Amount, and branches. Total Sales is calculated by summing
+Management Transactions Product, Quantity, the recorded sales amounts within the selected
+Sales Date,
+Branch reporting period. The resulting total is then compared
+with the corresponding value from a previous
+Inventory Inventory Inventory Stock in, Stock reporting period to determine whether recorded sales
+Management Transactions Out, Stock
+Transfer, activity increased or decreased.
+Adjustment
+Equation 6. Total Sales
+Customer Customer Customer Payment Amount,
+Payment Payment Payments Outstanding
+Management Balance, Payment
+Status
+Customer Customer Credit Records Credit Line,
+Credit Credit Credit Status,
+Management Outstanding
+Credit
+Branch Branch Branch Branch Name,
+Management Information Branch
+Assignment
+Table 13 presents the records retrieved from the
+centralized database for descriptive analytics. The
+required analytical dimension groups the data and
+provides the source information used to calculate the
+Equation 7. Sales Growth Rate
+descriptive measures presented in the following
+subsection.
+2.3.3.2. Descriptive Measure Generation
+After aggregating the records, CORVEX calculates
+descriptive measures from the consolidated data to
+summarize collection, sales, inventory, customer
+payment and credit, and branch conditions. CORVEX
+generates the measures using the values stored in the
+corresponding transaction and master records. Total
+amounts are obtained by summing transaction values,
+transaction activity is determined by counting records,
+percentages are calculated from their corresponding
+totals, and trends are determined by comparing
+measures across reporting periods. These measures
+provide the numerical basis for the following
+The calculated 25% increase indicates that recorded
+visualization and analytical interpretation.
+sales activity increased during the current period
+2.3.3.2.1 Collection Analysis compared with the previous period. When this
+Equation 5. Total Collection positive change occurs across successive reporting
+periods, it indicates an upward sales trend and gives
+management evidence to review current sales
+activities and plan future sales activities.
+2.3.3.2.3 Inventory Analysis
+Inventory records are summarized to determine
+available stock and inventory movement by product
+and branch. The system calculates the current
+available quantity using recorded stock-in, stock-out,
+transfer, and adjustment transactions according to the
+inventory rules implemented in CORVEX. The
+system compares the resulting values across branches
+to identify differences in product availability and
+stock movement.
+19
+
+===== PAGE 20 / 36 =====
+
+Table 14. Sample Branch Descriptive Summary
+Branch Total Total Available Outstandin
+Collectio Sales Inventory g Balance
+n
+Davao ₱500,000 ₱750,000 1,250 ₱180,000
+City
+General ₱620,000 ₱900,000 1,840 ₱140,000
+Santos
+The resulting 400 units represent the available stock Davao ₱250,000 ₱420,000 720 ₱210,000
+Oriental
+based on the recorded inventory transactions.
+Comparing available stock across branches identifies
+differences in inventory availability, allowing Table 14 presents the descriptive measures grouped
+authorized personnel to review branches with lower by branch. The comparison shows differences in
+stock levels and coordinate inventory requirements recorded collections, sales, inventory availability, and
+when necessary. outstanding customer balances among the three
+branches, giving management a basis for identifying
+2.3.3.2.4 Customer Payment and Credit Analysis
+branch-level differences that may require further
+Customer payment and credit records are summarized
+review.
+to determine outstanding customer balances, payment
+status, delinquent accounts, and credit exposure. The 2.3.3.3 Analytical Visualization
+system calculates the total outstanding balance by The Executive Dashboard presents descriptive
+aggregating remaining unpaid customer balances and measures from the aggregated records through key
+identifies delinquent accounts from records with performance indicators, comparative charts, tables,
+overdue payment obligations. The resulting measures and trend visualizations. The dashboard displays
+provide authorized personnel with a summarized view collection and sales measures through numerical
+of customer payment and credit conditions across totals, branch comparisons, and period trends. It also
+branches. presents inventory and customer payment and credit
+measures through summarized availability, balance,
+Equation 8. Total Outstanding Balance
+and status indicators. The dashboard functions as the
+visualization layer of the descriptive analytics
+process, presenting the calculated measures in a form
+that allows authorized personnel to examine
+differences and changes across branches and reporting
+periods.
+The resulting ₱43,000 represents the total outstanding
+balance within the sample customer records.
+Comparing this measure across branches allows
+authorized management personnel to identify where
+customer payment obligations are more concentrated
+and determine whether further payment or credit
+review is necessary.
+2.3.3.2.5 Branch-Level Descriptive Comparison Figure 4. Executive Dashboard Showing
+CORVEX groups the calculated descriptive measures Descriptive Analytics
+by branch to compare collection, sales, inventory, and Figure 4 shows that the Executive Dashboard presents
+customer payment and credit conditions among the the calculated descriptive measures through key
+Davao City, General Santos City, and Davao Oriental performance indicators, branch-level comparisons,
+branches. The same measures generated from the and trend visualizations. It summarizes collection,
+underlying records are presented side by side to sales, available inventory, outstanding balances,
+identify differences among branches and changes customer counts, and related status indicators,
+across reporting periods. allowing authorized personnel to compare branch
+performance and observe changes across reporting
+periods.
+20
+
+===== PAGE 21 / 36 =====
+
+2.3.3.4 Analytical Interpretation and Decision 2.3.5 Entity-Relationship Diagram
+Support
+The descriptive analytics results are interpreted by
+examining the magnitude, trend, and differences of
+the calculated measures across reporting periods and
+branches. In sales analysis, an increase in the
+calculated sales value across reporting periods
+indicates increased recorded sales activity, while
+differences among branches identify variations in
+sales performance. In collection analysis, differences
+in total collections or collection rates indicate changes
+in recorded collection activity. Inventory analysis
+identifies differences in available stock and inventory
+movement, while customer payment and credit
+analysis identifies the concentration of outstanding
+balances and delinquent accounts. These interpreted
+results provide management with evidence for
+determining which areas require further review or
+action. For example, a sustained decrease in a
+branch’s sales or collection measures may prompt
+management to review the corresponding activities.
+Figure 6. Entity-Relationship Diagram
+In contrast, relatively low inventory availability may
+prompt inventory coordination or review. Higher 2.3.6 Data Dictionary
+outstanding customer balances may likewise prompt A sample of the CORVEX data dictionary is shown
+further payment or credit assessment. The module below.
+does not automatically determine the action to take;
+instead, it provides analyzed information that supports Table 15. Audit Logs Table
+authorized personnel in making informed decisions.
+Field Dat Size Description Constrai
+Name a nts
+Typ
+e
+2.3.4. Use Case Diagram
+log_id INT 11 Log ID PK,
+Auto-inc
+rement
+user_id INT 11 User FK →
+users.use
+r_id, Not
+Null
+action VAR 150 User's Not Null
+CH action
+AR
+ip_addr VAR 45 Unit IP Not Null
+ess CH address
+AR
+status_ VAR 150 Result of Not Null
+details CH action
+AR
+created TIM — Date and Not Null
+_at EST time of log
+AM creation
+P
+The Audit Logs table records significant user
+activities performed within CORVEX, including
+authentication, data updates, inventory transactions,
+Figure 5. Use Case Diagram and scheduling-related actions. It references the Users
+table to provide an audit trail for accountability,
+security, and system administration.
+21
+
+===== PAGE 22 / 36 =====
+
+Table 16. Branches Table
+territor INT 11 Assigned FK →
+Field Dat Size Description Constra y_id Service territorie
+Name a ints Territories s.territor
+Typ y_id
+e
+first_na VAR 20 Primary Not Null
+me CH contact first
+branch INT 11 Unique PK,
+AR name
+_id branch Auto-inc
+identifier rement middle VAR 20 Primary Nullable
+_name CH contact
+branch VAR 50 Branch Not Null
+AR middle
+_name CH name
+name
+AR
+last_na VAR 20 Primary Not Null
+address VAR 150 Full branch Not Null
+me CH contact last
+CH address,
+AR name
+AR including
+city address VAR 150 Customer Not Null
+CH address
+latitude DEC 10,7 Latitude for Not Null
+AR
+IMA OpenStreetM
+L ap location latitude DEC 10,7 Latitude for Not Null
+IMA OpenStreetM
+longitu DEC 10,7 Longitude for Not Null
+L ap location
+de IMA OpenStreetM
+L ap location longitu DEC 10,7 Longitude Not Null
+de IMA for
+contact VAR 20 Branch Not Null
+L OpenStreet
+_no CH contact
+Map
+AR number
+location
+email VAR 100 Branch Not Null
+contact VAR 30 Primary Not Null
+CH official
+_phone CH contact
+AR email
+AR telephone
+address
+number
+status VAR 20 Status of Not Null
+contact VAR 20 Secondary Not Null
+CH branch
+_person CH point of
+AR (Active,
+_fname AR contact —
+Inactive)
+first name
+created TIM — Date Not Null
+contact VAR 20 Secondary Nullable
+_at EST created
+_person CH point of
+AM
+_mnam AR contact —
+P
+e middle
+name
+The Branches Table stores the master information of
+BH Marketing’s branches, including their addresses contact VAR 100 Secondary Not Null
+and geographic coordinates. Users, customers, _person CH point of
+inventory records, territories, sales records, collection _lname AR contact —
+records, and other branch-related data reference it. last name
+Table 17. Customers Table contact VAR 30 Secondary Not Null
+_person CH point of
+Field Data Size Description Constrain
+Name Type ts _phone AR contact —
+telephone
+custom INT 11 Customer PK, number
+er_id ID Auto-inc
+relation VAR 10 Type of Not Null
+rement
+ship CH business
+account INT 11 User FK → AR relationship
+_manag responsible users.use between the
+er_id for managing r_id customer
+the customer
+and contact
+account
+person
+branch_ INT 11 Associated FK →
+status VAR 20 Status of Not Null
+id branch b ra r n an ch ch _ e id s , . b CH c a u cc s o to u m nt e r
+Not Null AR (Active,
+Inactive)
+22
+
+===== PAGE 23 / 36 =====
+
+outstanding_balance as a decision criterion. The
+created TIM — Date Not Null
+purchase_volume, last_collection_date, and
+_at EST account
+last_sales_visit fields support descriptive analytics
+AM created
+and field activity history. When a Collector saves a
+P
+collection_payment, the system reduces
+updated TIM — Date and Not Null customer_activity.outstanding_balance by the
+_at EST time last recorded payment amount and inserts a corresponding
+AM updated credit_history record. The
+P credit_history.remaining_balance preserves the
+resulting balance as an audit trail and is not used as a
+The Customers table stores customer account profiles, separate SAW input.
+contact information, assigned account managers,
+Table 19. Customer Credit Info Table
+branch and territory associations, and geographic
+coordinates. It supports customer identification, Field Data Size Description Constrain
+account management, service territory assignment, Name Type ts
+and location-based operations. The table also
+maintains customer account status and record credit_i INT 11 Record ID PK,
+timestamps to support monitoring and management of nfo_id Auto-inc
+customer information. The Customers table also rement
+records customer relationship classifications to
+custom INT 11 Owning FK →
+support segmentation and account management. This
+er_id customer customers.
+stored information supports sales transactions, customer_
+collection monitoring, and customer-related reporting id,
+across branches and service territories. Unique,
+Not Null
+Table 18. Customer Activity Table
+credit_l DEC 12,2 Maximum Not Null
+Field Data Size Description Constrain imit IMA approved
+Name Type ts
+L credit limit
+activity INT 11 Record ID PK,
+monthl DEC 12,2 Declared Nullable
+_id Auto-inc y_inco IMA monthly
+rement me L income used
+for credit
+custom INT 11 Owning FK → evaluation
+er_id customer customer
+s.custom employ VAR 50 e.g. Nullable
+er_id, ment_st CH Employed,
+Unique, atus AR Self-employe
+d, Business
+Not Null
+owner
+outstan DEC 12,2 Current Not Null credit_s INT 11 Internal or Nullable
+ding_b IMA balance core bureau
+alance L owed credit score
+purchas DEC 12,2 Total Not Null approv INT 11 User who FK →
+e_volu IMA volume of ed_by approved users.use
+me L purchases the credit r_id
+limit
+last_col DAT — Date of Not Null
+lection E most recent approv DAT — Date the Nullable
+_date payment ed_date E credit limit
+collection was
+approved
+last_sal DAT — Date of Not Null
+es_visit E most recent created TIM — Date Not Null
+sales agent _at EST created
+visit AMP
+updated TIM — Date and Not Null
+_at EST time last updated TIM — Date and Not Null
+AM recalculated _at EST time last
+P /updated AMP updated
+The Customer Activity table stores current The Customer Credit Info table stores each customer's
+customer-level summary indicators derived from credit evaluation information, including the approved
+recorded collection and sales activities, including credit limit, declared monthly income, employment
+outstanding balance, purchase volume, last collection status, credit score, approving user, and approval date.
+date, and last sales visit. For the SAW These records support authorized customer credit
+collection-prioritization process, CORVEX reads only verification and credit-related decision-making.
+23
+
+===== PAGE 24 / 36 =====
+
+The Products table stores the master records of
+Table 20. Payment Method Table
+products sold and managed by BH Marketing. Sales
+Field Data Size Description Constrai and inventory records reference it to keep product
+Name Type nts information consistent across branches.
+Table 22. Product Categories Table
+payment INT 11 Method ID PK,
+_method Auto-incr Field Dat Size Description Constrai
+_id ement Name a nts
+Typ
+e
+payment VAR 50 Payment Not Null
+_method CHA methods
+categor INT 11 Category ID PK,
+R accepted and
+y_id Auto-inc
+configured
+within the rement
+system.
+categor VAR 50 Category Unique,
+y_name CH name (e.g. Not Null
+status VAR 20 Completed, Not Null
+AR Beverages,
+CHA Pending
+Snacks,
+R
+Household)
+status VAR 20 Active, Not Null
+The Payment Method table stores the list of payment
+CH Inactive
+methods the system accepts, such as Cash, Check,
+AR
+Bank Transfer, GCash, and Maya. The Collection
+Payment and Sales Invoices tables reference it to created TIM — Date the Not Null
+standardize transaction categorization by payment _at EST category
+type. AM was created
+P
+Table 21. Products Table
+Field Dat Size Descriptio Constrai updated TIM — Date the Not Null
+Name a n nts _at EST category
+Typ AM was updated
+e P
+product INT 11 Product ID PK, The Categories table stores the list of product
+_id Auto-inc categories, such as Beverages, Snacks, and
+rement Household, referenced by the Products table. It allows
+inventory and sales records to be grouped and filtered
+product VAR 100 Product Not Null
+by category for reporting purposes.
+_name CH name
+AR Table 23. Suppliers Table
+Field Data Size Description Constrai
+categor INT 11 Product FK →
+Name Type nts
+y_id category product_
+categorie supplier INT 11 Unique PK,
+s.categor _id supplier Auto-incr
+y_id, identifier ement
+Not Null
+supplier VAR 100 Name of the Not Null
+SKU VAR 50 A unique Unique, _name CHA supplier
+CH code used Not Null R
+AR to identify
+and manage
+contact_ VAR 30 Supplier Nullable
+each
+no CHA contact
+product R number
+unit_pri DEC 10,2 Selling Not Null
+ce IMA price email VAR 150 Supplier Nullable
+L CHA email address
+R
+status EN — Active, Not Null
+UM Inactive address VAR 255 Supplier Nullable
+CHA business
+product VAR 255 File path or Nullable R address
+_image CH URL of the
+status VAR 20 Current Not Null
+AR product
+CHA supplier
+image
+R status
+24
+
+===== PAGE 25 / 36 =====
+
+created_ TIM — Date and time Not Null last_nam VAR 50 Employee Not Null
+at EST the supplier e CHA last name
+AMP record was R
+created
+email VAR 150 Login Not Null,
+updated TIM — Date and time Not Null CHA email Unique
+_at EST the supplier R
+AMP record was
+last updated passwor VAR 255 Encrypted Not Null
+d CHA password
+R
+The Suppliers table stores the master information of
+suppliers that provide products for BH Marketing's status ENU — Active, Not Null
+inventory replenishment. Restock transactions M Inactive
+reference supplier records to identify the source of
+created_ TIME — Date Not Null,
+incoming inventory and support supplier traceability.
+at STA account Default
+Table 24. Territories Table MP created CURREN
+T_TIMES
+Field Data Size Description Constrai TAMP
+Name Typ nts
+e updated_ TIME — Date Not Null,
+at STA account On Update
+territory INT 11 Territory ID PK, MP last CURRENT
+_id Auto-incr updated _TIM M E P S TA
+ement
+territory VAR 100 Territory Not Null
+The users table stores the accounts of authorized
+_name CH name
+AR personnel who access CORVEX. Each user is
+associated with a system role and, where applicable, a
+branch_i INT 11 Assigned FK → branch, allowing the system to enforce role-based and
+d branch branches.b
+branch-level access to information and functions.
+ranch_id,
+Not Null
+Table 26. Roles Table
+assigned INT 11 Assigned FK →
+Field Dat Size Description Constrai
+_user personnel users.user
+_id Name a nts
+Typ
+coverage TEX — Service area Not Null e
+_area T
+role_id INT 11 Role ID PK,
+The territories table stores the service territories Auto-inc
+assigned to branches and field personnel. It supports rement
+map-based visualization, customer assignment,
+territory coordination, and route planning for field role_na VAR 50 Display Not Null
+activities. me CH name of the
+AR system role.
+Table 25. Users Table
+slug VAR 50 Machine-re Unique,
+Field Data Size Descriptio Constrai
+CH adable Not Null
+Name Type n nts
+AR identifier
+for the role
+user_id INT 11 User ID PK,
+Auto-incr created TIM — Date the Not Null
+ement _at EST role record
+AM was created
+branch_i INT 11 Assigned FK →
+P
+d branch branches.
+branch_id updated TIM — Date the Not Null
+, Not Null
+_at EST role record
+AM was last
+role_id INT 11 Assigned FK →
+P updated
+system role roles.role
+of the user _id, Not
+Null The Roles table stores the user roles defined within
+CORVEX, such as Operating Manager, Branch Head,
+first_na VARC 50 Employee Not Null
+Collector, Sales Agent, and Warehouse Personnel,
+me HAR first name
+along with a display name and a machine-readable
+middle_ VARC 50 Employee Nullable slug. The Users and Role Permissions tables reference
+name HAR middle it to enforce role-based access restrictions.
+name
+25
+
+===== PAGE 26 / 36 =====
+
+Table 27. Permissions Table
+invoice VAR 30 Human-read Unique,
+Field Data Size Description Constrai _numb CH able invoice Not Null
+Name Type nts er AR number, e.g.
+INV-2026-0
+permissi INT 11 Permission PK, 00001
+on_id ID Auto-incr
+ement custom INT 11 Customer FK →
+er_id associated customer
+label VAR 100 Display name Not Null
+with the s.custom
+CHA of the
+sale er_id,
+R permission
+Not Null
+descripti TEX — Explanation Not Null
+on T of what the sales_a INT 11 Sales agent FK →
+permission gent_id who users.use
+allows recorded the r_id, Not
+sale Null
+created_ TIM — Date and time Not Null
+at EST the
+branch INT 11 Branch FK →
+AMP permission
+_id where the branches.
+record was
+sale was branch_id
+created
+, Not Null
+made
+updated TIM — Date and time Not Null
+_at EST the total_a DEC 12,2 Total Not Null
+AMP permission mount IMA amount of
+record was L the sales
+updated invoice
+The Permissions table stores the individual, granular paymen INT 11 Payment FK →
+permissions available within the system, including a t_meth method payment_
+display label and a description of what each od_id used methods.p
+permission allows. It works together with the Roles ayment_m
+and Role Permissions tables to implement role-based ethod_id,
+Not Null
+access control.
+status EN — Invoice Not Null
+Table 28. Role Permissions Table
+UM payment
+Field Data Size Description Constrai status:
+Name Type nts Unpaid,
+Partial, or
+role_id INT 11 Role ID PK, FK
+Paid
+→
+roles.role
+invoice DAT — Date the Not Null
+_id
+s_date E invoice was
+permissi INT 11 Permission PK, FK issued
+on_id ID →
+permissio due_dat DAT — Payment Nullable
+ns.permis e E due date for
+sion_id credit sales
+granted BOO — Whether the Not Null notes TEX — Additional Nullable
+LEA permission is T remarks
+N currently
+granted (true) about the
+or revoked invoice
+(false)
+created TIM — Date and Not Null
+The Role Permissions table maps roles to their _at EST time the
+assigned permissions, with a granted flag indicating AM invoice
+whether a specific permission is currently active or P record was
+revoked for that role. It forms the operational core of created
+the system's role-based access control.
+updated TIM — Date and Not Null
+Table 29.Sales Invoices Table _at EST time the
+AM invoice
+Field Dat Size Description Constrai
+P record was
+Name a nts
+last updated
+Typ
+e
+The Sales Invoices table stores the header-level
+invoice INT 11 Unique PK, information of each sales transaction recorded by a
+_id identifier of Auto-inc Sales Agent, including the customer, branch, sales
+the sales rement agent, total amount, payment method, status, and
+invoice
+invoice dates. It serves as the parent record for the
+26
+
+===== PAGE 27 / 36 =====
+
+Sales Invoice Items table, which stores the individual
+status EN — Pending, Not
+products included in each sale.
+UM Completed Null
+Table 30.Sales Invoice Items Table
+created TIM — Date and Not Null
+Field Data Size Description Constrai _at EST time the
+Name Type nts AM visit record
+P was created
+sales_in INT 11 Unique PK,
+updated TIM — Date and Not Null
+voices_i identifier of Auto-incr
+tems_id the invoice ement _at EST time the
+item AM visit record
+P was last
+invoice_ INT 11 Sales invoice FK →
+updated
+id containing sales_invo
+the item ices.invoi
+The field visit table stores scheduled customer visits
+ce_id, Not
+Null assigned to Collectors and Sales Agents, including the
+customer, assigned personnel, visit type, schedule
+product_ INT 11 Product FK → date, and visit status. Collection visits may be
+id included in products.p
+generated from SAW-based customer priority results,
+the sale roduct_id,
+while sales visits are managed based on assigned field
+Not Null
+activities and service territories.
+quantity INT — Quantity of Not Null
+product sold Table 32. Collection Payment Table
+unit_pri DEC 12,2 Selling price Not Null Field Data Size Description Constrain
+ce IMA per unit at the Name Type ts
+L time of salet
+collectio INT 11 Collection PK,
+line_tota DEC 12,2 Total amount Not Null
+npayme payment ID Auto-incre
+l IMA of the line
+nt_id ment
+L item
+custome INT 11 Customer FK →
+created_ TIM — Date and time Not Null
+r_id who made the customers.
+at EST the line item
+payment customer_i
+AMP record was
+d
+created
+collector INT 11 Collector FK →
+The Sales Invoice Items table stores the individual _id who received users.user_
+products included in each sales invoice, including the the payment id, Not
+product, quantity, unit price, and line total. It provides Null
+the item-level details needed for product-based sales
+branch_i INT 11 Branch where FK →
+reporting and links to the Sales Invoices table through d the payment branches.b
+the invoice identifier. was collected ranch_id,
+Not Null
+Table 31. Field Visits Table
+payment INT 11 Payment FK →
+Field Dat Size Description Constrai _method method used payment_m
+Name a nts _id ethods.paym
+ent_method
+Typ
+_id, Not
+e Null
+visit_id INT 11 Visit ID PK, receipts INT 11 Reference FK →
+_id number of the digital_rec
+Auto-inc digital receipt eipts.recei
+rement associated with
+pt_number
+the collection
+, Not Null
+custom INT 11 Customer FK → payment
+er_id customer
+amount DEC 12,2 Amount Not Null
+s.custom
+IMA collected
+er_id L from the
+customer
+user_i INT 11 Assigned FK →
+d personnel users.us payment DAT — Date and time Not Null
+_date_ti ETI the payment
+er_id
+me ME was received
+visit_t EN — Collection, Not status VAR 20 Pending, Not Null
+ype UM Sales Null CHA Completed,
+R Cancelled
+schedu DA — Visit date Not
+notes TEX — Additional Nullable
+led_da TE Null T remarks about
+te the payment
+27
+
+===== PAGE 28 / 36 =====
+
+created_ TIM — Date and time Not Null collecti INT 11 Related FK →
+at EST the record on_id payment collection
+AMP was created _payment.
+collection
+payment_i
+updated TIM — Date and time Not Null
+d
+_at EST the record
+AMP was last
+previou DEC 10,2 Balance Not Null
+updated
+s_balan IMA prior to
+ce L this
+The Collection Payment table stores the individual payment
+payments received from customers, including the
+payment DEC 10,2 Amount Not Null
+amount, payment method, payment date and time,
+_amount IMA paid
+receiving collector branch, and transaction status. It L
+serves as the source record for digital receipt
+generation and customer payment history. remaini DEC 10,2 Remaining Not Null
+Table 33. Digital Receipts Table ng_bala IMA balance
+nce L
+Field Dat Size Description Constrai
+Name a nts paymen EN — Paid, Not Null
+Typ t_status UM Partial,
+e Overdue
+transact DAT — Date Not Null
+receipts INT 11 Receipt ID PK,
+ion_dat E
+_id Auto-inc
+e
+rement
+collecti INT 11 Collection FK → The credit history table stores historical customer
+on_id reference collectio credit-related payment events, including the balance
+n_payme before payment, payment amount, remaining balance,
+nt.collect payment status, and transaction date. It references
+ionpaym related sales and collection records to provide an
+ent_id auditable history of customer credit activity and
+support authorized payment and credit verification.
+receipt VAR 25 Receipt Unique,
+_numb CH number Not Null Table 35. Branch Inventory Table
+er AR
+Field Dat Size Descriptio Constrai
+receipt DAT — Date issued Not Null Name a n nts
+_date ETI Typ
+ME e
+generat INT 11 Collector FK → inventor INT 11 Unique PK,
+ed_by users.use y_id inventory Auto-incr
+r_id record ement
+identifier
+The digital receipts table stores electronic receipts
+branch_ INT 11 Branch FK →
+generated after successful collection transactions. It id where the branches.b
+provides proof of payment in the offline-capable Field inventory is ranches_id
+Portal and links directly to collection records. maintained , Not Null
+Table 34. Credit History Table product INT 11 Product ID FK →
+_id products.p
+Field Dat Size Descriptio Constrai roduct_id,
+Name a n nts Not Null
+Typ
+quantity INT — Current Not Null
+e
+quantity of
+the product
+credit_i INT 11 Credit PK,
+available at
+d record ID Auto-inc the branch
+rement
+reorder INT — Minimum Not Null
+custom INT 11 Customer FK → _level stock
+er_id customer quantity
+s.custom used
+er_id
+status EN — Current Not Null
+sales_i INT 11 Related FK → UM Inventory
+d sale sales_invoi Status
+ces.sales_in
+voices_id
+28
+
+===== PAGE 29 / 36 =====
+
+The Stock Movements table logs every change in
+created TIM — Date and Not Null
+product stock, whether from a sale deduction, restock,
+_at EST time the
+inter-branch transfer, adjustment, or damage write-off,
+AM inventory
+along with who performed the movement and when.
+P record was
+It provides the audit trail that supports real-time
+created
+Inventory Centralization across all branches.
+updated TIM — Date and Not Null
+_at EST time the Table 37. Inventory Transfers Table
+AM inventory Field Data Size Description Constrai
+record was
+P Name Type nts
+last updated
+transfer_ INT 11 Unique PK,
+The branch inventory table stores the current id identifier for Auto-incr
+inventory quantity and status of each product by BH the transfer ement
+request
+Marketing branch. It links branches and products and
+provides the inventory records needed for centralized transfer_ VAR 100 Reference Not Null
+stock monitoring, availability checks, and ref CHA number for
+R the transfer
+inter-branch inventory coordination.
+product_ INT 11 Product being FK →
+Table 36. Stock Movements Table
+id transferred products.p
+roduct_id,
+Field Data Size Description Constrai
+Not Null
+Name Type nts
+quantity INT 11 Quantity of Not Null
+stock_m INT 11 Unique PK, product being
+ovement identifier for Auto-incr transferred
+s_id the stock ement
+movement source_br INT 11 Branch the FK →
+anch_id product is branches.br
+perform INT 11 User who FK → being anch_id,
+transferred Not Null
+ed_by recorded the users.user
+from
+movement _id, Not
+Null destinati INT 11 Branch the FK →
+on_bran product is branches.
+product_ INT 11 Product FK →
+ch_id being branch_id
+id involved in products.p
+transferred to , Not Null
+the stock roduct_id,
+movement Not Null status VAR 30 Pending Not Null
+CHA Approval,
+branch INT 11 Branch FK →
+R Submitted,
+_id associated branches. Approved,
+with stock branch_id Completed,
+, Not Null
+movement Rejected
+quantity INT 11 Quantity Not Null submitte INT 11 User who FK →
+moved d_by submitted the users.user
+(positive = transfer _id, Not
+stock in, request Null
+negative =
+approve INT 11 User who FK →
+stock out)
+d_by approved the users.user
+type VAR 50 Sale Not Null transfer _id
+CHA Deduction, request
+R Restock,
+approval TEX — Additional Nullable
+Transfer In,
+_info T notes or details
+Transfer Out,
+related to the
+Stock Count approval
+Adjustment, decision
+Damage
+Write-Off submitte DAT — Date the Not Null
+d_date E transfer
+moveme VAR 100 Reference Not Null request was
+nt_ref CHA number for submitted
+R the stock
+movement complet DAT — Date the Nullable
+ed_date E transfer was
+moveme DAT — Date the Not Null completed
+nt_date E stock
+movement created_ TIM — Date and time Not Null
+occurred at EST the record
+AMP was created
+created_ TIM — Date and time Not Null
+at EST the record updated TIM — Date and time Not Null
+AMP was created _at EST the record was
+AMP last updated
+29
+
+===== PAGE 30 / 36 =====
+
+The Inventory Transfers table records requests and
+outstand DEC 12,2 Balance used Not Null
+completed product movements between BH ing IMA when the
+Marketing branches. It identifies the product, balance L score was
+quantity, source branch, destination branch, computed
+requesting and approving users, transfer status, and
+days_ov INT 11 Days overdue Not Null
+relevant dates to support controlled inter-branch
+erdue used when
+inventory coordination.
+the score was
+computed
+Table 38. Restocks Table
+distance DEC 8,3 Straight-line Not Null
+Field Data Size Description Constrai
+_km IMA kilometers
+Name Type nts
+L used when
+the score was
+restock_ INT 11 Unique PK, computed
+id identifier for Auto-incr
+restock ement score DEC 4,4 SAW score Not Null
+IMA
+product_ VAR 11 Product being FK → L
+id CHA restocked products.
+R product_i ranking INT 11 Priority rank Not Null
+d, Not
+generate TIM — Generated Not Null
+Null
+d_at EST date
+branch_i VAR 11 Branch FK → AMP
+d CHA receiving the branches.
+R restock branches_ The SAW results table stores the calculated
+id, Not preference score and priority rank generated by the
+Null SAW collection-prioritization process. These results
+generate the prioritized collection list for Collectors
+delivery VAR 100 Reference Not Null
+and preserve the decision-support results for reference
+_ref CHA number for
+and auditing.
+R the delivery
+Table 40. Notifications Table
+supplier INT 11 Supplier FK →
+_id providing the suppliers. Field Data Siz Descriptio Constrai
+restocked suppliers_ Name Type e n nts
+product id, Not
+Null notifica INT 11 Notificatio PK,
+tion_id n ID Auto-inc
+quantity INT — Quantity of Not Null rement
+product
+received user_id INT 11 Recipient FK →
+users.user
+receive_ DAT Date the Not Null _id, Not
+date E restocked Null
+items were
+title VARC 100 Notification Not Null
+received
+HAR title
+The Restocks table records supplier deliveries
+received by a branch, including the product, quantity, category VARC 50 Category or Not Null
+supplier, delivery reference number, and date HAR type of
+notification,
+received. These records update branch inventory
+such as
+levels once new stock arrives, supporting the inventory
+restocking side of Inventory Centralization. alerts and
+account
+Table 39. SAW Results Table activities
+Field Data Size Description Constrai messag TEX — Notificatio Not Null
+Name Type nts e T n content
+result_id INT 11 Result ID PK,
+status ENU — Read, Not Null
+Auto-incr
+M Unread
+ement
+custome INT 11 Customer FK → created TIME — Date Not Null
+r_id customers _at STA created
+.customer
+MP
+_id
+collector INT 11 Whose daily FK → The notifications table stores system-generated alerts
+_id list this row users.user
+for collection, inventory, sales scheduling, credit
+belongs to _id, Not
+verification, transfer, and synchronization events.
+Null
+30
+
+===== PAGE 31 / 36 =====
+
+These notifications help users stay informed about Table 42. Offline Sync Queue Table
+pending tasks and important system activities.
+Field Data Size Description Constrai
+Table 41. Field Activity Reports Table Name Type nts
+Field Dat Size Description Constrai sync_qu INT 11 Sync queue PK,
+Name a nts eue_id record ID Auto-incr
+Typ ement
+e user_id INT 11 User/device FK →
+owner who users.user
+report_i INT 11 Report ID PK, recorded the _id, Not
+d Auto-inc offline Null
+rement transaction
+visit_id INT 11 Related FK → device_i VAR 100 Identifier of the Nullable
+field visit field_vis d CHA device the
+R transaction
+its.visit_i originated from
+d, Not
+table_na VAR 50 Target table the Not Null
+Null
+me CHA queued record
+user_id INT 11 Collector or FK → R belongs to (e.g.
+collection_pay
+sales agent users.use ment,
+who r_id, Not field_activity_r
+eports)
+submitted Null
+the report record_r VAR 100 Local/offline- Not Null
+eference CHA generated
+activity VAR 50 Type of Not Null R reference ID
+_type CH field for the
+AR activity pending
+performed record
+(e.g.
+Collection, payload TEX — Serialized Not Null
+Sales Visit, T (JSON) copy of
+Delivery, the
+offline-recorde
+Site Check)
+d data awaiting
+sync
+remark TEX — Notes Nullable
+s T submitted sync_sta VAR 20 Pending, Not Null
+by the field tus CHA Synced,
+agent about R Failed
+the visit
+attempte TIM — Date and time Nullable
+photo VAR 255 Path/URL Nullable d_at EST the last sync
+CH to an AMP attempt was
+AR optional made
+photo
+captured as
+evidence of
+synced_ TIM — Date and time Nullable
+the visit at EST the record
+AMP successfully
+sync_st VAR 20 Pending, Not Null
+synced
+atus CH Synced,
+AR Failed —
+whether this
+report has created_ TIM — Date and time Not Null
+reached the at EST the offline
+server yet AMP record was
+first queued
+created TIM — Date and Not Null
+_at EST time the
+AM report was
+P created on The Offline Sync Queue table temporarily stores field
+the device records created while connectivity is unavailable and
+tracks their synchronization state. Once connectivity
+The Field Activity Report table stores the field is restored, the system submits queued records to the
+activity reports submitted by Collectors and Sales application server for validation and synchronization
+Agents after a visit, including the activity type, with the centralized PostgreSQL database.
+remarks, and optional photographic evidence of the
+recorded field activity. Its sync_status field supports 2.3.7 Architecture Design
+the offline-capable Field Portal by tracking whether a The architectural design of CORVEX illustrates how
+report has successfully reached the central server. client-side applications, server-side components,
+31
+
+===== PAGE 32 / 36 =====
+
+external services, and a centralized database work allowing Collectors to receive a prioritized collection
+together to support field operations, Inventory list based on the calculated SAW scores. Sales Agents
+Centralization, and decision support for BH do not use the SAW engine; instead, they access
+Marketing’s multi-branch operations. The system assigned customers, service territories, schedules, and
+adopts a three-tier architecture consisting of the map-based location information to support sales field
+Presentation Layer, Application Layer, and Database activities. The application layer also integrates
+Layer to ensure scalability, centralized data Leaflet.js with OpenStreetMap to provide interactive
+management, and secure communication between map visualization of customer locations, territories,
+users and enterprise resources. Furthermore, the and field routes.
+architecture supports both online and offline field
+operations, enabling sales agents and collectors to 2.3.7.3. Database Layer
+continue recording transactions even when internet The database layer utilizes PostgreSQL as the
+connectivity is temporarily unavailable. centralized relational database management system
+that stores all enterprise information. It maintains
+records for users, branches, clients, products, branch
+inventory, inventory transfers, sales transactions,
+collection transactions, credit history, field visits,
+SAW computation results, notifications, audit logs,
+and performance summaries. By maintaining a
+centralized repository, the system ensures operational
+data from all branches remains synchronized and
+immediately available for reporting, monitoring, and
+decision support.
+2.3.7.4. External Services
+CORVEX integrates external technologies to enhance
+its operational capabilities. Leaflet.js and
+OpenStreetMap provide interactive geographic
+visualization for customer locations, branch locations,
+territories, and field routes, supporting location-based
+operational planning. The system also uses
+browser-based local storage in the mobile field portal
+to temporarily store collection and sales transactions.
+Offline mode allows uninterrupted field operations
+until synchronization with the central server is
+possible.
+2.3.7.5. Online Configuration
+Figure 7. CORVEX System Architecture During online operation, all user requests submitted
+through the web dashboard and mobile field portal are
+2.3.7.1. Presentation Layer transmitted to the application server via secure
+The presentation layer serves as the primary interface RESTful communication. The application server
+through which users interact with CORVEX. It validates each request, executes the necessary
+consists of two client applications: the React.js Web business logic—including SAW prioritization,
+Dashboard for administrators, operations managers, Inventory Centralization, mapping integrated
+and warehouse staff, and the React.js Mobile Field processing, and notification generation—and stores
+Portal for sales agents and collectors. The web the resulting information within the centralized
+dashboard provides modules for inventory PostgreSQL database. The system then returns
+management, operational dashboards, and data updated data to client applications in real time,
+visualization. At the same time, the mobile field allowing managers and field personnel across all
+portal enables collection recording, sales reporting, branches to access consistent, synchronized
+and interactive map visualization using Leaflet.js operational information.
+integrated with OpenStreetMap, and offline
+2.3.7.6. Offline Configuration
+synchronization. User requests are transmitted
+When internet connectivity is unavailable, the mobile
+securely to the server through RESTful web services
+field portal allows collectors and sales agents to
+whenever an internet connection is available.
+continue recording collections, sales activities,
+2.3.7.2. Application Layer (Server-Side) customer visits, and digital receipts using the offline
+The application layer contains the core business logic synchronization module. These records are
+that processes requests received from the client temporarily stored within the device's local storage
+applications. It manages user authentication and without interrupting field operations. Once network
+authorization, user management, collection connectivity is restored, the synchronization module
+processing, sales management, notification services, automatically uploads the locally stored transactions
+descriptive analytics, and audit logging. This layer to the application server, which validates the data and
+also integrates the SAW Decision Support Engine, updates the PostgreSQL database to ensure
+which evaluates and ranks eligible customer accounts consistency across all branches.
+for collection based on predefined collection criteria,
+32
+
+===== PAGE 33 / 36 =====
+
+2.3.8 Prototypes
+Figure 10. Collector's Field Portal Dashboard
+The Field Portal Dashboard serves as the Collector's
+Figure 8. Collector's Today's Route Screen
+home screen, summarizing the day's workload
+The Today's Route screen displays the daily through key metrics, accounts assigned, amounts
+prioritized collection list generated by the Collection collected, pending visits, and completed visits, along
+Dispatch Engine using the Simple Additive Weighting with recent collection activity and incident reports.
+(SAW) method. The SAW ranking evaluates eligible Collectors use this screen at the start of their field day
+customer accounts using Outstanding Balance, Days and throughout to get an at-a-glance view of progress
+Overdue, and Geographic Distance, based on the and launch core Field Portal actions such as starting
+criteria and weights defined in Table 9. Collectors use today's route, reporting an incident, or reviewing
+this screen at the start of each field day to view their assigned accounts. The system is expected to update
+prioritized collection stops and review the all summary figures and the route progress bar in real
+corresponding customer and route information. When time as the collector logs collections and completes
+a collector selects “View” for an account, the system visits through the offline-capable Field Portal.
+displays the relevant customer and balance
+information. The Map View and Route Summary tabs
+allow the collector to visualize the assigned collection
+locations geographically and review the
+corresponding route information.
+Figure 11. Collector's Collection Log Screen
+This form lets the collector record a payment received
+from a client during a field visit. The collector enters
+the amount collected, selects the payment method
+(cash, check, bank transfer, mobile), uploads a photo
+of the proof of payment, and optionally marks it as a
+Figure 9. Sales Agent's Today's Schedule partial payment. On submission, the system validates
+Screen the amount against the outstanding balance, logs the
+transaction, generates a digital receipt, and deducts
+The Today's Schedule screen displays the Sales the collected amount from the client's outstanding
+Agent's assigned customer visits based on the agent's balance in real time.
+designated customers, service territory, and field
+schedule. The screen allows Sales Agents to view
+assigned customers, visit locations, and visit status
+such as Pending, Completed, and Rescheduled. Sales
+Agents can view customer details, record sales field
+activities, contact customers, and open customer
+locations on the map. The map and scheduling
+functions support field sales activities without
+applying the SAW decision-support process.
+Figure 12. Warehouse Staff's Inventory Screen
+33
+
+===== PAGE 34 / 36 =====
+
+This is the warehouse personnel's primary working
+screen, showing all furniture products assigned to
+their branch with current stock levels, reorder
+thresholds, and status badges (Sufficient, Low Stock,
+Critical, Out of Stock). Staff use it to monitor which
+items need restocking or transferring and to perform
+stock counts. The system automatically flags any item
+at or below its reorder point with a warning, and items
+at zero stock trigger a critical alert that propagates up
+to the Branch Manager and Operating Manager.
+Figure 15. Operating Manager’s Dashboard
+Screen
+This executive-level command center consolidates
+performance data from all three branches into a single
+view, showing enterprise-wide KPI stat cards, a
+branch KPI comparison bar chart, a revenue
+distribution donut chart, weekly collection and sales
+completion trend lines, top vs. bottom branch cards,
+and a live critical alerts feed. The operating manager
+uses it every morning to get an immediate health
+Figure 13. Account’s View Detail in Collector’s
+check of the entire operation, spotting which branch
+Screen
+needs intervention before drilling down into
+This screen gives the collector a full profile of a branch-specific data. The system computes all
+single client account, including their outstanding displayed values from the aggregated branch data in
+balance, number of days overdue, delinquency status, real time, and alerts are color-coded by severity so
+address, contact number, and complete payment critical issues are immediately visible at the top of the
+history table. The collector uses it before or during a page.
+visit to understand the client's payment behavior and
+decide the appropriate approach. The system
+highlights overdue accounts in red and shows a
+blacklisted flag for accounts flagged by the branch
+manager, preventing the collector from accepting new
+arrangements without manager approval.
+Figure 16. Operating Manager’s Branch
+Performance Screen
+This screen provides a detailed performance analysis
+of all three branches through three tabs: Overview
+Figure 14. Operating Manager’s Leaflet (horizontal bar charts of performance and growth
+integrated with OpenStreetMap scores), Comparison (6-month area and line charts of
+revenue and collections), and Trends (a radar chart
+This screen extends the branch-level map to show all comparing all five KPI dimensions simultaneously
+three branches simultaneously, with branch-level plus a delinquency trend area chart). The operating
+coverage areas, cross-branch territory boundaries, and manager uses it when a branch appears in the
+organization-wide data layers. The operating manager dashboard alerts to understand whether poor
+uses it to compare Leaflet.js integrated with performance is in collections, sales, inventory, route
+OpenStreetMap across Davao City, General Santos, compliance, or growth. The system color-codes each
+and Davao Oriental, identifying underperforming branch consistently across all charts so patterns are
+territories and where high-value client concentrations easy to track: General Santos in green, Davao City in
+are located. The system supports filtering by branch, blue, Davao Oriental in red.
+date range, and staff type, and the toolbar provides
+sub-views for Delinquency Heatmap, Profitability
+Analysis, and Territory Analysis.
+34
+
+===== PAGE 35 / 36 =====
+
+2.4 Development 5. REFERENCES
+The [1] M. Zhang, E. H. Grosse, and C. H. Glock,
+Table 43. Sprint "Potential of mobile applications in
+2.5 Testing human-centric production and logistics
+2.5.1 Hardware Compatibility Testing management," IFAC-PapersOnLine, vol. 55,
+no. 10, pp. 151–156, 2022, doi:
+2.5.2 Web Browser (Non-Functional)
+10.1016/j.ifacol.2022.09.382.
+Compatibility
+2.5.3 Internet Connectivity Testing [2] Elragal, A., & Haddara, M. (2023). The
+digital transformation of enterprise systems: A
+2.5.3.1 Mobile Browser Testing
+systematic literature review. Information
+2.5.4 Speed Performance Testing Systems Frontiers, 25(6), 2149–2170.
+2.5.5 GTmetrix Website Performance https://doi.org/10.1007/s10796-022-10293-2
+[3] P. K. Choudhary, S. Routray, P. Upadhyay,
+Testing
+and A. K. Pani, "Adoption of enterprise mobile
+2.5.6 Data Visualization Testing systems – An alternative theoretical
+2.5.7 User Testing (Base on Functional perspective," International Journal of
+Information Management, vol. 67, Art. no.
+Requirements)
+102539, Dec. 2022, doi:
+2.5.8 Simple Additive Weighting (SAW) 10.1016/j.ijinfomgt.2022.102539.
+Testing [4] D. Valle Enrique, et al., "Being digital and
+flexible to navigate the storm: How digital
+2.5.9 Descriptive Analytics Testing
+transformation enhances supply chain
+2.5.10 Software Testing flexibility in turbulent environments,"
+2.5.11 Notification Testing International Journal of Production
+Economics, vol. 250, 2022.
+2.5.12
+[5] S. Kar, S. Bhimrajka, A. Kumar, and S.
+2.5.13 Alpha Testing Mukherjee, "Mobile Based Inventory
+2.5.14 Beta Testing Management System with QR Code," in Proc.
+IEEE Int. Conf. Electronics, Computing and
+2.5.15 User Acceptance Testing
+Communication Technologies (CONECCT),
+2.5 Implementation Bengaluru, India, 2022, doi:
+2.6.1 Frontend Installation 10.1109/CONECCT55679.2022.9865739.
+[6] M. Yaqot, R. E. Franzoi, A. Islam, and B. C.
+2.6.2 Network and Domain
+Menezes, "Cyber-Physical System
+Configuration Demonstration of an Automated
+2.6.3 Database Setup Shuttle-Conveyor-Belt Operation for Inventory
+Control of Multiple Stockpiles: A Proof of
+2.6.4 User’s Manual and Turnover
+Concept," IEEE Access, vol. 10, pp.
+Activities 127636–127653, 2022, doi:
+2.7 Deployment 10.1109/ACCESS.2022.3226942.
+[7] J. Nascimento, N. Frazão, S. Teixeira, and A. C.
+2.8 User Acceptance
+Ribeiro, "Dashboard for the Management and
+3. RESULTS AND DISCUSSION Acceptance of Customer Orders," Business
+3.1 Hardware Compatibility Testing for Systems Research, vol. 13, no. 3, pp. 116–129,
+Desktop 2022.
+[8] M. AlManei, K. Salonitis, and Y. Xu, "Digital
+3.2 Mobile Hardware Compatibility
+transformation challenges for small and
+Testing
+medium enterprises: A systematic review,"
+3.3 Web Browser Compatibility Testing Sustainability, vol. 15, no. 4, Art. no. 3159,
+3.4 Internet Connectivity Testing 2023, doi: 10.3390/su15043159.
+[9] Department of Trade and Industry (DTI). 2023
+3.5 Mobile Browser Performance Testing
+MSME Statistics. Available:
+3.6 Page Speed Performance Test
+https://www.dti.gov.ph/resources/msme-statistic
+3.7 Software Testing s/
+3.8 Alpha Testing [10] S. Das, A. Baral, I. M. Rafizul, and S. Berner,
+3.9 Beta Testing "Efficiency enhancement in waste management
+through GIS-based route optimization,"
+4. CONCLUSION AND
+Cleaner Engineering and Technology, vol. 21,
+RECOMMENDATION Art. no. 100775, 2024, doi:
+4.1 Conclusion 10.1016/j.clet.2024.100775.
+[11] S. C. Cha, Y. H. Hsuan, K. H. Yeh, T. Ishihara,
+4.2 Recommendation
+O. Yoshihiro, and W. N. Chen, "An
+4.2.1 Researcher Recommendation
+Evolutionary Risk-based Access Control
+4.2.2 User’s Recommendation Framework for Enterprise File Systems," in
+4.2.3 Public Defense Recommendation Proc. IEEE 8th World Forum on Internet of
+35
+
+===== PAGE 36 / 36 =====
+
+Things (WF-IoT), Yokohama, Japan, 2022, doi:
+10.1109/WF-IoT54382.2022.10152041.
+[12] Pepperi Ltd., Pepperi Route & Activity
+Planning Module and Direct Store Delivery
+(DSD) Software. [Online]. Available:
+https://support.pepperi.com/hc/en-us/articles/50
+30322903708-Pepperi-s-Route-and-Activity-Pl
+anning-Moduleandhttps://www.pepperi.com/ro
+ute-accounting-dsd.
+[13] Odoo S.A., Odoo Inventory Documentation –
+Routes and Push/Pull Rules. [Online].
+Available:https://www.odoo.com/documentatio
+n/18.0/applications/inventory_and_mrp/invento
+ry/shipping_receiving/daily_operations/use_rou
+tes.html.
+[14] Badger Maps Inc., Badger Maps Features.
+[Online]. Available:
+https://www.badgermapping.com/features/
+[15] M. Kuhrmann, P. Tell, R. Hebig, et al., “What
+Makes Agile Software Development Agile?,”
+IEEE Transactions on Software Engineering,
+vol. 48, no. 9, pp. 3523–3539, Sept. 2022, doi:
+10.1109/TSE.2021.3110305.
+[16] H. Edison, X. Wang, and K. Conboy,
+“Comparing Methods for Large-Scale Agile
+Software Development: A Systematic
+Literature Review,” IEEE Transactions on
+Software Engineering, vol. 48, no. 8, pp.
+2709–2731, Aug. 2022, doi:
+10.1109/TSE.2021.3069039
+[17] S. Singh and A. Sharma, “Review of an Agile
+Software Development Methodology with
+Scrum & Extreme Programming,” in Proc.
+2022 IEEE Int. Conf. on Current Development
+in Engineering and Technology (CCET), 2022,
+doi: 10.1109/CCET56606.2022.10080640.
+(Although it discusses Scrum and XP, the
+paper is fundamentally a review of Agile
+software development methodologies.)
+[18] D. Itzik and R. Gelbard, “Does Agile
+Methodology Fit All Characteristics of
+Software Projects? Review and Analysis,”
+Empirical Software Engineering, vol. 28, no.
+4, 2023, doi: 10.1007/s10664-023-10334-7.
+[19] I. Rahman, “Trends in decision support system
+development using the Simple Additive
+Weighting method: Systematic literature
+review,” Jurnal Teknologi dan Sistem
+Informasi Bisnis, vol. 7, no. 1, pp. 29–35,
+2025, doi: 10.47233/jteksis.v7i1.1727.
+[20] H. Taherdoost, “Analysis of Simple Additive
+Weighting Method (SAW) as a multi-attribute
+decision-making technique: A step-by-step
+guide,” Journal of Management Science &
+Engineering Research, vol. 6, no. 1, pp.
+21–24, 2023, doi: 10.30564/jmser.v6i1.5400.
+36

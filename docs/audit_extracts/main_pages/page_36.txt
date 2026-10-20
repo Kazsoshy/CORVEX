@@ -1,0 +1,58 @@
+
+Things (WF-IoT), Yokohama, Japan, 2022, doi:
+10.1109/WF-IoT54382.2022.10152041.
+[12] Pepperi Ltd., Pepperi Route & Activity
+Planning Module and Direct Store Delivery
+(DSD) Software. [Online]. Available:
+https://support.pepperi.com/hc/en-us/articles/50
+30322903708-Pepperi-s-Route-and-Activity-Pl
+anning-Moduleandhttps://www.pepperi.com/ro
+ute-accounting-dsd.
+[13] Odoo S.A., Odoo Inventory Documentation –
+Routes and Push/Pull Rules. [Online].
+Available:https://www.odoo.com/documentatio
+n/18.0/applications/inventory_and_mrp/invento
+ry/shipping_receiving/daily_operations/use_rou
+tes.html.
+[14] Badger Maps Inc., Badger Maps Features.
+[Online]. Available:
+https://www.badgermapping.com/features/
+[15] M. Kuhrmann, P. Tell, R. Hebig, et al., “What
+Makes Agile Software Development Agile?,”
+IEEE Transactions on Software Engineering,
+vol. 48, no. 9, pp. 3523–3539, Sept. 2022, doi:
+10.1109/TSE.2021.3110305.
+[16] H. Edison, X. Wang, and K. Conboy,
+“Comparing Methods for Large-Scale Agile
+Software Development: A Systematic
+Literature Review,” IEEE Transactions on
+Software Engineering, vol. 48, no. 8, pp.
+2709–2731, Aug. 2022, doi:
+10.1109/TSE.2021.3069039
+[17] S. Singh and A. Sharma, “Review of an Agile
+Software Development Methodology with
+Scrum & Extreme Programming,” in Proc.
+2022 IEEE Int. Conf. on Current Development
+in Engineering and Technology (CCET), 2022,
+doi: 10.1109/CCET56606.2022.10080640.
+(Although it discusses Scrum and XP, the
+paper is fundamentally a review of Agile
+software development methodologies.)
+[18] D. Itzik and R. Gelbard, “Does Agile
+Methodology Fit All Characteristics of
+Software Projects? Review and Analysis,”
+Empirical Software Engineering, vol. 28, no.
+4, 2023, doi: 10.1007/s10664-023-10334-7.
+[19] I. Rahman, “Trends in decision support system
+development using the Simple Additive
+Weighting method: Systematic literature
+review,” Jurnal Teknologi dan Sistem
+Informasi Bisnis, vol. 7, no. 1, pp. 29–35,
+2025, doi: 10.47233/jteksis.v7i1.1727.
+[20] H. Taherdoost, “Analysis of Simple Additive
+Weighting Method (SAW) as a multi-attribute
+decision-making technique: A step-by-step
+guide,” Journal of Management Science &
+Engineering Research, vol. 6, no. 1, pp.
+21–24, 2023, doi: 10.30564/jmser.v6i1.5400.
+36

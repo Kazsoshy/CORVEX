@@ -11,14 +11,19 @@ router.get('/', async (req, res) => {
   try {
     const pool = req.app.locals.pool;
 
-    // All roles
+    const includeArchived = String(req.query.status || '').toLowerCase() === 'all';
+    const statusFilter = includeArchived ? '' : `WHERE COALESCE(status, 'Active') = 'Active'`;
+
+    // Active roles by default; pass status=all to include archived.
     const rolesResult = await pool.query(
-      `SELECT role_id, role_name, slug, created_at, updated_at FROM roles ORDER BY role_id`
+      `SELECT role_id, role_name, slug, COALESCE(status, 'Active') AS status, created_at, updated_at
+       FROM roles ${statusFilter} ORDER BY role_id`
     );
 
-    // All permissions
+    // Active permissions by default (same status filter).
     const permsResult = await pool.query(
-      `SELECT permission_id, label, description, created_at FROM permissions ORDER BY permission_id`
+      `SELECT permission_id, label, description, COALESCE(status, 'Active') AS status, created_at
+       FROM permissions ${statusFilter} ORDER BY permission_id`
     );
 
     // Role-permission mapping
@@ -37,6 +42,7 @@ router.get('/', async (req, res) => {
       id:          role.role_id,
       name:        role.role_name,
       slug:        role.slug,
+      status:      role.status || 'Active',
       created_at:  role.created_at,
       updated_at:  role.updated_at,
 
@@ -149,23 +155,47 @@ router.put('/:id', async (req, res) => {
 });
 
 // ──────────────────────────────────────────────────────────────────────────────
-// DELETE /api/roles/:id  — Delete role
+// DELETE /api/roles/:id  — Soft archive (status = Inactive; record kept)
 // ──────────────────────────────────────────────────────────────────────────────
 router.delete('/:id', async (req, res) => {
   try {
     const pool = req.app.locals.pool;
     const roleId = Number(req.params.id);
-    
-    const check = await pool.query(`SELECT slug FROM roles WHERE role_id = $1`, [roleId]);
+
+    const check = await pool.query(
+      `SELECT slug, COALESCE(status, 'Active') AS status FROM roles WHERE role_id = $1`,
+      [roleId]
+    );
     if (check.rows.length === 0) return res.status(404).json({ success: false, message: 'Role not found.' });
-    if (check.rows[0].slug === 'super_admin') return res.status(403).json({ success: false, message: 'Cannot delete Super Admin role.' });
-    
-    // Note: this will cascade delete role_permissions due to ON DELETE CASCADE
-    await pool.query(`DELETE FROM roles WHERE role_id = $1`, [roleId]);
-    return res.status(200).json({ success: true, message: 'Role deleted.' });
+    if (check.rows[0].slug === 'super_admin') {
+      return res.status(403).json({ success: false, message: 'Cannot archive Super Admin role.' });
+    }
+    if (check.rows[0].status === 'Inactive') {
+      return res.status(400).json({ success: false, message: 'Role is already archived.' });
+    }
+
+    const activeUsers = await pool.query(
+      `SELECT id FROM users WHERE role_id = $1 AND status = 'Active' LIMIT 1`,
+      [roleId]
+    );
+    if (activeUsers.rows.length > 0) {
+      return res.status(409).json({
+        success: false,
+        message: 'Cannot archive role while active users are still assigned to it.',
+      });
+    }
+
+    await pool.query(
+      `UPDATE roles SET status = 'Inactive', updated_at = NOW() WHERE role_id = $1`,
+      [roleId]
+    );
+    return res.status(200).json({
+      success: true,
+      message: 'Role archived successfully. The record is preserved.',
+    });
   } catch (err) {
     console.error('[Roles] DELETE /:id error:', err.message);
-    return res.status(500).json({ success: false, message: 'Failed to delete role.' });
+    return res.status(500).json({ success: false, message: 'Failed to archive role.' });
   }
 });
 

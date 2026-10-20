@@ -1,0 +1,62 @@
+
+2.3.3.4 Analytical Interpretation and Decision 2.3.5 Entity-Relationship Diagram
+Support
+The descriptive analytics results are interpreted by
+examining the magnitude, trend, and differences of
+the calculated measures across reporting periods and
+branches. In sales analysis, an increase in the
+calculated sales value across reporting periods
+indicates increased recorded sales activity, while
+differences among branches identify variations in
+sales performance. In collection analysis, differences
+in total collections or collection rates indicate changes
+in recorded collection activity. Inventory analysis
+identifies differences in available stock and inventory
+movement, while customer payment and credit
+analysis identifies the concentration of outstanding
+balances and delinquent accounts. These interpreted
+results provide management with evidence for
+determining which areas require further review or
+action. For example, a sustained decrease in a
+branch’s sales or collection measures may prompt
+management to review the corresponding activities.
+Figure 6. Entity-Relationship Diagram
+In contrast, relatively low inventory availability may
+prompt inventory coordination or review. Higher 2.3.6 Data Dictionary
+outstanding customer balances may likewise prompt A sample of the CORVEX data dictionary is shown
+further payment or credit assessment. The module below.
+does not automatically determine the action to take;
+instead, it provides analyzed information that supports Table 15. Audit Logs Table
+authorized personnel in making informed decisions.
+Field Dat Size Description Constrai
+Name a nts
+Typ
+e
+2.3.4. Use Case Diagram
+log_id INT 11 Log ID PK,
+Auto-inc
+rement
+user_id INT 11 User FK →
+users.use
+r_id, Not
+Null
+action VAR 150 User's Not Null
+CH action
+AR
+ip_addr VAR 45 Unit IP Not Null
+ess CH address
+AR
+status_ VAR 150 Result of Not Null
+details CH action
+AR
+created TIM — Date and Not Null
+_at EST time of log
+AM creation
+P
+The Audit Logs table records significant user
+activities performed within CORVEX, including
+authentication, data updates, inventory transactions,
+Figure 5. Use Case Diagram and scheduling-related actions. It references the Users
+table to provide an audit trail for accountability,
+security, and system administration.
+21

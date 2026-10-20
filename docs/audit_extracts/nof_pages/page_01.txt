@@ -1,0 +1,67 @@
+
+CORVEX: A Mapping-Integrated Field Operations and
+Inventory Centralization System for
+Multi-Branch Enterprises
+John Misael A. Bacaron James M. Omosay
+Rameses II N. Bernabe
+BS Information Technology BS Information Technology
+University of Mindanao BS Information Technology University of Mindanao
+Matina, Davao City, 8000 University of Mindanao Matina, Davao City, 8000
+j.bacaron.543152@umindanao.edu.ph Matina, Davao City, 8000 j.omosay.547594@umindanao.edu.ph
+r.bernabe.546886@umindanao.edu.ph
+Ramcis N. Vilchez, DIT
+University of Mindanao
+Matina, Davao City, 8000
+ramcis_vilchez@umindanao.edu.ph
+CCS Concepts independently at each site [6]. Dashboard-based order
+management systems have likewise been shown to
+CCS🡪Information Systems🡪Information Systems
+reduce operational delays by consolidating scattered
+Applications🡪Enterprise Information Systems
+transaction records into a single, centrally accessible
+General Terms interface for management review [7]. In the
+Algorithms, Management, Performance, Design, Philippines, however, many micro, small, and
+Human Factors medium-sized enterprises (MSMEs) still face
+challenges adopting integrated digital technologies
+Keywords because of fragmented business processes, limited
+CORVEX; Mapping-Integrated; Multi-Branch technological capabilities, and reliance on manual
+Enterprises; Field Operations; Inventory operational procedures [8]. These challenges are
+Centralization significant considering that MSMEs account for
+99.59% of all registered business establishments in the
+1. INTRODUCTION country, making digital transformation an important
+1.1 Project Context factor in improving operational efficiency and business
+competitiveness [9]. Similar operational conditions
+The increasing adoption of digital technologies has were observed at Bethuel-Herminihildo (BH)
+transformed how organizations manage field Marketing, a multi-branch distribution enterprise
+operations, inventory, and business processes across operating in Davao City, General Santos City, and
+geographically distributed branches. Recent studies Davao Oriental. Based on interviews with the
+have shown that enterprise information systems, Operating Manager, field personnel, and warehouse
+cloud-based platforms, and mobile technologies staff, together with direct observations conducted by
+improve organizational performance by enabling the researchers, the company continues to rely on
+timely information sharing, operational coordination, manual field coordination, inventory monitoring, and
+and data-driven decision-making across business branch information exchange, resulting in unplanned
+functions [1]. Organizations operating across multiple collector routes and no controlled, centralized
+branches require integrated enterprise information visibility into customer payment history across
+systems to centralize operational data, improve branches. In comparable field-operation contexts, GIS-
+coordination among departments, and provide based route optimization has been shown to reduce
+consistent access to information that supports efficient travel distance by up to 9.40% and fuel costs by 11.6%
+business operations [2], with employee use-context when system-generated routes replace driver-
+identified as one of the strongest predictors of dependent planning [10]. At the same time, risk-based
+successful enterprise mobile system adoption, access control frameworks have demonstrated the
+reinforcing positive effects on field employee ability to restrict sensitive financial and customer data
+engagement and performance when such platforms are to authorized personnel based on contextual risk level
+properly integrated into daily operations [3]. Likewise, rather than blanket access [11] — both illustrating
+digital transformation has become a key strategy for measurable improvements a mapping- and access-
+improving supply chain flexibility, operational controlled approach could offer BH Marketing's
+responsiveness, and organizational resilience, current unplanned routes and uncontrolled cross-
+particularly among small and medium-sized branch payment visibility. These operational gaps
+enterprises (SMEs) operating in dynamic business collectively contribute to inconsistent field scheduling,
+environments [4]; this is supported by evidence that delayed operational information, fragmented inventory
+mobile, QR-based inventory management applications and customer payment records across branches, and
+allow real-time stock updates and secure multi- limited management visibility over field activities,
+organization tracking through mobile devices [5], and highlighting the need for an integrated enterprise
+that cyber-physical inventory control systems can information system that supports map-based field
+extend this synchronization across multiple physical operations, Inventory Centralization, centralized
+locations simultaneously, directly addressing the
+discrepancies that arise when inventory is tracked
+1

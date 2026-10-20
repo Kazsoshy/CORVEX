@@ -1,0 +1,75 @@
+
+required hardware and software resources, the Table 6. Estimated Development Cost
+organization's existing technical infrastructure, and
+Development Estimate Estimated Estimated
+the researchers' technical capabilities, CORVEX is
+Role Resource d Effort Rate Cost (PHP)
+technically feasible because the technologies and
+resources required for its development, deployment, Development Costs
+and long-term operation are readily available and
+appropriate for addressing BH Marketing's Systems Analyst / 20 hours ₱500/hour ₱10,000
+operational requirements. Project Manager
+2.2.4.3. Economic Feasibility Full Stack 80 hours ₱500/hour ₱40,000
+The study evaluated CORVEX's economic feasibility Developer
+by comparing projected software development costs
+with the operational benefits expected from its Database 30 hours ₱500/hour ₱15,000
+implementation at Bethuel-Herminihildo (BH) Developer
+Marketing. Based on the interviews, survey
+questionnaires, and direct observations conducted Quality Assurance 20 hours ₱500/hour ₱10,000
+Tester
+during the study, the organization incurs recurring
+operational costs associated with manual collection
+Documentation 10 hours ₱400/hour ₱4,000
+scheduling, repetitive inventory verification, and Technical
+fragmented communication among branches, delayed Writing
+customer payment verification, and paper-based
+documentation. These manual activities require Internet and Fixed — ₱4,500
+Electricity Cost
+additional labor time, transportation, communication
+expenses, and administrative effort, reducing
+System Testing Fixed — ₱5,000
+operational efficiency. The system addresses these and Deployment Cost
+inefficiencies by automating customer prioritization
+for collectors, synchronizing inventory and customer User Orientation Fixed — ₱3,000
+payment information across branches, and providing and Training Cost
+Materials
+centralized monitoring of business activities to reduce
+repetitive manual processes and improve resource
+Contingency — — ₱5,000
+utilization. (approximately
+5%)
+The estimated development cost of CORVEX was
+prepared using an effort-based software cost Subtotal (Development Cost) ₱96,500.00
+estimation approach, wherein project costs were
+derived from the estimated workload of each Operational Subscription (After Deployment)
+development role and prevailing software
+development rates in the Philippines. This approach is Cloud Hosting Monthly ₱2,500/mon ₱2,500
+consistent with industry practice, where software (VPS/Cloud th
+Server)
+development costs are estimated based on personnel
+effort, project scope, and resource utilization rather
+Domain Name Monthly ₱125/month ₱125
+than software licensing alone. Furthermore, the Equivalen
+project utilizes open-source technologies including t
+React.js, Node.js, Express.js, Python, PostgreSQL,
+PostGIS, Leaflet.js, OpenStreetMap, Nominatim, and SSL Certificate Monthly ₱250/month ₱250
+Equivalen
+OpenRouteService, eliminating software licensing
+t
+expenses and significantly reducing implementation
+costs. Although the organization incurs recurring Database Backup Monthly ₱500/month ₱500
+costs for internet connectivity and routine system and Cloud Storage
+maintenance, these expenses are considerably
+outweighed by the anticipated benefits, including System Monthly ₱3,000/mon ₱3,000
+Maintenance and th
+improved field productivity, synchronized inventory
+Technical Support
+information, centralized customer payment
+verification, reduced paper consumption, enhanced
+Total Monthly Subscription Cost ₱6,375/
+operational visibility, and faster managerial month
+decision-making. Therefore, CORVEX is considered
+economically feasible because its projected long-term Estimated Annual Operational Cost ₱76,500/
+operational benefits justify the estimated investment year
+required for its development and implementation.
+11

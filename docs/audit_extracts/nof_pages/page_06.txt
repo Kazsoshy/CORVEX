@@ -1,0 +1,82 @@
+
+measure respondents' level of agreement with existing monitor activities across branches, evaluate
+operational practices. At the same time, open-ended sales, collection, inventory, and credit
+questions allowed participants to describe operational conditions, and support management
+issues and suggest improvements. decision-making. The Operating Manager
+also needs to manage customer and branch
+To further validate the survey findings, the researchers
+records and approve credit investigation
+conducted a face-to-face semi-structured interview
+requests according to authorized
+with the Operating Manager using a prepared interview
+responsibilities.
+guide. The interview focused on the organization's
+overall operational workflow, the responsibilities of 2.2.1.2. The Branch Manager needs branch-
+each operational role, existing branch coordination level information on collection activities,
+procedures, Inventory Centralization practices, sales activities, inventory availability and
+customer payment verification, operational reporting, movements, customer payment information,
+and the challenges of managing geographically staff performance, and field activities to
+distributed branches. The interview also validated the supervise collection, sales, inventory, and
+operational requirements identified through the survey field activities within the assigned branch,
+responses and clarified organizational policies that coordinate branch resources, monitor branch
+structured questionnaires alone could not capture. performance, and identify sales, inventory,
+and collection issues requiring management
+In addition, the researchers conducted on-site
+attention.
+observations across the company's branches to
+examine how collection activities, sales canvassing, 2.2.1.3. The Collector needs to identify and prioritize
+inventory management, and branch coordination are customers for daily collection activities, view
+executed in practice. Particular attention was given to customer locations and recommended travel
+how collectors prioritize customer visits, how sales routes, access authorized customer payment
+agents conduct canvassing within assigned service information, and review collection history to
+territories, how warehouse personnel verify inventory, prepare for field visits. The Collector also
+and how operational information is communicated needs to record collection transactions and
+among branches. These observations enabled the synchronize completed collection records
+researchers to compare actual operational practices with the centralized database.
+with the information gathered from the surveys and
+2.2.1.4. The Sales Agent needs to identify customers
+interviews, thereby strengthening the validity of the
+and prospective customers within assigned
+collected data.
+service territories, view customer locations
+The information from the surveys, interviews, and and recommended travel routes, and access
+direct observations served as the basis for identifying authorized customer account information to
+the system's functional and non-functional support canvassing activities. The Sales
+requirements. The findings guided the design and Agent also needs to record sales transactions,
+development of the map-based field operations submit field activity information, and
+module, customer prioritization using the Simple synchronize completed sales records with the
+Additive Weighting (SAW) method, Inventory centralized database.
+Centralization, centralized customer payment
+2.2.1.5. The Inventory Staff needs to maintain accurate
+verification, operations dashboard, and role-based
+inventory records by recording stock
+access control to address the operational challenges
+movements, stock transfers, and inventory
+identified at Bethuel-Herminihildo (BH) Marketing.
+adjustments, viewing current inventory and
+2.2 Analysis restock history, and checking product
+availability across branches. The Inventory
+2.2.1 User Requirements
+Staff also needs synchronized inventory
+This section presents the user requirements identified information to coordinate stock availability
+through the interviews, survey questionnaires, and and movement between branches.
+direct observations conducted at Bethuel-Herminihildo
+(BH) Marketing. These requirements describe the 2.2.1.6. The Customer needs to access
+information, activities, and system functions intended relevant account information maintained by
+users need based on their respective responsibilities. the system, including payment history and
+The requirements support collection management, outstanding balance, to review the status of
+sales field activities, inventory centralization, their account and transactions with BH
+customer payment and credit verification, field Marketing.
+operations, and branch-level monitoring. The system's
+intended users are the Operating Manager, Branch 2.2.2 Hardware and Software Requirement
+Manager, Customer, Collector, Sales Agent, and 2.2.2.1. Software Requirement
+Inventory Staff, with access and functions assigned
+Table 2. Software Requirements
+according to their roles.
+Table 2 presents the software requirements needed to
+2.2.1.1. The Operating Manager needs consolidated develop and deploy the CORVEX system.
+information on collection performance, sales
+activities, inventory status, customer payment 2.2.2.2. Hardware Requirement
+and credit records, field activities, staff
+performance, and branch performance to Table 3. Hardware Software
+6

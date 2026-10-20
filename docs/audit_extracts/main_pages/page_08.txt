@@ -1,0 +1,92 @@
+
+behavior that supports BH Marketing's operational
+PostgreSQL to store, manage, and process
+needs.
+geographic information such as customer
+coordinate, branch location, collection
+routes, and sales territories.
+Table 4. Functional Requirements
+Module FR No. The system shall…
+Leaflet.js Used to provide interactive map
+visualization of customer locations, service User Authentication FR-01 authenticate authorized users using
+territories, and operational activities. their registered username and
+password before granting system
+access.
+OpenStreet Used as the base map provider for
+Map displaying geographic information.
+FR-02 allow authenticated users to
+securely sign out of the system.
+Nominatim Used to convert customer and branch
+addresses into geographic coordinates FR-03 deny access when invalid login
+(geocoding). credentials are entered.
+User Account FR-04 allow the Operating Manager to
+OpenRouteS Used to calculate and display recommended
+Management create user accounts for Branch
+ervice travel routes between customer locations. Heads, Collectors, Sales Agents,
+and Warehouse Personnel. The
+system shall also allow a Customer
+Recharts Used to generate analytical charts and to view only their own outstanding
+dashboard visualizations. balance and payment history.
+Git & Used for version control, collaborative FR-05 allow the Operating Manager to
+GitHub development, and source code update user account information.
+management.
+FR-06 allow the Operating Manager to
+activate or deactivate user
+Table 2 presents the software requirements needed to
+accounts.
+develop and deploy the CORVEX system.
+FR-07 assign role-based access
+2.2.2.2. Hardware Requirement permissions according to the user's
+designated role.
+Table 3. Hardware Software
+Profile Management FR-08 allow users to view their personal
+profile information.
+Hardware Minimum Specifications
+FR-09 allow users to update their profile
+Development Operating System: Windows 10/11 information and account password.
+Computer (64-bit); Processor: Intel Core i5
+(11th Generation) or AMD Ryzen 5 Customer FR-10 retrieve customer records required
+(or higher); Memory: Minimum 8 Prioritization (SAW for SAW computation.
+GB RAM; Storage: 256 GB SSD or Module)
+higher. FR-11 normalize customer criteria values
+using the Simple Additive
+Weighting (SAW) method.
+Mobile Device Android 10 or later with internet
+connectivity for collectors and sales
+FR-12 calculate the weighted preference
+agents during field operations.
+score of every customer.
+GPS-Enabled Required to obtain the current FR-13 rank customers according to their
+computed SAW scores.
+Smartphone location of collectors and sales
+agents for route visualization and
+collection scheduling. FR-14 generate the daily prioritized
+collection schedule for Collectors.
+Internet Minimum 10 Mbps download/upload
+FR-15 The system shall display customer
+Connection speed to support database locations and assigned service
+synchronization, dashboard territories to support sales
+monitoring, and cloud canvassing activities.
+communication.
+Field Portal FR-16 The system shall display the
+prioritized collection schedule for
+Table 3 presents the minimum hardware requirements Collectors and the assigned
+for developing, deploying, and using the CORVEX customer locations and service
+territories for Sales Agents.
+system.
+FR-17 Display recommended travel
+2.2.3. Functional and Non-Functional routes using OpenRouteService.
+Requirements
+FR-18 allow Collectors to record
+2.2.3.1. Functional Requirement collection transactions.
+This section presents CORVEX's functional
+requirements, which describe the specific behaviors FR-19 allow Sales Agents to record sales
+transactions.
+and services the system must perform based on the
+identified user requirements. These requirements are
+FR-20 allow users to submit field activity
+organized by system module and written from the reports.
+system's perspective. Each functional requirement
+represents a specific, observable, and testable system FR-21 generate digital receipts for
+completed collection transactions.
+8

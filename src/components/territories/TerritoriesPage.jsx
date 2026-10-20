@@ -342,7 +342,7 @@ export function TerritoriesPage({ showToast }) {
   };
 
   const handleArchive = async (id) => {
-    if (!window.confirm('Are you sure you want to archive this territory?')) return;
+    if (!window.confirm('Archive this territory? The record is preserved. Related customer history is not removed.')) return;
     try {
       await deleteTerritory(id);
       showToast('Territory archived successfully', 'success');
@@ -391,7 +391,7 @@ export function TerritoriesPage({ showToast }) {
   };
 
   return (
-    <div className="page-container">
+    <div className="page">
       <section className="panel content-panel relative overflow-hidden">
         <div className="list-section-header">
           <h3>Territories</h3>

@@ -1,7 +1,7 @@
 import { Pagination } from '../shared/Pagination';
 import { StatsGrid, Stats } from '../shared/StatsGrid';
 import { usePagination } from '../../hooks/usePagination';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { login as apiLogin, getEntryPathForRole, requestLogout } from '../../api/authService.js';
 import { updateMyProfile } from '../../api/profileService.js';
@@ -22,6 +22,7 @@ import { fetchNotifications } from '../../api/notificationService.js';
 import { formatDisplayDate, formatDisplayDateTime, formatCurrency } from '../../utils/formatters.js';
 import { EmptyState } from '../shared/EmptyState';
 import { LoadingState } from '../shared/LoadingState';
+import { DetailRowsTable } from '../shared/DetailRowsTable';
 import { StatusBadge } from '../StatusBadge';
 import { NavIcon } from '../../navIcons';
 function LoginPage({
@@ -104,6 +105,136 @@ function monthStartKey(monthStart) {
   return String(monthStart).slice(0, 10);
 }
 
+const CAROUSEL_MAX_SLIDES = 5;
+const CAROUSEL_SWIPE_THRESHOLD = 48;
+
+function CustomerProductCarousel() {
+  const [products, setProducts] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [activeIndex, setActiveIndex] = useState(0);
+  const touchStartX = useRef(null);
+  const touchDeltaX = useRef(0);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function load() {
+      const res = await fetchCustomerPortalProducts();
+      if (!cancelled) {
+        if (res.success) {
+          setProducts((res.data || []).slice(0, CAROUSEL_MAX_SLIDES));
+        }
+        setLoading(false);
+      }
+    }
+    load();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const slideCount = products.length;
+
+  const goTo = (index) => {
+    if (!slideCount) return;
+    const next = ((index % slideCount) + slideCount) % slideCount;
+    setActiveIndex(next);
+  };
+
+  const goPrev = () => goTo(activeIndex - 1);
+  const goNext = () => goTo(activeIndex + 1);
+
+  const onTouchStart = (event) => {
+    const touch = event.touches?.[0];
+    if (!touch) return;
+    touchStartX.current = touch.clientX;
+    touchDeltaX.current = 0;
+  };
+
+  const onTouchMove = (event) => {
+    if (touchStartX.current == null) return;
+    const touch = event.touches?.[0];
+    if (!touch) return;
+    touchDeltaX.current = touch.clientX - touchStartX.current;
+  };
+
+  const onTouchEnd = () => {
+    const delta = touchDeltaX.current;
+    touchStartX.current = null;
+    touchDeltaX.current = 0;
+    if (Math.abs(delta) < CAROUSEL_SWIPE_THRESHOLD) return;
+    if (delta < 0) goNext();
+    else goPrev();
+  };
+
+  if (loading || !slideCount) return null;
+
+  return (
+    <section className="customer-product-carousel" aria-roledescription="carousel" aria-label="Featured products">
+      <div
+        className="customer-product-carousel__stage"
+        onTouchStart={onTouchStart}
+        onTouchMove={onTouchMove}
+        onTouchEnd={onTouchEnd}
+        onTouchCancel={onTouchEnd}
+      >
+        <div
+          className="customer-product-carousel__track"
+          style={{ transform: `translateX(-${activeIndex * 100}%)` }}
+        >
+          {products.map((product, index) => {
+            const name = product.product_name || 'Product';
+            const category = product.category_name || 'Uncategorized';
+            const price = formatCurrency(Number(product.unit_price || 0));
+            return (
+              <article
+                key={product.product_id}
+                className="customer-product-carousel__slide"
+                aria-hidden={index !== activeIndex}
+                aria-label={`${index + 1} of ${slideCount}`}
+              >
+                <p className="customer-product-carousel__eyebrow">{category}</p>
+                <h3 className="customer-product-carousel__title">{name}</h3>
+                <p className="customer-product-carousel__price">{price}</p>
+              </article>
+            );
+          })}
+        </div>
+
+        <button
+          type="button"
+          className="customer-product-carousel__arrow customer-product-carousel__arrow--prev"
+          aria-label="Previous product"
+          onClick={goPrev}
+        >
+          <span className="customer-product-carousel__chevron" aria-hidden="true" />
+        </button>
+        <button
+          type="button"
+          className="customer-product-carousel__arrow customer-product-carousel__arrow--next"
+          aria-label="Next product"
+          onClick={goNext}
+        >
+          <span className="customer-product-carousel__chevron" aria-hidden="true" />
+        </button>
+
+        <div className="customer-product-carousel__dots" role="tablist" aria-label="Carousel slides">
+          {products.map((product, index) => (
+            <button
+              key={product.product_id}
+              type="button"
+              role="tab"
+              aria-label={`Show product ${index + 1}`}
+              aria-selected={index === activeIndex}
+              className={`customer-product-carousel__dot${index === activeIndex ? ' is-active' : ''}`}
+              onClick={() => goTo(index)}
+            />
+          ))}
+        </div>
+      </div>
+    </section>
+  );
+}
+
 function HomePage({
   navigate
 }) {
@@ -160,8 +291,10 @@ function HomePage({
       value: account?.branch_name || '—'
     }, {
       label: 'Account Status',
-      value: account?.status || '—'
+      value: <StatusBadge status={account?.status || '—'} />
     }]} />
+
+      <CustomerProductCarousel />
 
       <div className="flex flex-wrap gap-2 justify-end mt-4 mb-4">
         <button className="button secondary" type="button" onClick={() => navigate('/customer/statements')}>Statements</button>
@@ -174,16 +307,41 @@ function HomePage({
       <div className="dashboard-widgets grid two-up">
         <section className="panel content-panel relative overflow-hidden">
           <div className="flex flex-col md:flex-row justify-between gap-4 items-start md:items-center mb-4"><h3>Recent Payments</h3></div>
-          {recentPayments.length ? <ul className="list-none p-0 m-0 flex flex-col gap-3">
-              {recentPayments.map(p => <li key={p.collectionpayment_id}><div><strong>{formatCurrency(Number(p.amount))}</strong><span className="text-ink/70">{formatDisplayDate(p.payment_date)}</span></div><span>{p.receipt_number || '—'}</span></li>)}
-            </ul> : <EmptyState title="No payments yet" description="Your payment history will appear here after collections are recorded." />}
+          {recentPayments.length ? (
+            <div className="corvex-table-wrapper">
+              <table className="corvex-table">
+                <thead>
+                  <tr>
+                    <th>Payment Date</th>
+                    <th>Amount</th>
+                    <th>Receipt #</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {recentPayments.map((p) => (
+                    <tr key={p.collectionpayment_id}>
+                      <td>{formatDisplayDate(p.payment_date)}</td>
+                      <td>{formatCurrency(Number(p.amount))}</td>
+                      <td>{p.receipt_number || '—'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ) : (
+            <EmptyState title="No payments yet" description="Your payment history will appear here after collections are recorded." />
+          )}
         </section>
         <section className="panel content-panel relative overflow-hidden">
           <div className="flex flex-col md:flex-row justify-between gap-4 items-start md:items-center mb-4"><h3>Account Activity</h3></div>
-          <ul className="list-none p-0 m-0 flex flex-col gap-3">
-            <li><div><strong>Last collection</strong></div><span>{account?.last_collection_date ? formatDisplayDate(account.last_collection_date) : '—'}</span></li>
-            <li><div><strong>Last sales visit</strong></div><span>{account?.last_sales_visit ? formatDisplayDate(account.last_sales_visit) : '—'}</span></li>
-          </ul>
+          <DetailRowsTable
+            fieldHeader="Activity"
+            detailsHeader="Date and Time"
+            rows={[
+              { label: 'Last collection', value: account?.last_collection_date ? formatDisplayDate(account.last_collection_date) : '—' },
+              { label: 'Last sales visit', value: account?.last_sales_visit ? formatDisplayDate(account.last_sales_visit) : '—' },
+            ]}
+          />
         </section>
       </div>
 
@@ -205,7 +363,9 @@ function AccountDetailsPage({
   const [account, setAccount] = useState(null);
   const [loading, setLoading] = useState(true);
   const [contact, setContact] = useState({ contactNumber: '', email: '' });
+  const [currentPassword, setCurrentPassword] = useState('');
   const [password, setPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [saving, setSaving] = useState(false);
   useEffect(() => {
@@ -227,42 +387,14 @@ function AccountDetailsPage({
   return <div className="page customer-page">
       <section className="panel content-panel relative overflow-hidden">
         <div className="list-section-header"><h3>Account Information</h3></div>
-        <div className="corvex-table-wrapper">
-          <table className="corvex-table">
-            <thead>
-              <tr>
-                <th>Field</th>
-                <th>Details</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr>
-                <td>Customer Name</td>
-                <td><strong>{`${account.first_name || ''} ${account.last_name || ''}`.trim() || '—'}</strong></td>
-              </tr>
-              <tr>
-                <td>Account Number</td>
-                <td><span style={{ fontFamily: 'monospace', fontSize: '0.82rem' }}>{account.customer_code || account.customer_id || '—'}</span></td>
-              </tr>
-              <tr>
-                <td>Address</td>
-                <td>{account.address || '—'}</td>
-              </tr>
-              <tr>
-                <td>Branch</td>
-                <td>{account.branch_name || '—'}</td>
-              </tr>
-              <tr>
-                <td>Account Status</td>
-                <td><StatusBadge status={account.status || '—'} /></td>
-              </tr>
-              <tr>
-                <td>Portal Status</td>
-                <td><StatusBadge status={account.portal_status || '—'} /></td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
+        <DetailRowsTable rows={[
+          { label: 'Customer Name', value: <strong>{`${account.first_name || ''} ${account.last_name || ''}`.trim() || '—'}</strong> },
+          { label: 'Account Number', value: <span style={{ fontFamily: 'monospace', fontSize: '0.82rem' }}>{account.customer_code || account.customer_id || '—'}</span> },
+          { label: 'Address', value: account.address || '—' },
+          { label: 'Branch', value: account.branch_name || '—' },
+          { label: 'Account Status', value: <StatusBadge status={account.status || '—'} /> },
+          { label: 'Portal Status', value: <StatusBadge status={account.portal_status || '—'} /> },
+        ]} />
       </section>
 
       <section className="panel form-panel content-panel">
@@ -278,27 +410,52 @@ function AccountDetailsPage({
       </section>
 
       {showPassword ? <section className="panel form-panel content-panel">
-        <label>New password<input type="password" value={password} onChange={e => setPassword(e.target.value)} placeholder="Min. 8 characters" /></label>
+        <div className="form-grid">
+          <label>Current password<input type="password" value={currentPassword} onChange={e => setCurrentPassword(e.target.value)} autoComplete="current-password" /></label>
+          <label>New password<input type="password" value={password} onChange={e => setPassword(e.target.value)} placeholder="Min. 8 characters" autoComplete="new-password" /></label>
+          <label>Confirm new password<input type="password" value={confirmPassword} onChange={e => setConfirmPassword(e.target.value)} placeholder="Re-enter new password" autoComplete="new-password" /></label>
+        </div>
       </section> : null}
       <div className="flex justify-end gap-2 mt-4">
+        <button className="button ghost" type="button" onClick={() => requestLogout()}>Logout</button>
         <button className="button secondary" type="button" disabled={saving} onClick={async () => {
           if (!showPassword) {
             setShowPassword(true);
+            return;
+          }
+          if (!currentPassword) {
+            showToast('Enter your current password.', 'error');
             return;
           }
           if (password.trim().length < 8) {
             showToast('Password must be at least 8 characters.', 'error');
             return;
           }
+          if (password.trim() !== confirmPassword.trim()) {
+            showToast('New password and confirmation do not match.', 'error');
+            return;
+          }
           setSaving(true);
-          const result = await updateMyProfile({ password: password.trim() });
+          const result = await updateMyProfile({
+            current_password: currentPassword,
+            password: password.trim(),
+            confirm_password: confirmPassword.trim(),
+          });
           setSaving(false);
           if (result.success) {
+            setCurrentPassword('');
             setPassword('');
+            setConfirmPassword('');
             setShowPassword(false);
-            showToast('Password updated.', 'success');
+            showToast(result.message || 'Password updated.', 'success');
           } else showToast(result.message || 'Failed to change password.', 'error');
         }}>{showPassword ? 'Save Password' : 'Change Password'}</button>
+        {showPassword ? <button className="button ghost" type="button" disabled={saving} onClick={() => {
+          setShowPassword(false);
+          setCurrentPassword('');
+          setPassword('');
+          setConfirmPassword('');
+        }}>Cancel</button> : null}
         <button className="button" type="button" disabled={saving} onClick={async () => {
           setSaving(true);
           const result = await updateCustomerPortalContact({
@@ -464,15 +621,15 @@ function ReceiptDetailPage({
   return <div className="page customer-page">
       <section className="panel content-panel receipt-preview">
         <div className="flex flex-col md:flex-row justify-between gap-4 items-start md:items-center mb-4"><h3>Receipt {receipt.receipt_number}</h3></div>
-        <ul className="detail-list">
-          <li><span>Date</span><strong>{formatDisplayDate(receipt.receipt_date || receipt.payment_date)}</strong></li>
-          <li><span>Amount</span><strong>{formatCurrency(Number(receipt.amount))}</strong></li>
-          <li><span>Payment method</span><strong>{receipt.payment_method || '—'}</strong></li>
-          <li><span>Collector</span><strong>{receipt.collector_name || '—'}</strong></li>
-          <li><span>Account</span><strong>{receipt.customer_code || '—'}</strong></li>
-          <li><span>Branch</span><strong>{receipt.branch_name || '—'}</strong></li>
-          <li><span>Status</span><strong>{receipt.status || '—'}</strong></li>
-        </ul>
+        <DetailRowsTable rows={[
+          { label: 'Date', value: formatDisplayDate(receipt.receipt_date || receipt.payment_date) },
+          { label: 'Amount', value: formatCurrency(Number(receipt.amount)) },
+          { label: 'Payment method', value: receipt.payment_method || '—' },
+          { label: 'Collector', value: receipt.collector_name || '—' },
+          { label: 'Account', value: receipt.customer_code || '—' },
+          { label: 'Branch', value: receipt.branch_name || '—' },
+          { label: 'Status', value: <StatusBadge status={receipt.status || '—'} /> },
+        ]} />
       </section>
     </div>;
 }
@@ -570,12 +727,12 @@ function StatementDetailPage({
   return <div className="page customer-page">
       <section className="panel content-panel relative overflow-hidden">
         <div className="flex flex-col md:flex-row justify-between gap-4 items-start md:items-center mb-4"><h3>{label}</h3></div>
-        <ul className="detail-list">
-          <li><span>Period</span><strong>{label}</strong></li>
-          <li><span>Total Paid This Month</span><strong>{formatCurrency(Number(monthRow.total_paid || 0))}</strong></li>
-          <li><span>Current Outstanding Balance</span><strong>{formatCurrency(Number(account?.outstanding_balance || 0))}</strong></li>
-          <li><span>Account</span><strong>{account?.customer_code || '—'}</strong></li>
-        </ul>
+        <DetailRowsTable rows={[
+          { label: 'Period', value: label },
+          { label: 'Total Paid This Month', value: formatCurrency(Number(monthRow.total_paid || 0)) },
+          { label: 'Current Outstanding Balance', value: formatCurrency(Number(account?.outstanding_balance || 0)) },
+          { label: 'Account', value: account?.customer_code || '—' },
+        ]} />
       </section>
       <div className="flex justify-end mt-4">
         <button className="button" type="button" onClick={() => {
@@ -608,76 +765,57 @@ function ProfilePage({
 }) {
   const [account, setAccount] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [editingContact, setEditingContact] = useState(false);
+  const [contact, setContact] = useState({ contactNumber: '', email: '' });
   const [otpEnabled, setOtpEnabled] = useState(() => localStorage.getItem('corvex_customer_otp') !== '0');
   const [showPassword, setShowPassword] = useState(false);
+  const [currentPassword, setCurrentPassword] = useState('');
   const [password, setPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
   const [saving, setSaving] = useState(false);
   useEffect(() => {
     async function load() {
       const res = await fetchCustomerPortalMe();
-      if (res.success) setAccount(res.data);
+      if (res.success && res.data) {
+        setAccount(res.data);
+        setContact({
+          contactNumber: res.data.contact_phone || '',
+          email: res.data.portal_email || '',
+        });
+      }
       setLoading(false);
     }
     load();
   }, []);
   if (loading) return <LoadingState message="Loading profile…" />;
   if (!account) return <EmptyState title="Profile unavailable" description="Could not load your customer record." />;
-  const customerName = `${account.first_name || ''} ${account.last_name || ''}`.trim() || '—';
+  const customerName = `${account.first_name || ''} ${account.middle_name || ''} ${account.last_name || ''}`.replace(/\s+/g, ' ').trim() || '—';
   return <div className="page customer-page">
       <section className="panel content-panel relative overflow-hidden">
         <div className="list-section-header"><h3>Personal Information</h3></div>
-        <div className="corvex-table-wrapper">
-          <table className="corvex-table">
-            <thead>
-              <tr>
-                <th>Field</th>
-                <th>Details</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr>
-                <td>Name</td>
-                <td><strong>{customerName}</strong></td>
-              </tr>
-              <tr>
-                <td>Account Number</td>
-                <td><span style={{ fontFamily: 'monospace', fontSize: '0.82rem' }}>{account.customer_code || account.customer_id || '—'}</span></td>
-              </tr>
-              <tr>
-                <td>Branch</td>
-                <td>{account.branch_name || '—'}</td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
+        <DetailRowsTable rows={[
+          { label: 'Name', value: <strong>{customerName}</strong> },
+          { label: 'Account Number', value: <span style={{ fontFamily: 'monospace', fontSize: '0.82rem' }}>{account.customer_code || account.customer_id || '—'}</span> },
+          { label: 'Branch', value: account.branch_name || '—' },
+          { label: 'Status', value: <StatusBadge status={account.status || '—'} /> },
+        ]} />
       </section>
 
       <section className="panel content-panel relative overflow-hidden">
         <div className="list-section-header"><h3>Contact Information</h3></div>
-        <div className="corvex-table-wrapper">
-          <table className="corvex-table">
-            <thead>
-              <tr>
-                <th>Field</th>
-                <th>Details</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr>
-                <td>Phone</td>
-                <td>{account.contact_phone || '—'}</td>
-              </tr>
-              <tr>
-                <td>Email</td>
-                <td>{account.portal_email || '—'}</td>
-              </tr>
-              <tr>
-                <td>Address</td>
-                <td>{account.address || '—'}</td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
+        {editingContact ? (
+          <div className="form-grid">
+            <label>Phone<input value={contact.contactNumber} onChange={e => setContact(c => ({ ...c, contactNumber: e.target.value }))} /></label>
+            <label>Email<input type="email" value={contact.email} onChange={e => setContact(c => ({ ...c, email: e.target.value }))} /></label>
+            <label>Address<input value={account.address || ''} readOnly /></label>
+          </div>
+        ) : (
+          <DetailRowsTable rows={[
+            { label: 'Phone', value: account.contact_phone || '—' },
+            { label: 'Email', value: account.portal_email || '—' },
+            { label: 'Address', value: account.address || '—' },
+          ]} />
+        )}
       </section>
 
       <section className="panel form-panel content-panel">
@@ -692,7 +830,11 @@ function ProfilePage({
       </section>
 
       {showPassword ? <section className="panel form-panel content-panel">
-        <label>New password<input type="password" value={password} onChange={e => setPassword(e.target.value)} placeholder="Min. 8 characters" /></label>
+        <div className="form-grid">
+          <label>Current password<input type="password" value={currentPassword} onChange={e => setCurrentPassword(e.target.value)} autoComplete="current-password" /></label>
+          <label>New password<input type="password" value={password} onChange={e => setPassword(e.target.value)} placeholder="Min. 8 characters" autoComplete="new-password" /></label>
+          <label>Confirm new password<input type="password" value={confirmPassword} onChange={e => setConfirmPassword(e.target.value)} placeholder="Re-enter new password" autoComplete="new-password" /></label>
+        </div>
       </section> : null}
       <div className="flex justify-end gap-2 mt-4">
         <button className="button ghost" type="button" onClick={() => requestLogout()}>Logout</button>
@@ -701,19 +843,61 @@ function ProfilePage({
             setShowPassword(true);
             return;
           }
+          if (!currentPassword) {
+            showToast('Enter your current password.', 'error');
+            return;
+          }
           if (password.trim().length < 8) {
             showToast('Password must be at least 8 characters.', 'error');
             return;
           }
+          if (password.trim() !== confirmPassword.trim()) {
+            showToast('New password and confirmation do not match.', 'error');
+            return;
+          }
           setSaving(true);
-          const result = await updateMyProfile({ password: password.trim() });
+          const result = await updateMyProfile({
+            current_password: currentPassword,
+            password: password.trim(),
+            confirm_password: confirmPassword.trim(),
+          });
           setSaving(false);
           if (result.success) {
+            setCurrentPassword('');
             setPassword('');
+            setConfirmPassword('');
             setShowPassword(false);
-            showToast('Password updated.', 'success');
+            showToast(result.message || 'Password updated.', 'success');
           } else showToast(result.message || 'Failed to change password.', 'error');
         }}>{showPassword ? 'Save Password' : 'Change Password'}</button>
+        {showPassword ? <button className="button ghost" type="button" disabled={saving} onClick={() => {
+          setShowPassword(false);
+          setCurrentPassword('');
+          setPassword('');
+          setConfirmPassword('');
+        }}>Cancel</button> : null}
+        {editingContact ? <>
+            <button className="button ghost" type="button" disabled={saving} onClick={() => {
+              setEditingContact(false);
+              setContact({
+                contactNumber: account.contact_phone || '',
+                email: account.portal_email || '',
+              });
+            }}>Cancel</button>
+            <button className="button" type="button" disabled={saving} onClick={async () => {
+              setSaving(true);
+              const result = await updateCustomerPortalContact({
+                contact_phone: contact.contactNumber,
+                portal_email: contact.email,
+              });
+              setSaving(false);
+              if (result.success) {
+                setAccount(result.data);
+                setEditingContact(false);
+                showToast('Profile updated.', 'success');
+              } else showToast(result.message || 'Failed to update profile.', 'error');
+            }}>Save Profile</button>
+          </> : <button className="button" type="button" onClick={() => setEditingContact(true)}>Update Profile</button>}
       </div>
     </div>;
 }
@@ -797,7 +981,7 @@ function CustomerPurchaseRequestsPage({ navigate, showToast }) {
               <tbody>
                 {requests.map((req) => <tr key={req.request_id}>
                     <td>{req.request_id}</td>
-                    <td>{req.status}</td>
+                    <td><StatusBadge status={req.status} /></td>
                     <td>{(req.items || []).map((item) => `${item.product_name} × ${item.quantity}`).join(', ')}</td>
                     <td>{formatDisplayDateTime(req.created_at)}</td>
                   </tr>)}

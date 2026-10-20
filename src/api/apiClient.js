@@ -32,14 +32,25 @@ apiClient.interceptors.request.use(
   (error) => Promise.reject(error)
 );
 
-// Response interceptor — handle global errors
+// Response interceptor — keep the sliding session and end idle sessions
 apiClient.interceptors.response.use(
-  (response) => response,
+  (response) => {
+    const nextToken = response.headers?.['x-session-token'];
+    if (nextToken) localStorage.setItem('corvex_token', nextToken);
+    return response;
+  },
   (error) => {
     if (error.response?.status === 401) {
-      // Clear stale session
+      const message = error.response?.data?.message || '';
       localStorage.removeItem('corvex_user');
       localStorage.removeItem('corvex_token');
+      if (/inactivity/i.test(message)) {
+        sessionStorage.setItem(
+          'corvex_auth_notice',
+          'Your session ended after 15 minutes of inactivity. Sign in again.'
+        );
+        window.dispatchEvent(new Event('session-ended'));
+      }
     }
     return Promise.reject(error);
   }

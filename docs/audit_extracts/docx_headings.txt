@@ -1,0 +1,72 @@
+[Heading 1] 1. INTRODUCTION
+[Normal] 1.1 Project Context
+[Normal] 1.2. Purpose and Description
+[Normal] 1.3. Objectives
+[Normal] 1.3.1 General Objectives
+[Normal] 1.3.2 Specific Objectives 
+[Normal] 1.3.2.1. Develop a map-based field operations module using Leaflet.js integrated with the Simple Additive Weighting (SAW) method that generates a prioritized daily collection list and corresponding route visualization for collectors. 
+[Normal] 1.3.2.2. Develop an offline-capable Field Portal using React.js to enable collectors and sales agents to digitally record collection transactions, sales transactions, and field activities with automatic synchronization once network connectiv
+[Normal] 1.3.2.3.	Develop an Inventory Centralization module using PostgreSQL to maintain accurate and updated inventory records across all branches, reducing delayed stock updates, duplicate inventory records, inaccurate stock information, and overs
+[Normal] 1.3.2.4. Develop a centralized customer payment monitoring module using PostgreSQL that enables authorized management personnel to verify company-wide customer payment records for timely credit verification and informed credit decision-makin
+[Normal] 1.3.2.5. Develop an Inventory and Sales Dashboard using React.js and PostgreSQL that applies descriptive analytics to summarize collection performance, sales activities, inventory status, customer payment information, customer credit line re
+[Normal] 1.4. Scope and Limitations
+[Heading 1] 2. METHODS
+[Heading 2] 2.1 Data Gathering
+[Heading 3] 2.2	Analysis
+[Heading 3] 2.2.1 	User Requirements
+[Normal] 2.2.1.1. The Operating Manager needs consolidated information on collection performance, sales activities, inventory status, customer payment and credit records, field activities, staff performance, and branch performance to monitor activiti
+[Normal] 2.2.1.2. The Branch Manager needs branch-level information on collection activities, sales activities, inventory availability and movements, customer payment information, staff performance, and field activities to supervise collection, sales
+[Normal] 2.2.1.3. The Collector needs to identify and prioritize customers for daily collection activities, view customer locations and recommended travel routes, access authorized customer payment information, and review collection history to prepar
+[Normal] 2.2.1.4. The Sales Agent needs to identify customers and prospective customers within assigned service territories, view customer locations and recommended travel routes, and access authorized customer account information to support canvassi
+[Normal] 2.2.1.5. The Inventory Staff needs to maintain accurate inventory records by recording stock movements, stock transfers, and inventory adjustments, viewing current inventory and restock history, and checking product availability across branc
+[Normal] 2.2.1.6. The Customer needs to access relevant account information maintained by the system, including payment history and outstanding balance, to review the status of their account and transactions with BH Marketing.
+[Heading 3] 2.2.2	Hardware and Software Requirement
+[Heading 3] 2.2.2.1.  Software Requirement
+[Heading 3] Table 2. Software Requirements 
+[Heading 3] Table 2 presents the software requirements needed to develop and deploy the  CORVEX system. 
+[Heading 3] 2.2.2.2.  Hardware Requirement
+[Normal] 2.2.3. 	Functional and Non-Functional Requirements
+[Heading 3] 2.2.3.1.	Functional Requirement
+[Heading 3] 
+[Heading 3] 2.2.3.2.	Non-Functional Requirement
+[Heading 3] 2.2.4.	Feasibility Requirements 
+[Heading 3] 2.2.4.1. 	Operational Feasibility
+[Normal] 2.2.4.2 Technical Feasibility
+[Normal] 2.2.4.3. Economic Feasibility
+[Normal] 2.2.4.4. 	Schedule Feasibility
+[Heading 2] 2.3 Design
+[Heading 3] 2.3.1 Conceptual Framework
+[Heading 3] 
+[Heading 3] 2.3.1.1. Input 
+[Normal] 2.3.1.2. Process
+[Normal] 2.3.1.3. Output
+[Normal] 2.3.2  Schedule and Route Generation Using the Simple Additive Weighting (SAW) Model 
+[Normal] 2.3.2.1.	Operational Data Retrieval
+[Normal] 2.3.2.2. Basis for Selecting the Decision Criteria
+[Normal] 2.3.2.3. Determination of Criteria Weights
+[Normal] 2.3.2.4. Construction of the Decision Matrix
+[Normal] 2.3.2.5 Normalization of Decision Criteria
+[Normal] 2.3.2.6	Computation of Weighted Preference Scores
+[Normal] 2.3.2.7. Final Customer Ranking
+[Normal] 2.3.2.8. Generation of Priority List and Route
+[Normal] 2.3.3. Descriptive Analytics Module
+[Normal] 2.3.3.1. Data Aggregation
+[Normal] 2.3.3.2. Descriptive Measure Generation
+[Normal] 2.3.3.2.1 Collection Analysis
+[Normal] 2.3.3.2.2 Sales Analysis
+[Normal] 2.3.3.2.3 Inventory Analysis
+[Normal] 2.3.3.2.4 Customer Payment and Credit Analysis
+[Normal] 2.3.3.2.5 Branch-Level Descriptive Comparison
+[Normal] 2.3.3.3 Analytical Visualization 
+[Normal] 2.3.3.4 Analytical Interpretation and Decision Support
+[Normal] 2.3.4. Use Case Diagram
+[Normal] 2.3.5 Entity-Relationship Diagram
+[Normal] 2.3.6 Data Dictionary
+[Normal] 2.3.7 Architecture Design
+[Normal] 2.3.7.1. Presentation Layer 
+[Normal] 2.3.7.2. Application Layer (Server-Side)
+[Normal] 2.3.7.3. Database Layer
+[Normal] 2.3.7.4. External Services
+[Normal] 2.3.7.5. Online Configuration 
+[Normal] 2.3.7.6. Offline Configuration
+[Normal] 2.3.8 Prototypes

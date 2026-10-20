@@ -83,6 +83,7 @@ router.get('/products', async (req, res) => {
 
     const result = await pool.query(
       `SELECT p.id AS product_id, p.name AS product_name, p.sku, p.unit_price,
+              p.image_url,
               COALESCE(pc.category_name, 'Uncategorized') AS category_name,
               COALESCE(bi.available_stock, 0) AS available_stock
        FROM products p

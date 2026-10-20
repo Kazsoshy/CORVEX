@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { fetchInvoiceById, fetchInvoiceItems } from '../../api/salesService';
 import { EmptyState } from '../shared/EmptyState';
 import { LoadingState } from '../shared/LoadingState';
+import { DetailRowsTable } from '../shared/DetailRowsTable';
 import { StatusBadge } from '../StatusBadge';
 import { formatCurrency, formatDisplayDate, formatDisplayDateTime } from '../../data/salesMockData';
 
@@ -17,29 +18,6 @@ const itemsTableShellStyle = {
   border: '1px solid var(--border, #c5c8d0)',
   borderRadius: 8,
 };
-
-function DetailRowsTable({ rows }) {
-  return (
-    <div className="corvex-table-wrapper">
-      <table className="corvex-table">
-        <thead>
-          <tr>
-            <th style={{ width: '36%' }}>Field</th>
-            <th>Value</th>
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map((row) => (
-            <tr key={row.label}>
-              <td style={{ fontWeight: 600, color: '#818697' }}>{row.label}</td>
-              <td>{row.value}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
-  );
-}
 
 export function InvoiceDetailsPage({
   invoiceId,
@@ -234,7 +212,7 @@ export function InvoiceDetailsPage({
   }
 
   return (
-    <div className="relative z-10 grid gap-[22px] w-full">
+    <div className="page">
       <section className="panel content-panel relative overflow-hidden">
         <div className="list-section-header">
           <div>

@@ -1,0 +1,83 @@
+
+The Products table stores the master records of
+Table 20. Payment Method Table
+products sold and managed by BH Marketing. Sales
+Field Data Size Description Constrai and inventory records reference it to keep product
+Name Type nts information consistent across branches.
+Table 22. Product Categories Table
+payment INT 11 Method ID PK,
+_method Auto-incr Field Dat Size Description Constrai
+_id ement Name a nts
+Typ
+e
+payment VAR 50 Payment Not Null
+_method CHA methods
+categor INT 11 Category ID PK,
+R accepted and
+y_id Auto-inc
+configured
+within the rement
+system.
+categor VAR 50 Category Unique,
+y_name CH name (e.g. Not Null
+status VAR 20 Completed, Not Null
+AR Beverages,
+CHA Pending
+Snacks,
+R
+Household)
+status VAR 20 Active, Not Null
+The Payment Method table stores the list of payment
+CH Inactive
+methods the system accepts, such as Cash, Check,
+AR
+Bank Transfer, GCash, and Maya. The Collection
+Payment and Sales Invoices tables reference it to created TIM — Date the Not Null
+standardize transaction categorization by payment _at EST category
+type. AM was created
+P
+Table 21. Products Table
+Field Dat Size Descriptio Constrai updated TIM — Date the Not Null
+Name a n nts _at EST category
+Typ AM was updated
+e P
+product INT 11 Product ID PK, The Categories table stores the list of product
+_id Auto-inc categories, such as Beverages, Snacks, and
+rement Household, referenced by the Products table. It allows
+inventory and sales records to be grouped and filtered
+product VAR 100 Product Not Null
+by category for reporting purposes.
+_name CH name
+AR Table 23. Suppliers Table
+Field Data Size Description Constrai
+categor INT 11 Product FK →
+Name Type nts
+y_id category product_
+categorie supplier INT 11 Unique PK,
+s.categor _id supplier Auto-incr
+y_id, identifier ement
+Not Null
+supplier VAR 100 Name of the Not Null
+SKU VAR 50 A unique Unique, _name CHA supplier
+CH code used Not Null R
+AR to identify
+and manage
+contact_ VAR 30 Supplier Nullable
+each
+no CHA contact
+product R number
+unit_pri DEC 10,2 Selling Not Null
+ce IMA price email VAR 150 Supplier Nullable
+L CHA email address
+R
+status EN — Active, Not Null
+UM Inactive address VAR 255 Supplier Nullable
+CHA business
+product VAR 255 File path or Nullable R address
+_image CH URL of the
+status VAR 20 Current Not Null
+AR product
+CHA supplier
+image
+R status
+24

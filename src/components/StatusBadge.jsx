@@ -1,48 +1,59 @@
+const NEUTRAL_EXACT = new Set(['draft', 'archived', 'disabled', 'n/a', '—', '-', 'na']);
+
 const ERROR_TERMS = [
-  'inactive', 'archived', 'cancelled', 'canceled', 'rejected', 'failed',
-  'failure', 'critical', 'out of stock', 'overdue', 'late', 'offline',
-  'declined', 'denied', 'void', 'error', 'unpaid', 'unavailable', 'returned',
-  'reversed',
+  'inactive', 'cancelled', 'canceled', 'rejected', 'failed',
+  'failure', 'critical', 'out of stock', 'out of balance', 'overdue', 'late',
+  'offline', 'declined', 'denied', 'void', 'error', 'unpaid', 'unavailable',
+  'returned', 'reversed',
 ];
 
 const WARNING_TERMS = [
   'pending', 'processing', 'in progress', 'low stock', 'low', 'warning',
   'submitted', 'awaiting', 'scheduled', 'rescheduled', 'partial', 'unread',
-  'due', 'open',
+  'due', 'open', 'needs alignment', 'misaligned',
 ];
 
 const SUCCESS_TERMS = [
   'active', 'available', 'completed', 'approved', 'success', 'successful',
   'sufficient', 'paid', 'delivered', 'resolved', 'synced', 'read', 'online',
   'posted', 'confirmed', 'accepted', 'clear', 'verified', 'current', 'healthy',
-  'received',
+  'received', 'aligned',
 ];
 
+const INFO_TERMS = ['shipped', 'informational', 'info'];
+
+/**
+ * Maps a status label to a semantic tone used for colored text.
+ * Same status → same tone system-wide.
+ */
 export function getStatusTone(status) {
   const normalized = String(status ?? '').trim().toLowerCase();
+  if (!normalized) return 'neutral';
 
+  if (NEUTRAL_EXACT.has(normalized)) return 'neutral';
+  if (normalized.includes('draft') || normalized.includes('archived') || normalized.includes('disabled')) {
+    return 'neutral';
+  }
   if (ERROR_TERMS.some(term => normalized.includes(term))) return 'danger';
   if (WARNING_TERMS.some(term => normalized.includes(term))) return 'warning';
   if (SUCCESS_TERMS.some(term => normalized.includes(term))) return 'success';
-  if (normalized.includes('informational') || normalized.includes('info')) return 'info';
+  if (INFO_TERMS.some(term => normalized.includes(term))) return 'info';
   return 'neutral';
 }
 
 export function getStatusTextClass(status) {
-  const tone = getStatusTone(status);
-  return `status-text-${tone}`;
+  return `status-text status-text-${getStatusTone(status)}`;
 }
 
-export function StatusBadge({ status, className = '', variant = 'text' }) {
+/**
+ * Renders a status as plain colored text (no badge/pill background).
+ * `variant` is accepted for backward compatibility but always renders text.
+ */
+export function StatusBadge({ status, className = '', variant: _variant }) {
   if (status === null || status === undefined || status === '') return null;
 
-  const tone = getStatusTone(status);
-  const classes = variant === 'pill'
-    ? (tone === 'neutral' ? 'badge' : `badge badge-${tone}`)
-    : getStatusTextClass(status);
-
   return (
-    <span className={`${classes} font-medium whitespace-nowrap ${className}`.trim()}>
+    <span className={`${getStatusTextClass(status)} ${className}`.trim()}>
       {status}
     </span>
   );

@@ -11,16 +11,19 @@ import {
   patchCreditInvestigation,
   fetchSpecialCollectionRequests,
   patchSpecialCollectionRequest,
+  fetchPendingSalesInvoices,
+  patchSalesInvoiceReview,
   mapCreditInvestigationRow,
   mapSpecialCollectionRow,
 } from '../../api/approvalsService.js';
 import { fetchOperationalAlerts, patchOperationalAlert, mapOperationalAlertRow } from '../../api/operationalAlertsService.js';
 import { fetchNotifications, markNotificationRead, markAllNotificationsRead, mapNotificationRow } from '../../api/notificationService.js';
 import { fetchInventoryTransfers, patchInventoryTransfer, mapInventoryTransferRow } from '../../api/inventoryService.js';
-import { fetchMyProfile, updateMyProfile } from '../../api/profileService.js';
-import { persistCurrentUserFromProfile } from '../../api/authService.js';
+import { BranchInventoryViewPage } from '../inventory/BranchInventoryViewPage.jsx';
 import { EmptyState } from '../shared/EmptyState';
 import { LoadingState } from '../shared/LoadingState';
+import { DetailRowsTable } from '../shared/DetailRowsTable';
+import { AccountProfilePanel } from '../shared/AccountProfilePanel';
 import { NavIcon } from '../../navIcons';
 import LeafletMap from '../common/LeafletMap';
 import { StatusBadge } from '../StatusBadge';
@@ -34,6 +37,8 @@ import {
   getBranchAuditLogs,
   getBranchCollectorDetail,
   getBranchSalesAgentDetail,
+  getFieldActivityReports,
+  getFieldActivityReport,
   fetchCollectorSawPriority,
   assignCollectorCollectionRoute,
 } from '../../api/branchManagerService.js';
@@ -41,6 +46,7 @@ import { getReportCollection, getReportSales, getReportInventory, getReportDelin
 import { CreditHistoryListPage, CreditHistoryDetailPage } from '../shared/CreditHistoryPages';
 import { TerritoriesPage } from '../territories/TerritoriesPage';
 import { InvoiceDetailsPage } from '../sales/InvoiceDetailsPage';
+import { BranchLeafletPage } from './BranchLeafletPage';
 import { formatMiddleNameDisplay } from '../../utils/customerDisplay.js';
 import { downloadPdf, exportRows } from '../../utils/dataExport.js';
 
@@ -92,6 +98,7 @@ function DashboardPage({
   const [kpi, setKpi] = useState(null);
   const [loading, setLoading] = useState(true);
   const [unread, setUnread] = useState(0);
+  const [recentNotifications, setRecentNotifications] = useState([]);
   useEffect(() => {
     async function fetchData() {
       setLoading(true);
@@ -115,7 +122,9 @@ function DashboardPage({
       if (reportDelinquency.success) setDelinquencyData(reportDelinquency.data);
       if (reportKpi.success) setKpi(reportKpi.data);
       if (notifData.success) {
-        setUnread((notifData.data || []).filter(n => n.status !== 'Read').length);
+        const rows = notifData.data || [];
+        setUnread(rows.filter(n => n.status !== 'Read').length);
+        setRecentNotifications(rows.slice(0, 5));
       }
       setLoading(false);
     }
@@ -123,7 +132,7 @@ function DashboardPage({
   }, []);
   const critical = alerts.filter(a => a.severity === 'Critical');
   if (loading) return <LoadingState />;
-  return <div className="relative z-10 grid gap-[22px] w-full">
+  return <div className="page">
       <section className="panel dashboard-greeting">
         <div className="flex flex-col gap-1">
           <p className="text-[0.82rem] font-bold tracking-widest uppercase text-navy/60 m-0">{userBranch}</p>
@@ -154,6 +163,27 @@ function DashboardPage({
       label: 'Stock Alerts',
       value: String(kpi?.stockAlertsCount || analytics?.stockAlertsCount || 0)
     }]} />
+
+      {recentNotifications.length ? (
+        <section className="panel content-panel relative overflow-hidden">
+          <div className="list-section-header">
+            <h3 style={{ margin: 0 }}>Operational Updates</h3>
+            <button className="button secondary" type="button" onClick={() => navigate(`${opsBase}/notifications`)}>
+              Open inbox
+            </button>
+          </div>
+          <ul className="notification-list" style={{ margin: 0 }}>
+            {recentNotifications.map((n) => (
+              <li key={n.notification_id} className={`notification-item${n.status === 'Read' ? '' : ' unread'}`}>
+                <div>
+                  <strong>{n.title}</strong>
+                  <p className="muted">{n.message}</p>
+                </div>
+              </li>
+            ))}
+          </ul>
+        </section>
+      ) : null}
 
       <div className="grid two-up">
         <Card title="Daily Collection vs Target" sub="This week">
@@ -219,6 +249,7 @@ function DashboardPage({
 
       <div className="flex flex-wrap gap-2 mt-2">
         <button className="button" type="button" onClick={() => navigate(`${opsBase}/field-operations`)}>Field Operations</button>
+        <button className="button secondary" type="button" onClick={() => navigate(`${opsBase}/field-activity-reports`)}>Field Reports</button>
         <button className="button secondary" type="button" onClick={() => navigate(`${opsBase}/customers`)}>Customers</button>
         <button className="button secondary" type="button" onClick={() => navigate(`${opsBase}/ci-approvals`)}>Approve CIs</button>
         <button className="button secondary" type="button" onClick={() => navigate(`${opsBase}/leaflet`)}>Leaflet | OpenStreetMap</button>
@@ -286,7 +317,7 @@ function FieldOperationsHub({
   const pagination_staff_sales = usePagination(staff.salesAgents);
   const paginated_staff_sales = pagination_staff_sales.paginatedData;
   if (loading) return <LoadingState />;
-  return <div className="relative z-10 grid gap-[22px] w-full">
+  return <div className="page">
       <div className="segmented-control">
         {tabs.map(t => <button key={t.key} className={tab === t.key ? 'segment active' : 'segment'} type="button" onClick={() => setTab(t.key)}>{t.label}</button>)}
       </div>
@@ -547,7 +578,7 @@ function CollectorDetailPage({
 
   if (loading) return <LoadingState />;
   if (!c) return <EmptyState title="Collector not found" actionLabel="Back" onAction={() => navigate(`${opsBase}/field-operations`)} />;
-  return <div className="relative z-10 grid gap-[22px] w-full">
+  return <div className="page">
       <Stats stats={[{
       label: 'Compliance',
       value: `${c.complianceScore}%`
@@ -696,7 +727,7 @@ function SalesAgentDetailPage({
   const pagination_products = usePagination(productPerformance);
   if (loading) return <LoadingState />;
   if (!a) return <EmptyState title="Agent not found" actionLabel="Back" onAction={() => navigate(`${opsBase}/field-operations`)} />;
-  return <div className="relative z-10 grid gap-[22px] w-full">
+  return <div className="page">
       <Stats stats={[{
       label: 'Visit Completion',
       value: `${a.visitCompletionRate}%`
@@ -833,7 +864,7 @@ function ReportsHubPage({
     if (ok) showToast(format === 'pdf' ? 'Report exported as PDF.' : 'Excel file downloaded.', 'success');
     else showToast('Nothing to export.', 'error');
   };
-  return <div className="relative z-10 grid gap-[22px] w-full">
+  return <div className="page">
       <div className="segmented-control">
         {tabs.map(t => <button key={t.key} className={tab === t.key ? 'segment active' : 'segment'} type="button" onClick={() => { setTab(t.key); setViewingInvoiceId(null); }}>{t.label}</button>)}
       </div>
@@ -891,7 +922,7 @@ function ReportsHubPage({
               }} tickFormatter={v => `${(v / 1000).toFixed(0)}k`} />
                   <Tooltip />
                   <Legend />
-                  <Bar dataKey="amount" name="Collected (PHP)" fill="#255684" radius={[4, 4, 0, 0]} />
+                  <Bar dataKey="amount" name="Collected (₱)" fill="#255684" radius={[4, 4, 0, 0]} />
                   <Bar dataKey="compliance" name="Compliance %" fill="#0c1031" radius={[4, 4, 0, 0]} />
                 </BarChart>
               </ResponsiveContainer>
@@ -1326,7 +1357,7 @@ function StaffPerformancePage({
   const paginated_____staff_salesAgents__sort__a_b___b_totalSalesAmount_a_totalSalesAmount_ = pagination_____staff_salesAgents__sort__a_b___b_totalSalesAmount_a_totalSalesAmount_.paginatedData;
   const pagination_scorecards = usePagination(combined);
   const paginated_scorecards = pagination_scorecards.paginatedData;
-  return <div className="relative z-10 grid gap-[22px] w-full">
+  return <div className="page">
       <div className="segmented-control">
         {tabs.map(t => <button key={t.key} className={tab === t.key ? 'segment active' : 'segment'} type="button" onClick={() => setTab(t.key)}>{t.label}</button>)}
       </div>
@@ -1481,7 +1512,7 @@ function CIQueuePage({
     } else showToast(result.message || 'Action failed.', 'error');
   };
   if (loading && !items.length) return <LoadingState message="Loading credit investigations..." />;
-  return <div className="relative z-10 grid gap-[22px] w-full">
+  return <div className="page">
       <section className="panel content-panel relative overflow-hidden">
         <div className="list-section-header">
           <h3>Credit Investigation Queue</h3>
@@ -1542,7 +1573,7 @@ function CIDetailPage({
   };
   if (loading) return <LoadingState message="Loading credit investigation..." />;
   if (!ci) return <EmptyState title="CI not found" actionLabel="Back" onAction={() => navigate(`${opsBase}/ci-approvals`)} />;
-  return <div className="relative z-10 grid gap-[22px] w-full">
+  return <div className="page">
       <Stats stats={[{
       label: 'Customer',
       value: ci.customerName
@@ -1557,7 +1588,13 @@ function CIDetailPage({
       value: ci.leafletClassification
     }]} />
       <section className="panel content-panel relative overflow-hidden">
-        <ul className="info-grid"><li><span className="info-item-label">Purpose</span><span className="info-item-value">{ci.purpose}</span></li><li><span className="info-item-label">Monthly Income</span><span className="info-item-value">{formatCurrency(ci.monthlyIncome)}</span></li><li><span className="info-item-label">Business Type</span><span className="info-item-value">{ci.businessType}</span></li><li><span className="info-item-label">References</span><span className="info-item-value">{ci.references}</span></li><li><span className="info-item-label">Remarks</span><span className="info-item-value">{ci.formRemarks}</span></li></ul>
+        <DetailRowsTable rows={[
+          { label: 'Purpose', value: ci.purpose || '—' },
+          { label: 'Monthly Income', value: formatCurrency(ci.monthlyIncome) },
+          { label: 'Business Type', value: ci.businessType || '—' },
+          { label: 'References', value: ci.references || '—' },
+          { label: 'Remarks', value: ci.formRemarks || '—' },
+        ]} />
         {ci.delinquencyFlags.length ? <div style={{
         marginTop: 16,
         padding: 12,
@@ -1622,7 +1659,7 @@ function CustomersPage({
   const pagination_filtered = usePagination(filtered);
   const paginated_filtered = pagination_filtered.paginatedData;
   if (loading) return <LoadingState message="Loading customers..." />;
-  return <div className="relative z-10 grid gap-[22px] w-full">
+  return <div className="page">
       <Stats stats={[{
       label: 'Total Customers',
       value: String(customers.length)
@@ -1655,32 +1692,13 @@ function CustomersPage({
             }}>Export PDF</button>
           </div>
         </div>
-        <div className="list-section-toolbar" style={{
-        marginBottom: 12
-      }}>
+        <div className="list-section-toolbar">
           <div className="list-section-controls">
-            <input className="filter-input search" type="search" placeholder="Search by customer name, address, or phone" value={search} onChange={e => setSearch(e.target.value)} style={{
-            padding: '8px 12px',
-            borderRadius: '6px',
-            border: '1px solid #c5c8d0',
-            fontSize: '0.9rem',
-            flex: 1,
-            minWidth: '200px'
-          }} />
-            <select className="filter-select" value={statusFilter} onChange={e => setStatusFilter(e.target.value)} style={{
-            padding: '8px 12px',
-            borderRadius: '6px',
-            border: '1px solid #c5c8d0',
-            fontSize: '0.9rem'
-          }}>
+            <input className="filter-input search" type="search" placeholder="Search by customer name, address, or phone" value={search} onChange={e => setSearch(e.target.value)} />
+            <select className="filter-select" value={statusFilter} onChange={e => setStatusFilter(e.target.value)}>
               {['All', 'Active', 'Inactive'].map(s => <option key={s} value={s}>{s === 'All' ? 'All Statuses' : s}</option>)}
             </select>
-            <select className="filter-select" value={paymentFilter} onChange={e => setPaymentFilter(e.target.value)} style={{
-            padding: '8px 12px',
-            borderRadius: '6px',
-            border: '1px solid #c5c8d0',
-            fontSize: '0.9rem'
-          }}>
+            <select className="filter-select" value={paymentFilter} onChange={e => setPaymentFilter(e.target.value)}>
               {['All', 'Current', 'Overdue'].map(s => <option key={s} value={s}>{s === 'All' ? 'All Payment Status' : s}</option>)}
             </select>
           </div>
@@ -1728,6 +1746,7 @@ function CustomerDetailPage({
 }) {
   const [customer, setCustomer] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [detailTab, setDetailTab] = useState('contact');
   useEffect(() => {
     async function load() {
       setLoading(true);
@@ -1744,7 +1763,13 @@ function CustomerDetailPage({
   const name = `${customer.first_name} ${customer.last_name}`;
   const paymentStatus = Number(customer.activity?.outstanding_balance || 0) > 0 ? 'Overdue' : 'Current';
   const customerSince = customer.created_at ? formatDisplayDate(customer.created_at) : '—';
-  return <div className="relative z-10 grid gap-[22px] w-full">
+  const detailTabs = [
+    { key: 'contact', label: 'Contact Information' },
+    { key: 'activity', label: 'Account Activity' },
+    { key: 'credit', label: 'Credit Information' },
+  ];
+  const activeDetailTab = detailTabs.find((tab) => tab.key === detailTab) || detailTabs[0];
+  return <div className="page">
       <section className="panel dashboard-greeting">
         <div className="flex flex-col gap-1">
           <p className="text-[0.82rem] font-bold tracking-widest uppercase text-navy/60 m-0">{customer.branch_name || branchName}</p>
@@ -1755,10 +1780,10 @@ function CustomerDetailPage({
 
       <Stats stats={[{
       label: 'Status',
-      value: customer.status || '—'
+      value: <StatusBadge status={customer.status || '—'} />
     }, {
       label: 'Payment Status',
-      value: paymentStatus
+      value: <StatusBadge status={paymentStatus} />
     }, {
       label: 'Outstanding',
       value: formatCurrency(Number(customer.activity?.outstanding_balance || 0))
@@ -1773,45 +1798,67 @@ function CustomerDetailPage({
       value: customerSince
     }]} />
 
-      <div className="grid two-up">
-        <section className="panel content-panel relative overflow-hidden">
-          <div className="flex flex-col md:flex-row justify-between gap-4 items-start md:items-center mb-4"><h3>Contact Information</h3></div>
-          <ul className="info-grid">
-            <li><span className="info-item-label">Customer Name</span><span className="info-item-value">{name}</span></li>
-            <li><span className="info-item-label">Middle Name</span><span className="info-item-value">{formatMiddleNameDisplay(customer.middle_name)}</span></li>
-            <li><span className="info-item-label">Branch</span><span className="info-item-value">{customer.branch_name || branchName}</span></li>
-            <li><span className="info-item-label">Address</span><span className="info-item-value">{customer.address || '—'}</span></li>
-            <li><span className="info-item-label">Contact Phone</span><span className="info-item-value">{customer.contact_phone || '—'}</span></li>
-            <li><span className="info-item-label">Contact Person</span><span className="info-item-value">{customer.contact_person_fname} {customer.contact_person_lname}</span></li>
-            <li><span className="info-item-label">Contact Person Middle Name</span><span className="info-item-value">{formatMiddleNameDisplay(customer.contact_person_mname)}</span></li>
-            <li><span className="info-item-label">Contact Person Phone</span><span className="info-item-value">{customer.contact_person_phone || '—'}</span></li>
-            <li><span className="info-item-label">Account Manager</span><span className="info-item-value">{customer.account_manager_name || '—'}</span></li>
-            <li><span className="info-item-label">Customer Since</span><span className="info-item-value">{customerSince}</span></li>
-          </ul>
-        </section>
+      <section className="panel content-panel relative overflow-hidden">
+        <div className="segmented-control" style={{ marginBottom: 16 }}>
+          {detailTabs.map((tab) => (
+            <button
+              key={tab.key}
+              className={detailTab === tab.key ? 'segment active' : 'segment'}
+              type="button"
+              onClick={() => setDetailTab(tab.key)}
+            >
+              {tab.label}
+            </button>
+          ))}
+        </div>
 
-        <section className="panel content-panel relative overflow-hidden">
-          <div className="flex flex-col md:flex-row justify-between gap-4 items-start md:items-center mb-4"><h3>Account Activity</h3></div>
-          <ul className="info-grid">
-            <li><span className="info-item-label">Outstanding Balance</span><span className="info-item-value">{formatCurrency(Number(customer.activity?.outstanding_balance || 0))}</span></li>
-            <li><span className="info-item-label">Purchase Volume</span><span className="info-item-value">{formatCurrency(Number(customer.activity?.purchase_volume || 0))}</span></li>
-            <li><span className="info-item-label">Last Collection</span><span className="info-item-value">{customer.activity?.last_collection_date || '—'}</span></li>
-            <li><span className="info-item-label">Last Sales Visit</span><span className="info-item-value">{customer.activity?.last_sales_visit || '—'}</span></li>
-          </ul>
-        </section>
-      </div>
+        <div className="flex flex-col md:flex-row justify-between gap-4 items-start md:items-center mb-4">
+          <h3>{activeDetailTab.label}</h3>
+        </div>
 
-      {customer.creditInfo ? <section className="panel content-panel relative overflow-hidden">
-          <div className="flex flex-col md:flex-row justify-between gap-4 items-start md:items-center mb-4"><h3>Credit Information</h3></div>
-          <ul className="info-grid">
-            <li><span className="info-item-label">Credit Limit</span><span className="info-item-value">{formatCurrency(Number(customer.creditInfo.credit_limit || 0))}</span></li>
-            <li><span className="info-item-label">Monthly Income</span><span className="info-item-value">{formatCurrency(Number(customer.creditInfo.monthly_income || 0))}</span></li>
-            <li><span className="info-item-label">Credit Score</span><span className="info-item-value">{customer.creditInfo.credit_score || '—'}</span></li>
-            <li><span className="info-item-label">Employment Status</span><span className="info-item-value">{customer.creditInfo.employment_status || '—'}</span></li>
-            <li><span className="info-item-label">Approved By</span><span className="info-item-value">{customer.creditInfo.approved_by_name || '—'}</span></li>
-            <li><span className="info-item-label">Approved Date</span><span className="info-item-value">{customer.creditInfo.approved_date || '—'}</span></li>
-          </ul>
-        </section> : null}
+        {detailTab === 'contact' && (
+          <DetailRowsTable rows={[
+            { label: 'Customer Name', value: name },
+            { label: 'Middle Name', value: formatMiddleNameDisplay(customer.middle_name) },
+            { label: 'Branch', value: customer.branch_name || branchName },
+            { label: 'Address', value: customer.address || '—' },
+            { label: 'Contact Phone', value: customer.contact_phone || '—' },
+            { label: 'Contact Person', value: [customer.contact_person_fname, customer.contact_person_lname].filter(Boolean).join(' ') || '—' },
+            { label: 'Contact Person Middle Name', value: formatMiddleNameDisplay(customer.contact_person_mname) },
+            { label: 'Contact Person Phone', value: customer.contact_person_phone || '—' },
+            { label: 'Account Manager', value: customer.account_manager_name || '—' },
+            { label: 'Customer Since', value: customerSince },
+          ]} />
+        )}
+
+        {detailTab === 'activity' && (
+          <DetailRowsTable
+            fieldHeader="Activity"
+            detailsHeader="Details"
+            rows={[
+              { label: 'Outstanding Balance', value: formatCurrency(Number(customer.activity?.outstanding_balance || 0)) },
+              { label: 'Purchase Volume', value: formatCurrency(Number(customer.activity?.purchase_volume || 0)) },
+              { label: 'Last Collection', value: customer.activity?.last_collection_date ? formatDisplayDate(customer.activity.last_collection_date) : '—' },
+              { label: 'Last Sales Visit', value: customer.activity?.last_sales_visit ? formatDisplayDate(customer.activity.last_sales_visit) : '—' },
+            ]}
+          />
+        )}
+
+        {detailTab === 'credit' && (
+          customer.creditInfo ? (
+            <DetailRowsTable rows={[
+              { label: 'Credit Limit', value: formatCurrency(Number(customer.creditInfo.credit_limit || 0)) },
+              { label: 'Monthly Income', value: formatCurrency(Number(customer.creditInfo.monthly_income || 0)) },
+              { label: 'Credit Score', value: customer.creditInfo.credit_score || '—' },
+              { label: 'Employment Status', value: customer.creditInfo.employment_status || '—' },
+              { label: 'Approved By', value: customer.creditInfo.approved_by_name || '—' },
+              { label: 'Approved Date', value: customer.creditInfo.approved_date ? formatDisplayDate(customer.creditInfo.approved_date) : '—' },
+            ]} />
+          ) : (
+            <EmptyState title="No credit information" description="This customer has no credit record on file." />
+          )
+        )}
+      </section>
 
       {customer.latitude && customer.longitude ? <section className="panel content-panel relative overflow-hidden">
           <div className="flex flex-col md:flex-row justify-between gap-4 items-start md:items-center mb-4"><h3>Location</h3></div>
@@ -1837,69 +1884,7 @@ function CustomerDetailPage({
     </div>;
 }
 
-// ── GIS, Alerts, Notifications, Profile, Audit ───────────────────────────────
-function LeafletPage({
-  pageType,
-  navigate,
-  showToast,
-  opsBase
-}) {
-  const [layers, setLayers] = useState(['Collector Routes', 'Delinquency Clusters']);
-  const [mapAccounts, setMapAccounts] = useState([]);
-  const [staff, setStaff] = useState({
-    collectors: [],
-    salesAgents: []
-  });
-  const [loading, setLoading] = useState(true);
-  const layerOptions = ['Collector Routes', 'Sales Territories', 'Payment Behavior Zones', 'Delinquency Clusters', 'Profitability Zones', 'High Collection Areas', 'Route Efficiency Layer'];
-  const toggle = l => setLayers(p => p.includes(l) ? p.filter(x => x !== l) : [...p, l]);
-  useEffect(() => {
-    async function load() {
-      setLoading(true);
-      const [customersResult, staffResult] = await Promise.all([getBranchCustomers(), getBranchStaff()]);
-      if (customersResult.success) setMapAccounts(customersResult.data.mapAccounts || []);
-      if (staffResult.success) setStaff(staffResult.data);
-      setLoading(false);
-    }
-    load();
-  }, []);
-  const mapCenter = mapAccounts.find(a => a.lat && a.lng) ? [mapAccounts.find(a => a.lat && a.lng).lat, mapAccounts.find(a => a.lat && a.lng).lng] : [7.1907, 125.4553];
-  const pagination_mapAccounts = usePagination(mapAccounts);
-  const paginated_mapAccounts = pagination_mapAccounts.paginatedData;
-  if (loading) return <LoadingState message="Loading map data..." />;
-  return <div className="relative z-10 grid gap-[22px] w-full">
-      <section className="panel content-panel relative overflow-hidden">
-        <div className="flex flex-col md:flex-row justify-between gap-4 items-start md:items-center mb-4"><h3>Leaflet | OpenStreetMap</h3></div>
-        <div className="accounts-filters">
-          <select className="filter-select"><option>Today</option><option>This Week</option><option>This Month</option></select>
-          <select className="filter-select"><option>All Staff</option>{staff.collectors.map(c => <option key={c.id}>{c.name}</option>)}{staff.salesAgents.map(a => <option key={a.id}>{a.name}</option>)}</select>
-        </div>
-        <div className="layer-toggles">{layerOptions.map(l => <label key={l} className="toggle-label"><input type="checkbox" checked={layers.includes(l)} onChange={() => toggle(l)} />{l}</label>)}</div>
-        <div style={{
-        marginTop: 16
-      }}>
-          <LeafletMap center={mapCenter} zoom={12} height={560} markers={mapAccounts.filter(a => a.lat && a.lng).map(a => ({
-          id: a.id,
-          position: [a.lat, a.lng],
-          label: a.customerName.substring(0, 2).toUpperCase(),
-          color: a.paymentStatus === 'Overdue' ? '#ef4444' : '#255684',
-          popup: `${a.customerName} - ${a.paymentStatus}`
-        }))} />
-        </div>
-      </section>
-      <section className="panel content-panel relative overflow-hidden">
-        <div className="flex flex-col md:flex-row justify-between gap-4 items-start md:items-center mb-4"><h3>Customer Pins</h3></div>
-        {mapAccounts.length ? <><div className="corvex-table-wrapper"><table className="corvex-table">
-            <thead><tr><th>Customer</th><th>Balance</th><th>Status</th><th>Last Visit</th><th>Staff</th><th>Actions</th></tr></thead>
-            <tbody>{paginated_mapAccounts.map(a => <tr key={a.id}><td>{a.customerName}</td><td>{formatCurrency(a.balance)}</td><td><StatusBadge status={a.paymentStatus} /></td><td>{a.lastVisit}</td><td>{a.assignedStaff}</td><td className="table-actions"><button className="icon-action-button" type="button" title="View" onClick={() => navigate(`${opsBase}/customers/${a.id}`)}><NavIcon name="view" /></button></td></tr>)}</tbody>
-          </table></div><Pagination {...pagination_mapAccounts} /></> : <EmptyState title="No customers on map" description="Customers for your branch will appear here once they have location data." />}
-      </section>
-      <div className="flex justify-end gap-2 mt-4">
-        <button className="button secondary" type="button" onClick={() => navigate(`${opsBase}/leaflet/delinquency`)}>Delinquency Heatmap</button>
-        <button className="button secondary" type="button" onClick={() => navigate(`${opsBase}/leaflet/profitability`)}>Profitability Zones</button>
-      </div>
-    </div>;
-}
+// ── Alerts, Notifications, Profile, Audit ────────────────────────────────────
 function AlertsPage({
   navigate,
   showToast,
@@ -1938,7 +1923,7 @@ function AlertsPage({
     } else showToast(result.message || 'Resolve failed.', 'error');
   };
   if (loading && !alerts.length) return <LoadingState message="Loading alerts..." />;
-  return <div className="relative z-10 grid gap-[22px] w-full">
+  return <div className="page">
       <section className="panel content-panel relative overflow-hidden">
         <div className="list-section-header"><h3>Alerts <span className="text-ink/70">({filtered.length})</span></h3></div>
         <div className="list-section-toolbar" style={{ marginBottom: 12 }}>
@@ -2007,7 +1992,7 @@ function NotificationsPage({
     if (filter === 'All') return items;
     return items.filter(n => (n.category || n.type || '').toLowerCase().includes(filter.toLowerCase()));
   }, [items, filter]);
-  return <div className="relative z-10 grid gap-[22px] w-full">
+  return <div className="page">
       <section className="panel content-panel relative overflow-hidden">
         <div className="flex flex-col md:flex-row justify-between gap-4 items-start md:items-center">
           <div className="segmented-control">{['All', 'Unread', 'CI', 'Route', 'Delinquency', 'Inventory', 'Staff'].map(f => <button key={f} className={filter === f ? 'segment active' : 'segment'} type="button" onClick={() => setFilter(f)}>{f}</button>)}</div>
@@ -2037,72 +2022,17 @@ function NotificationsPage({
 function ProfilePage({
   navigate,
   showToast,
-  branchName,
   opsBase
 }) {
-  const sessionUser = getCurrentUser();
-  const [profile, setProfile] = useState(null);
-  const [password, setPassword] = useState('');
-  const [editing, setEditing] = useState(false);
-  useEffect(() => {
-    async function load() {
-      const res = await fetchMyProfile();
-      if (res.success) setProfile(res.data);
-    }
-    load();
-  }, []);
-  const userName = profile
-    ? [profile.first_name, profile.last_name].filter(Boolean).join(' ')
-    : sessionUser?.fullName || 'User';
-  const userBranch = profile?.branch?.name || sessionUser?.branch?.name || branchName || 'Branch';
-  const roleLabel = profile?.role?.name || sessionUser?.role?.name || 'Staff';
-  const userInitials = userName.split(' ').map(n => n[0]).join('').toUpperCase();
-  const saveProfile = async () => {
-    if (!profile) return;
-    const payload = {
-      first_name: profile.first_name,
-      last_name: profile.last_name,
-      email: profile.email,
-      phone: profile.phone,
-    };
-    if (password.trim()) payload.password = password.trim();
-    const res = await updateMyProfile(payload);
-    if (res.success) {
-      persistCurrentUserFromProfile(res.data);
-      setProfile(res.data);
-      setPassword('');
-      setEditing(false);
-      showToast('Profile updated.', 'success');
-    } else showToast(res.message || 'Update failed.', 'error');
-  };
-  if (!profile) return <LoadingState message="Loading profile..." />;
-  return <div className="relative z-10 grid gap-[22px] w-full">
-      <section className="panel content-panel relative overflow-hidden">
-        <div className="profile-header">
-          <div className="profile-avatar">{userInitials}</div>
-          <div><h3>{userName}</h3><p className="text-ink/70">{roleLabel}</p></div>
-        </div>
-        {editing ? <div className="form-grid" style={{ marginTop: 16 }}>
-            <label>First name<input value={profile.first_name || ''} onChange={e => setProfile(p => ({ ...p, first_name: e.target.value }))} /></label>
-            <label>Last name<input value={profile.last_name || ''} onChange={e => setProfile(p => ({ ...p, last_name: e.target.value }))} /></label>
-            <label>Email<input type="email" value={profile.email || ''} onChange={e => setProfile(p => ({ ...p, email: e.target.value }))} /></label>
-            <label>Phone<input value={profile.phone || ''} onChange={e => setProfile(p => ({ ...p, phone: e.target.value }))} /></label>
-            <label>New password (optional)<input type="password" value={password} onChange={e => setPassword(e.target.value)} placeholder="Min. 8 characters" /></label>
-          </div>
-          : <ul className="info-grid"><li><span className="info-item-label">Branch</span><span className="info-item-value">{userBranch}</span></li><li><span className="info-item-label">Email</span><span className="info-item-value">{profile.email}</span></li><li><span className="info-item-label">Phone</span><span className="info-item-value">{profile.phone || '—'}</span></li></ul>}
-      </section>
-      <div className="flex justify-end gap-2 mt-4">
-        <button className="button ghost" type="button" onClick={() => requestLogout()}>Logout</button>
-        <button className="button ghost" type="button" onClick={() => navigate(`${opsBase}/audit-log`)}>Audit Log</button>
-        <button className="button ghost" type="button" onClick={() => navigate(`${opsBase}/approval-center`)}>Approval Center</button>
-        {editing ? <>
-            <button className="button ghost" type="button" onClick={() => setEditing(false)}>Cancel</button>
-            <button className="button" type="button" onClick={saveProfile}>Save Profile</button>
-          </> : <>
-            <button className="button secondary" type="button" onClick={() => setEditing(true)}>Update Profile</button>
-          </>}
-      </div>
-    </div>;
+  return <AccountProfilePanel
+    showToast={showToast}
+    title="Branch Manager Profile"
+    subtitle="View your personal details and update your account password."
+    extraActions={<>
+      <button className="button ghost" type="button" onClick={() => navigate(`${opsBase}/audit-log`)}>Audit Log</button>
+      <button className="button ghost" type="button" onClick={() => navigate(`${opsBase}/approval-center`)}>Approval Center</button>
+    </>}
+  />;
 }
 function ApprovalCenterPage({
   navigate,
@@ -2113,13 +2043,15 @@ function ApprovalCenterPage({
   const [ciList, setCiList] = useState([]);
   const [transferList, setTransferList] = useState([]);
   const [specialList, setSpecialList] = useState([]);
+  const [invoiceList, setInvoiceList] = useState([]);
   const [loading, setLoading] = useState(true);
   const reload = async () => {
     setLoading(true);
-    const [ciRes, trRes, scRes] = await Promise.all([
+    const [ciRes, trRes, scRes, invRes] = await Promise.all([
       fetchCreditInvestigations(),
       fetchInventoryTransfers(),
       fetchSpecialCollectionRequests(),
+      fetchPendingSalesInvoices(),
     ]);
     if (ciRes.success) setCiList((ciRes.data || []).map(mapCreditInvestigationRow));
     if (trRes.success) {
@@ -2127,6 +2059,7 @@ function ApprovalCenterPage({
       setTransferList(pending.map(mapInventoryTransferRow));
     }
     if (scRes.success) setSpecialList((scRes.data || []).map(mapSpecialCollectionRow));
+    if (invRes.success) setInvoiceList(invRes.data || []);
     setLoading(false);
   };
   useEffect(() => {
@@ -2141,8 +2074,11 @@ function ApprovalCenterPage({
   }, {
     key: 'special',
     label: `Special Collections (${specialList.filter(s => s.status === 'Pending').length})`
+  }, {
+    key: 'invoices',
+    label: `Sales Invoices (${invoiceList.length})`
   }];
-  const totalPending = ciList.filter(c => c.status === 'Pending').length + transferList.filter(t => t.status === 'Pending Approval').length + specialList.filter(s => s.status === 'Pending').length;
+  const totalPending = ciList.filter(c => c.status === 'Pending').length + transferList.filter(t => t.status === 'Pending Approval').length + specialList.filter(s => s.status === 'Pending').length + invoiceList.length;
   const approveCI = async (ciId) => {
     const result = await patchCreditInvestigation(ciId, { status: 'Approved' });
     if (result.success) {
@@ -2198,6 +2134,25 @@ function ApprovalCenterPage({
       reload();
     } else showToast(result.message || 'Reject failed.', 'error');
   };
+  const confirmInvoice = async (invoiceId) => {
+    const result = await patchSalesInvoiceReview(invoiceId, { status: 'Confirmed' });
+    if (result.success) {
+      showToast(result.message || 'Invoice confirmed.', 'success');
+      reload();
+    } else showToast(result.message || 'Confirm failed.', 'error');
+  };
+  const rejectInvoice = async (invoiceId) => {
+    const reason = window.prompt('Rejection reason (required):');
+    if (!reason?.trim()) {
+      showToast('Reason required.', 'error');
+      return;
+    }
+    const result = await patchSalesInvoiceReview(invoiceId, { status: 'Cancelled', review_note: reason.trim() });
+    if (result.success) {
+      showToast(result.message || 'Invoice rejected.', 'success');
+      reload();
+    } else showToast(result.message || 'Reject failed.', 'error');
+  };
   const RiskBadge = ({
     score
   }) => {
@@ -2215,10 +2170,12 @@ function ApprovalCenterPage({
   const paginated_transferList = pagination_transferList.paginatedData;
   const pagination_specialList = usePagination(specialList);
   const paginated_specialList = pagination_specialList.paginatedData;
-  if (loading && !ciList.length && !transferList.length && !specialList.length) {
+  const pagination_invoiceList = usePagination(invoiceList);
+  const paginated_invoiceList = pagination_invoiceList.paginatedData;
+  if (loading && !ciList.length && !transferList.length && !specialList.length && !invoiceList.length) {
     return <LoadingState message="Loading approval center..." />;
   }
-  return <div className="relative z-10 grid gap-[22px] w-full">
+  return <div className="page">
       {/* Summary bar */}
       <Stats stats={[{
         label: 'Total Pending',
@@ -2232,6 +2189,9 @@ function ApprovalCenterPage({
       }, {
         label: 'Special Collections',
         value: String(specialList.filter(s => s.status === 'Pending').length),
+      }, {
+        label: 'Sales Invoices',
+        value: String(invoiceList.length),
       }]} />
 
       {/* Tab navigation */}
@@ -2366,6 +2326,52 @@ function ApprovalCenterPage({
             <Pagination {...pagination_specialList} />
           </> : <EmptyState title="No special collection requests" description="All requests have been processed." />}
         </section>}
+
+      {tab === 'invoices' && <section className="panel content-panel relative overflow-hidden">
+          <div className="list-section-header">
+            <h3>Sales invoices waiting for review <span className="text-ink/70">({invoiceList.length})</span></h3>
+            <p className="list-section-subtitle">Confirm a sale logged by a sales agent, or reject it to return the stock and reopen the purchase request.</p>
+          </div>
+          {invoiceList.length ? <>
+            <div className="corvex-table-wrapper">
+              <table className="corvex-table">
+                <thead>
+                  <tr>
+                    <th>Invoice</th>
+                    <th>Customer</th>
+                    <th>Sales Agent</th>
+                    <th>Items</th>
+                    <th>Amount</th>
+                    <th>Date</th>
+                    <th>Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {paginated_invoiceList.map((inv) => {
+                    let items = inv.items;
+                    if (typeof items === 'string') {
+                      try { items = JSON.parse(items); } catch { items = []; }
+                    }
+                    if (!Array.isArray(items)) items = [];
+                    return <tr key={inv.sales_invoices_id}>
+                      <td><strong>{inv.invoice_number}</strong></td>
+                      <td>{inv.customer_name}</td>
+                      <td>{inv.sales_agent_name}</td>
+                      <td>{items.map((item) => `${item.product_name} × ${item.quantity}`).join(', ') || '—'}</td>
+                      <td style={{ fontWeight: 600 }}>{formatCurrency(Number(inv.total_amount))}</td>
+                      <td>{formatDisplayDate(inv.invoices_date)}</td>
+                      <td className="table-actions">
+                        <button className="icon-action-button" type="button" title="Confirm" onClick={() => confirmInvoice(inv.sales_invoices_id)}><NavIcon name="check" /></button>
+                        <button className="icon-action-button danger" type="button" title="Reject" onClick={() => rejectInvoice(inv.sales_invoices_id)}><NavIcon name="close" /></button>
+                      </td>
+                    </tr>;
+                  })}
+                </tbody>
+              </table>
+            </div>
+            <Pagination {...pagination_invoiceList} />
+          </> : <EmptyState title="No sales invoices to review" description="Invoices logged by sales agents will appear here until you confirm or reject them." />}
+        </section>}
     </div>;
 }
 function AuditLogPage({
@@ -2384,7 +2390,7 @@ function AuditLogPage({
   }, []);
   const pagination_AUDIT_LOGS = usePagination(logs);
   const paginated_AUDIT_LOGS = pagination_AUDIT_LOGS.paginatedData;
-  return <div className="relative z-10 grid gap-[22px] w-full">
+  return <div className="page">
       <section className="panel content-panel relative overflow-hidden">
         <div className="flex flex-col md:flex-row justify-between gap-4 items-start md:items-center mb-4"><h3>Audit Log</h3></div>
         {loading ? <LoadingState message="Loading audit log…" /> : <><div className="corvex-table-wrapper"><table className="corvex-table"><thead><tr><th>User</th><th>Action</th><th>Details</th><th>IP</th><th>Timestamp</th></tr></thead><tbody>{paginated_AUDIT_LOGS.length ? paginated_AUDIT_LOGS.map(l => <tr key={l.audit_id ?? l.id}><td>{l.user_name || '—'}</td><td>{l.action}</td><td>{l.status_details || l.detail || '—'}</td><td>{l.ip_address || '—'}</td><td>{formatDisplayDateTime(l.created_at || l.timestamp)}</td></tr>) : <tr><td colSpan={5}><EmptyState title="No audit entries" /></td></tr>}</tbody></table></div><Pagination {...pagination_AUDIT_LOGS} /></>}
@@ -2396,7 +2402,7 @@ function SettingsPage({
   navigate,
   opsBase
 }) {
-  return <div className="relative z-10 grid gap-[22px] w-full">
+  return <div className="page">
       <section className="panel content-panel relative overflow-hidden">
         <h3>Branch Settings</h3>
         <p className="text-ink/70">Manage your profile, approvals, and audit history for this branch.</p>
@@ -2434,7 +2440,7 @@ function AccountLocationDetailPage({
   const name = `${customer.first_name} ${customer.last_name}`;
   const lat = Number(customer.latitude);
   const lng = Number(customer.longitude);
-  return <div className="relative z-10 grid gap-[22px] w-full">
+  return <div className="page">
       <Stats stats={[{
       label: 'Customer',
       value: name
@@ -2461,6 +2467,192 @@ function AccountLocationDetailPage({
     </div>;
 }
 
+function reportPhotoSrc(photo) {
+  if (typeof photo !== 'string') return '';
+  if (photo.startsWith('data:image/') || photo.startsWith('http://') || photo.startsWith('https://')) return photo;
+  return '';
+}
+
+// ── Collector field activity reports ──────────────────────────────────────────
+function FieldActivityReportsPage({
+  showToast,
+  currentUser,
+}) {
+  const showBranch = currentUser?.role?.slug === 'operating_manager' || currentUser?.role?.slug === 'super_admin';
+  const [reports, setReports] = useState([]);
+  const [total, setTotal] = useState(0);
+  const [loading, setLoading] = useState(true);
+  const [search, setSearch] = useState('');
+  const [activityFilter, setActivityFilter] = useState('All');
+  const [syncFilter, setSyncFilter] = useState('All');
+  const [selected, setSelected] = useState(null);
+  const [detailLoading, setDetailLoading] = useState(false);
+
+  useEffect(() => {
+    async function load() {
+      setLoading(true);
+      const result = await getFieldActivityReports();
+      if (result.success) {
+        setReports(result.data || []);
+        setTotal(Number(result.total ?? result.data?.length ?? 0));
+      } else {
+        showToast?.(result.message || 'Failed to load field activity reports.', 'error');
+      }
+      setLoading(false);
+    }
+    load();
+  }, []);
+
+  const activityTypes = useMemo(() => {
+    const types = [...new Set(reports.map((r) => r.activity_type).filter(Boolean))].sort();
+    return ['All', ...types];
+  }, [reports]);
+
+  const filtered = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    return reports.filter((r) => {
+      const matchActivity = activityFilter === 'All' || r.activity_type === activityFilter;
+      const matchSync = syncFilter === 'All' || r.sync_status === syncFilter;
+      const haystack = [r.collector_name, r.staff_role, r.customer_name, r.remarks, r.branch_name, r.activity_type, r.visit_type]
+        .filter(Boolean)
+        .join(' ')
+        .toLowerCase();
+      return matchActivity && matchSync && (!q || haystack.includes(q));
+    });
+  }, [reports, search, activityFilter, syncFilter]);
+
+  const pagination = usePagination(filtered);
+  const rows = pagination.paginatedData;
+  const collectorCount = new Set(reports.map((r) => String(r.collector_id))).size;
+
+  async function openReport(report) {
+    setSelected(report);
+    setDetailLoading(true);
+    const result = await getFieldActivityReport(report.report_id);
+    setDetailLoading(false);
+    if (result.success && result.data) setSelected(result.data);
+    else showToast?.(result.message || 'Could not open this report.', 'error');
+  }
+
+  if (loading) return <LoadingState message="Loading field activity reports..." />;
+
+  const photoSrc = reportPhotoSrc(selected?.photo);
+
+  return <div className="page">
+      <Stats stats={[{
+        label: 'Reports',
+        value: String(total || reports.length),
+      }, {
+        label: 'Pending Sync',
+        value: String(reports.filter((r) => r.sync_status === 'Pending').length),
+      }, {
+        label: 'With Photo',
+        value: String(reports.filter((r) => r.has_photo).length),
+      }, {
+        label: 'Staff',
+        value: String(collectorCount),
+      }]} />
+      <section className="panel content-panel relative overflow-hidden">
+        <div className="list-section-header">
+          <div>
+            <h3>Field Activity Reports</h3>
+            <p className="text-ink/70" style={{ margin: '4px 0 0', fontSize: '0.82rem' }}>
+              {`Visit reports submitted by collectors and sales agents${showBranch ? ' across branches' : ''}.${total > reports.length ? ` Showing the ${reports.length} most recent of ${total}.` : ''}`}
+            </p>
+          </div>
+        </div>
+        <div className="list-section-toolbar">
+          <div className="list-section-controls">
+            <input
+              className="filter-input search"
+              type="search"
+              placeholder="Search staff, customer, or remarks"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+            />
+            <select className="filter-select" value={activityFilter} onChange={(e) => setActivityFilter(e.target.value)}>
+              {activityTypes.map((type) => <option key={type} value={type}>{type === 'All' ? 'All Activities' : type}</option>)}
+            </select>
+            <select className="filter-select" value={syncFilter} onChange={(e) => setSyncFilter(e.target.value)}>
+              {['All', 'Pending', 'Synced', 'Failed'].map((status) => <option key={status} value={status}>{status === 'All' ? 'All Sync Status' : status}</option>)}
+            </select>
+          </div>
+        </div>
+        {filtered.length ? <>
+          <div className="corvex-table-wrapper">
+            <table className="corvex-table">
+              <thead>
+                <tr>
+                  <th>Staff</th>
+                  {showBranch ? <th>Branch</th> : null}
+                  <th>Customer</th>
+                  <th>Activity</th>
+                  <th>Visit Date</th>
+                  <th>Sync</th>
+                  <th>Submitted</th>
+                  <th>Remarks</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map((r) => <tr key={r.report_id}>
+                    <td><strong>{r.collector_name}</strong>{r.staff_role ? <div className="muted">{r.staff_role}</div> : null}</td>
+                    {showBranch ? <td>{r.branch_name || '—'}</td> : null}
+                    <td>{r.customer_name}</td>
+                    <td>{r.activity_type}</td>
+                    <td>{formatDisplayDate(r.scheduled_date)}</td>
+                    <td><StatusBadge status={r.sync_status} /></td>
+                    <td>{formatDisplayDateTime(r.created_at)}</td>
+                    <td style={{ maxWidth: 220, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={r.remarks}>{r.remarks || '—'}</td>
+                    <td className="table-actions">
+                      <button className="icon-action-button" type="button" title="View report" onClick={() => openReport(r)}><NavIcon name="view" /></button>
+                    </td>
+                  </tr>)}
+              </tbody>
+            </table>
+          </div>
+          <Pagination {...pagination} />
+        </> : <EmptyState title="No field activity reports" description="Collector and sales agent submissions will appear here after a visit report is filed." />}
+      </section>
+      {selected ? <div className="modal-overlay" onClick={() => setSelected(null)}>
+          <div className="modal-content" style={{ maxWidth: 640 }} onClick={(e) => e.stopPropagation()}>
+            <div className="flex flex-col md:flex-row justify-between gap-4 items-start md:items-center mb-4">
+              <div>
+                <h3 style={{ margin: 0 }}>Report {selected.report_id}</h3>
+                <p className="text-ink/70" style={{ margin: '4px 0 0', fontSize: '0.82rem' }}>
+                  {selected.collector_name} · {selected.customer_name}
+                </p>
+              </div>
+              <StatusBadge status={selected.sync_status} />
+            </div>
+            {detailLoading ? <LoadingState message="Loading report..." /> : <div className="grid gap-3">
+                <div className="grid two-up">
+                  <p style={{ margin: 0 }}><span className="text-ink/70">Activity</span><br /><strong>{selected.activity_type || '—'}</strong></p>
+                  <p style={{ margin: 0 }}><span className="text-ink/70">Visit</span><br /><strong>{selected.visit_type || '—'} · {formatDisplayDate(selected.scheduled_date)} · <StatusBadge status={selected.visit_status || '—'} /></strong></p>
+                  {showBranch ? <p style={{ margin: 0 }}><span className="text-ink/70">Branch</span><br /><strong>{selected.branch_name || '—'}</strong></p> : null}
+                  <p style={{ margin: 0 }}><span className="text-ink/70">Submitted</span><br /><strong>{formatDisplayDateTime(selected.created_at)}</strong></p>
+                </div>
+                <div>
+                  <p className="text-ink/70" style={{ margin: '0 0 4px' }}>Remarks</p>
+                  <p style={{ margin: 0, whiteSpace: 'pre-wrap' }}>{selected.remarks || '—'}</p>
+                </div>
+                <div>
+                  <p className="text-ink/70" style={{ margin: '0 0 8px' }}>Photo evidence</p>
+                  {photoSrc ? (
+                    <a href={photoSrc} target="_blank" rel="noreferrer">
+                      <img src={photoSrc} alt="Report evidence" style={{ maxWidth: '100%', maxHeight: 320, borderRadius: 8, border: '1px solid #c5c8d0' }} />
+                    </a>
+                  ) : <p style={{ margin: 0 }}>{selected.has_photo ? 'Photo could not be displayed.' : 'No photo attached.'}</p>}
+                </div>
+              </div>}
+            <div className="modal-actions">
+              <button className="button" type="button" onClick={() => setSelected(null)}>Close</button>
+            </div>
+          </div>
+        </div> : null}
+    </div>;
+}
+
 // ── Main export ───────────────────────────────────────────────────────────────
 export function BranchManagerPageBody({
   page,
@@ -2475,7 +2667,7 @@ export function BranchManagerPageBody({
         <p className="text-ink/70">Your account is not linked to a branch. Please contact an administrator.</p>
       </section>;
   }
-  const branchName = currentUser?.branch?.name || 'All Branches';
+  const branchName = currentUser?.branch?.name || (isOperatingManager ? 'All Branches' : 'Unassigned Branch');
   const opsBase = isOperatingManager ? '/operating-manager/operations' : '/branch-manager';
   if (!page) return <EmptyState title="Page not found" description="Use the sidebar to open a supported screen." />;
   const p = {
@@ -2502,6 +2694,10 @@ export function BranchManagerPageBody({
       return <CustomerDetailPage {...p} />;
     case 'territories':
       return <TerritoriesPage {...p} />;
+    case 'fieldActivityReports':
+      return <FieldActivityReportsPage {...p} />;
+    case 'branchInventory':
+      return <BranchInventoryViewPage showToast={showToast} branchName={branchName} />;
     case 'fieldOperations':
     case 'collectorRoutes':
     case 'salesSchedules':
@@ -2519,7 +2715,7 @@ export function BranchManagerPageBody({
     case 'leafletTerritory':
     case 'leafletDelinquency':
     case 'leafletProfitability':
-      return <LeafletPage pageType={page.pageType} {...p} />;
+      return <BranchLeafletPage pageType={page.pageType} {...p} />;
     case 'accountLocationDetail':
       return <AccountLocationDetailPage {...p} />;
     case 'reports':

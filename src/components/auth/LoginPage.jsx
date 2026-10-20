@@ -1,8 +1,9 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Mail, Lock, Eye, EyeOff, AlertCircle } from 'lucide-react';
 import { login as apiLogin, getEntryPathForRole } from '../../api/authService.js';
+import { consumeAuthNotice } from '../../api/sessionActivity.js';
 import logo from '../../assets/corvex-logo.png';
 import bgImage from '../../assets/corvex-bg.png';
 import './LoginPage.css';
@@ -23,6 +24,11 @@ export function LoginPage() {
   const [errors, setErrors] = useState({});
   const [apiError, setApiError] = useState('');
   const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    const notice = consumeAuthNotice();
+    if (notice) setApiError(notice);
+  }, []);
 
   const handleLogin = useCallback(async (e) => {
     e?.preventDefault();

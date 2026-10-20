@@ -1,0 +1,105 @@
+
+the centralized database, including customer payment Table 8. Operational Data Sources
+records, collection history, and geographic
+Decision Source Database/ Retrieved Purpose
+information. These descriptive indicators provide Criterion Module Table Field
+management with an overview of each customer’s
+financial obligation, payment urgency, and travel Outstanding Customer customer_a outstanding__ Current
+Balance Activity ctivity balance unpaid
+accessibility. The summarized operational data then amount used
+as the benefit
+become input variables for the SAW algorithm, which criterion
+generates an objective customer priority ranking for
+daily collection activities. Days Sales sales_invoi Due_date, Determines
+Overdue ces status the earliest
+due date
+This implementation directly addresses the among
+operational problems identified during the unpaid or
+partially paid
+requirements gathering conducted at invoices
+Bethuel-Herminihildo (BH) Marketing. Based on
+Distance, Customer customers Latitude, Provides the
+interviews with the Operating Manager and field
+customer records longitude customer's
+personnel, collectors currently determine collection geographic
+coordinates
+priorities using personal judgment, considering
+outstanding balances, overdue payments, and travel Distance, Branch branches Latitude, Provides the
+distance without any standardized decision-support reference records longitude geographic
+point reference
+mechanism. As a result, different collectors may point
+associated
+produce different collection schedules for similar with the
+customer conditions, leading to inconsistent customer's
+branch
+prioritization, inefficient travel, and reduced
+collection productivity. Through descriptive analytics
+Table 8 presents the operational data sources retrieved
+and the SAW method, CORVEX standardizes this
+by CORVEX before executing the Simple Additive
+decision-making process by automatically generating
+Weighting (SAW) computation. Each decision
+a ranked customer list based on operational data
+criterion is associated with the database records
+retrieved from the centralized information system.
+required to obtain or derive its value. The Outstanding
+The generated ranking is subsequently displayed in
+Balance is retrieved from the maintained customer
+the Collector’s Field Portal to support daily collection
+activity summary, the applicable due date is identified
+planning.
+from sales invoices according to invoice status, and
+2.3.2.1. Operational Data Retrieval geographic distance is derived from the coordinates of
+Before performing the SAW computation, CORVEX the customer's assigned branch and the customer.
+retrieves the operational records required to construct These prepared values are then supplied to the SAW
+the collection decision matrix from its centralized decision-support process.
+PostgreSQL database. The system retrieves the
+After retrieving and validating the required
+customer's current Outstanding Balance from
+operational records, CORVEX transforms each
+customer_activity.outstanding_balance, the applicable
+customer's Outstanding Balance, Days Overdue, and
+invoice due date from sales_invoices.due_date, the
+Geographic Distance into numerical criterion values.
+customer's geographic coordinates from
+These values are automatically assigned to the
+customers.latitude and customers.longitude, and the
+corresponding columns of the decision matrix, where
+assigned branch's geographic coordinates from
+each customer represents an alternative and each
+branches.latitude and branches.longitude. The
+criterion represents an evaluation variable. The
+retrieved records are validated for completeness and
+completed decision matrix serves as the direct input
+consistency before being processed by the SAW
+to the SAW normalization and weighted preference
+decision-support procedure.
+computations.
+The system uses the retrieved records to prepare the
+2.3.2.2. SAW Eligibility and Computation Rules
+three SAW criteria. The Outstanding Balance is read
+Before generating the collection priority ranking,
+directly from customer_activity.outstanding_balance
+CORVEX applies predefined eligibility and
+as the current unpaid amount maintained by the
+computation rules to ensure that only valid customer
+system rather than being recomputed from raw
+records are included in the SAW decision matrix. A
+payment transactions during ranking. The Days
+customer is eligible for ranking only when
+Overdue value is derived by identifying the applicable
+customers.status is Active, the current
+unpaid sales invoice and comparing its due date with
+outstanding_balance is greater than zero, the
+the current system date. The Geographic Distance is
+customer's account_manager_id corresponds to the
+calculated from the assigned branch coordinates to the
+Collector for whom the priority list is being
+customer's coordinates using the Haversine method.
+generated, the customer has valid geographic
+These prepared criterion values are then supplied to
+coordinates, and the customer's assigned branch has
+the SAW computation to generate the daily collection
+valid geographic coordinates.
+priority ranking.
+14

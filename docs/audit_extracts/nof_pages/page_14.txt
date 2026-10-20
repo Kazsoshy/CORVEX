@@ -1,0 +1,92 @@
+
+calculated measures across reporting periods and The Customer Activity table stores current customer-
+branches. In sales analysis, an increase in the level summary indicators derived from recorded
+calculated sales value across reporting periods collection and sales activities, including outstanding
+indicates increased recorded sales activity, while balance, purchase volume, last collection date, and last
+differences among branches identify variations in sales sales visit. These values provide current customer
+performance. In collection analysis, differences in total activity information used by the SAW collection-
+collections or collection rates indicate changes in prioritization process and selected descriptive analysis.
+recorded collection activity. Inventory analysis
+Table 19. Customer Credit Info Table
+identifies differences in available stock and inventory
+The Customer Credit Info table stores each customer's
+movement, while customer payment and credit
+credit evaluation information, including the approved
+analysis identify the concentration of outstanding
+credit limit, declared monthly income, employment
+balances and delinquent accounts. These interpreted
+status, credit score, approving user, and approval date.
+results provide management with evidence for
+These records support authorized customer credit
+determining which areas require further review or
+verification and credit-related decision-making.
+action. For example, a sustained decrease in a branch’s
+sales or collection measures may prompt management
+Table 20. Payment Method Table
+to review the corresponding activities.
+The Payment Method table stores the list of payment
+methods the system accepts, such as Cash, Check,
+In contrast, relatively low inventory availability may
+Bank Transfer, GCash, and Maya. The Collection
+prompt inventory coordination or review. Higher
+Payment and Sales Invoices tables reference it to
+outstanding customer balances may likewise prompt
+standardize transaction categorization by payment
+further payment or credit assessment. The module does
+type.
+not automatically determine the action to take; instead,
+it provides analyzed information that supports
+Table 21. Products Table
+authorized personnel in making informed decisions.
+The Products table stores the master records of
+products sold and managed by BH Marketing. Sales
+2.3.4. Use Case Diagram and inventory records reference it to keep product
+Figure 5. Use Case Diagram information consistent across branches.
+2.3.5 Entity-Relationship Diagram Table 22. Product Categories Table
+Figure 6. Entity-Relationship Diagram The Categories table stores the list of product
+categories, such as Beverages, Snacks, and Household,
+2.3.6 Data Dictionary
+referenced by the Products table. It allows inventory
+A sample of the CORVEX data dictionary is shown and sales records to be grouped and filtered by
+below. category for reporting purposes.
+Table 15. Audit Logs Table Table 23. Suppliers Table
+The Audit Logs table records significant user activities The Suppliers table stores the master information of
+performed within CORVEX, including authentication, suppliers that provide products for BH Marketing's
+data updates, inventory transactions, and scheduling- inventory replenishment. Restock transactions
+related actions. It references the Users table to provide reference supplier records to identify the source of
+an audit trail for accountability, security, and system incoming inventory and support supplier traceability.
+administration.
+Table 24. Territories Table
+Table 16. Branches Table The territories table stores the service territories
+The Branches Table stores the master information of assigned to branches and field personnel. It supports
+BH Marketing’s branches, including their addresses map-based visualization, customer assignment,
+and geographic coordinates. Users, customers, territory coordination, and route planning for field
+inventory records, territories, sales records, collection activities.
+records, and other branch-related data reference it.
+Table 25. Users Table
+Table 17. Customers Table The users table stores the accounts of authorized
+The Customers table stores customer account profiles, personnel who access CORVEX. Each user is
+contact information, assigned account managers, associated with a system role and, where applicable, a
+branch and territory associations, and geographic branch, allowing the system to enforce role-based and
+coordinates. It supports customer identification, branch-level access to information and functions.
+account management, service territory assignment, and
+Table 26. Roles Table
+location-based operations. The table also maintains
+The Roles table stores the user roles defined within
+customer account status and record timestamps to
+CORVEX, such as Operating Manager, Branch Head,
+support monitoring and management of customer
+Collector, Sales Agent, and Warehouse Personnel,
+information. The Customers table also records
+along with a display name and a machine-readable
+customer relationship classifications to support
+slug. The Users and Role Permissions tables reference
+segmentation and account management. This stored
+it to enforce role-based access restrictions.
+information supports sales transactions, collection
+monitoring, and customer-related reporting across Table 27. Permissions Table
+branches and service territories. The Permissions table stores the individual, granular
+permissions available within the system, including a
+Table 18. Customer Activity Table
+display label and a description of what each permission
+14

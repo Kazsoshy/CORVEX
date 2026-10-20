@@ -1,0 +1,96 @@
+
+Table 16. Branches Table
+territor INT 11 Assigned FK →
+Field Dat Size Description Constra y_id Service territorie
+Name a ints Territories s.territor
+Typ y_id
+e
+first_na VAR 20 Primary Not Null
+me CH contact first
+branch INT 11 Unique PK,
+AR name
+_id branch Auto-inc
+identifier rement middle VAR 20 Primary Nullable
+_name CH contact
+branch VAR 50 Branch Not Null
+AR middle
+_name CH name
+name
+AR
+last_na VAR 20 Primary Not Null
+address VAR 150 Full branch Not Null
+me CH contact last
+CH address,
+AR name
+AR including
+city address VAR 150 Customer Not Null
+CH address
+latitude DEC 10,7 Latitude for Not Null
+AR
+IMA OpenStreetM
+L ap location latitude DEC 10,7 Latitude for Not Null
+IMA OpenStreetM
+longitu DEC 10,7 Longitude for Not Null
+L ap location
+de IMA OpenStreetM
+L ap location longitu DEC 10,7 Longitude Not Null
+de IMA for
+contact VAR 20 Branch Not Null
+L OpenStreet
+_no CH contact
+Map
+AR number
+location
+email VAR 100 Branch Not Null
+contact VAR 30 Primary Not Null
+CH official
+_phone CH contact
+AR email
+AR telephone
+address
+number
+status VAR 20 Status of Not Null
+contact VAR 20 Secondary Not Null
+CH branch
+_person CH point of
+AR (Active,
+_fname AR contact —
+Inactive)
+first name
+created TIM — Date Not Null
+contact VAR 20 Secondary Nullable
+_at EST created
+_person CH point of
+AM
+_mnam AR contact —
+P
+e middle
+name
+The Branches Table stores the master information of
+BH Marketing’s branches, including their addresses contact VAR 100 Secondary Not Null
+and geographic coordinates. Users, customers, _person CH point of
+inventory records, territories, sales records, collection _lname AR contact —
+records, and other branch-related data reference it. last name
+Table 17. Customers Table contact VAR 30 Secondary Not Null
+_person CH point of
+Field Data Size Description Constrain
+Name Type ts _phone AR contact —
+telephone
+custom INT 11 Customer PK, number
+er_id ID Auto-inc
+relation VAR 10 Type of Not Null
+rement
+ship CH business
+account INT 11 User FK → AR relationship
+_manag responsible users.use between the
+er_id for managing r_id customer
+the customer
+and contact
+account
+person
+branch_ INT 11 Associated FK →
+status VAR 20 Status of Not Null
+id branch b ra r n an ch ch _ e id s , . b CH c a u cc s o to u m nt e r
+Not Null AR (Active,
+Inactive)
+22

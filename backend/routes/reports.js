@@ -1,5 +1,19 @@
 import express from 'express';
-import { requireAuth, requireRole, requireAssignedBranch, ROLE_SETS } from '../middleware/auth.js';
+import { requireAuth, requireRole, requireAssignedBranch, isUnscoped, ROLE_SETS } from '../middleware/auth.js';
+
+/** Branch roles are always scoped; only OM / super_admin may see all branches. */
+function branchScope(user, queryBranchId) {
+  if (!isUnscoped(user)) {
+    return { isBranchScoped: true, bid: user.branchId };
+  }
+  const parsed = queryBranchId !== undefined && queryBranchId !== '' && queryBranchId != null
+    ? Number(queryBranchId)
+    : null;
+  return {
+    isBranchScoped: false,
+    bid: Number.isFinite(parsed) ? parsed : null,
+  };
+}
 
 const router = express.Router();
 const ORG_REPORT_PATHS = new Set(['/executive', '/operating-manager', '/performance-history']);
@@ -287,8 +301,7 @@ router.get('/collection', requireAuth, async (req, res) => {
   try {
     const pool = req.app.locals.pool;
     const user = req.currentUser;
-    const isBranchScoped = user.branchId !== null;
-    const bid = isBranchScoped ? user.branchId : (req.query.branch_id ? Number(req.query.branch_id) : null);
+    const { isBranchScoped, bid } = branchScope(user, req.query.branch_id);
 
     const days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
     const result = await pool.query(
@@ -343,8 +356,7 @@ router.get('/sales', requireAuth, async (req, res) => {
   try {
     const pool = req.app.locals.pool;
     const user = req.currentUser;
-    const isBranchScoped = user.branchId !== null;
-    const bid = isBranchScoped ? user.branchId : (req.query.branch_id ? Number(req.query.branch_id) : null);
+    const { isBranchScoped, bid } = branchScope(user, req.query.branch_id);
 
     const days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
     const result = await pool.query(
@@ -401,8 +413,7 @@ router.get('/inventory', requireAuth, async (req, res) => {
   try {
     const pool = req.app.locals.pool;
     const user = req.currentUser;
-    const isBranchScoped = user.branchId !== null;
-    const bid = isBranchScoped ? user.branchId : (req.query.branch_id ? Number(req.query.branch_id) : null);
+    const { isBranchScoped, bid } = branchScope(user, req.query.branch_id);
 
     const statusResult = await pool.query(
       `SELECT
@@ -473,8 +484,7 @@ router.get('/delinquency', requireAuth, async (req, res) => {
   try {
     const pool = req.app.locals.pool;
     const user = req.currentUser;
-    const isBranchScoped = user.branchId !== null;
-    const bid = isBranchScoped ? user.branchId : (req.query.branch_id ? Number(req.query.branch_id) : null);
+    const { isBranchScoped, bid } = branchScope(user, req.query.branch_id);
 
     const weeks = ['W1', 'W2', 'W3', 'W4', 'W5', 'W6', 'W7'];
     const delinquency = [];
@@ -545,8 +555,7 @@ router.get('/compliance', requireAuth, async (req, res) => {
   try {
     const pool = req.app.locals.pool;
     const user = req.currentUser;
-    const isBranchScoped = user.branchId !== null;
-    const bid = isBranchScoped ? user.branchId : (req.query.branch_id ? Number(req.query.branch_id) : null);
+    const { isBranchScoped, bid } = branchScope(user, req.query.branch_id);
 
     const collectorsResult = await pool.query(
       `SELECT u.id, u.first_name || ' ' || u.last_name AS name
@@ -618,8 +627,7 @@ router.get('/kpi', requireAuth, async (req, res) => {
   try {
     const pool = req.app.locals.pool;
     const user = req.currentUser;
-    const isBranchScoped = user.branchId !== null;
-    const bid = isBranchScoped ? user.branchId : (req.query.branch_id ? Number(req.query.branch_id) : null);
+    const { isBranchScoped, bid } = branchScope(user, req.query.branch_id);
 
     const [
       staffResult,
@@ -737,8 +745,7 @@ router.get('/executive', requireAuth, async (req, res) => {
   try {
     const pool = req.app.locals.pool;
     const user = req.currentUser;
-    const isBranchScoped = user.branchId !== null;
-    const bid = isBranchScoped ? user.branchId : null;
+    const { isBranchScoped, bid } = branchScope(user);
 
     const branchParam    = isBranchScoped ? [bid] : [];
     const branchWhere    = isBranchScoped ? 'AND branch_id = $1' : '';
@@ -1008,8 +1015,7 @@ router.get('/invoices', requireAuth, async (req, res) => {
   try {
     const pool = req.app.locals.pool;
     const user = req.currentUser;
-    const isBranchScoped = user.branchId !== null;
-    const bid = isBranchScoped ? user.branchId : (req.query.branch_id ? Number(req.query.branch_id) : null);
+    const { isBranchScoped, bid } = branchScope(user, req.query.branch_id);
     const { status, page = 1, limit = 50 } = req.query;
 
     const conditions = [];
@@ -1089,8 +1095,7 @@ router.get('/performance-history', requireAuth, async (req, res) => {
   try {
     const pool = req.app.locals.pool;
     const user = req.currentUser;
-    const isBranchScoped = user.branchId !== null;
-    const bid = isBranchScoped ? user.branchId : (req.query.branch_id ? Number(req.query.branch_id) : null);
+    const { isBranchScoped, bid } = branchScope(user, req.query.branch_id);
     const dateWindow = resolveAnalyticsWindow(req.query);
 
     const conditions = [];
@@ -1169,9 +1174,7 @@ router.get('/operating-manager', requireAuth, async (req, res) => {
     const user = req.currentUser;
     const dateWindow = resolveAnalyticsWindow(req.query);
 
-    const branchId = user.branchId !== null
-      ? Number(user.branchId)
-      : (req.query.branch_id !== undefined && req.query.branch_id !== '' ? Number(req.query.branch_id) : null);
+    const { bid: branchId } = branchScope(user, req.query.branch_id);
 
     if (Number.isNaN(branchId)) {
       return res.status(400).json({ success: false, message: 'branch_id must be numeric.' });
@@ -1422,9 +1425,7 @@ router.get('/credit-history', requireAuth, async (req, res) => {
     const user = req.currentUser;
 
     // Branch scoping: branch-level roles see only their branch's customers
-    const branchId = user.branchId !== null
-      ? user.branchId
-      : (req.query.branch_id ? Number(req.query.branch_id) : null);
+    const { bid: branchId } = branchScope(user, req.query.branch_id);
 
     const conditions = [];
     const params = [];

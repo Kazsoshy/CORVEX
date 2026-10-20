@@ -1,0 +1,92 @@
+
+the system must meet. Each requirement is written
+Inventory FR-22 allow Warehouse Personnel to add
+Management inventory records. from the system's perspective and provides
+measurable conditions that can be evaluated during
+FR-23 allow Warehouse Personnel to system testing.
+update inventory records.
+Table 5. Non-Functional Requirements
+FR-24 The system shall automatically
+synchronize inventory transactions NFR Category The system shall…
+and stock quantities across all No.
+branches.
+FR-25 display current inventory NFR-0 Performa load dashboard pages and system
+availability for all branches. 1 nce modules within 3 seconds under normal
+network conditions.
+Credit History FR-26 record customer payment histories. NFR-0 generate customer prioritization results
+Repository 2 using the SAW algorithm within 5
+FR-27 Display consolidated customer seconds after processing customer
+payment history and outstanding records.
+balances across all branches.
+NFR-0 within an acceptable response time
+Map-Based Field FR-28 Display customer locations using 3 under normal network conditions.
+Operations an interactive map.
+NFR-0 Security require authenticated username and
+FR-29 Display recommended collection 4 password credentials before granting
+routes.
+access to any system module.
+FR-30 Display assigned sales territories
+NFR-0 enforce role-based access control to
+and branch coverage.
+5 ensure users can only access modules
+assigned to their designated roles.
+Operations FR-31 display collection performance
+Dashboard summaries.
+NFR-0 encrypt user passwords before storing
+6 them in the PostgreSQL database.
+FR-32 display sales performance
+summaries.
+NFR-0 automatically terminate inactive user
+FR-33 display inventory status across 7 sessions after 15 minutes of inactivity.
+branches.
+NFR-0 Usability provide a responsive and intuitive
+FR-34 display delinquent customer 8 interface that allows first-time users to
+reports. complete core operational tasks with
+minimal guidance.
+FR-35 Generate operational insights by
+consolidating inventory, sales,
+NFR-0 display clear validation messages and
+collection, customer credit,
+salaries and wages, operating 9 user-friendly error notifications
+expenses, and branch performance. whenever invalid input or system errors
+occur.
+Notification Module FR-36 notify Collectors and Sales Agents
+of their daily assigned schedules. NFR-1 Reliabilit maintain the accuracy and integrity of
+0 y operational records during normal
+FR-37 notify Warehouse Personnel when system operation.
+inventory reaches predefined
+threshold levels.
+NFR-1 prevent data inconsistency during
+1 Inventory Centralization and customer
+FR-38 notify the Operating Manager of transaction processing across all
+overdue customer accounts.
+branches.
+FR-39 notify authorized users of
+operational updates through the NFR-1 prevent duplicate inventory and
+dashboard. 2 customer payment records during
+concurrent transactions and
+synchronization across branches.
+Table 4 presents the functional requirements of the
+system, grouped by module, each specifying a
+NFR-1 maintain consistent inventory
+capability the system must perform, such as user 3 information and customer payment
+authentication, account management, customer records across all branches after
+synchronization.
+prioritization, field operations, inventory
+management, and notifications, to support the
+NFR-1 Maintaina be developed using modular software
+organization's collection, sales, and warehouse
+4 bility components to allow future
+operations. enhancements and maintenance without
+affecting existing system functions.
+2.2.3.2. Non-Functional Requirement
+Non-functional requirements define the quality NFR-1 Compatib operate correctly on modern web
+attributes CORVEX must satisfy to ensure reliable, 5 ility browsers including Google Chrome,
+Microsoft Edge, and Mozilla Firefox.
+secure, and efficient operation within BH Marketing.
+Unlike functional requirements, which describe the
+NFR-1 support desktop and mobile devices
+services the system provides, these requirements 6 with responsive layouts for the
+specify the performance standards, security measures, Operating Manager, Branch Head,
+usability, compatibility, maintainability, and reliability Collectors, Sales Agents, and
+9

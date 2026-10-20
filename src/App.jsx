@@ -9,6 +9,7 @@ import { CustomerPageBody } from './components/customer/CustomerPageBody';
 import { SuperAdminPageBody } from './components/superAdmin/SuperAdminPageBody';
 import { Toast, useToast } from './components/shared/Toast';
 import { getEntryPathForRole, logout, getCurrentUser } from './api/authService.js';
+import { startIdleSessionWatch } from './api/sessionActivity.js';
 import logo from './assets/corvex-logo.png';
 import { LoginPage } from './components/auth/LoginPage';
 import { ActivatePortalPage } from './components/auth/ActivatePortalPage';
@@ -93,17 +94,42 @@ function PrototypeShell() {
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(() => localStorage.getItem('corvex_sidebar_collapsed') === 'true');
   const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
 
+  const closeMobileSidebar = useCallback(() => setIsMobileSidebarOpen(false), []);
+  const openMobileSidebar = useCallback(() => setIsMobileSidebarOpen(true), []);
+
   useEffect(() => {
     localStorage.setItem('corvex_sidebar_collapsed', isSidebarCollapsed);
   }, [isSidebarCollapsed]);
 
   useEffect(() => {
+    closeMobileSidebar();
+  }, [location.pathname, location.search, closeMobileSidebar]);
+
+  useEffect(() => {
     const handleKeyDown = (e) => {
-      if (e.key === 'Escape') setIsMobileSidebarOpen(false);
+      if (e.key === 'Escape') closeMobileSidebar();
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, []);
+  }, [closeMobileSidebar]);
+
+  useEffect(() => {
+    if (!isMobileSidebarOpen) return undefined;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => {
+      document.body.style.overflow = previousOverflow;
+    };
+  }, [isMobileSidebarOpen]);
+
+  useEffect(() => {
+    const media = window.matchMedia('(min-width: 1024px)');
+    const handleChange = (event) => {
+      if (event.matches) closeMobileSidebar();
+    };
+    media.addEventListener('change', handleChange);
+    return () => media.removeEventListener('change', handleChange);
+  }, [closeMobileSidebar]);
 
   useEffect(() => {
     if (location.pathname === '/password-reset') return;
@@ -123,9 +149,16 @@ function PrototypeShell() {
 
   useEffect(() => {
     const handleRequestLogout = () => setShowLogoutConfirm(true);
+    const handleSessionEnded = () => navigate('/login', { replace: true });
     window.addEventListener('request-logout', handleRequestLogout);
-    return () => window.removeEventListener('request-logout', handleRequestLogout);
-  }, []);
+    window.addEventListener('session-ended', handleSessionEnded);
+    const stopIdleWatch = startIdleSessionWatch();
+    return () => {
+      window.removeEventListener('request-logout', handleRequestLogout);
+      window.removeEventListener('session-ended', handleSessionEnded);
+      stopIdleWatch();
+    };
+  }, [navigate]);
 
   const handleLogoutConfirm = () => {
     logout();
@@ -154,15 +187,24 @@ function PrototypeShell() {
         onCancel={() => setShowLogoutConfirm(false)}
       />
       {isMobileSidebarOpen && (
-        <div className="sidebar-overlay" onClick={() => setIsMobileSidebarOpen(false)} aria-hidden="true" />
+        <div className="sidebar-overlay" onClick={closeMobileSidebar} aria-hidden="true" />
       )}
-      <aside className="sidebar">
+      <aside id="corvex-sidebar" className="sidebar">
         <button
           className="sidebar-toggle-btn"
+          type="button"
           onClick={() => setIsSidebarCollapsed(!isSidebarCollapsed)}
           aria-label={isSidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
         >
           <NavIcon name={isSidebarCollapsed ? 'chevronRight' : 'chevronLeft'} />
+        </button>
+        <button
+          className="sidebar-mobile-close"
+          type="button"
+          onClick={closeMobileSidebar}
+          aria-label="Close navigation menu"
+        >
+          <NavIcon name="close" />
         </button>
         <div className="sidebar-inner">
           <div className="sidebar-header">
@@ -191,6 +233,7 @@ function PrototypeShell() {
                           <Link
                             key={link.to}
                             to={link.to}
+                            onClick={closeMobileSidebar}
                             className={
                               isRoleModule
                                 ? (isCollector
@@ -228,6 +271,7 @@ function PrototypeShell() {
                     <Link
                       key={link.to}
                       to={link.to}
+                      onClick={closeMobileSidebar}
                       className={
                         isRoleModule
                           ? (isCollector
@@ -266,6 +310,7 @@ function PrototypeShell() {
                 <Link
                   key={link.to}
                   to={link.to}
+                  onClick={closeMobileSidebar}
                   className={location.pathname === link.to ? 'nav-link active' : 'nav-link'}
                   data-tooltip={link.label}
                 >
@@ -284,7 +329,16 @@ function PrototypeShell() {
               className="sidebar-profile"
               onClick={() => {
                 const prefix = currentRole.entryPath.split('/')[1];
+                closeMobileSidebar();
                 navigate(`/${prefix}/profile`);
+              }}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                  e.preventDefault();
+                  const prefix = currentRole.entryPath.split('/')[1];
+                  closeMobileSidebar();
+                  navigate(`/${prefix}/profile`);
+                }
               }}
               role="button"
               tabIndex={0}
@@ -301,7 +355,6 @@ function PrototypeShell() {
               className="button sidebar-logout"
               type="button"
               onClick={() => setShowLogoutConfirm(true)}
-              style={{ display: 'flex', width: '100%', opacity: 1, visibility: 'visible', marginTop: '8px' }}
             >
               <span className="sidebar-switch-icon">
                 <NavIcon name="login" />
@@ -315,6 +368,24 @@ function PrototypeShell() {
       <main className="content">
         <div className="content-ambient" aria-hidden="true" />
 
+        <header className="mobile-app-bar">
+          <button
+            className="mobile-menu-btn"
+            type="button"
+            onClick={openMobileSidebar}
+            aria-label="Open navigation menu"
+            aria-expanded={isMobileSidebarOpen}
+            aria-controls="corvex-sidebar"
+          >
+            <NavIcon name="menu" />
+          </button>
+          <div className="mobile-app-bar-copy">
+            <span className="mobile-app-bar-brand">CORVEX</span>
+            {pageTitle && pageTitle !== 'CORVEX' ? (
+              <span className="mobile-app-bar-page">{pageTitle}</span>
+            ) : null}
+          </div>
+        </header>
 
         <Routes>
           <Route path="/password-reset" element={<PasswordResetNotice navigate={navigate} />} />
@@ -454,7 +525,7 @@ function PageBody({ showMap, setShowMap, filter, setFilter, page, currentRole, n
   };
 
   return (
-    <div className="relative z-10 grid gap-[22px] w-full">
+    <div className="page">
       {page.stats?.length ? <StatsGrid stats={page.stats} /> : null}
 
       {page.actions?.length ? (

@@ -71,7 +71,7 @@ export function NotificationsInbox({
   if (loading) return <LoadingState message="Loading notifications..." />;
 
   return (
-    <div className="relative z-10 grid gap-[22px] w-full">
+    <div className="page">
       <section className="panel content-panel relative overflow-hidden">
         <div className="flex flex-col md:flex-row justify-between gap-4 items-start md:items-center">
           <div className="segmented-control" style={{ flexWrap: 'wrap' }}>

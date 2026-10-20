@@ -1,0 +1,108 @@
+
+management struggles to monitor operational customer credit exposure, and make timely operational
+performance, identify branch-level issues, evaluate decisions across all branches.
+Table 1. Feature Comparison Matrix
+Table 1 shows that the reviewed commercial systems Development Goal (SDG) 9: Industry, Innovation and
+provide specialized capabilities for different aspects of Infrastructure by promoting digital transformation and
+business operations. Pepperi primarily supports mobile strengthening information and communication
+field sales, customer visit management, and payment technologies. Furthermore, the study aligns with the
+collection; Odoo provides comprehensive enterprise University of Mindanao’s research agenda on ICT-
+resource planning through integrated sales, inventory, Enabled Systems and Services by developing an
+warehousing, and accounting modules, while Badger integrated information system that enhances
+Maps specializes in customer mapping, territory organizational efficiency, operational productivity,
+visualization, and route optimization for field and technology-driven service delivery.
+personnel. Although these systems effectively address
+CORVEX is a web-based and mobile-accessible
+their respective operational domains, none is designed
+information system developed for Bethuel-
+to support BH Marketing's integrated operational
+Herminihildo (BH) Marketing to support map-based
+workflow. In particular, the reviewed systems do not
+field operations, Inventory Centralization, customer
+combine (1) SAW-based collection prioritization using
+payment verification, and business activity monitoring
+the company's operational criteria, (2) map-based
+across its geographically distributed branches. The
+visualization using a Maps API to display customer
+system provides six role-based user accounts: Owner,
+locations, recommended collection routes, sales
+Operating Manager, Branch Head, Collector, Sales
+territories, and field activities, (3) Inventory
+Agent, and Warehouse Personnel. The Owner and the
+Centralization tailored to the company's branch
+Operating Manager have enterprise-wide access to
+operations, (4) centralized customer payment
+monitor branch operations, review operational
+verification restricted to authorized management, and
+dashboards and reports, verify company-wide
+(5) a unified operational dashboard that consolidates
+customer payment records, and oversee inventory,
+collection performance, sales activities, inventory
+sales, collections, and operational performance.
+status, customer payment information, and branch
+Branch Heads can monitor field personnel, supervise
+operational records into a single solution. These
+branch operations, verify branch inventory, review
+identified gaps demonstrate the need for the CORVEX
+branch-level operational reports, and coordinate
+system, which integrates these business-specific
+operational activities with the Operating Manager.
+operational requirements into a single enterprise
+Collectors receive daily collection assignments
+information system designed for BH Marketing.
+prioritized using the Simple Additive Weighting
+This study is motivated by the need to improve the
+(SAW) method, record collection transactions, update
+efficiency of field operations, inventory management,
+customer payment information, generate digital
+and operational coordination across the geographically
+receipts, and navigate assigned customer locations
+dispersed branches of Bethuel-Herminihildo (BH)
+through the integrated mapping module. Sales Agents
+Marketing. Through the development of a centralized
+use the mapping module to visualize customer
+platform for map-based field operations, Inventory
+locations, organize canvassing activities within their
+Centralization, centralized customer payment
+assigned service territories, record sales transactions,
+verification, and business activity monitoring, the
+and submit field activity reports, while Warehouse
+system is expected to reduce manual operational
+Personnel manage inventory records, update stock
+processes, improve the accuracy and availability of
+movements, monitor product availability, and
+operational information, strengthen inter-branch
+synchronize inventory information across branches.
+coordination, and support more informed managerial
+Role-based access control ensures each user can access
+decision-making for Branch Heads, collectors, sales
+only the information and functions needed to perform
+agents, warehouse personnel, the Operating Manager,
+their assigned responsibilities, while maintaining data
+and the Owner. Furthermore, the study supports United
+security and operational integrity.
+Nations Sustainable Development Goal (SDG) 9:
+Industry, Innovation and Infrastructure by promoting 1.3. Objectives
+digital transformation through information and
+1.3.1 General Objectives
+communication technologies, and it aligns with the
+University of Mindanao’s research thrust on ICT- This study aims to develop CORVEX, a Mapping-
+enabled solutions that enhance organizational Integrated Field Operations and Inventory
+efficiency, innovation, and sustainable development. Centralization System for Multi-Branch Enterprises,
+for Bethuel-Herminihildo (BH) Marketing to improve
+1.2. Purpose and Description
+field operations, inventory management, customer
+payment monitoring, and operational decision-making
+This study aims to develop CORVEX: A Mapping-
+through a centralized enterprise information system
+Integrated Field Operations and Inventory
+with map-based visualization.
+Centralization System for Multi-Branch Enterprises
+for Bethuel-Herminihildo (BH) Marketing to improve
+1.3.2 Specific Objectives
+field operations, collection account prioritization,
+Inventory Centralization, centralized customer To achieve the general objective, the researchers
+payment verification, and operational coordination specifically design, develop, implement, and integrate
+through a centralized enterprise information system. the following:
+The system supports the United Nations Sustainable
+3

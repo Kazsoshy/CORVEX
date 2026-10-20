@@ -10,12 +10,77 @@ async function roleSlug(pool, roleId) {
   return result.rows[0]?.slug ?? null;
 }
 
+const OP_BLOCKED_ROLE_SLUGS = new Set(['super_admin', 'operating_manager', 'client']);
+
+function operatingManagerCannotAssign(actor, slug, currentSlug = null) {
+  return actor?.roleSlug === 'operating_manager'
+    && OP_BLOCKED_ROLE_SLUGS.has(slug)
+    && slug !== currentSlug;
+}
+
 async function userRoleSlug(pool, userId) {
   const result = await pool.query(
     `SELECT r.slug FROM users u JOIN roles r ON r.role_id = u.role_id WHERE u.id = $1`,
     [Number(userId)]
   );
   return result.rows[0]?.slug ?? null;
+}
+
+/** Guards for soft-disable (status → Inactive). Returns an error payload or null. */
+async function assertCanDisableUser(pool, actor, userId) {
+  const id = Number(userId);
+  if (!Number.isInteger(id) || id <= 0) {
+    return { status: 404, message: 'User not found.' };
+  }
+  if (Number(actor?.id) === id) {
+    return { status: 400, message: 'You cannot disable your own account.' };
+  }
+
+  const existing = await pool.query(
+    `SELECT u.status, r.slug AS role_slug
+     FROM users u
+     JOIN roles r ON r.role_id = u.role_id
+     WHERE u.id = $1`,
+    [id]
+  );
+  if (existing.rows.length === 0) {
+    return { status: 404, message: 'User not found.' };
+  }
+
+  const { status: currentStatus, role_slug: targetSlug } = existing.rows[0];
+  if (currentStatus === 'Inactive') {
+    return { status: 400, message: 'User is already disabled.' };
+  }
+
+  if (targetSlug === 'super_admin' && actor?.roleSlug !== 'super_admin') {
+    return { status: 403, message: 'Access denied.' };
+  }
+  if (
+    actor?.roleSlug === 'operating_manager'
+    && (targetSlug === 'super_admin' || targetSlug === 'operating_manager')
+  ) {
+    return {
+      status: 403,
+      message: 'Operating managers cannot disable Super Admin or Operating Manager accounts.',
+    };
+  }
+
+  if (targetSlug === 'super_admin') {
+    const activeAdmins = await pool.query(
+      `SELECT COUNT(*)::int AS count
+       FROM users u
+       JOIN roles r ON r.role_id = u.role_id
+       WHERE r.slug = 'super_admin' AND u.status = 'Active'`
+    );
+    if (Number(activeAdmins.rows[0]?.count) <= 1) {
+      return {
+        status: 400,
+        message: 'Cannot disable the last active Super Admin account.',
+      };
+    }
+  }
+
+  return null;
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -25,6 +90,7 @@ async function userRoleSlug(pool, userId) {
 router.get('/', async (req, res) => {
   try {
     const pool = req.app.locals.pool;
+    const user = req.currentUser;
     const {
       role, status, branch_id, search,
       page = 1, limit = 20,
@@ -34,6 +100,15 @@ router.get('/', async (req, res) => {
     const params = [];
     let pIdx = 1;
 
+    // Branch-scoped roles may only list staff in their own branch.
+    if (user?.branchId != null && !['super_admin', 'operating_manager'].includes(user.roleSlug)) {
+      conditions.push(`u.branch_id = $${pIdx++}`);
+      params.push(user.branchId);
+    } else if (branch_id) {
+      conditions.push(`u.branch_id = $${pIdx++}`);
+      params.push(Number(branch_id));
+    }
+
     if (role) {
       conditions.push(`r.slug = $${pIdx++}`);
       params.push(role);
@@ -41,10 +116,6 @@ router.get('/', async (req, res) => {
     if (status) {
       conditions.push(`u.status = $${pIdx++}`);
       params.push(status);
-    }
-    if (branch_id) {
-      conditions.push(`u.branch_id = $${pIdx++}`);
-      params.push(Number(branch_id));
     }
     if (search) {
       conditions.push(`(u.first_name ILIKE $${pIdx} OR u.last_name ILIKE $${pIdx} OR u.email ILIKE $${pIdx})`);
@@ -113,6 +184,7 @@ router.get('/:id', async (req, res) => {
          u.branch_id,
          u.role_id,
          u.first_name,
+         u.middle_name,
          u.last_name,
          u.email,
          u.phone,
@@ -171,6 +243,12 @@ router.post('/', async (req, res) => {
     if (assignedSlug === 'super_admin' && req.currentUser.roleSlug !== 'super_admin') {
       return res.status(403).json({ success: false, message: 'Access denied.' });
     }
+    if (operatingManagerCannotAssign(req.currentUser, assignedSlug)) {
+      return res.status(403).json({
+        success: false,
+        message: 'Operating managers cannot assign Super Admin, Operating Manager, or Client.',
+      });
+    }
 
     // Check uniqueness
     const dupCheck = await pool.query(
@@ -182,16 +260,18 @@ router.post('/', async (req, res) => {
     }
 
     const passwordHash = await bcrypt.hash(password, 12);
+    const fullName = [first_name, middle_name, last_name].filter(Boolean).join(' ').replace(/\s+/g, ' ').trim();
 
     const result = await pool.query(
       `INSERT INTO users
-         (first_name, middle_name, last_name, email, password_hash, role_id, branch_id, status)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+         (first_name, middle_name, last_name, full_name, email, password_hash, role_id, branch_id, status)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
        RETURNING id AS user_id`,
       [
         first_name.trim(),
         middle_name ? middle_name.trim() : null,
         last_name.trim(),
+        fullName,
         email.toLowerCase().trim(),
         passwordHash,
         Number(role_id),
@@ -206,6 +286,7 @@ router.post('/', async (req, res) => {
          u.branch_id,
          u.role_id,
          u.first_name,
+         u.middle_name,
          u.last_name,
          u.email,
          u.status,
@@ -262,6 +343,22 @@ router.put('/:id', async (req, res) => {
       if (assignedSlug === 'super_admin' && req.currentUser.roleSlug !== 'super_admin') {
         return res.status(403).json({ success: false, message: 'Access denied.' });
       }
+      if (operatingManagerCannotAssign(req.currentUser, assignedSlug, targetSlug)) {
+        return res.status(403).json({
+          success: false,
+          message: 'Operating managers cannot assign Super Admin, Operating Manager, or Client.',
+        });
+      }
+    }
+    if (status === 'Inactive') {
+      const currentStatusRes = await pool.query(`SELECT status FROM users WHERE id = $1`, [userId]);
+      const currentStatus = currentStatusRes.rows[0]?.status;
+      if (currentStatus && currentStatus !== 'Inactive') {
+        const disableBlock = await assertCanDisableUser(pool, req.currentUser, userId);
+        if (disableBlock) {
+          return res.status(disableBlock.status).json({ success: false, message: disableBlock.message });
+        }
+      }
     }
 
     // Build update fields dynamically
@@ -299,6 +396,12 @@ router.put('/:id', async (req, res) => {
       `UPDATE users SET ${updates.join(', ')}, updated_at = NOW() WHERE id = $${pIdx}`,
       params
     );
+    await pool.query(
+      `UPDATE users
+       SET full_name = TRIM(CONCAT_WS(' ', first_name, NULLIF(middle_name, ''), last_name))
+       WHERE id = $1`,
+      [userId]
+    );
 
     const updated = await pool.query(
       `SELECT
@@ -306,6 +409,7 @@ router.put('/:id', async (req, res) => {
          u.branch_id,
          u.role_id,
          u.first_name,
+         u.middle_name,
          u.last_name,
          u.email,
          u.phone,
@@ -334,32 +438,34 @@ router.put('/:id', async (req, res) => {
 });
 
 // ──────────────────────────────────────────────────────────────────────────────
-// DELETE /api/users/:id  — Soft delete (set status = Inactive)
+// DELETE /api/users/:id  — Soft disable (set status = Inactive; record kept)
 // ──────────────────────────────────────────────────────────────────────────────
 router.delete('/:id', async (req, res) => {
   try {
     const pool = req.app.locals.pool;
     const userId = Number(req.params.id);
-    const targetSlug = await userRoleSlug(pool, userId);
-    if (!targetSlug) {
-      return res.status(404).json({ success: false, message: 'User not found.' });
-    }
-    if (targetSlug === 'super_admin' && req.currentUser.roleSlug !== 'super_admin') {
-      return res.status(403).json({ success: false, message: 'Access denied.' });
+    const disableBlock = await assertCanDisableUser(pool, req.currentUser, userId);
+    if (disableBlock) {
+      return res.status(disableBlock.status).json({ success: false, message: disableBlock.message });
     }
 
     const result = await pool.query(
-      `UPDATE users SET status = 'Inactive', updated_at = NOW() WHERE id = $1 RETURNING id AS user_id`,
+      `UPDATE users SET status = 'Inactive', updated_at = NOW()
+       WHERE id = $1 AND status <> 'Inactive'
+       RETURNING id AS user_id`,
       [userId]
     );
     if (result.rows.length === 0) {
       return res.status(404).json({ success: false, message: 'User not found.' });
     }
 
-    return res.status(200).json({ success: true, message: 'User deactivated successfully.' });
+    return res.status(200).json({
+      success: true,
+      message: 'User disabled successfully. Their record and history are preserved.',
+    });
   } catch (err) {
     console.error('[Users] DELETE /:id error:', err.message);
-    return res.status(500).json({ success: false, message: 'Failed to deactivate user.' });
+    return res.status(500).json({ success: false, message: 'Failed to disable user.' });
   }
 });
 

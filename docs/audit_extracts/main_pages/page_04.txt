@@ -1,0 +1,86 @@
+
+This study is motivated by the need to improve the module. Sales Agents use the mapping module to
+efficiency of field operations, inventory management, visualize customer locations, organize canvassing
+and operational coordination across the activities within their assigned service territories,
+geographically dispersed branches of record sales transactions, and submit field activity
+Bethuel-Herminihildo (BH) Marketing. Through the reports, while Warehouse Personnel manage
+development of a centralized platform for map-based inventory records, update stock movements, monitor
+field operations, Inventory Centralization, centralized product availability, and synchronize inventory
+customer payment verification, and business activity information across branches. Customers can view
+monitoring, the system is expected to reduce manual their own outstanding balance and payment history.
+operational processes, improve the accuracy and Role-based access control ensures each user can
+availability of operational information, strengthen access only the information and functions needed to
+inter-branch coordination, and support more informed perform their assigned responsibilities, while
+managerial decision-making for Branch Heads, maintaining data security and operational integrity.
+collectors, sales agents, warehouse personnel, the
+1.3. Objectives
+Operating Manager. Furthermore, the study supports
+United Nations Sustainable Development Goal (SDG) 1.3.1 General Objectives
+9: Industry, Innovation and Infrastructure by
+This study aims to develop CORVEX, a
+promoting digital transformation through information
+Mapping-Integrated Field Operations and Inventory
+and communication technologies, and it aligns with
+Centralization System for Multi-Branch Enterprises,
+the University of Mindanao’s research thrust on
+for Bethuel-Herminihildo (BH) Marketing to improve
+ICT-enabled solutions that enhance organizational
+field operations, inventory management, customer
+efficiency, innovation, and sustainable development.
+payment monitoring, and operational decision-making
+1.2. Purpose and Description through a centralized enterprise information system
+with map-based visualization.
+This study aims to develop CORVEX: A
+1.3.2 Specific Objectives
+Mapping-Integrated Field Operations and Inventory
+Centralization System for Multi-Branch Enterprises
+To achieve the general objective, the researchers
+for Bethuel-Herminihildo (BH) Marketing to improve
+specifically design, develop, implement, and integrate
+field operations, collection account prioritization,
+the following:
+Inventory Centralization, centralized customer
+payment verification, and operational coordination 1.3.2.1. Develop a map-based field operations module
+through a centralized enterprise information system. using Leaflet.js integrated with the Simple
+The system supports the United Nations Sustainable Additive Weighting (SAW) method that
+Development Goal (SDG) 9: Industry, Innovation and generates a prioritized daily collection list
+Infrastructure by promoting digital transformation and and corresponding route visualization for
+strengthening information and communication collectors.
+technologies. Furthermore, the study aligns with the
+University of Mindanao’s research agenda on 1.3.2.2. Develop an offline-capable Field Portal using
+ICT-Enabled Systems and Services by developing an React.js to enable collectors and sales agents
+integrated information system that enhances to digitally record collection transactions,
+organizational efficiency, operational productivity, sales transactions, and field activities with
+and technology-driven service delivery. automatic synchronization once network
+connectivity becomes available.
+CORVEX is a web-based and mobile-accessible
+information system developed for 1.3.2.3. Develop an Inventory Centralization module
+Bethuel-Herminihildo (BH) Marketing to support using PostgreSQL to maintain accurate and
+map-based field operations, Inventory Centralization, updated inventory records across all
+customer payment verification, and business activity branches, reducing delayed stock updates,
+monitoring across its geographically distributed duplicate inventory records, inaccurate stock
+branches. The system provides six role-based user information, and overselling.
+accounts: Operating Manager, Branch Head,
+1.3.2.4. Develop a centralized customer payment
+Collector, Sales Agent, Warehouse Personnel, and
+monitoring module using PostgreSQL that
+Customer. The Operating Manager has
+enables authorized management personnel to
+enterprise-wide access to monitor branch operations,
+verify company-wide customer payment
+review operational dashboards and reports, verify
+records for timely credit verification and
+company-wide customer payment records, and
+informed credit decision-making.
+oversee inventory, sales, collections, and operational
+performance. Branch Heads can monitor field 1.3.2.5. Develop an Inventory and Sales Dashboard
+personnel, supervise branch operations, verify branch using React.js and PostgreSQL that applies
+inventory, review branch-level operational reports, descriptive analytics to summarize collection
+and coordinate operational activities with the performance, sales activities, inventory
+Operating Manager. Collectors receive daily status, customer payment information,
+collection assignments prioritized using the Simple customer credit line records, and centralized
+Additive Weighting (SAW) method, record collection branch records to support sales and inventory
+transactions, update customer payment information, monitoring, identify branch-level sales and
+generate digital receipts, and navigate assigned inventory issues, evaluate customer credit
+customer locations through the integrated mapping
+4

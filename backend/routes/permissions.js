@@ -10,8 +10,11 @@ router.use(allow(ROLE_SETS.roleAdmin));
 router.get('/', async (req, res) => {
   try {
     const pool = req.app.locals.pool;
+    const includeArchived = String(req.query.status || '').toLowerCase() === 'all';
+    const statusFilter = includeArchived ? '' : `WHERE COALESCE(status, 'Active') = 'Active'`;
     const result = await pool.query(
-      `SELECT permission_id, label, description, created_at, updated_at FROM permissions ORDER BY permission_id`
+      `SELECT permission_id, label, description, COALESCE(status, 'Active') AS status, created_at, updated_at
+       FROM permissions ${statusFilter} ORDER BY permission_id`
     );
     return res.status(200).json({ success: true, data: result.rows });
   } catch (err) {
@@ -73,24 +76,35 @@ router.put('/:id', async (req, res) => {
 });
 
 // ──────────────────────────────────────────────────────────────────────────────
-// DELETE /api/permissions/:id  — Delete permission
+// DELETE /api/permissions/:id  — Soft archive (status = Inactive; record kept)
 // ──────────────────────────────────────────────────────────────────────────────
 router.delete('/:id', async (req, res) => {
   try {
     const pool = req.app.locals.pool;
     const permId = Number(req.params.id);
-    
-    const check = await pool.query(`SELECT permission_id FROM permissions WHERE permission_id = $1`, [permId]);
+
+    const check = await pool.query(
+      `SELECT permission_id, COALESCE(status, 'Active') AS status FROM permissions WHERE permission_id = $1`,
+      [permId]
+    );
     if (check.rows.length === 0) {
       return res.status(404).json({ success: false, message: 'Permission not found.' });
     }
-    
-    // Note: CASCADE DELETE in role_permissions will handle mappings
-    await pool.query(`DELETE FROM permissions WHERE permission_id = $1`, [permId]);
-    return res.status(200).json({ success: true, message: 'Permission deleted successfully.' });
+    if (check.rows[0].status === 'Inactive') {
+      return res.status(400).json({ success: false, message: 'Permission is already archived.' });
+    }
+
+    await pool.query(
+      `UPDATE permissions SET status = 'Inactive', updated_at = NOW() WHERE permission_id = $1`,
+      [permId]
+    );
+    return res.status(200).json({
+      success: true,
+      message: 'Permission archived successfully. The record is preserved.',
+    });
   } catch (err) {
     console.error('[Permissions] DELETE /:id error:', err.message);
-    return res.status(500).json({ success: false, message: 'Failed to delete permission.' });
+    return res.status(500).json({ success: false, message: 'Failed to archive permission.' });
   }
 });
 

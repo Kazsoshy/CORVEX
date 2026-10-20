@@ -1,0 +1,109 @@
+
+2.3 Design support customer identification, territory
+management, and route planning within their assigned
+2.3.1 Conceptual Framework
+service areas. The system synchronizes inventory
+The study's conceptual framework serves as the
+records and customer payment information across all
+blueprint for developing CORVEX: A
+branches through a centralized PostgreSQL database
+Mapping-Integrated Field Operations and Inventory
+with PostGIS, ensuring that authorized users have
+Centralization System for Multi-Branch Enterprises.
+access to updated operational information. Role-based
+It adopts the Input–Process–Output (IPO) model to
+access control regulates user permissions, while the
+illustrate how operational data collected from various
+map-based field operations module visualizes
+users are processed into information that supports
+customer locations, branch locations, territories, and
+daily field operations, Inventory Centralization,
+field activities using Leaflet.js with OpenStreetMap
+cross-branch coordination, and business activity
+services. Before storing and synchronizing
+monitoring. The framework demonstrates how
+information, the system validates submitted records to
+operational records are captured, validated, processed,
+ensure data completeness, consistency, and integrity
+synchronized, and transformed into decision-support
+across all operational modules.
+information that addresses the operational challenges
+identified at Bethuel-Herminihildo (BH) Marketing. 2.3.1.3. Output
+Figure 3 presents the system's conceptual framework. As shown in Figure 3, the Output component delivers
+processed information through CORVEX's
+operational modules. Collectors receive prioritized
+daily collection schedules generated using the Simple
+Additive Weighting (SAW) method. At the same
+time, Sales Agents receive map-based customer and
+territory visualizations to support canvassing and field
+planning. Warehouse Personnel access synchronized
+inventory information and stock availability across all
+branches. At the same time, the Operating Manager
+monitors collection performance, sales activities,
+inventory status, customer payment information,
+branch performance, and operational trends through
+the centralized Operations Dashboard. These outputs
+Figure 3. Conceptual Framework
+are presented through web-based dashboards,
+2.3.1.1. Input interactive maps, reports, tables, charts, and digital
+records that support business activity monitoring and
+As shown in Figure 3, the Input component consists
+management decision-making. Collectively, these
+of operational data captured from the system's four
+outputs address the operational gaps identified during
+user groups. Collectors record customer payment
+the requirements gathering phase by improving
+transactions, collection activities, payment
+customer prioritization, Inventory Centralization,
+commitments, outstanding balances, and field activity
+cross-branch information sharing, field coordination,
+reports through the Field Portal. Sales Agents record
+and centralized business activity monitoring
+sales transactions, customer visit reports, prospective
+throughout Bethuel-Herminihildo (BH) Marketing.
+customer information, and territory activities.
+Warehouse Personnel manage inventory transactions,
+2.3.2 Schedule and Route Generation Using the
+including stock receipts, stock releases, stock
+Simple Additive Weighting (SAW) Model
+transfers, inventory adjustments, and product
+The primary capstone element of CORVEX: A
+availability. The Operating Manager maintains
+Mapping-Integrated Field Operations and Inventory
+customer information, branch records, user accounts,
+Centralization System for Multi-Branch Enterprise is
+operational parameters, and customer payment
+implementing the Simple Additive Weighting (SAW)
+records. The system also maintains customer
+method as the decision-support mechanism for
+addresses and branch locations as geographic
+customer prioritization during collection operations.
+information to support map-based field operations.
+The SAW method is a Multi-Criteria
+The system validates and stores all operational data in
+Decision-Making (MCDM) technique that evaluates
+the centralized database as the primary inputs for
+multiple alternatives by normalizing criterion values,
+customer prioritization, Inventory Centralization,
+applying predefined weights, and computing a
+customer payment verification, map-based field
+weighted preference score to produce a ranked list of
+operations, and business activity monitoring.
+alternatives. Because of its computational simplicity,
+2.3.1.2. Process transparency, and effectiveness in evaluating multiple
+As shown in Figure 3, the Process component operational criteria simultaneously, SAW has been
+transforms collected operational data into meaningful widely applied in decision-support systems involving
+operational information through CORVEX's resource allocation, scheduling, customer
+integrated modules. The system applies the Simple prioritization, and operational planning [19], [20].
+Additive Weighting (SAW) method to prioritize
+Unlike conventional decision support systems, where
+customer collection schedules by evaluating each
+the algorithm operates independently, this
+customer's outstanding balance, number of overdue
+implementation integrates descriptive analytics with
+days, and travel distance from the collector's current
+the SAW method. Before ranking, CORVEX first
+location. For Sales Agents, the system provides
+summarizes operational information retrieved from
+map-based customer and territory visualization to
+13

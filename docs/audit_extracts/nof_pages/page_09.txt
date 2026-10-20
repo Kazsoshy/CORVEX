@@ -1,0 +1,84 @@
+
+method, map-based field operations for collectors and geographic information to support map-based field
+sales agents, Inventory Centralization across branches, operations. The system validates and stores all
+centralized customer payment verification, and the operational data in the centralized database as the
+Operations Dashboard for management monitoring. primary inputs for customer prioritization, Inventory
+Continuous testing throughout the development Centralization, customer payment verification, map-
+process verifies completed modules, identifies defects based field operations, and business activity
+early, and incorporates stakeholder feedback before monitoring.
+proceeding to subsequent iterations, consistent with
+2.3.1.2. Process
+Agile principles.
+As shown in Figure 3, the Process component
+The development schedule is feasible because it aligns transforms collected operational data into meaningful
+with the academic calendar, the study's defined scope, operational information through CORVEX's
+and the development team's estimated workload. Each integrated modules. The system applies the Simple
+development activity follows a logical sequence in Additive Weighting (SAW) method to prioritize
+which the identified operational requirements serve as customer collection schedules by evaluating each
+the basis for system design, implementation, testing, customer's outstanding balance, number of overdue
+and deployment. The iterative nature of the Agile days, and travel distance from the collector's current
+methodology enables independent evaluation of location. For Sales Agents, the system provides map-
+completed modules, allowing requirement refinements based customer and territory visualization to support
+and operational improvements to be incorporated customer identification, territory management, and
+without substantially affecting the overall project route planning within their assigned service areas. The
+timeline. This approach also reduces project risk by system synchronizes inventory records and customer
+validating each module before integrating it into the payment information across all branches through a
+complete system. Based on the planned activities, centralized PostgreSQL database with PostGIS,
+available resources, and allotted capstone period, the ensuring that authorized users have access to updated
+schedule is considered feasible because all core system operational information. Role-based access control
+functionalities can be developed, tested, evaluated, and regulates user permissions, while the map-based field
+documented within the prescribed development operations module visualizes customer locations,
+timeline. branch locations, territories, and field activities using
+Leaflet.js with OpenStreetMap services. Before
+Figure 2. Gantt Chart
+storing and synchronizing information, the system
+2.3 Design validates submitted records to ensure data
+2.3.1 Conceptual Framework completeness, consistency, and integrity across all
+The study's conceptual framework serves as the operational modules.
+blueprint for developing CORVEX: A Mapping-
+2.3.1.3. Output
+Integrated Field Operations and Inventory
+As shown in Figure 3, the Output component delivers
+Centralization System for Multi-Branch Enterprises. It
+processed information through CORVEX's operational
+adopts the Input–Process–Output (IPO) model to
+modules. Collectors receive prioritized daily collection
+illustrate how operational data collected from various
+schedules generated using the Simple Additive
+users are processed into information that supports daily
+Weighting (SAW) method. At the same time, Sales
+field operations, Inventory Centralization, cross-
+Agents receive map-based customer and territory
+branch coordination, and business activity monitoring.
+visualizations to support canvassing and field
+The framework demonstrates how operational records
+planning. Warehouse Personnel access synchronized
+are captured, validated, processed, synchronized, and
+inventory information and stock availability across all
+transformed into decision-support information that
+branches. At the same time, the Operating Manager
+addresses the operational challenges identified at
+monitors collection performance, sales activities,
+Bethuel-Herminihildo (BH) Marketing. Figure 3
+inventory status, customer payment information,
+presents the system's conceptual framework.
+branch performance, and operational trends through
+Figure 3. Conceptual Framework the centralized Operations Dashboard. These outputs
+are presented through web-based dashboards,
+2.3.1.1. Input interactive maps, reports, tables, charts, and digital
+As shown in Figure 3, the Input component consists of records that support business activity monitoring and
+operational data captured from the system's four user management decision-making. Collectively, these
+groups. Collectors record customer payment outputs address the operational gaps identified during
+transactions, collection activities, payment the requirements gathering phase by improving
+commitments, outstanding balances, and field activity customer prioritization, Inventory Centralization,
+reports through the Field Portal. Sales Agents record cross-branch information sharing, field coordination,
+sales transactions, customer visit reports, prospective and centralized business activity monitoring
+customer information, and territory activities. throughout Bethuel-Herminihildo (BH) Marketing.
+Warehouse Personnel manage inventory transactions,
+including stock receipts, stock releases, stock transfers, 2.3.2 Schedule and Route Generation Using the
+inventory adjustments, and product availability. The Simple Additive Weighting (SAW) Model
+Operating Manager maintains customer information, The primary capstone element of CORVEX: A
+branch records, user accounts, operational parameters, Mapping-Integrated Field Operations and Inventory
+and customer payment records. The system also Centralization System for Multi-Branch Enterprise is
+maintains customer addresses and branch locations as implementing the Simple Additive Weighting (SAW)
+9

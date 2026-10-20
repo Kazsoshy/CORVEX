@@ -1,0 +1,89 @@
+
+Table 6 presents the estimated development and decision-making, operational visibility, and service
+recurring operational costs for implementing quality. Collectively, these benefits demonstrate the
+CORVEX. The development cost includes personnel, system's value in addressing the operational
+deployment, documentation, testing, and training challenges identified at Bethuel-Herminihildo (BH)
+expenses. In contrast, the operational subscription Marketing.
+cost covers cloud hosting, domain registration,
+2.2.4.4. Schedule Feasibility
+security certificates, data backup, and technical
+maintenance necessary to keep the system available Figure 2 presents the Gantt Chart illustrating the
+after deployment. These recurring costs represent the development schedule of CORVEX: A
+estimated amount BH Marketing would pay to Mapping-Integrated Field Operations and Inventory
+operate and maintain the system continuously in a Centralization System for Multi-Branch Enterprises.
+production environment. The project follows the Agile Software Development
+Life Cycle (Agile SDLC), beginning with project
+Table 7. Estimated Development Benefits planning and requirements gathering through
+interviews, survey questionnaires, and direct
+Benefit Category Expected Benefit Classification
+observations, followed by system design, iterative
+Expected Benefits development, system testing, deployment, and
+documentation. More time is allocated to the
+Field Collection Reduced time required to Tangible development and testing phases because these involve
+Operations prepare daily collection
+schedules through SAW-assisted implementing the system's major operational
+customer prioritization
+modules, including customer prioritization for
+collection activities using the Simple Additive
+Sales Field Improved customer visit Tangible
+Operations planning through map-based Weighting (SAW) method, map-based field
+customer and territory
+visualization operations for collectors and sales agents, Inventory
+Centralization across branches, centralized customer
+Inventory Reduced manual inventory Tangible payment verification, and the Operations Dashboard
+Management verification and faster stock
+availability checking across for management monitoring. Continuous testing
+branches throughout the development process verifies
+completed modules, identifies defects early, and
+Cross-Branch Reduced time spent verifying Tangible incorporates stakeholder feedback before proceeding
+Coordination inventory availability and
+customer payment records to subsequent iterations, consistent with Agile
+through centralized information
+sharing principles.
+The development schedule is feasible because it
+Documentation Reduced paper consumption and Tangible
+manual encoding of collection aligns with the academic calendar, the study's defined
+and sales transactions
+scope, and the development team's estimated
+workload. Each development activity follows a
+Customer Credit Faster verification of customer Tangible
+logical sequence in which the identified operational
+Monitoring payment history before
+approving sales transactions requirements serve as the basis for system design,
+implementation, testing, and deployment. The
+Management and Improved visibility of collection Intangible iterative nature of the Agile methodology enables
+Monitoring performance, sales activities,
+inventory status, customer independent evaluation of completed modules,
+payment information, and branch
+allowing requirement refinements and operational
+operations through a centralized
+dashboard improvements to be incorporated without
+substantially affecting the overall project timeline.
+Decision Support More consistent operational Intangible This approach also reduces project risk by validating
+decision-making through each module before integrating it into the complete
+standardized customer
+prioritization and consolidated system. Based on the planned activities, available
+operational information
+resources, and allotted capstone period, the schedule
+is considered feasible because all core system
+Inventory Accuracy Improved consistency of Intangible functionalities can be developed, tested, evaluated,
+synchronized inventory records
+across all branches and documented within the prescribed development
+timeline.
+Customer Service Reduced overselling incidents Intangible
+and improved customer
+satisfaction through
+synchronized inventory
+information
+Organizational Enhanced coordination and Intangible
+Productivity communication among the
+Operating Manager, Collectors,
+Sales Agents, and Warehouse
+Personnel
+Table 7 presents the anticipated operational benefits
+of implementing CORVEX. The expected benefits are
+classified as tangible, representing measurable
+improvements in operational efficiency and resource
+utilization, and intangible, referring to organizational
+improvements such as enhanced coordination, Figure 2. Gantt Chart
+12

@@ -30,27 +30,64 @@ export async function markAllNotificationsRead() {
   }
 }
 
+/**
+ * Map API notification rows for UI + deep-links by role base path.
+ * @param {object} row
+ * @param {{ opsBase?: string, orgBase?: string }} opts
+ */
 export function mapNotificationRow(row, { opsBase = '/branch-manager', orgBase = '/operating-manager' } = {}) {
   const read = row.status === 'Read';
   const category = row.category || '';
+  const cat = category.toLowerCase();
+  const isSales = opsBase.includes('/sales');
+  const isWarehouse = opsBase.includes('/warehouse');
+  const isCollector = opsBase.includes('/collector');
+  const isOm = opsBase.includes('/operating-manager') || orgBase.includes('/operating-manager');
+
   let relatedTo = null;
-  if (category.includes('Approval')) relatedTo = `${opsBase}/approval-center`;
-  else if (category.includes('Branch') || category.includes('Alert')) relatedTo = orgBase ? `${orgBase}/alerts` : `${opsBase}/alerts`;
-  else if (category.includes('CI')) relatedTo = opsBase.includes('/sales') ? `${opsBase}/credit-investigations` : `${opsBase}/ci-approvals`;
-  else if (category.includes('Inventory') || category.includes('Stock')) relatedTo = opsBase.includes('/sales') ? `${opsBase}/inventory` : `${opsBase}/approval-center`;
-  else if (category.includes('Schedule')) relatedTo = `${opsBase}/schedule`;
-  else if (category.includes('Sales')) relatedTo = `${opsBase}/purchase-requests`;
-  else if (category.includes('Transfer')) {
-    relatedTo = opsBase.includes('/warehouse') ? `${opsBase}/transfers` : `${opsBase}/approval-center`;
+  if (cat.includes('overdue')) {
+    relatedTo = `${orgBase}/saw-results`;
+  } else if (cat.includes('approval')) {
+    relatedTo = isSales ? `${opsBase}/history` : `${opsBase}/approval-center`;
+  } else if (cat.includes('branch') || cat.includes('alert')) {
+    relatedTo = isOm ? `${orgBase}/alerts` : `${opsBase}/alerts`;
+  } else if (cat.includes('ci')) {
+    relatedTo = isSales ? `${opsBase}/credit-investigations` : `${opsBase}/ci-approvals`;
+  } else if (cat.includes('inventory') || cat.includes('stock')) {
+    relatedTo = isWarehouse
+      ? `${opsBase}/branch-inventory`
+      : isSales
+        ? `${opsBase}/inventory`
+        : `${opsBase}/approval-center`;
+  } else if (cat.includes('invoice')) {
+    relatedTo = isSales ? `${opsBase}/history` : `${opsBase}/approval-center`;
+  } else if (cat.includes('schedule') || cat.includes('route')) {
+    relatedTo = isCollector
+      ? `${opsBase}/route`
+      : isSales
+        ? `${opsBase}/schedule`
+        : `${opsBase}/field-operations`;
+  } else if (cat.includes('sales')) {
+    relatedTo = isSales ? `${opsBase}/purchase-requests` : `${opsBase}/field-operations`;
+  } else if (cat.includes('transfer')) {
+    relatedTo = isWarehouse ? `${opsBase}/transfers` : `${opsBase}/approval-center`;
   }
+
   return {
     id: row.notification_id,
+    notification_id: row.notification_id,
     title: row.title,
     message: row.message,
-    type: category.toLowerCase(),
+    type: cat,
     category,
+    status: row.status,
     read,
     time: row.created_at,
+    created_at: row.created_at,
     relatedTo,
   };
+}
+
+export function countUnreadNotifications(rows = []) {
+  return rows.filter((row) => row.status !== 'Read' && !row.read).length;
 }

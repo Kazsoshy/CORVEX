@@ -1,0 +1,92 @@
+
+descriptive measures presented in the following status, delinquent accounts, and credit exposure. The
+subsection. system calculates the total outstanding balance by
+aggregating remaining unpaid customer balances and
+2.3.3.2. Descriptive Measure Generation
+identifies delinquent accounts from records with
+After aggregating the records, CORVEX calculates overdue payment obligations. The resulting measures
+descriptive measures from the consolidated data to provide authorized personnel with a summarized view
+summarize collection, sales, inventory, customer of customer payment and credit conditions across
+payment and credit, and branch conditions. CORVEX branches.
+generates the measures using the values stored in the
+corresponding transaction and master records. Total Equation 8. Total Outstanding Balance
+amounts are obtained by summing transaction values, The resulting ₱43,000 represents the total outstanding
+transaction activity is determined by counting records, balance within the sample customer records.
+percentages are calculated from their corresponding Comparing this measure across branches allows
+totals, and trends are determined by comparing authorized management personnel to identify where
+measures across reporting periods. These measures customer payment obligations are more concentrated
+provide the numerical basis for the following and determine whether further payment or credit
+visualization and analytical interpretation. review is necessary.
+2.3.3.2.1 Collection Analysis 2.3.3.2.5 Branch-Level Descriptive Comparison
+Equation 5. Total Collection CORVEX groups the calculated descriptive measures
+by branch to compare collection, sales, inventory, and
+The resulting ₱37,000 represents the total amount
+customer payment and credit conditions among the
+collected from the sample transactions during the
+Davao City, General Santos City, and Davao Oriental
+selected period. Comparing this measure across
+branches. The same measures generated from the
+branches or reporting periods helps identify
+underlying records are presented side by side to
+differences in recorded collection activity.
+identify differences among branches and changes
+2.3.3.2.2 Sales Analysis across reporting periods.
+Sales records are summarized to determine total sales
+Table 14. Sample Branch Descriptive Summary
+and changes in sales activity across reporting periods
+Table 14 presents the descriptive measures grouped by
+and branches. Total Sales is calculated by summing the
+branch. The comparison shows differences in recorded
+recorded sales amounts within the selected reporting
+collections, sales, inventory availability, and
+period. The resulting total is then compared with the
+outstanding customer balances among the three
+corresponding value from a previous reporting period
+branches, giving management a basis for identifying
+to determine whether recorded sales activity increased
+branch-level differences that may require further
+or decreased.
+review.
+Equation 6. Total Sales
+2.3.3.3 Analytical Visualization
+Equation 7. Sales Growth Rate
+The Executive Dashboard presents descriptive
+The calculated 25% increase indicates that recorded
+measures from the aggregated records through key
+sales activity increased during the current period
+performance indicators, comparative charts, tables,
+compared with the previous period. When this positive
+and trend visualizations. The dashboard displays
+change occurs across successive reporting periods, it
+collection and sales measures through numerical totals,
+indicates an upward sales trend and gives management
+branch comparisons, and period trends. It also presents
+evidence to review current sales activities and plan
+inventory and customer payment and credit measures
+future sales activities.
+through summarized availability, balance, and status
+2.3.3.2.3 Inventory Analysis indicators. The dashboard functions as the
+Inventory records are summarized to determine visualization layer of the descriptive analytics process,
+available stock and inventory movement by product presenting the calculated measures in a form that
+and branch. The system calculates the current available allows authorized personnel to examine differences
+quantity using recorded stock-in, stock-out, transfer, and changes across branches and reporting periods.
+and adjustment transactions according to the inventory
+rules implemented in CORVEX. The system compares Figure 4. Executive Dashboard Showing
+the resulting values across branches to identify Descriptive Analytics
+differences in product availability and stock Figure 4 shows that the Executive Dashboard presents
+movement. the calculated descriptive measures through key
+performance indicators, branch-level comparisons, and
+The resulting 400 units represent the available stock trend visualizations. It summarizes collection, sales,
+based on the recorded inventory transactions. available inventory, outstanding balances, customer
+Comparing available stock across branches identifies counts, and related status indicators, allowing
+differences in inventory availability, allowing authorized personnel to compare branch performance
+authorized personnel to review branches with lower and observe changes across reporting periods.
+stock levels and coordinate inventory requirements
+when necessary. 2.3.3.4 Analytical Interpretation and Decision
+Support
+2.3.3.2.4 Customer Payment and Credit Analysis
+The descriptive analytics results are interpreted by
+Customer payment and credit records are summarized
+examining the magnitude, trend, and differences of the
+to determine outstanding customer balances, payment
+13
