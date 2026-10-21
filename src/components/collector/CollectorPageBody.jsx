@@ -25,6 +25,11 @@ import {
 } from '../../api/collectorService';
 import { fetchNotifications } from '../../api/notificationService.js';
 import { getCurrentUser } from '../../api/authService.js';
+import { isBrowserOnline } from '../../offline/connection.js';
+import { saveOfflineRecord } from '../../offline/db.js';
+import { DeviceQueue, loadWaiting } from '../../offline/DeviceQueue.jsx';
+import { flushOfflineQueue } from '../../offline/flushQueue.js';
+import { isCollectorAutoSyncEnabled } from '../../offline/prefs.js';
 import { downloadPdf } from '../../utils/dataExport';
 import { collectorMapPath, openPhoneCall } from '../../utils/mapsNavigation';
 import { NotificationsInbox } from '../shared/NotificationsInbox';
@@ -273,11 +278,13 @@ function FieldActivityReportsPage({
     photoName: '',
   });
   const [errors, setErrors] = useState({});
+  const [deviceReports, setDeviceReports] = useState([]);
   async function loadReports() {
     setLoading(true);
     const [reportsResult, visitsResult] = await Promise.all([fetchFieldActivityReports(), fetchTodayFieldVisits()]);
     if (reportsResult.success) setReports(reportsResult.data || []);
     if (visitsResult.success) setVisits(visitsResult.data || []);
+    setDeviceReports(await loadWaiting('field_activity_reports'));
     setLoading(false);
   }
   useEffect(() => {
@@ -292,13 +299,32 @@ function FieldActivityReportsPage({
     if (!form.photo) nextErrors.photo = 'Photo evidence is required.';
     setErrors(nextErrors);
     if (Object.keys(nextErrors).length) return;
-    setSubmitting(true);
-    const result = await submitFieldActivityReport({
+    const visit = visits.find((row) => String(row.visit_id) === String(form.visit_id));
+    const payload = {
       visit_id: Number(form.visit_id),
       activity_type: form.activity_type,
       remarks: form.remarks.trim(),
       photo: form.photo,
-    });
+      customer_name: visit?.customer_name || '',
+      visit_status: visit?.status || '',
+    };
+    const keepLocal = async () => {
+      await saveOfflineRecord({ tableName: 'field_activity_reports', payload });
+      showToast(
+        isCollectorAutoSyncEnabled()
+          ? 'Saved on this device. It will sync when you are online.'
+          : 'Saved on this device. Send it from Settings while auto-sync is off.',
+        'success'
+      );
+      setForm({ visit_id: '', activity_type: '', remarks: '', photo: '', photoName: '' });
+      setDeviceReports(await loadWaiting('field_activity_reports'));
+    };
+    if (!isBrowserOnline()) {
+      await keepLocal();
+      return;
+    }
+    setSubmitting(true);
+    const result = await submitFieldActivityReport(payload);
     setSubmitting(false);
     if (result.success) {
       showToast(result.message || 'Report submitted to Operating Manager.', 'success');
@@ -310,6 +336,8 @@ function FieldActivityReportsPage({
         photoName: '',
       });
       loadReports();
+    } else if (result.offline) {
+      await keepLocal();
     } else {
       showToast(result.message || 'Failed to submit report.', 'error');
     }
@@ -330,6 +358,8 @@ function FieldActivityReportsPage({
             </p>
           </div>
         </div>
+
+        <DeviceQueue rows={deviceReports} />
 
         <form className="grid gap-3 mb-6" onSubmit={handleSubmit}>
         <div className="form-group" style={{
@@ -491,6 +521,32 @@ function isRouteStopCompleted(stop) {
   return stop.status === 'Completed' || stop.visitStatus === 'Completed';
 }
 
+function manilaDateInputValue() {
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Manila',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(new Date());
+}
+
+function RouteDateControl({ value, onChange }) {
+  return (
+    <label className="muted" style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+      Route date
+      <input
+        className="filter-input"
+        type="date"
+        value={value}
+        aria-label="Route date"
+        onChange={(event) => {
+          if (/^\d{4}-\d{2}-\d{2}$/.test(event.target.value)) onChange(event.target.value);
+        }}
+      />
+    </label>
+  );
+}
+
 function RoutePage({
   pageType,
   navigate,
@@ -502,24 +558,18 @@ function RoutePage({
   const [filter, setFilter] = useState('All');
   const [showMap, setShowMap] = useState(pageType === 'routeMap');
   const [roadStats, setRoadStats] = useState(null);
+  const [routeDate, setRouteDate] = useState(manilaDateInputValue);
   useEffect(() => {
+    let cancelled = false;
     async function load() {
       setLoading(true);
-      const [sawRes, visitsRes] = await Promise.all([fetchSawPriority(), fetchTodayFieldVisits()]);
+      const sawRes = await fetchSawPriority({ date: routeDate });
+      if (cancelled) return;
       setSawMeta(sawRes.meta || null);
-      const visitByCustomer = new Map();
-      if (visitsRes.success) {
-        (visitsRes.data || [])
-          .filter((v) => v.visit_type === 'Collection')
-          .forEach((v) => visitByCustomer.set(String(v.customer_id), v));
-      }
-      const assignmentMode = Boolean(sawRes.meta?.assignmentMode);
       let stops = [];
       if (sawRes.success && (sawRes.data || []).length) {
-        stops = sawRes.data.map((row) => mapSawRowToRouteStop(row, visitByCustomer));
-      } else if (assignmentMode) {
-        stops = [];
-      } else {
+        stops = sawRes.data.map((row) => mapSawRowToRouteStop(row));
+      } else if (!sawRes.success) {
         const accountsRes = await fetchAccounts();
         if (accountsRes.success) {
           stops = accountsRes.data
@@ -527,16 +577,18 @@ function RoutePage({
             .sort((a, b) => (b.outstandingBalance || 0) - (a.outstandingBalance || 0))
             .map((a, i) => ({ ...a, rank: i + 1 }));
         }
-        if (!sawRes.success && showToast) {
+        if (showToast) {
           showToast('SAW priority unavailable — showing balance order.', 'error');
         }
       }
-      setCustomers(stops);
-      setLoading(false);
+      if (!cancelled) {
+        setCustomers(stops);
+        setLoading(false);
+      }
     }
     load();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+    return () => { cancelled = true; };
+  }, [routeDate, showToast]);
 
   useEffect(() => {
     if (pageType !== 'routeSummary' || !customers.length) return;
@@ -579,17 +631,22 @@ function RoutePage({
   }];
   const pagination_filteredStops = usePagination(filteredStops);
   const paginated_filteredStops = pagination_filteredStops.paginatedData;
-  const assignmentMode = Boolean(sawMeta?.assignmentMode);
-  const noAssignedRoute = assignmentMode && customers.length === 0;
+  const showingSawFallback = sawMeta?.listSource === 'saw';
+  const stopsLabel = routeDate === manilaDateInputValue() ? "Today's Stops" : 'Stops';
+  const routeNote = showingSawFallback
+    ? `No customers were assigned for ${sawMeta?.scheduledDate || routeDate}. This list is the SAW ranking of eligible customers.`
+    : `Assigned route · SAW rank · ${customers.length} stop${customers.length === 1 ? '' : 's'}${sawMeta?.scheduledDate ? ` · ${sawMeta.scheduledDate}` : ''}. Completed visits keep their SAW rank.`;
 
   if (loading) return <LoadingState message="Loading route..." />;
   if (pageType === 'routeSummary') {
     return <div className="page">
-        <div className="flex flex-wrap gap-2 justify-end mt-2 mb-2">
+        <div className="flex flex-wrap gap-2 justify-end items-center mt-2 mb-2">
+          <RouteDateControl value={routeDate} onChange={setRouteDate} />
           {actions.map(a => <button key={a.label} className={a.variant === 'secondary' ? 'button secondary' : 'button'} type="button" onClick={() => navigate(a.to)}>{a.label}</button>)}
         </div>
+        {showingSawFallback ? <p className="muted" style={{ marginTop: 0 }}>{routeNote}</p> : null}
         <StatsGrid stats={[{
-        label: "Today's Stops",
+        label: stopsLabel,
         value: String(customers.length)
       }, {
         label: 'Overdue Customers',
@@ -618,11 +675,12 @@ function RoutePage({
       </div>;
   }
   return <div className="page">
-      <div className="flex flex-wrap gap-2 justify-end mt-2 mb-2">
+      <div className="flex flex-wrap gap-2 justify-end items-center mt-2 mb-2">
+        <RouteDateControl value={routeDate} onChange={setRouteDate} />
         {actions.map(a => <button key={a.label} className={a.variant === 'secondary' ? 'button secondary' : 'button'} type="button" onClick={() => navigate(a.to)}>{a.label}</button>)}
       </div>
       <StatsGrid stats={[{
-      label: "Today's Stops",
+      label: stopsLabel,
       value: String(customers.length)
     }, {
       label: 'Overdue Customers',
@@ -631,21 +689,14 @@ function RoutePage({
       label: 'Road distance',
       value: roadStats?.distanceKm != null ? `${roadStats.distanceKm} km` : '—'
       }]} />
-      {noAssignedRoute ? (
-        <EmptyState
-          title="No route assigned for today"
-          description="Ask your branch manager to assign collection customers for today from Field Operations → collector detail."
-        />
-      ) : null}
       <section className="panel content-panel relative overflow-hidden">
         <div className="flex flex-col md:flex-row justify-between gap-4 items-start md:items-center mb-4">
-          <h3>{showMap || pageType === 'routeMap' ? 'Route Map View' : 'SAW Customer Priority List'}</h3>
-          {!showMap && pageType !== 'routeMap' && sawMeta && !noAssignedRoute ? (
-            <p className="muted" style={{ marginTop: 4 }}>
-              SAW order · {customers.length} stop{customers.length === 1 ? '' : 's'}
-              {sawMeta.scheduledDate ? ` · ${sawMeta.scheduledDate}` : ''}
-            </p>
-          ) : null}
+          <div>
+            <h3>{showMap || pageType === 'routeMap' ? 'Route Map View' : 'SAW Customer Priority List'}</h3>
+            {sawMeta ? (
+              <p className="muted" style={{ marginTop: 4 }}>{routeNote}</p>
+            ) : null}
+          </div>
           <div className="inline-toolbar">
             <div className="segmented-control">
               {['All', 'Pending', 'Completed'].map(item => <button key={item} className={filter === item ? 'segment active' : 'segment'} type="button" onClick={() => setFilter(item)}>
@@ -657,7 +708,12 @@ function RoutePage({
               </button> : null}
           </div>
         </div>
-        {noAssignedRoute ? null : showMap || pageType === 'routeMap' ? (
+        {customers.length === 0 ? (
+          <EmptyState
+            title="No eligible customers for this date"
+            description="SAW ranks customers with an open balance, a due date, and map coordinates."
+          />
+        ) : showMap || pageType === 'routeMap' ? (
           <CollectionRouteMap
             stops={filteredStops.filter((s) => accountMapPosition(s).hasCoords)}
             showToast={showToast}
@@ -668,7 +724,7 @@ function RoutePage({
             <table className="corvex-table">
               <thead>
                 <tr>
-                  <th>Rank</th>
+                  <th>SAW Rank</th>
                   <th>Customer</th>
                   <th>Address</th>
                   <th>Balance</th>
@@ -681,7 +737,7 @@ function RoutePage({
               </thead>
               <tbody>
                 {paginated_filteredStops.map((stop) => <tr key={stop.id}>
-                    <td><strong>#{stop.rank ?? '—'}</strong></td>
+                    <td><strong>{stop.rank == null ? '—' : `#${stop.rank}`}</strong></td>
                     <td>{stop.customerName}</td>
                     <td>{stop.address}</td>
                     <td>{formatCurrency(stop.outstandingBalance || 0)}</td>
@@ -1082,7 +1138,12 @@ function CollectionLogPage({
   const [errors, setErrors] = useState({});
   const [submitting, setSubmitting] = useState(false);
   const [paymentMethods, setPaymentMethods] = useState(['Cash', 'Check', 'Bank Transfer', 'GCash', 'Maya']);
+  const [devicePayments, setDevicePayments] = useState([]);
   const contextQuery = `?from=${parentContext}`;
+  async function refreshDevicePayments() {
+    const rows = await loadWaiting('collection_payment');
+    setDevicePayments(rows.filter((row) => String(row.payload?.customer_id) === String(accountId)));
+  }
   useEffect(() => {
     async function load() {
       setLoading(true);
@@ -1100,13 +1161,17 @@ function CollectionLogPage({
       if (methodsRes.success && methodsRes.data?.length) {
         setPaymentMethods(methodsRes.data.map(m => m.method_name));
       }
+      await refreshDevicePayments();
       setLoading(false);
     }
     load();
   }, [accountId]);
   if (loading) return <LoadingState message="Loading customer..." />;
   if (!account) {
-    return <EmptyState title="Customer not found" actionLabel="Back to Customers" onAction={() => navigate('/collector/accounts')} />;
+    return <div className="page">
+      <DeviceQueue rows={devicePayments} />
+      <EmptyState title="Customer not found" actionLabel="Back to Customers" onAction={() => navigate('/collector/accounts')} />
+    </div>;
   }
   const remainingBalance = Math.max((account.outstandingBalance || 0) - (Number(formData.amountCollected) || 0), 0);
   const handleChange = (name, value) => {
@@ -1133,16 +1198,38 @@ function CollectionLogPage({
       showToast('Please fix the errors before submitting.', 'error');
       return;
     }
-    setSubmitting(true);
-    const result = await submitCollectionPayment({
+    const payload = {
       customer_id: Number(account.id),
       amount,
       payment_method: formData.paymentMethod,
       notes: formData.notes || null,
       generate_receipt: formData.generateReceipt,
-    });
+      expected_balance: outstanding,
+      customer_name: account.customerName || '',
+    };
+    const keepLocal = async () => {
+      await saveOfflineRecord({ tableName: 'collection_payment', payload });
+      showToast(
+        isCollectorAutoSyncEnabled()
+          ? 'Saved on this device. It will sync when you are online.'
+          : 'Saved on this device. Send it from Settings while auto-sync is off.',
+        'success'
+      );
+      setFormData((prev) => ({ ...prev, amountCollected: '', notes: '' }));
+      await refreshDevicePayments();
+    };
+    if (!isBrowserOnline()) {
+      await keepLocal();
+      return;
+    }
+    setSubmitting(true);
+    const result = await submitCollectionPayment(payload);
     setSubmitting(false);
     if (!result.success) {
+      if (result.offline) {
+        await keepLocal();
+        return;
+      }
       showToast(result.message || 'Collection failed.', 'error');
       return;
     }
@@ -1156,6 +1243,7 @@ function CollectionLogPage({
     }
   };
   return <div className="page">
+      <DeviceQueue rows={devicePayments} />
       <FormPanel title="Log Payment Collection" formData={formData} onChange={handleChange} errors={errors} fields={[{
       name: 'customerName',
       label: 'Customer Name',
@@ -1194,7 +1282,7 @@ function CollectionLogPage({
       toggleLabel: 'This is a partial payment'
     }, {
       name: 'remainingPreview',
-      label: 'Remaining Balance Preview',
+      label: 'Balance after confirmation',
       type: 'preview',
       value: formatCurrency(remainingBalance)
     }, {
@@ -1205,7 +1293,7 @@ function CollectionLogPage({
     }]} />
       <div className="flex flex-wrap gap-2 justify-end mt-4 mb-2">
         <button className="button secondary" type="button" onClick={() => navigate(`/collector/account-detail/${account.id}${contextQuery}`)}>Cancel</button>
-        <button className="button" type="button" onClick={handleSubmit} disabled={submitting}>{submitting ? 'Submitting…' : 'Submit & Generate Receipt'}</button>
+        <button className="button" type="button" onClick={handleSubmit} disabled={submitting}>{submitting ? 'Submitting…' : 'Submit for review'}</button>
       </div>
     </div>;
 }
@@ -1658,6 +1746,7 @@ function CollectionHistoryPage({
   const [dateTo, setDateTo] = useState('');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [devicePayments, setDevicePayments] = useState([]);
   useEffect(() => {
     async function load() {
       setLoading(true);
@@ -1667,8 +1756,8 @@ function CollectionHistoryPage({
         setPayments(result.data || []);
       } else {
         setError(result.message || 'Failed to load collection payments.');
-        if (showToast) showToast(result.message || 'Failed to load collection payments', 'error');
       }
+      setDevicePayments(await loadWaiting('collection_payment'));
       setLoading(false);
     }
     load();
@@ -1687,9 +1776,13 @@ function CollectionHistoryPage({
   const paginated_filtered = pagination_filtered.paginatedData;
   if (loading) return <LoadingState message="Loading collection payments..." />;
   if (error && !payments.length) {
-    return <EmptyState title="Unable to load collection payments" description={error} actionLabel="Retry" onAction={() => window.location.reload()} />;
+    return <div className="page">
+      <DeviceQueue rows={devicePayments} />
+      <EmptyState title="Unable to load collection payments" description={error} actionLabel="Retry" onAction={() => window.location.reload()} />
+    </div>;
   }
   return <div className="page">
+      <DeviceQueue rows={devicePayments} />
       <section className="panel content-panel relative overflow-hidden">
         <div className="list-section-header">
           <h3>Collection Payments</h3>
@@ -1854,25 +1947,57 @@ function ProfilePage({
   />;
 }
 function SettingsPage({
-  navigate
+  navigate,
+  showToast
 }) {
   const [prefs, setPrefs] = useState(() => ({
     language: localStorage.getItem('corvex_collector_language') || 'English',
     push: localStorage.getItem('corvex_collector_push') !== '0',
-    autosync: localStorage.getItem('corvex_collector_autosync') !== '0',
+    autosync: isCollectorAutoSyncEnabled(),
   }));
+  const [pendingCount, setPendingCount] = useState(0);
+  const [syncing, setSyncing] = useState(false);
+  const refreshPending = async () => {
+    const rows = await loadWaiting('collection_payment');
+    const reports = await loadWaiting('field_activity_reports');
+    setPendingCount(rows.length + reports.length);
+  };
+  useEffect(() => {
+    refreshPending().catch(() => setPendingCount(0));
+  }, []);
   const save = (next) => {
     setPrefs(next);
     localStorage.setItem('corvex_collector_language', next.language);
     localStorage.setItem('corvex_collector_push', next.push ? '1' : '0');
     localStorage.setItem('corvex_collector_autosync', next.autosync ? '1' : '0');
+    if (next.autosync) window.dispatchEvent(new Event('corvex-session-ready'));
+  };
+  const syncNow = async () => {
+    setSyncing(true);
+    const result = await flushOfflineQueue({ manual: true });
+    await refreshPending();
+    setSyncing(false);
+    const synced = (result.results || []).filter((row) => row.syncStatus === 'Synced').length;
+    const failed = (result.results || []).filter((row) => row.syncStatus === 'Failed').length;
+    if (result.skipped) {
+      showToast('Sync waits until you are online and signed in.', 'error');
+      return;
+    }
+    if (!synced && !failed) {
+      showToast('No collections or field reports are waiting on this device.', 'success');
+      return;
+    }
+    showToast(
+      failed ? `${synced} synced. ${failed} still need attention.` : `${synced} record${synced === 1 ? '' : 's'} synced.`,
+      failed ? 'error' : 'success'
+    );
   };
   return <div className="page">
       <section className="panel form-panel content-panel">
         <div className="flex flex-col md:flex-row justify-between gap-4 items-start md:items-center mb-4">
           <h3>Settings</h3>
         </div>
-        <p className="text-ink/70">These preferences are saved on this device.</p>
+        <p className="text-ink/70">Auto-sync sends collections and field reports saved on this device once you are online.</p>
         <div className="form-group">
           <label>Language</label>
           <select className="filter-select" value={prefs.language} onChange={(e) => save({ ...prefs, language: e.target.value })}>
@@ -1889,9 +2014,11 @@ function SettingsPage({
         <div className="form-group">
           <label className="toggle-label">
             <input type="checkbox" checked={prefs.autosync} onChange={(e) => save({ ...prefs, autosync: e.target.checked })} />
-            Auto-sync route data
+            Auto-sync when online
           </label>
         </div>
+        <p className="muted">{pendingCount} record{pendingCount === 1 ? '' : 's'} waiting on this device.</p>
+        <button className="button" type="button" onClick={syncNow} disabled={syncing}>{syncing ? 'Syncing…' : 'Sync now'}</button>
       </section>
       <div className="flex justify-end mt-4">
         <button className="button ghost" type="button" onClick={() => navigate('/collector/dashboard')}>Back to Dashboard</button>

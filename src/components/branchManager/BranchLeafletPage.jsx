@@ -6,7 +6,7 @@ import { EmptyState } from '../shared/EmptyState';
 import { LoadingState } from '../shared/LoadingState';
 import { StatusBadge } from '../StatusBadge';
 import { NavIcon } from '../../navIcons';
-import { getBranchMap } from '../../api/branchManagerService.js';
+import { getBranchMap, getSawMapRoads } from '../../api/branchManagerService.js';
 import { getCurrentUser } from '../../api/authService.js';
 import { formatCurrency, formatDisplayDate } from '../../utils/formatters.js';
 import {
@@ -15,6 +15,7 @@ import {
   buildBranchLeafletView,
   defaultLayersForPage,
   hasCoords,
+  manilaMapDate,
 } from '../../utils/branchLeafletLayers.js';
 
 export function BranchLeafletPage({
@@ -35,6 +36,9 @@ export function BranchLeafletPage({
   const [layers, setLayers] = useState(() => defaultLayersForPage(pageType));
   const [payload, setPayload] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [sawRoads, setSawRoads] = useState([]);
+  const [sawRoadDate, setSawRoadDate] = useState('');
+  const roadsEnabled = layers.includes('Collector Routes') || layers.includes('Route Efficiency Layer');
 
   useEffect(() => {
     setLayers(defaultLayersForPage(pageType));
@@ -60,6 +64,29 @@ export function BranchLeafletPage({
     };
   }, [period]);
 
+  useEffect(() => {
+    if (!roadsEnabled) {
+      setSawRoads([]);
+      setSawRoadDate('');
+      return undefined;
+    }
+    let cancelled = false;
+    const date = manilaMapDate();
+    const params = { date };
+    const scopedBranch = isOrgScope ? branchId : 'all';
+    if (scopedBranch !== 'all') params.branch_id = scopedBranch;
+    if (staffId !== 'all') params.collector_id = staffId;
+    getSawMapRoads(params).then((result) => {
+      if (cancelled) return;
+      setSawRoads(result.success ? result.data || [] : []);
+      setSawRoadDate(result.meta?.scheduledDate || date);
+      if (!result.success) showToast?.(result.message || 'SAW road routes are unavailable.', 'error');
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [roadsEnabled, branchId, staffId, isOrgScope]);
+
   const view = useMemo(
     () => buildBranchLeafletView({
       payload,
@@ -68,8 +95,9 @@ export function BranchLeafletPage({
       navigate,
       opsBase,
       branchId: isOrgScope ? branchId : 'all',
+      sawRoads,
     }),
-    [payload, layers, staffId, navigate, opsBase, isOrgScope, branchId]
+    [payload, layers, staffId, navigate, opsBase, isOrgScope, branchId, sawRoads]
   );
 
   const selectedBranch = (payload?.branches || []).find((branch) => (
@@ -110,6 +138,7 @@ export function BranchLeafletPage({
               {view.accountCount} mapped accounts · {view.visitCount} scheduled visits
               {payload?.range ? ` · ${formatDisplayDate(payload.range.start)} to ${formatDisplayDate(payload.range.end)}` : ''}
               {!isOrgScope ? ' · your branch only' : ''}
+              {sawRoads.length ? ` · ${sawRoads.length} SAW road${sawRoads.length === 1 ? '' : 's'} for ${formatDisplayDate(sawRoadDate)}` : ''}
             </p>
           </div>
         </div>

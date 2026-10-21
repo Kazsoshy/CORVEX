@@ -1,5 +1,8 @@
 import express from 'express';
 import { requireAuth, requireRole, requireAssignedBranch, isUnscoped, ROLE_SETS } from '../middleware/auth.js';
+import { inventoryHealthPercent } from '../lib/inventoryHealth.js';
+import { parseTargetAmount, readPerformanceTargets, savePerformanceTargets } from '../lib/performanceTargets.js';
+import { readCreditExposure } from '../lib/creditExposure.js';
 
 /** Branch roles are always scoped; only OM / super_admin may see all branches. */
 function branchScope(user, queryBranchId) {
@@ -16,7 +19,7 @@ function branchScope(user, queryBranchId) {
 }
 
 const router = express.Router();
-const ORG_REPORT_PATHS = new Set(['/executive', '/operating-manager', '/performance-history']);
+const ORG_REPORT_PATHS = new Set(['/executive', '/operating-manager', '/performance-history', '/targets']);
 const CREDIT_HISTORY_PATHS = new Set(['/credit-history']);
 router.use((req, res, next) => {
   const allowed = ORG_REPORT_PATHS.has(req.path)
@@ -29,6 +32,23 @@ router.use((req, res, next) => {
 router.use(requireAssignedBranch);
 
 const MANILA_TIME_ZONE = 'Asia/Manila';
+const COUNTED_INVOICE_STATUS = `status IN ('Confirmed', 'Pending Review')`;
+const COUNTED_INVOICE_STATUS_SI = `si.status IN ('Confirmed', 'Pending Review')`;
+const OVERDUE_CUSTOMER = `EXISTS (
+  SELECT 1
+  FROM sales_invoices si
+  LEFT JOIN (
+    SELECT sales_id, SUM(payment_amount) AS paid
+    FROM credit_history
+    WHERE sales_id IS NOT NULL
+    GROUP BY sales_id
+  ) paid ON paid.sales_id = si.sales_invoices_id
+  WHERE si.customer_id = c.customer_id
+    AND si.status IN ('Confirmed', 'Pending Review')
+    AND si.due_date IS NOT NULL
+    AND si.due_date < (CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Manila')::date
+    AND COALESCE(paid.paid, 0) < si.total_amount
+)`;
 
 function toManilaDateString(date = new Date()) {
   return new Intl.DateTimeFormat('en-CA', {
@@ -293,7 +313,32 @@ function ratio(part, total) {
   return Math.round((Number(part) / Number(total)) * 100);
 }
 
-// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+router.get('/targets', requireAuth, async (req, res) => {
+  try {
+    const targets = await readPerformanceTargets(req.app.locals.pool);
+    return res.status(200).json({ success: true, data: targets });
+  } catch (err) {
+    console.error('[Reports] GET /targets error:', err.message);
+    return res.status(500).json({ success: false, message: 'Failed to load targets.' });
+  }
+});
+
+router.patch('/targets', requireAuth, async (req, res) => {
+  try {
+    const collection = parseTargetAmount(req.body?.collectionDaily, 'Collection target');
+    const sales = parseTargetAmount(req.body?.salesDaily, 'Sales target');
+    if (collection.error || sales.error) {
+      return res.status(400).json({ success: false, message: collection.error || sales.error });
+    }
+    const targets = await savePerformanceTargets(req.app.locals.pool, collection.amount, sales.amount);
+    return res.status(200).json({ success: true, data: targets, message: 'Targets saved.' });
+  } catch (err) {
+    console.error('[Reports] PATCH /targets error:', err.message);
+    return res.status(500).json({ success: false, message: 'Failed to save targets.' });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
 // GET /api/reports/collection
 // Returns daily collection data for the branch
 // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -316,12 +361,13 @@ router.get('/collection', requireAuth, async (req, res) => {
       isBranchScoped ? [bid] : []
     );
 
+    const targets = await readPerformanceTargets(pool);
     const daily = days.map((day) => {
       const found = result.rows.find((r) => r.day === day);
       return {
         day,
         amount: found ? Number(found.amount) : 0,
-        target: 180000,
+        target: targets.collectionDaily,
       };
     });
 
@@ -366,18 +412,20 @@ router.get('/sales', requireAuth, async (req, res) => {
          COALESCE(SUM(total_amount), 0) AS actual
        FROM sales_invoices
        WHERE invoices_date >= (CURRENT_TIMESTAMP AT TIME ZONE '+08')::DATE - INTERVAL '7 days'
+         AND ${COUNTED_INVOICE_STATUS}
          ${isBranchScoped ? 'AND branch_id = $1' : ''}
        GROUP BY TO_CHAR(invoices_date, 'Dy'), invoices_date
        ORDER BY MIN(invoices_date)`,
       isBranchScoped ? [bid] : []
     );
 
+    const targets = await readPerformanceTargets(pool);
     const weekly = days.map((day) => {
       const found = result.rows.find((r) => r.day === day);
       return {
         day,
         actual: found ? Number(found.actual) : 0,
-        target: 230000,
+        target: targets.salesDaily,
         invoices: found ? Number(found.invoices) : 0,
       };
     });
@@ -651,7 +699,7 @@ router.get('/kpi', requireAuth, async (req, res) => {
            COUNT(*) AS total_customers,
            COUNT(*) FILTER (WHERE c.status = 'Active') AS active_customers,
            COALESCE(SUM(ca.outstanding_balance), 0) AS total_outstanding,
-           COUNT(*) FILTER (WHERE ca.outstanding_balance > 0) AS overdue_count
+           COUNT(*) FILTER (WHERE ${OVERDUE_CUSTOMER}) AS overdue_count
          FROM customers c
          LEFT JOIN customer_activity ca ON c.customer_id = ca.customer_id
          ${isBranchScoped ? 'WHERE c.branch_id = $1' : ''}`,
@@ -659,6 +707,7 @@ router.get('/kpi', requireAuth, async (req, res) => {
       ),
       pool.query(
         `SELECT
+           COUNT(*) AS product_count,
            COUNT(*) FILTER (WHERE available_stock <= 0) AS stockout_count,
            COUNT(*) FILTER (WHERE available_stock <= reorder_level) AS low_stock_count
          FROM branch_inventory
@@ -680,6 +729,7 @@ router.get('/kpi', requireAuth, async (req, res) => {
            COALESCE(SUM(total_amount), 0) AS total_sales_amount
          FROM sales_invoices
          WHERE invoices_date >= (CURRENT_TIMESTAMP AT TIME ZONE '+08')::DATE - INTERVAL '7 days'
+           AND ${COUNTED_INVOICE_STATUS}
            ${isBranchScoped ? 'AND branch_id = $1' : ''}`,
         isBranchScoped ? [bid] : []
       ),
@@ -698,6 +748,9 @@ router.get('/kpi', requireAuth, async (req, res) => {
       (Number(inventory.stockout_count) === 0 ? 15 : 0)
     ));
 
+    const targets = await readPerformanceTargets(pool);
+    const credit = await readCreditExposure(pool, isBranchScoped ? bid : null);
+
     return res.status(200).json({
       success: true,
       data: {
@@ -714,9 +767,12 @@ router.get('/kpi', requireAuth, async (req, res) => {
         totalSalesWeek: Number(sales.total_invoices) || 0,
         totalSalesAmount: Number(sales.total_sales_amount) || 0,
         // Cap at 100 — target is a reference, not a ceiling; actual collections can exceed it
-        collectionRate: collections.total_collections > 0 ? Math.min(100, Math.round((Number(collections.total_amount_collected) / 180000) * 100)) : 0,
-        salesEfficiency: sales.total_sales_amount > 0 ? Math.min(100, Math.round((Number(sales.total_sales_amount) / 230000) * 100)) : 0,
-        inventoryHealth: Number(inventory.stockout_count) === 0 ? 100 : Math.max(0, 100 - Number(inventory.stockout_count) * 10),
+        collectionRate: collections.total_collections > 0 ? Math.min(100, Math.round((Number(collections.total_amount_collected) / targets.collectionDaily) * 100)) : 0,
+        salesEfficiency: sales.total_sales_amount > 0 ? Math.min(100, Math.round((Number(sales.total_sales_amount) / targets.salesDaily) * 100)) : 0,
+        inventoryHealth: inventoryHealthPercent(inventory.stockout_count, inventory.product_count),
+        totalCreditLimit: credit.totalCreditLimit,
+        creditUsed: credit.creditUsed,
+        creditRemaining: credit.creditRemaining,
       },
     });
   } catch (err) {
@@ -745,16 +801,25 @@ router.get('/executive', requireAuth, async (req, res) => {
   try {
     const pool = req.app.locals.pool;
     const user = req.currentUser;
-    const { isBranchScoped, bid } = branchScope(user);
+    const dateWindow = resolveAnalyticsWindow(req.query);
+    if (req.query.branch_id !== undefined && req.query.branch_id !== '') {
+      const parsedBranch = Number(req.query.branch_id);
+      if (!Number.isInteger(parsedBranch) || parsedBranch <= 0) {
+        return res.status(400).json({ success: false, message: 'Choose a valid branch.' });
+      }
+    }
+    const { bid } = branchScope(user, req.query.branch_id);
 
-    const branchParam    = isBranchScoped ? [bid] : [];
-    const branchWhere    = isBranchScoped ? 'AND branch_id = $1' : '';
-    const custBranchWhere = isBranchScoped ? 'AND c.branch_id = $1' : '';
-
-    // Philippine Standard Time month boundary (UTC+8)
-    const phMonthStart = `DATE_TRUNC('month', NOW() AT TIME ZONE 'Asia/Manila')::DATE`;
-    const phMonthPrev  = `(DATE_TRUNC('month', NOW() AT TIME ZONE 'Asia/Manila') - INTERVAL '1 month')::DATE`;
-    const ph7dAgo      = `((NOW() AT TIME ZONE 'Asia/Manila')::DATE - INTERVAL '7 days')`;
+    const branchParam = Number.isFinite(bid) ? [bid] : [];
+    const branchWhere = Number.isFinite(bid) ? 'AND branch_id = $1' : '';
+    const custBranchWhere = Number.isFinite(bid) ? 'AND c.branch_id = $1' : '';
+    const userBranchWhere = Number.isFinite(bid) ? 'AND u.branch_id = $1' : '';
+    const inventoryBranchWhere = Number.isFinite(bid) ? 'AND bi.branch_id = $1' : '';
+    const selectedBranch = Number.isFinite(bid) ? 'AND b.id = $1' : '';
+    const periodStart = `'${dateWindow.startDate}'::date`;
+    const periodEnd = `'${dateWindow.endDate}'::date`;
+    const compareStart = `'${dateWindow.compareStartDate}'::date`;
+    const compareEnd = `'${dateWindow.compareEndDate}'::date`;
 
     const [
       collectionsCurrentResult,
@@ -769,13 +834,15 @@ router.get('/executive', requireAuth, async (req, res) => {
       salesTrendResult,
       branchSummaryResult,
       inventoryBranchResult,
+      branchListResult,
     ] = await Promise.all([
 
       // Equation 5 — TC = SUM(Ci), current month
       pool.query(
         `SELECT COALESCE(SUM(amount), 0) AS total, COUNT(*) AS count
          FROM collection_payment
-         WHERE payment_date >= ${phMonthStart}
+         WHERE payment_date >= ${periodStart}
+           AND payment_date <= ${periodEnd}
            ${branchWhere}`,
         branchParam
       ),
@@ -784,8 +851,8 @@ router.get('/executive', requireAuth, async (req, res) => {
       pool.query(
         `SELECT COALESCE(SUM(amount), 0) AS total
          FROM collection_payment
-         WHERE payment_date >= ${phMonthPrev}
-           AND payment_date  <  ${phMonthStart}
+         WHERE payment_date >= ${compareStart}
+           AND payment_date <= ${compareEnd}
            ${branchWhere}`,
         branchParam
       ),
@@ -794,7 +861,9 @@ router.get('/executive', requireAuth, async (req, res) => {
       pool.query(
         `SELECT COALESCE(SUM(total_amount), 0) AS total, COUNT(*) AS count
          FROM sales_invoices
-         WHERE invoices_date >= ${phMonthStart}
+         WHERE invoices_date >= ${periodStart}
+           AND invoices_date <= ${periodEnd}
+           AND ${COUNTED_INVOICE_STATUS}
            ${branchWhere}`,
         branchParam
       ),
@@ -803,8 +872,9 @@ router.get('/executive', requireAuth, async (req, res) => {
       pool.query(
         `SELECT COALESCE(SUM(total_amount), 0) AS total
          FROM sales_invoices
-         WHERE invoices_date >= ${phMonthPrev}
-           AND invoices_date  <  ${phMonthStart}
+         WHERE invoices_date >= ${compareStart}
+           AND invoices_date <= ${compareEnd}
+           AND ${COUNTED_INVOICE_STATUS}
            ${branchWhere}`,
         branchParam
       ),
@@ -812,7 +882,7 @@ router.get('/executive', requireAuth, async (req, res) => {
       // Equation 9 — TOB = SUM(OBi) — from customer_activity directly
       pool.query(
         `SELECT COALESCE(SUM(ca.outstanding_balance), 0) AS total,
-                COUNT(*) FILTER (WHERE ca.outstanding_balance > 0) AS overdue_count,
+                COUNT(*) FILTER (WHERE ${OVERDUE_CUSTOMER}) AS overdue_count,
                 COUNT(*) AS total_customers
          FROM customer_activity ca
          JOIN customers c ON c.customer_id = ca.customer_id
@@ -820,16 +890,16 @@ router.get('/executive', requireAuth, async (req, res) => {
         branchParam
       ),
 
-      // Customer counts
+      // Customer counts — current snapshot, branch scope only
       pool.query(
         `SELECT COUNT(*) AS total,
                 COUNT(*) FILTER (WHERE status = 'Active') AS active
          FROM customers
-         WHERE 1=1 ${isBranchScoped ? 'AND branch_id = $1' : ''}`,
+         WHERE 1=1 ${custBranchWhere.replace('c.branch_id', 'branch_id')}`,
         branchParam
       ),
 
-      // Staff counts
+      // Staff counts — current snapshot
       pool.query(
         `SELECT
            COUNT(*) FILTER (WHERE r.slug = 'collector')   AS collectors,
@@ -837,11 +907,11 @@ router.get('/executive', requireAuth, async (req, res) => {
          FROM users u
          JOIN roles r ON u.role_id = r.role_id
          WHERE u.status = 'Active'
-           ${isBranchScoped ? 'AND u.branch_id = $1' : ''}`,
+           ${userBranchWhere}`,
         branchParam
       ),
 
-      // Route compliance
+      // Route compliance follows the selected dates
       pool.query(
         `SELECT
            COUNT(*) AS total_visits,
@@ -850,39 +920,38 @@ router.get('/executive', requireAuth, async (req, res) => {
            COUNT(*) FILTER (WHERE fv.visit_type = 'Sales') AS sales_total
          FROM field_visits fv
          JOIN users u ON u.id = fv.user_id
-         WHERE 1=1 ${isBranchScoped ? 'AND u.branch_id = $1' : ''}`,
+         WHERE fv.scheduled_date >= ${periodStart}
+           AND fv.scheduled_date <= ${periodEnd}
+           ${userBranchWhere}`,
         branchParam
       ),
 
-      // Collection trend — daily 7 days
       pool.query(
-        `SELECT
-           TO_CHAR(payment_date, 'Dy') AS day,
-           COALESCE(SUM(amount), 0) AS amount
+        `SELECT payment_date::text AS day,
+                COALESCE(SUM(amount), 0) AS amount
          FROM collection_payment
-         WHERE payment_date >= ${ph7dAgo}
+         WHERE payment_date >= ${periodStart}
+           AND payment_date <= ${periodEnd}
            ${branchWhere}
-         GROUP BY payment_date, TO_CHAR(payment_date, 'Dy')
+         GROUP BY payment_date
          ORDER BY payment_date`,
         branchParam
       ),
 
-      // Sales trend — daily 7 days
       pool.query(
-        `SELECT
-           TO_CHAR(invoices_date, 'Dy') AS day,
-           COALESCE(SUM(total_amount), 0) AS amount,
-           COUNT(*) AS invoices
+        `SELECT invoices_date::text AS day,
+                COALESCE(SUM(total_amount), 0) AS amount,
+                COUNT(*) AS invoices
          FROM sales_invoices
-         WHERE invoices_date >= ${ph7dAgo}
+         WHERE invoices_date >= ${periodStart}
+           AND invoices_date <= ${periodEnd}
+           AND ${COUNTED_INVOICE_STATUS}
            ${branchWhere}
-         GROUP BY invoices_date, TO_CHAR(invoices_date, 'Dy')
+         GROUP BY invoices_date
          ORDER BY invoices_date`,
         branchParam
       ),
 
-      // Table 14 — branch comparison
-      // Uses correlated subqueries to avoid Cartesian product
       pool.query(
         `SELECT
            b.id,
@@ -890,12 +959,15 @@ router.get('/executive', requireAuth, async (req, res) => {
            (SELECT COALESCE(SUM(cp.amount), 0)
             FROM collection_payment cp
             WHERE cp.branch_id = b.id
-              AND cp.payment_date >= ${phMonthStart}
+              AND cp.payment_date >= ${periodStart}
+              AND cp.payment_date <= ${periodEnd}
            ) AS total_collections,
            (SELECT COALESCE(SUM(si.total_amount), 0)
             FROM sales_invoices si
             WHERE si.branch_id = b.id
-              AND si.invoices_date >= ${phMonthStart}
+              AND si.invoices_date >= ${periodStart}
+              AND si.invoices_date <= ${periodEnd}
+              AND ${COUNTED_INVOICE_STATUS_SI}
            ) AS total_sales,
            (SELECT COALESCE(SUM(ca.outstanding_balance), 0)
             FROM customers c2
@@ -905,12 +977,11 @@ router.get('/executive', requireAuth, async (req, res) => {
            (SELECT COUNT(*) FROM customers c3 WHERE c3.branch_id = b.id) AS customer_count,
            (SELECT COUNT(*) FROM customers c4 WHERE c4.branch_id = b.id AND c4.status = 'Active') AS active_customers
          FROM branches b
-         WHERE b.status = 'Active' ${isBranchScoped ? 'AND b.id = $1' : ''}
+         WHERE b.status = 'Active' ${selectedBranch}
          ORDER BY b.name`,
         branchParam
       ),
 
-      // Equation 8 — Available Stock by branch
       pool.query(
         `SELECT b.name AS branch_name, b.id AS branch_id,
                 COUNT(*) AS product_count,
@@ -919,10 +990,17 @@ router.get('/executive', requireAuth, async (req, res) => {
                 COUNT(*) FILTER (WHERE bi.available_stock <= bi.reorder_level AND bi.available_stock > 0) AS low_stock
          FROM branch_inventory bi
          JOIN branches b ON b.id = bi.branch_id
-         WHERE 1=1 ${isBranchScoped ? 'AND bi.branch_id = $1' : ''}
+         WHERE 1=1 ${inventoryBranchWhere}
          GROUP BY b.id, b.name
          ORDER BY b.name`,
         branchParam
+      ),
+
+      pool.query(
+        `SELECT id AS branch_id, name AS branch_name
+         FROM branches
+         WHERE status = 'Active'
+         ORDER BY name`
       ),
     ]);
 
@@ -945,19 +1023,15 @@ router.get('/executive', requireAuth, async (req, res) => {
     const routeCompliance      = totalVisits > 0 ? Math.round((completedVisits / totalVisits) * 100) : 0;
     const salesVisitCompletion = salesTotal  > 0 ? Math.round((salesCompleted  / salesTotal)  * 100) : 0;
 
-    const DAY_LABELS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
-    const collectionByDay = {};
-    collectionTrendResult.rows.forEach((r) => { collectionByDay[r.day] = Number(r.amount); });
-    const salesByDay = {};
-    salesTrendResult.rows.forEach((r) => { salesByDay[r.day] = Number(r.amount); });
-
-    const collectionTrend = DAY_LABELS.map((d) => ({ day: d, amount: collectionByDay[d] || 0, target: 180000 }));
-    const salesTrend      = DAY_LABELS.map((d) => ({ day: d, amount: salesByDay[d]      || 0, target: 230000 }));
+    const targets = await readPerformanceTargets(pool);
+    const credit = await readCreditExposure(pool, Number.isFinite(bid) ? bid : null);
+    const collectionTrend = buildDateSeries(dateWindow.startDate, dateWindow.endDate, collectionTrendResult.rows, 'amount', targets.collectionDaily);
+    const salesTrend = buildDateSeries(dateWindow.startDate, dateWindow.endDate, salesTrendResult.rows, 'amount', targets.salesDaily);
 
     const invBranches     = inventoryBranchResult.rows;
     const totalProducts   = invBranches.reduce((s, b) => s + Number(b.product_count), 0);
     const totalOutOfStock = invBranches.reduce((s, b) => s + Number(b.out_of_stock),  0);
-    const inventoryHealth = totalProducts > 0 ? Math.round(Math.max(0, 100 - (totalOutOfStock / totalProducts) * 100)) : 100;
+    const inventoryHealth = inventoryHealthPercent(totalOutOfStock, totalProducts);
     const stockAlerts     = invBranches.reduce((s, b) => s + Number(b.low_stock) + Number(b.out_of_stock), 0);
 
     return res.status(200).json({
@@ -972,6 +1046,9 @@ router.get('/executive', requireAuth, async (req, res) => {
         totalSalesPrevious:      TsPrev,
         salesGrowthRate,
         totalOutstandingBalance: Tob,
+        totalCreditLimit: credit.totalCreditLimit,
+        creditUsed: credit.creditUsed,
+        creditRemaining: credit.creditRemaining,
         overdueCount:            Number(outstandingResult.rows[0].overdue_count),
         totalCustomersWithActivity: Number(outstandingResult.rows[0].total_customers),
         totalCustomers:  Number(customerResult.rows[0].total),
@@ -992,6 +1069,7 @@ router.get('/executive', requireAuth, async (req, res) => {
         })),
         collectionTrend,
         salesTrend,
+        targets,
         branchSummary: branchSummaryResult.rows.map((b) => ({
           branchId:         Number(b.id),
           branchName:       b.branch_name,
@@ -1001,7 +1079,12 @@ router.get('/executive', requireAuth, async (req, res) => {
           customerCount:    Number(b.customer_count),
           activeCustomers:  Number(b.active_customers),
         })),
-        period:      'current_month',
+        branches: branchListResult.rows.map((branch) => ({
+          branchId: Number(branch.branch_id),
+          branchName: branch.branch_name,
+        })),
+        filters: dateWindow,
+        period: dateWindow.label,
         generatedAt: new Date().toISOString(),
       },
     });
@@ -1216,21 +1299,21 @@ router.get('/operating-manager', requireAuth, async (req, res) => {
     ] = await Promise.all([
       pool.query(`SELECT COALESCE(SUM(amount), 0) AS total, COUNT(*) AS count FROM collection_payment WHERE ${currentWherePayment} ${branchFilter}`),
       pool.query(`SELECT COALESCE(SUM(amount), 0) AS total, COUNT(*) AS count FROM collection_payment WHERE ${previousWherePayment} ${branchFilter}`),
-      pool.query(`SELECT COALESCE(SUM(total_amount), 0) AS total, COUNT(*) AS count FROM sales_invoices WHERE ${currentWhereInvoice} ${branchFilter}`),
-      pool.query(`SELECT COALESCE(SUM(total_amount), 0) AS total, COUNT(*) AS count FROM sales_invoices WHERE ${previousWhereInvoice} ${branchFilter}`),
-      pool.query(`SELECT COALESCE(SUM(ca.outstanding_balance), 0) AS total, COUNT(*) FILTER (WHERE ca.outstanding_balance > 0) AS overdue_count, COUNT(*) AS customer_count FROM customer_activity ca JOIN customers c ON c.customer_id = ca.customer_id WHERE 1=1 ${customerBranchFilter}`),
+      pool.query(`SELECT COALESCE(SUM(total_amount), 0) AS total, COUNT(*) AS count FROM sales_invoices WHERE ${currentWhereInvoice} AND ${COUNTED_INVOICE_STATUS} ${branchFilter}`),
+      pool.query(`SELECT COALESCE(SUM(total_amount), 0) AS total, COUNT(*) AS count FROM sales_invoices WHERE ${previousWhereInvoice} AND ${COUNTED_INVOICE_STATUS} ${branchFilter}`),
+      pool.query(`SELECT COALESCE(SUM(ca.outstanding_balance), 0) AS total, COUNT(*) FILTER (WHERE ${OVERDUE_CUSTOMER}) AS overdue_count, COUNT(*) AS customer_count FROM customer_activity ca JOIN customers c ON c.customer_id = ca.customer_id WHERE 1=1 ${customerBranchFilter}`),
       pool.query(`SELECT COUNT(*) AS total_customers, COUNT(*) FILTER (WHERE c.status = 'Active') AS active_customers, COUNT(*) FILTER (WHERE c.status = 'Inactive') AS inactive_customers FROM customers c WHERE 1=1 ${customerBranchFilter}`),
       pool.query(`SELECT COUNT(*) FILTER (WHERE r.slug = 'collector') AS active_collectors, COUNT(*) FILTER (WHERE r.slug = 'sales_staff') AS active_sales_agents, COUNT(*) FILTER (WHERE r.slug = 'branch_manager') AS branch_managers, COUNT(*) FILTER (WHERE r.slug = 'inventory_staff') AS inventory_staff FROM users u JOIN roles r ON r.role_id = u.role_id WHERE u.status = 'Active' ${userBranchFilter}`),
       pool.query(`SELECT COUNT(*) AS total_visits, COUNT(*) FILTER (WHERE fv.status = 'Completed') AS completed_visits, COUNT(*) FILTER (WHERE fv.visit_type = 'Collection') AS collection_visits, COUNT(*) FILTER (WHERE fv.visit_type = 'Sales') AS sales_visits, COUNT(*) FILTER (WHERE fv.visit_type = 'Collection' AND fv.status = 'Completed') AS completed_collection_visits, COUNT(*) FILTER (WHERE fv.visit_type = 'Sales' AND fv.status = 'Completed') AS completed_sales_visits FROM field_visits fv JOIN users u ON u.id = fv.user_id WHERE ${currentWhereVisit.replace(/scheduled_date/g, 'fv.scheduled_date')} ${userBranchFilter}`),
       pool.query(`SELECT TO_CHAR(payment_date, 'YYYY-MM-DD') AS day, COALESCE(SUM(amount), 0) AS amount FROM collection_payment WHERE ${currentWherePayment} ${branchFilter} GROUP BY TO_CHAR(payment_date, 'YYYY-MM-DD') ORDER BY day`),
       pool.query(`SELECT TO_CHAR(payment_date, 'YYYY-MM-DD') AS day, COALESCE(SUM(amount), 0) AS amount FROM collection_payment WHERE ${previousWherePayment} ${branchFilter} GROUP BY TO_CHAR(payment_date, 'YYYY-MM-DD') ORDER BY day`),
-      pool.query(`SELECT TO_CHAR(invoices_date, 'YYYY-MM-DD') AS day, COALESCE(SUM(total_amount), 0) AS amount, COUNT(*) AS invoices FROM sales_invoices WHERE ${currentWhereInvoice} ${branchFilter} GROUP BY TO_CHAR(invoices_date, 'YYYY-MM-DD') ORDER BY day`),
-      pool.query(`SELECT TO_CHAR(invoices_date, 'YYYY-MM-DD') AS day, COALESCE(SUM(total_amount), 0) AS amount, COUNT(*) AS invoices FROM sales_invoices WHERE ${previousWhereInvoice} ${branchFilter} GROUP BY TO_CHAR(invoices_date, 'YYYY-MM-DD') ORDER BY day`),
-      pool.query(`SELECT b.id, b.name AS branch_name, COALESCE((SELECT SUM(cp.amount) FROM collection_payment cp WHERE cp.branch_id = b.id AND ${currentWherePayment.replace(/payment_date/g, 'cp.payment_date')}), 0) AS total_collections, COALESCE((SELECT SUM(si.total_amount) FROM sales_invoices si WHERE si.branch_id = b.id AND ${currentWhereInvoice.replace(/invoices_date/g, 'si.invoices_date')}), 0) AS total_sales, COALESCE((SELECT SUM(ca.outstanding_balance) FROM customers c2 JOIN customer_activity ca ON ca.customer_id = c2.customer_id WHERE c2.branch_id = b.id), 0) AS total_outstanding, (SELECT COUNT(*) FROM customers c3 WHERE c3.branch_id = b.id) AS customer_count, (SELECT COUNT(*) FROM customers c4 WHERE c4.branch_id = b.id AND c4.status = 'Active') AS active_customers, (SELECT COUNT(*) FROM branch_inventory bi WHERE bi.branch_id = b.id AND bi.available_stock <= bi.reorder_level) AS stock_alerts, (SELECT COUNT(*) FROM branch_inventory bi WHERE bi.branch_id = b.id AND bi.available_stock <= 0) AS stockouts, (SELECT COUNT(*) FROM field_visits fv JOIN users u ON u.id = fv.user_id WHERE u.branch_id = b.id AND ${currentWhereVisit.replace(/scheduled_date/g, 'fv.scheduled_date')}) AS total_visits, (SELECT COUNT(*) FROM field_visits fv JOIN users u ON u.id = fv.user_id WHERE u.branch_id = b.id AND fv.status = 'Completed' AND ${currentWhereVisit.replace(/scheduled_date/g, 'fv.scheduled_date')}) AS completed_visits FROM branches b WHERE b.status = 'Active' ${Number.isFinite(branchId) ? `AND b.id = ${branchId}` : ''} ORDER BY b.name`),
+      pool.query(`SELECT TO_CHAR(invoices_date, 'YYYY-MM-DD') AS day, COALESCE(SUM(total_amount), 0) AS amount, COUNT(*) AS invoices FROM sales_invoices WHERE ${currentWhereInvoice} AND ${COUNTED_INVOICE_STATUS} ${branchFilter} GROUP BY TO_CHAR(invoices_date, 'YYYY-MM-DD') ORDER BY day`),
+      pool.query(`SELECT TO_CHAR(invoices_date, 'YYYY-MM-DD') AS day, COALESCE(SUM(total_amount), 0) AS amount, COUNT(*) AS invoices FROM sales_invoices WHERE ${previousWhereInvoice} AND ${COUNTED_INVOICE_STATUS} ${branchFilter} GROUP BY TO_CHAR(invoices_date, 'YYYY-MM-DD') ORDER BY day`),
+      pool.query(`SELECT b.id, b.name AS branch_name, COALESCE((SELECT SUM(cp.amount) FROM collection_payment cp WHERE cp.branch_id = b.id AND ${currentWherePayment.replace(/payment_date/g, 'cp.payment_date')}), 0) AS total_collections, COALESCE((SELECT SUM(si.total_amount) FROM sales_invoices si WHERE si.branch_id = b.id AND ${currentWhereInvoice.replace(/invoices_date/g, 'si.invoices_date')} AND ${COUNTED_INVOICE_STATUS_SI}), 0) AS total_sales, COALESCE((SELECT SUM(ca.outstanding_balance) FROM customers c2 JOIN customer_activity ca ON ca.customer_id = c2.customer_id WHERE c2.branch_id = b.id), 0) AS total_outstanding, (SELECT COUNT(*) FROM customers c3 WHERE c3.branch_id = b.id) AS customer_count, (SELECT COUNT(*) FROM customers c4 WHERE c4.branch_id = b.id AND c4.status = 'Active') AS active_customers, (SELECT COUNT(*) FROM branch_inventory bi WHERE bi.branch_id = b.id AND bi.available_stock <= bi.reorder_level) AS stock_alerts, (SELECT COUNT(*) FROM branch_inventory bi WHERE bi.branch_id = b.id AND bi.available_stock <= 0) AS stockouts, (SELECT COUNT(*) FROM field_visits fv JOIN users u ON u.id = fv.user_id WHERE u.branch_id = b.id AND ${currentWhereVisit.replace(/scheduled_date/g, 'fv.scheduled_date')}) AS total_visits, (SELECT COUNT(*) FROM field_visits fv JOIN users u ON u.id = fv.user_id WHERE u.branch_id = b.id AND fv.status = 'Completed' AND ${currentWhereVisit.replace(/scheduled_date/g, 'fv.scheduled_date')}) AS completed_visits FROM branches b WHERE b.status = 'Active' ${Number.isFinite(branchId) ? `AND b.id = ${branchId}` : ''} ORDER BY b.name`),
       pool.query(`SELECT b.id AS branch_id, b.name AS branch_name, COUNT(*) AS product_count, COALESCE(SUM(bi.available_stock), 0) AS total_available, COUNT(*) FILTER (WHERE bi.available_stock <= 0) AS out_of_stock, COUNT(*) FILTER (WHERE bi.available_stock <= bi.reorder_level AND bi.available_stock > 0) AS low_stock FROM branch_inventory bi JOIN branches b ON b.id = bi.branch_id WHERE 1=1 ${inventoryBranchFilter} GROUP BY b.id, b.name ORDER BY b.name`),
       pool.query(`SELECT c.customer_id, c.first_name || ' ' || c.last_name AS customer_name, b.name AS branch_name, ca.outstanding_balance, ca.purchase_volume, ca.last_collection_date, ca.last_sales_visit, COALESCE(CURRENT_DATE - ca.last_collection_date, 0) AS days_since_collection FROM customer_activity ca JOIN customers c ON c.customer_id = ca.customer_id JOIN branches b ON b.id = c.branch_id WHERE ca.outstanding_balance > 0 ${customerBranchFilter} ORDER BY ca.outstanding_balance DESC LIMIT 10`),
-      pool.query(`SELECT p.id AS product_id, p.name AS product_name, COALESCE(pc.category_name, 'Uncategorized') AS category_name, SUM(sii.quantity) AS quantity_sold, COALESCE(SUM(sii.line_total), 0) AS revenue FROM sales_invoice_items sii JOIN sales_invoices si ON si.sales_invoices_id = sii.invoices_id JOIN products p ON p.id = sii.product_id LEFT JOIN product_categories pc ON pc.category_id = p.category_id WHERE ${currentWhereInvoice.replace(/invoices_date/g, 'si.invoices_date')} ${branchFilter.replace(/branch_id/g, 'si.branch_id')} GROUP BY p.id, p.name, pc.category_name ORDER BY revenue DESC LIMIT 10`),
-      pool.query(`SELECT COALESCE(pc.category_name, 'Uncategorized') AS category_name, SUM(sii.quantity) AS quantity_sold, COALESCE(SUM(sii.line_total), 0) AS revenue FROM sales_invoice_items sii JOIN sales_invoices si ON si.sales_invoices_id = sii.invoices_id JOIN products p ON p.id = sii.product_id LEFT JOIN product_categories pc ON pc.category_id = p.category_id WHERE ${currentWhereInvoice.replace(/invoices_date/g, 'si.invoices_date')} ${branchFilter.replace(/branch_id/g, 'si.branch_id')} GROUP BY pc.category_name ORDER BY revenue DESC`),
+      pool.query(`SELECT p.id AS product_id, p.name AS product_name, COALESCE(pc.category_name, 'Uncategorized') AS category_name, SUM(sii.quantity) AS quantity_sold, COALESCE(SUM(sii.line_total), 0) AS revenue FROM sales_invoice_items sii JOIN sales_invoices si ON si.sales_invoices_id = sii.invoices_id JOIN products p ON p.id = sii.product_id LEFT JOIN product_categories pc ON pc.category_id = p.category_id WHERE ${currentWhereInvoice.replace(/invoices_date/g, 'si.invoices_date')} AND ${COUNTED_INVOICE_STATUS_SI} ${branchFilter.replace(/branch_id/g, 'si.branch_id')} GROUP BY p.id, p.name, pc.category_name ORDER BY revenue DESC LIMIT 10`),
+      pool.query(`SELECT COALESCE(pc.category_name, 'Uncategorized') AS category_name, SUM(sii.quantity) AS quantity_sold, COALESCE(SUM(sii.line_total), 0) AS revenue FROM sales_invoice_items sii JOIN sales_invoices si ON si.sales_invoices_id = sii.invoices_id JOIN products p ON p.id = sii.product_id LEFT JOIN product_categories pc ON pc.category_id = p.category_id WHERE ${currentWhereInvoice.replace(/invoices_date/g, 'si.invoices_date')} AND ${COUNTED_INVOICE_STATUS_SI} ${branchFilter.replace(/branch_id/g, 'si.branch_id')} GROUP BY pc.category_name ORDER BY revenue DESC`),
       pool.query(`SELECT fv.visit_id, fv.customer_id, fv.user_id, fv.visit_type, fv.scheduled_date, fv.status, c.first_name || ' ' || c.last_name AS customer_name, u.first_name || ' ' || u.last_name AS staff_name, b.name AS branch_name FROM field_visits fv JOIN customers c ON c.customer_id = fv.customer_id JOIN users u ON u.id = fv.user_id JOIN branches b ON b.id = c.branch_id WHERE fv.status = 'Pending' AND fv.scheduled_date >= '${dateWindow.startDate}'::date AND fv.scheduled_date <= '${dateWindow.endDate}'::date ${Number.isFinite(branchId) ? `AND c.branch_id = ${branchId}` : ''} ORDER BY fv.scheduled_date ASC LIMIT 15`),
       pool.query(`SELECT p.name AS product_name, b.name AS branch_name, bi.available_stock, bi.reorder_level, CASE WHEN bi.available_stock <= 0 THEN 'Out of Stock' WHEN bi.available_stock <= bi.reorder_level THEN 'Low Stock' ELSE 'Sufficient' END AS status FROM branch_inventory bi JOIN products p ON p.id = bi.product_id JOIN branches b ON b.id = bi.branch_id WHERE bi.available_stock <= bi.reorder_level ${inventoryBranchFilter} ORDER BY bi.available_stock ASC LIMIT 20`),
       pool.query(`
@@ -1274,10 +1357,12 @@ router.get('/operating-manager', requireAuth, async (req, res) => {
     const routeCompliance = Number(visitResult.rows[0]?.total_visits || 0) > 0 ? Math.round((Number(visitResult.rows[0]?.completed_visits || 0) / Number(visitResult.rows[0]?.total_visits || 1)) * 100) : 0;
     const salesVisitCompletion = Number(visitResult.rows[0]?.sales_visits || 0) > 0 ? Math.round((Number(visitResult.rows[0]?.completed_sales_visits || 0) / Number(visitResult.rows[0]?.sales_visits || 1)) * 100) : 0;
 
-    const collectionSeries = buildDateSeries(dateWindow.startDate, dateWindow.endDate, collectionTrendResult.rows, 'amount', 180000);
-    const comparisonCollectionSeries = dateWindow.comparisonEnabled ? buildDateSeries(dateWindow.compareStartDate, dateWindow.compareEndDate, collectionPreviousTrendResult.rows, 'amount', 180000) : [];
-    const salesSeries = buildDateSeries(dateWindow.startDate, dateWindow.endDate, salesTrendResult.rows, 'amount', 230000);
-    const comparisonSalesSeries = dateWindow.comparisonEnabled ? buildDateSeries(dateWindow.compareStartDate, dateWindow.compareEndDate, salesPreviousTrendResult.rows, 'amount', 230000) : [];
+    const targets = await readPerformanceTargets(pool);
+    const credit = await readCreditExposure(pool, Number.isFinite(branchId) ? branchId : null);
+    const collectionSeries = buildDateSeries(dateWindow.startDate, dateWindow.endDate, collectionTrendResult.rows, 'amount', targets.collectionDaily);
+    const comparisonCollectionSeries = dateWindow.comparisonEnabled ? buildDateSeries(dateWindow.compareStartDate, dateWindow.compareEndDate, collectionPreviousTrendResult.rows, 'amount', targets.collectionDaily) : [];
+    const salesSeries = buildDateSeries(dateWindow.startDate, dateWindow.endDate, salesTrendResult.rows, 'amount', targets.salesDaily);
+    const comparisonSalesSeries = dateWindow.comparisonEnabled ? buildDateSeries(dateWindow.compareStartDate, dateWindow.compareEndDate, salesPreviousTrendResult.rows, 'amount', targets.salesDaily) : [];
 
     const branchSummary = branchSummaryResult.rows.map((row) => {
       const collections = Number(row.total_collections || 0);
@@ -1287,7 +1372,7 @@ router.get('/operating-manager', requireAuth, async (req, res) => {
       const completedVisits = Number(row.completed_visits || 0);
       const compliance = visits > 0 ? Math.round((completedVisits / visits) * 100) : 0;
       const inventoryRow = inventorySummaryResult.rows.find((entry) => Number(entry.branch_id) === Number(row.id));
-      const inventoryHealth = inventoryRow ? Math.round(Math.max(0, 100 - ((Number(inventoryRow.out_of_stock || 0) / Math.max(1, Number(inventoryRow.product_count || 0))) * 100))) : 100;
+      const inventoryHealth = inventoryRow ? inventoryHealthPercent(inventoryRow.out_of_stock, inventoryRow.product_count) : 100;
 
       return {
         branchId: Number(row.id),
@@ -1308,7 +1393,7 @@ router.get('/operating-manager', requireAuth, async (req, res) => {
 
     const totalProducts = inventorySummaryResult.rows.reduce((sum, row) => sum + Number(row.product_count || 0), 0);
     const totalOutOfStock = inventorySummaryResult.rows.reduce((sum, row) => sum + Number(row.out_of_stock || 0), 0);
-    const inventoryHealth = totalProducts > 0 ? Math.round(Math.max(0, 100 - ((totalOutOfStock / totalProducts) * 100))) : 100;
+    const inventoryHealth = inventoryHealthPercent(totalOutOfStock, totalProducts);
     const stockAlerts = inventorySummaryResult.rows.reduce((sum, row) => sum + Number(row.low_stock || 0) + Number(row.out_of_stock || 0), 0);
     const collectionsGrowthRate = dateWindow.comparisonEnabled && collectionPrevious > 0 ? Math.round((((collectionCurrent - collectionPrevious) / collectionPrevious) * 100) * 10) / 10 : null;
     const salesGrowthRate = dateWindow.comparisonEnabled && salesPrevious > 0 ? Math.round((((salesCurrent - salesPrevious) / salesPrevious) * 100) * 10) / 10 : null;
@@ -1337,6 +1422,9 @@ router.get('/operating-manager', requireAuth, async (req, res) => {
           inventoryHealth,
           stockAlerts,
           performanceScore,
+          totalCreditLimit: credit.totalCreditLimit,
+          creditUsed: credit.creditUsed,
+          creditRemaining: credit.creditRemaining,
         },
         comparison: {
           collectionsChange: collectionsGrowthRate,

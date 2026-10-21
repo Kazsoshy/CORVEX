@@ -30,6 +30,20 @@ export async function getBranchCustomers() {
   }
 }
 
+export async function getSawMapRoads(params = {}) {
+  try {
+    const response = await apiClient.get('/branch-manager/map/saw-roads', { params });
+    return response.data;
+  } catch (error) {
+    console.error('Failed to fetch SAW road routes:', error);
+    return {
+      success: false,
+      message: error.response?.data?.message || 'Failed to load SAW road routes.',
+      data: [],
+    };
+  }
+}
+
 export async function getBranchMap(params = {}) {
   try {
     const response = await apiClient.get('/branch-manager/map', { params });

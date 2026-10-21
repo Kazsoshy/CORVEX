@@ -8,6 +8,12 @@ const WEIGHT_DAYS = 0.3;
 const WEIGHT_DISTANCE = 0.3;
 const EARTH_RADIUS_KM = 6371;
 
+export const SAW_WEIGHTS = {
+  balance: WEIGHT_BALANCE,
+  daysOverdue: WEIGHT_DAYS,
+  distance: WEIGHT_DISTANCE,
+};
+
 function round2(n) {
   return Math.round(Number(n) * 100) / 100;
 }
@@ -84,6 +90,12 @@ export function computeSawScores(rows) {
       balance_norm,
       days_norm,
       distance_norm,
+      cohort_max_balance: maxBalance,
+      cohort_max_days: maxDays,
+      cohort_min_distance: minDist,
+      weight_balance: WEIGHT_BALANCE,
+      weight_days: WEIGHT_DAYS,
+      weight_distance: WEIGHT_DISTANCE,
       score,
     };
   });

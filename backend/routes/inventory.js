@@ -13,6 +13,7 @@ import {
   notifyTransferSubmitted,
 } from '../lib/inventoryTransferNotifications.js';
 import { publishStockAlerts } from '../lib/operationalNotifications.js';
+import { normalizeProductName, productNameConflict, productNameTaken } from '../lib/productName.js';
 
 const TRANSFER_APPROVER_ROLES = new Set(['branch_manager', 'operating_manager', 'super_admin']);
 /** Stock mutations (restock / count / transfer create / product create) — not branch managers. */
@@ -1317,7 +1318,7 @@ router.post('/products', requireAuth, requireRole(INVENTORY_WRITER_ROLES), async
     initial_quantity: initialQuantity,
   } = req.body;
 
-  if (!name || !sku) {
+  if (!normalizeProductName(name) || !sku) {
     return res.status(400).json({ success: false, message: 'Name and SKU are required.' });
   }
   if (branchId == null) {
@@ -1327,6 +1328,11 @@ router.post('/products', requireAuth, requireRole(INVENTORY_WRITER_ROLES), async
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
+    const productName = normalizeProductName(name);
+    if (await productNameTaken(client, productName)) {
+      await client.query('ROLLBACK');
+      return res.status(409).json({ success: false, message: 'A product with this name already exists.' });
+    }
     const dup = await client.query(`SELECT id FROM products WHERE sku = $1`, [sku.toUpperCase().trim()]);
     if (dup.rows.length) {
       await client.query('ROLLBACK');
@@ -1338,7 +1344,7 @@ router.post('/products', requireAuth, requireRole(INVENTORY_WRITER_ROLES), async
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'Active')
        RETURNING id AS product_id`,
       [
-        String(name).trim(),
+        productName,
         String(sku).toUpperCase().trim(),
         categoryId ? Number(categoryId) : null,
         description || null,
@@ -1369,6 +1375,8 @@ router.post('/products', requireAuth, requireRole(INVENTORY_WRITER_ROLES), async
     return res.status(201).json({ success: true, message: 'Product created.', data: { product_id: productId } });
   } catch (err) {
     await client.query('ROLLBACK');
+    const nameConflict = productNameConflict(err);
+    if (nameConflict) return res.status(409).json({ success: false, message: nameConflict });
     console.error('[Inventory] POST /products error:', err.message);
     return res.status(500).json({ success: false, message: 'Failed to create product.' });
   } finally {

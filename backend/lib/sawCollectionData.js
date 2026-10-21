@@ -196,6 +196,12 @@ export function mapSawPriorityRow(row) {
     balance_norm: row.balance_norm,
     days_norm: row.days_norm,
     distance_norm: row.distance_norm,
+    cohort_max_balance: row.cohort_max_balance,
+    cohort_max_days: row.cohort_max_days,
+    cohort_min_distance: row.cohort_min_distance,
+    weight_balance: row.weight_balance,
+    weight_days: row.weight_days,
+    weight_distance: row.weight_distance,
     score: row.score,
     rank: row.rank,
     generated_at: row.generated_at,
@@ -221,7 +227,31 @@ export async function getCollectionAssignmentsForDate(pool, collectorId, schedul
 }
 
 /**
- * When the collector has Collection visits for scheduledDate, return only those customers in SAW order.
+ * Keep the SAW rank from scoring. Visit status does not assign a new rank.
+ * Assigned customers who no longer qualify stay on the list with a blank rank.
+ */
+export function orderAssignedSawStops(scoredRows, extraRows, visitByCustomer) {
+  const withVisit = [...scoredRows, ...extraRows].map((row) => {
+    const visit = visitByCustomer.get(Number(row.customer_id));
+    const rank = row.rank == null || row.rank === '' ? null : Number(row.rank);
+    const score = row.score == null || row.score === '' ? null : Number(row.score);
+    return {
+      ...row,
+      rank: Number.isFinite(rank) ? rank : null,
+      score: Number.isFinite(score) ? score : null,
+      visit_id: visit?.visit_id ?? null,
+      visit_status: visit?.status ?? null,
+    };
+  });
+
+  const sortKey = (rank) => (rank == null ? Number.POSITIVE_INFINITY : rank);
+  return withVisit.sort((a, b) => (
+    sortKey(a.rank) - sortKey(b.rank) || Number(a.customer_id) - Number(b.customer_id)
+  ));
+}
+
+/**
+ * When the collector has Collection visits for scheduledDate, return only those customers in SAW rank order.
  */
 export async function computeAssignedSawRoute(pool, { collectorId, branchId, scheduledDate, asOfDate }) {
   const date = scheduledDate || manilaDateString();
@@ -253,20 +283,7 @@ export async function computeAssignedSawRoute(pool, { collectorId, branchId, sch
     ? await fetchAssignedCustomersOutsideSaw(pool, missingIds, collectorId, asOf)
     : [];
 
-  const withVisit = [...filtered, ...extras].map((row) => {
-    const visit = visitByCustomer.get(Number(row.customer_id));
-    return {
-      ...row,
-      visit_id: visit?.visit_id ?? null,
-      visit_status: visit?.status ?? null,
-    };
-  });
-  const openStops = withVisit.filter((row) => row.visit_status !== 'Completed');
-  const completedStops = withVisit.filter((row) => row.visit_status === 'Completed');
-  const rankedAssigned = [...openStops, ...completedStops].map((row, i) => ({
-    ...row,
-    rank: i + 1,
-  }));
+  const rankedAssigned = orderAssignedSawStops(filtered, extras, visitByCustomer);
 
   return {
     asOf,
@@ -275,7 +292,7 @@ export async function computeAssignedSawRoute(pool, { collectorId, branchId, sch
       ...stats,
       assigned: assignments.length,
       onRoute: rankedAssigned.length,
-      completed: completedStops.length,
+      completed: rankedAssigned.filter((row) => row.visit_status === 'Completed').length,
     },
     assignmentMode: true,
     scheduledDate: date,
@@ -331,6 +348,7 @@ async function fetchAssignedCustomersOutsideSaw(pool, customerIds, collectorId, 
       cust_lat: row.cust_lat,
       cust_lon: row.cust_lon,
       score: null,
+      rank: null,
       generated_at: asOf,
     };
   });
@@ -393,13 +411,21 @@ export async function assignCollectionVisits(pool, {
   }
 }
 
+function finiteOrNull(value) {
+  const n = Number(value);
+  return Number.isFinite(n) ? n : null;
+}
+
 export async function persistSawResults(pool, rankedRows, { replaceAll = false } = {}) {
-  if (!rankedRows.length) {
+  const scoredRows = rankedRows.filter(
+    (row) => Number.isFinite(Number(row.score)) && Number.isFinite(Number(row.rank))
+  );
+  if (!scoredRows.length) {
     if (replaceAll) await pool.query(`DELETE FROM saw_results`);
     return 0;
   }
 
-  const customerIds = rankedRows.map((r) => Number(r.customer_id));
+  const customerIds = scoredRows.map((r) => Number(r.customer_id));
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
@@ -411,15 +437,43 @@ export async function persistSawResults(pool, rankedRows, { replaceAll = false }
         [customerIds]
       );
     }
-    for (const row of rankedRows) {
+    for (const row of scoredRows) {
       await client.query(
-        `INSERT INTO saw_results (customer_id, score, ranking, generated_at)
-         VALUES ($1, $2, $3, CURRENT_TIMESTAMP)`,
-        [Number(row.customer_id), row.score, row.rank]
+        `INSERT INTO saw_results (
+           customer_id, score, ranking, generated_at,
+           outstanding_balance, days_overdue, distance_km,
+           balance_norm, days_norm, distance_norm,
+           cohort_max_balance, cohort_max_days, cohort_min_distance,
+           weight_balance, weight_days, weight_distance
+         )
+         VALUES (
+           $1, $2, $3, CURRENT_TIMESTAMP,
+           $4, $5, $6,
+           $7, $8, $9,
+           $10, $11, $12,
+           $13, $14, $15
+         )`,
+        [
+          Number(row.customer_id),
+          row.score,
+          row.rank,
+          finiteOrNull(row.outstanding_balance),
+          finiteOrNull(row.days_overdue) == null ? null : Math.round(Number(row.days_overdue)),
+          finiteOrNull(row.distance_km),
+          finiteOrNull(row.balance_norm),
+          finiteOrNull(row.days_norm),
+          finiteOrNull(row.distance_norm),
+          finiteOrNull(row.cohort_max_balance),
+          finiteOrNull(row.cohort_max_days) == null ? null : Math.round(Number(row.cohort_max_days)),
+          finiteOrNull(row.cohort_min_distance),
+          finiteOrNull(row.weight_balance),
+          finiteOrNull(row.weight_days),
+          finiteOrNull(row.weight_distance),
+        ]
       );
     }
     await client.query('COMMIT');
-    return rankedRows.length;
+    return scoredRows.length;
   } catch (err) {
     await client.query('ROLLBACK');
     throw err;

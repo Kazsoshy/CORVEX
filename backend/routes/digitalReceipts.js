@@ -12,15 +12,37 @@ router.get('/', async (req, res) => {
   try {
     const pool = req.app.locals.pool;
     const { search, page = 1, limit = 50 } = req.query;
+    const paymentStatus = String(req.query.payment_status || '').trim();
+    const branchText = String(req.query.branch_id || '').trim();
+    const allowedStatus = ['Pending', 'Completed', 'Cancelled'];
+
+    if (paymentStatus && !allowedStatus.includes(paymentStatus)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Payment status must be Pending, Completed, or Cancelled.',
+      });
+    }
+    const branchId = branchText ? Number(branchText) : null;
+    if (branchText && (!Number.isInteger(branchId) || branchId <= 0)) {
+      return res.status(400).json({ success: false, message: 'Choose a valid branch.' });
+    }
 
     const conditions = [];
     const params = [];
     let pIdx = 1;
 
     if (search) {
-      conditions.push(`(dr.receipt_number ILIKE $${pIdx} OR u.full_name ILIKE $${pIdx})`);
-      params.push(`%${search}%`);
+      conditions.push(`(dr.receipt_number ILIKE $${pIdx} OR u.full_name ILIKE $${pIdx} OR c.first_name ILIKE $${pIdx} OR c.last_name ILIKE $${pIdx})`);
+      params.push(`%${String(search).trim()}%`);
       pIdx++;
+    }
+    if (branchId) {
+      conditions.push(`cp.branch_id = $${pIdx++}`);
+      params.push(branchId);
+    }
+    if (paymentStatus) {
+      conditions.push(`cp.status = $${pIdx++}`);
+      params.push(paymentStatus);
     }
 
     const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
@@ -32,16 +54,21 @@ router.get('/', async (req, res) => {
       `SELECT
          dr.receipts_id,
          dr.collection_id,
+         cp.collectionpayment_id,
          dr.receipt_number,
          dr.receipt_date,
          dr.generated_by,
          u.full_name AS generated_by_name,
          cp.amount AS collection_amount,
+         cp.status AS payment_status,
+         cp.branch_id,
+         b.name AS branch_name,
          pm.method_name AS payment_method,
          c.first_name || ' ' || c.last_name AS customer_name
        FROM digital_receipts dr
        LEFT JOIN users u ON u.id = dr.generated_by
        LEFT JOIN collection_payment cp ON cp.collectionpayment_id = dr.collection_id
+       LEFT JOIN branches b ON b.id = cp.branch_id
        LEFT JOIN payment_methods pm ON pm.payment_method_id = cp.payment_method_id
        LEFT JOIN customers c ON c.customer_id = cp.customer_id
        ${where}
@@ -74,12 +101,16 @@ router.get('/:id', async (req, res) => {
          dr.generated_by,
          u.full_name AS generated_by_name,
          cp.amount AS collection_amount,
+         cp.status AS payment_status,
+         cp.branch_id,
+         b.name AS branch_name,
          pm.method_name AS payment_method,
          c.first_name || ' ' || c.last_name AS customer_name,
          c.customer_id
        FROM digital_receipts dr
        LEFT JOIN users u ON u.id = dr.generated_by
        LEFT JOIN collection_payment cp ON cp.collectionpayment_id = dr.collection_id
+       LEFT JOIN branches b ON b.id = cp.branch_id
        LEFT JOIN payment_methods pm ON pm.payment_method_id = cp.payment_method_id
        LEFT JOIN customers c ON c.customer_id = cp.customer_id
        WHERE dr.receipts_id = $1`,

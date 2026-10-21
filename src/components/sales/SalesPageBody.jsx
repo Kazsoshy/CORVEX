@@ -29,6 +29,11 @@ import { lookupCustomersForDuplicate, resendCustomerPortalInvitation } from '../
 import { fetchNotifications, markNotificationRead, markAllNotificationsRead, mapNotificationRow } from '../../api/notificationService.js';
 import { mapCreditInvestigationRow } from '../../api/approvalsService.js';
 import { getCurrentUser } from '../../api/authService.js';
+import { isBrowserOnline } from '../../offline/connection.js';
+import { listOfflineRecords, saveOfflineRecord } from '../../offline/db.js';
+import { DeviceQueue, loadWaiting } from '../../offline/DeviceQueue.jsx';
+import { flushOfflineQueue } from '../../offline/flushQueue.js';
+import { isSalesAutoSyncEnabled, isSalesOfflineEnabled } from '../../offline/prefs.js';
 import { AccountProfilePanel } from '../shared/AccountProfilePanel';
 import apiClient from '../../api/apiClient.js';
 import { CONTACT_RELATIONSHIP_OPTIONS, formatContactPersonName, formatCustomerDisplayId, formatCustomerFullName, formatMiddleNameDisplay, formatPurchaseVolumeUnits, formatSecondaryContactName } from '../../utils/customerDisplay';
@@ -1306,6 +1311,7 @@ function LogSalePage({
     quantity: 1
   }]);
   const [errors, setErrors] = useState({});
+  const [deviceSales, setDeviceSales] = useState([]);
   const [linkedPurchaseRequestId, setLinkedPurchaseRequestId] = useState(purchaseRequestId ? String(purchaseRequestId) : '');
   useEffect(() => {
     if (customerId) {
@@ -1358,6 +1364,7 @@ function LogSalePage({
           showToast(pr.message || 'Could not load purchase request.', 'error');
         }
       }
+      setDeviceSales(await loadWaiting('sales_invoices'));
       setLoading(false);
     }
     load();
@@ -1407,8 +1414,8 @@ function LogSalePage({
       showToast('Please fix the errors before submitting.', 'error');
       return;
     }
-    setSubmitting(true);
-    const result = await createSalesInvoice({
+    const customer = customers.find((row) => String(row.customer_id) === String(form.customerId));
+    const payload = {
       customer_id: Number(form.customerId),
       payment_method_id: Number(form.paymentMethodId),
       invoices_date: form.invoicesDate,
@@ -1416,9 +1423,34 @@ function LogSalePage({
       notes: form.notes,
       items,
       purchase_request_id: linkedPurchaseRequestId ? Number(linkedPurchaseRequestId) : undefined,
-    });
+      customer_name: customer ? `${customer.first_name || ''} ${customer.last_name || ''}`.trim() : 'Sale',
+    };
+    const keepLocal = async () => {
+      if (!isSalesOfflineEnabled()) {
+        showToast('Turn on offline mode in Settings to keep this sale on the device.', 'error');
+        return;
+      }
+      await saveOfflineRecord({ tableName: 'sales_invoices', payload: { ...payload, saved_offline: true } });
+      showToast(
+        isSalesAutoSyncEnabled()
+          ? 'Saved on this device. It will sync when you are online.'
+          : 'Saved on this device. Send it from Settings while auto-sync is off.',
+        'success'
+      );
+      setDeviceSales(await loadWaiting('sales_invoices'));
+    };
+    if (!isBrowserOnline()) {
+      await keepLocal();
+      return;
+    }
+    setSubmitting(true);
+    const result = await createSalesInvoice(payload);
     setSubmitting(false);
     if (!result.success || !result.data) {
+      if (result.offline) {
+        await keepLocal();
+        return;
+      }
       showToast(result.message || 'Failed to log sale.', 'error');
       return;
     }
@@ -1427,6 +1459,7 @@ function LogSalePage({
   };
   if (loading) return <LoadingState message="Loading log a sale form..." />;
   return <div className="page">
+      <DeviceQueue rows={deviceSales} />
       <section className="panel form-panel content-panel">
         <div className="panel-section-header">
           <h3>Log a Sale</h3>
@@ -2070,6 +2103,7 @@ export function SalesHistoryPage({
   const [serverTotal, setServerTotal] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [deviceSales, setDeviceSales] = useState([]);
   const filterResetKey = `${statusFilter}|${dateFrom}|${dateTo}`;
   const serverPager = useServerPagination({
     totalRecords: serverTotal,
@@ -2096,8 +2130,8 @@ export function SalesHistoryPage({
         setServerTotal(Number(result.pagination?.total) || (result.data || []).length);
       } else {
         setError(result.message || 'Failed to load sales history.');
-        if (showToast) showToast(result.message || 'Failed to load sales history.', 'error');
       }
+      if (active) setDeviceSales(await loadWaiting('sales_invoices'));
       setLoading(false);
     }
     load();
@@ -2123,9 +2157,13 @@ export function SalesHistoryPage({
 
   if (loading) return <LoadingState message="Loading sales history..." />;
   if (error && !invoices.length) {
-    return <EmptyState title="Unable to load sales history" description={error} actionLabel="Retry" onAction={() => window.location.reload()} />;
+    return <div className="page">
+      <DeviceQueue rows={deviceSales} />
+      <EmptyState title="Unable to load sales history" description={error} actionLabel="Retry" onAction={() => window.location.reload()} />
+    </div>;
   }
   return <div className="page">
+      <DeviceQueue rows={deviceSales} />
       <section className="panel content-panel relative overflow-hidden">
         <div className="list-section-header">
           <h3>Sales Transactions</h3>
@@ -2205,6 +2243,16 @@ function FieldActivityReportsPage({ showToast }) {
     photoName: '',
   });
   const [errors, setErrors] = useState({});
+  const [deviceReports, setDeviceReports] = useState([]);
+
+  async function loadDeviceReports() {
+    try {
+      const rows = await loadWaiting('field_activity_reports');
+      setDeviceReports(rows);
+    } catch {
+      setDeviceReports([]);
+    }
+  }
 
   async function loadReports() {
     setLoading(true);
@@ -2215,12 +2263,36 @@ function FieldActivityReportsPage({ showToast }) {
     ]);
     if (reportsResult.success) setReports(reportsResult.data || []);
     if (visitsResult.success) setVisits(visitsResult.data || []);
+    await loadDeviceReports();
     setLoading(false);
   }
 
   useEffect(() => {
     loadReports();
   }, []);
+
+  async function keepReportOnDevice() {
+    const visit = visits.find((row) => String(row.visit_id) === String(form.visit_id));
+    await saveOfflineRecord({
+      tableName: 'field_activity_reports',
+      payload: {
+        visit_id: Number(form.visit_id),
+        activity_type: form.activity_type,
+        remarks: form.remarks.trim(),
+        photo: form.photo,
+        customer_name: visit?.customer_name || '',
+        visit_status: visit?.status || '',
+      },
+    });
+    showToast(
+      isSalesAutoSyncEnabled()
+        ? 'Saved on this device. It will sync when you are online.'
+        : 'Saved on this device. Send it from Settings while auto-sync is off.',
+      'success'
+    );
+    setForm({ visit_id: '', activity_type: '', remarks: '', photo: '', photoName: '' });
+    await loadDeviceReports();
+  }
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -2231,6 +2303,14 @@ function FieldActivityReportsPage({ showToast }) {
     if (!form.photo) nextErrors.photo = 'Photo evidence is required.';
     setErrors(nextErrors);
     if (Object.keys(nextErrors).length) return;
+    if (!isBrowserOnline()) {
+      if (isSalesOfflineEnabled()) {
+        await keepReportOnDevice();
+      } else {
+        showToast('Turn on offline mode in Settings to keep this report on the device.', 'error');
+      }
+      return;
+    }
     setSubmitting(true);
     const result = await submitSalesFieldReport({
       visit_id: Number(form.visit_id),
@@ -2243,6 +2323,8 @@ function FieldActivityReportsPage({ showToast }) {
       showToast(result.message || 'Report submitted.', 'success');
       setForm({ visit_id: '', activity_type: '', remarks: '', photo: '', photoName: '' });
       loadReports();
+    } else if (result.offline && isSalesOfflineEnabled()) {
+      await keepReportOnDevice();
     } else {
       showToast(result.message || 'Failed to submit report.', 'error');
     }
@@ -2257,6 +2339,7 @@ function FieldActivityReportsPage({ showToast }) {
         <h3>Field Activity Reports</h3>
         <p className="muted">Submit visit activity for today's sales schedule ({reports.length} report{reports.length === 1 ? '' : 's'} on file).</p>
       </div>
+      {deviceReports.length ? <DeviceQueue rows={deviceReports} /> : null}
       <form className="grid gap-3" onSubmit={handleSubmit}>
         <div className="form-group">
           <label>Visit / Customer<span className="required">*</span></label>
@@ -2640,26 +2723,72 @@ function AuditLogPage({
     </div>;
 }
 function SettingsPage({
-  navigate
+  navigate,
+  showToast
 }) {
   const [prefs, setPrefs] = useState(() => ({
-    offline: localStorage.getItem('corvex_sales_offline') === '1',
-    autosync: localStorage.getItem('corvex_sales_autosync') !== '0',
+    offline: isSalesOfflineEnabled(),
+    autosync: isSalesAutoSyncEnabled(),
     gps: localStorage.getItem('corvex_sales_gps') !== '0',
   }));
+  const [pendingCount, setPendingCount] = useState(0);
+  const [syncing, setSyncing] = useState(false);
+  const refreshPending = async () => {
+    try {
+      const rows = await listOfflineRecords();
+      setPendingCount(rows.filter((row) => (
+        (row.tableName === 'field_activity_reports' || row.tableName === 'sales_invoices')
+        && row.status !== 'Synced'
+      )).length);
+    } catch {
+      setPendingCount(0);
+    }
+  };
+  useEffect(() => {
+    refreshPending();
+  }, []);
   const toggle = (key, storageKey) => {
     setPrefs(p => {
       const next = { ...p, [key]: !p[key] };
       localStorage.setItem(storageKey, next[key] ? '1' : '0');
+      if (key === 'autosync' && next.autosync) {
+        window.dispatchEvent(new Event('corvex-session-ready'));
+      }
       return next;
     });
   };
+  const syncNow = async () => {
+    setSyncing(true);
+    const result = await flushOfflineQueue({ manual: true });
+    await refreshPending();
+    setSyncing(false);
+    if (result.skipped && result.reason === 'offline') {
+      showToast('You are offline. Reports stay on this device.', 'error');
+      return;
+    }
+    if (result.skipped && result.reason === 'signed-out') {
+      showToast('Sign in again to sync reports.', 'error');
+      return;
+    }
+    const synced = (result.results || []).filter((row) => row.syncStatus === 'Synced').length;
+    const failed = (result.results || []).filter((row) => row.syncStatus === 'Failed').length;
+    if (!synced && !failed) {
+      showToast('No field reports are waiting on this device.', 'success');
+      return;
+    }
+    showToast(
+      failed ? `${synced} synced. ${failed} still need attention.` : `${synced} field report${synced === 1 ? '' : 's'} synced.`,
+      failed ? 'error' : 'success'
+    );
+  };
   return <div className="page">
       <section className="panel form-panel content-panel">
-        <div className="panel-section-header"><h3>Settings</h3><p className="muted">Preferences stored on this device (offline sync is not yet connected to the server).</p></div>
-        <div className="form-group"><label className="toggle-label"><input type="checkbox" checked={prefs.offline} onChange={() => toggle('offline', 'corvex_sales_offline')} />Enable offline mode (UI preference)</label></div>
-        <div className="form-group"><label className="toggle-label"><input type="checkbox" checked={prefs.autosync} onChange={() => toggle('autosync', 'corvex_sales_autosync')} />Auto-sync when online (UI preference)</label></div>
+        <div className="panel-section-header"><h3>Settings</h3><p className="muted">Offline mode keeps a field report or a sale on this device when the server cannot be reached. Auto-sync sends those saved records once you are online.</p></div>
+        <div className="form-group"><label className="toggle-label"><input type="checkbox" checked={prefs.offline} onChange={() => toggle('offline', 'corvex_sales_offline')} />Enable offline mode</label></div>
+        <div className="form-group"><label className="toggle-label"><input type="checkbox" checked={prefs.autosync} onChange={() => toggle('autosync', 'corvex_sales_autosync')} />Auto-sync when online</label></div>
         <div className="form-group"><label className="toggle-label"><input type="checkbox" checked={prefs.gps} onChange={() => toggle('gps', 'corvex_sales_gps')} />Show GPS route tracking on map</label></div>
+        <p className="muted">{pendingCount} record{pendingCount === 1 ? '' : 's'} waiting on this device.</p>
+        <button className="button" type="button" onClick={syncNow} disabled={syncing}>{syncing ? 'Syncing…' : 'Sync now'}</button>
       </section>
       <div className="flex justify-end mt-4">
         <button className="button ghost" type="button" onClick={() => navigate('/sales/profile')}>Profile</button>

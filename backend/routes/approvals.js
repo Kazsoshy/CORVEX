@@ -6,8 +6,14 @@ import {
 } from '../lib/creditInvestigationQueries.js';
 import { notifyCreditInvestigationDecision } from '../lib/creditInvestigationNotifications.js';
 import { upsertBranchInventoryStock, insertStockMovement } from '../lib/branchInventoryStock.js';
-import { publishStockAlerts, notifyInvoiceReviewDecision } from '../lib/operationalNotifications.js';
+import { reverseCustomerSaleCharge } from '../lib/salesInvoiceWrite.js';
+import { publishStockAlerts, notifyInvoiceReviewDecision, clearOverdueDedup, notifyOverdueAccounts } from '../lib/operationalNotifications.js';
 import { manilaDateString } from '../lib/sawCollection.js';
+import {
+  confirmCollectionPayment,
+  rejectCollectionPayment,
+  reverseCollectionPayment,
+} from '../lib/collectionPayment.js';
 
 const router = express.Router();
 const APPROVAL_ROLES = [...new Set([...ROLE_SETS.branchOps, 'operating_manager', 'super_admin'])];
@@ -283,7 +289,8 @@ router.patch('/sales-invoices/:id', async (req, res) => {
       branchSql = `si.branch_id = $${params.length}`;
     }
     const existing = await client.query(
-      `SELECT si.sales_invoices_id, si.invoice_number, si.sales_agent_id, si.branch_id
+      `SELECT si.sales_invoices_id, si.invoice_number, si.sales_agent_id, si.branch_id,
+              si.customer_id, si.total_amount
        FROM sales_invoices si
        WHERE si.sales_invoices_id = $1
          AND si.status = 'Pending Review'
@@ -303,10 +310,11 @@ router.patch('/sales-invoices/:id', async (req, res) => {
     let reopenedRequest = false;
     if (status === 'Cancelled') {
       const items = await client.query(
-        `SELECT product_id, quantity FROM sales_invoice_items WHERE invoices_id = $1`,
+        `SELECT product_id, quantity FROM sales_invoice_items WHERE invoices_id = $1 ORDER BY sales_invoices_items_id`,
         [invoiceId]
       );
-      for (const item of items.rows) {
+      for (let index = 0; index < items.rows.length; index += 1) {
+        const item = items.rows[index];
         const snapshot = await upsertBranchInventoryStock(client, {
           branchId: invoice.branch_id,
           productId: item.product_id,
@@ -319,7 +327,7 @@ router.patch('/sales-invoices/:id', async (req, res) => {
           branchId: invoice.branch_id,
           quantity: Number(item.quantity),
           type: 'Sale Reversal',
-          movementRef: `REV-${invoice.invoice_number}`,
+          movementRef: `REV-${invoice.invoice_number}-${item.product_id}-${index + 1}`,
           movementDate: manilaDateString(),
         });
       }
@@ -330,6 +338,10 @@ router.patch('/sales-invoices/:id', async (req, res) => {
         [invoiceId]
       );
       reopenedRequest = reopened.rowCount > 0;
+      await reverseCustomerSaleCharge(client, {
+        customerId: invoice.customer_id,
+        amount: invoice.total_amount,
+      });
     }
 
     const updated = await client.query(
@@ -357,13 +369,99 @@ router.patch('/sales-invoices/:id', async (req, res) => {
       success: true,
       message: status === 'Confirmed'
         ? `Invoice ${invoice.invoice_number} confirmed.`
-        : `Invoice ${invoice.invoice_number} rejected and stock restored.`,
+        : `Invoice ${invoice.invoice_number} rejected. Stock and the unpaid balance were returned.`,
       data: updated.rows[0],
     });
   } catch (err) {
     try { await client.query('ROLLBACK'); } catch { /* transaction already finished */ }
     console.error('[Approvals] PATCH /sales-invoices/:id error:', err.message);
     return res.status(500).json({ success: false, message: 'Failed to review the invoice.' });
+  } finally {
+    client.release();
+  }
+});
+
+router.get('/collections', async (req, res) => {
+  try {
+    const pool = req.app.locals.pool;
+    const user = req.currentUser;
+    const status = req.query.status === 'Completed' ? 'Completed' : 'Pending';
+    const scope = branchFilter(user, 'cp');
+    const params = [...scope.params, status];
+    const statusIndex = params.length;
+    const result = await pool.query(
+      `SELECT
+         cp.collectionpayment_id,
+         cp.receipt_number,
+         cp.amount,
+         cp.status,
+         cp.payment_date::text AS payment_date,
+         cp.notes,
+         cp.review_note,
+         cp.customer_id,
+         COALESCE(NULLIF(TRIM(CONCAT_WS(' ', c.first_name, c.last_name)), ''), 'Customer') AS customer_name,
+         COALESCE(NULLIF(TRIM(CONCAT_WS(' ', collector.first_name, collector.last_name)), ''), 'Collector') AS collector_name,
+         b.name AS branch_name,
+         COALESCE(pm.method_name, 'Cash') AS payment_method
+       FROM collection_payment cp
+       LEFT JOIN customers c ON c.customer_id = cp.customer_id
+       LEFT JOIN users collector ON collector.id = cp.collector_id
+       LEFT JOIN branches b ON b.id = cp.branch_id
+       LEFT JOIN payment_methods pm ON pm.payment_method_id = cp.payment_method_id
+       WHERE ${scope.sql}
+         AND cp.status = $${statusIndex}
+       ORDER BY cp.created_at DESC
+       LIMIT 100`,
+      params
+    );
+    return res.status(200).json({ success: true, data: result.rows });
+  } catch (err) {
+    console.error('[Approvals] GET /collections error:', err.message);
+    return res.status(500).json({ success: false, message: 'Failed to load collections for review.' });
+  }
+});
+
+router.patch('/collections/:id', async (req, res) => {
+  const pool = req.app.locals.pool;
+  const user = req.currentUser;
+  const paymentId = Number(req.params.id);
+  const action = req.body.action === 'confirm' || req.body.action === 'reject' || req.body.action === 'reverse'
+    ? req.body.action
+    : null;
+  const reviewNote = String(req.body.review_note || '').trim();
+  if (!Number.isInteger(paymentId) || paymentId <= 0 || !action) {
+    return res.status(400).json({ success: false, message: 'Confirm, reject, or reverse a valid collection.' });
+  }
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const scopedBranchId = isUnscoped(user) ? null : user.branchId;
+    let result;
+    if (action === 'confirm') {
+      result = await confirmCollectionPayment(client, user, paymentId, scopedBranchId, reviewNote, req.ip);
+    } else if (action === 'reject') {
+      result = await rejectCollectionPayment(client, user, paymentId, scopedBranchId, reviewNote, req.ip);
+    } else {
+      result = await reverseCollectionPayment(client, user, paymentId, scopedBranchId, reviewNote, req.ip);
+    }
+    await client.query('COMMIT');
+    if (action === 'confirm' && result.remainingBalance === 0) {
+      await clearOverdueDedup(pool, result.customerId);
+    }
+    if (action === 'confirm' || action === 'reverse') await notifyOverdueAccounts(pool);
+    const message = action === 'confirm'
+      ? `Collection ${result.payment.receipt_number} confirmed. The balance is updated.`
+      : action === 'reject'
+        ? `Collection ${result.payment.receipt_number} rejected. The balance was left unchanged.`
+        : `Collection ${result.payment.receipt_number} reversed. The amount was returned to the balance.`;
+    return res.status(200).json({ success: true, message, data: result.payment });
+  } catch (err) {
+    try { await client.query('ROLLBACK'); } catch { /* transaction already finished */ }
+    if (err.status || err.conflict) {
+      return res.status(err.status || 409).json({ success: false, message: err.message });
+    }
+    console.error('[Approvals] PATCH /collections/:id error:', err.message);
+    return res.status(500).json({ success: false, message: 'Failed to review the collection.' });
   } finally {
     client.release();
   }

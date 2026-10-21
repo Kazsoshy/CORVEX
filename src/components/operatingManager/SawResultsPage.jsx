@@ -34,6 +34,142 @@ function hasCoords(lat, lng) {
   return Number.isFinite(a) && Number.isFinite(b) && !(a === 0 && b === 0);
 }
 
+function finite(value) {
+  const n = Number(value);
+  return Number.isFinite(n) ? n : null;
+}
+
+function round2(n) {
+  return Math.round(Number(n) * 100) / 100;
+}
+
+function round3(n) {
+  return Math.round(Number(n) * 1000) / 1000;
+}
+
+function hasStoredFactors(row) {
+  return [
+    'outstanding_balance',
+    'days_overdue',
+    'distance_km',
+    'balance_norm',
+    'days_norm',
+    'distance_norm',
+    'weight_balance',
+    'weight_days',
+    'weight_distance',
+  ].every((key) => finite(row?.[key]) != null);
+}
+
+function recomputedScore(row) {
+  if (!hasStoredFactors(row)) return null;
+  return round3(
+    Number(row.weight_balance) * Number(row.balance_norm)
+    + Number(row.weight_days) * Number(row.days_norm)
+    + Number(row.weight_distance) * Number(row.distance_norm)
+  );
+}
+
+function scoreMatchesStoredFactors(row) {
+  const next = recomputedScore(row);
+  const stored = finite(row?.score);
+  if (next == null || stored == null) return null;
+  return Math.abs(next - stored) < 0.0005;
+}
+
+function expectedNorms(row) {
+  const maxBalance = finite(row?.cohort_max_balance);
+  const maxDays = finite(row?.cohort_max_days);
+  const minDistance = finite(row?.cohort_min_distance);
+  const balance = finite(row?.outstanding_balance);
+  const days = finite(row?.days_overdue);
+  const distance = finite(row?.distance_km);
+  if ([maxBalance, maxDays, minDistance, balance, days, distance].some((n) => n == null)) return null;
+  return {
+    balance_norm: maxBalance > 0 ? round2(balance / maxBalance) : 0,
+    days_norm: maxDays > 0 ? round2(days / maxDays) : 0,
+    distance_norm: distance > 0 && minDistance > 0 ? round2(minDistance / distance) : 0,
+  };
+}
+
+function normsMatchCohort(row) {
+  const expected = expectedNorms(row);
+  if (!expected || !hasStoredFactors(row)) return null;
+  return ['balance_norm', 'days_norm', 'distance_norm'].every(
+    (key) => Math.abs(expected[key] - Number(row[key])) < 0.001
+  );
+}
+
+function formatFactorNumber(value, digits) {
+  const n = finite(value);
+  if (n == null) return '—';
+  return n.toFixed(digits);
+}
+
+function formatSavedMoney(value) {
+  const n = finite(value);
+  if (n == null) return '—';
+  return formatCurrency(n);
+}
+
+function SawFactorCell({ row }) {
+  if (!hasStoredFactors(row)) {
+    return <span className="saw-factors-bad">Not stored</span>;
+  }
+  const expected = expectedNorms(row);
+  const normsOk = normsMatchCohort(row);
+  const maxBalance = formatSavedMoney(row.cohort_max_balance);
+  const maxDays = finite(row.cohort_max_days) == null ? '—' : Math.round(Number(row.cohort_max_days));
+  const minDistance = formatFactorNumber(row.cohort_min_distance, 3);
+  return (
+    <div className="saw-factors-cell">
+      <div className="saw-factors-math">
+        {formatFactorNumber(row.weight_balance, 2)}×{formatFactorNumber(row.balance_norm, 2)}
+        {' + '}
+        {formatFactorNumber(row.weight_days, 2)}×{formatFactorNumber(row.days_norm, 2)}
+        {' + '}
+        {formatFactorNumber(row.weight_distance, 2)}×{formatFactorNumber(row.distance_norm, 2)}
+      </div>
+      {expected ? (
+        <>
+          <div className="saw-factors-cohort">
+            Balance {formatSavedMoney(row.outstanding_balance)} / {maxBalance} = {formatFactorNumber(expected.balance_norm, 2)}
+          </div>
+          <div className="saw-factors-cohort">
+            Days {Math.round(Number(row.days_overdue))} / {maxDays} = {formatFactorNumber(expected.days_norm, 2)}
+          </div>
+          <div className="saw-factors-cohort">
+            Closest {minDistance} km / {formatFactorNumber(row.distance_km, 3)} km = {formatFactorNumber(expected.distance_norm, 2)}
+          </div>
+          <div className={normsOk ? 'saw-factors-ok' : 'saw-factors-bad'}>
+            {normsOk ? 'Normalized values match' : 'Normalized values do not match the saved inputs'}
+          </div>
+        </>
+      ) : (
+        <div className="saw-factors-bad">Cohort totals were not saved</div>
+      )}
+    </div>
+  );
+}
+
+function SawScoreCheck({ row }) {
+  const next = recomputedScore(row);
+  const matches = scoreMatchesStoredFactors(row);
+  if (next == null) return <span className="saw-factors-bad">Cannot recompute</span>;
+  return (
+    <span className={matches ? 'saw-factors-ok' : 'saw-factors-bad'}>
+      {matches ? `Recomputed ${next.toFixed(3)}` : `Recomputed ${next.toFixed(3)} ≠ stored`}
+    </span>
+  );
+}
+
+function ranksFollowScores(rows) {
+  const ordered = [...rows].sort(
+    (a, b) => Number(b.score) - Number(a.score) || Number(a.customer_id) - Number(b.customer_id)
+  );
+  return ordered.every((row, index) => Number(row.ranking) === index + 1);
+}
+
 function exportSawPdf(rows) {
   const exportRows = rows.map((row) => ({
     Rank: row.ranking,
@@ -41,7 +177,13 @@ function exportSawPdf(rows) {
     Branch: row.branch_name || '',
     Territory: row.territory_name || '',
     Collector: row.collector_name || '',
-    Outstanding: formatCurrency(row.outstanding_balance),
+    Balance: finite(row.outstanding_balance) == null ? '' : formatCurrency(row.outstanding_balance),
+    'Days overdue': finite(row.days_overdue) == null ? '' : Math.round(Number(row.days_overdue)),
+    'Distance km': finite(row.distance_km) == null ? '' : Number(row.distance_km).toFixed(3),
+    'Balance norm': finite(row.balance_norm) == null ? '' : Number(row.balance_norm).toFixed(2),
+    'Days norm': finite(row.days_norm) == null ? '' : Number(row.days_norm).toFixed(2),
+    'Distance norm': finite(row.distance_norm) == null ? '' : Number(row.distance_norm).toFixed(2),
+    'Recomputed score': recomputedScore(row) ?? '',
     Score: Number(row.score) || 0,
     Latitude: row.latitude ?? '',
     Longitude: row.longitude ?? '',
@@ -75,7 +217,7 @@ export function SawResultsPage({ navigate, showToast }) {
         const params = {};
         if (search.trim()) params.search = search.trim();
         if (branchId !== 'all') params.branch_id = branchId;
-        params.limit = 200;
+        params.limit = 5000;
         const result = await fetchSawResults(params);
         if (cancelled) return;
         if (result.success) {
@@ -187,6 +329,14 @@ export function SawResultsPage({ navigate, showToast }) {
   const mapCenter = mapBounds[0] || [6.7534, 125.6558];
   const mappedCount = mapMarkers.length;
   const topScore = Number(summary?.topScore || 0);
+  const missingFactors = Number(summary?.missingFactors ?? results.filter((row) => !hasStoredFactors(row)).length);
+  const fullQueueLoaded = !search.trim()
+    && branchId === 'all'
+    && scoreBand === 'all'
+    && results.length > 0
+    && results.length === Number(summary?.total || 0);
+  const scoresCheckOut = fullQueueLoaded && results.every((row) => scoreMatchesStoredFactors(row) && normsMatchCohort(row));
+  const ranksCheckOut = fullQueueLoaded && ranksFollowScores(results);
 
   if (loading && !results.length) return <LoadingState message="Loading SAW results…" />;
 
@@ -199,7 +349,7 @@ export function SawResultsPage({ navigate, showToast }) {
             <p className="saw-eyebrow">Customer Prioritization</p>
             <h3 style={{ margin: 0 }}>SAW Collection Priority</h3>
             <p className="text-ink/70" style={{ margin: '6px 0 0', fontSize: '0.88rem', maxWidth: 560 }}>
-              Simple Additive Weighting ranks every eligible account so collectors visit the highest-impact stops first.
+              Each saved row keeps the balance, days overdue, distance, and normalized values that produced its score. Rank is the order of those scores.
             </p>
           </div>
           <div className="saw-results-actions">
@@ -248,6 +398,7 @@ export function SawResultsPage({ navigate, showToast }) {
           </div>
           <div className="saw-formula-meta">
             Last run {summary?.lastGeneratedAt ? formatDisplayDateTime(summary.lastGeneratedAt) : '—'}
+            {missingFactors > 0 ? ` · ${missingFactors} row${missingFactors === 1 ? '' : 's'} missing factors` : ''}
           </div>
         </div>
 
@@ -280,7 +431,9 @@ export function SawResultsPage({ navigate, showToast }) {
                 <h4>{row.customer_name}</h4>
                 <p>{row.branch_name || '—'}{row.territory_name ? ` · ${row.territory_name}` : ''}</p>
                 <div className="saw-spotlight-meta">
-                  <span>{formatCurrency(Number(row.outstanding_balance) || 0)}</span>
+                  <span>{formatSavedMoney(row.outstanding_balance)}</span>
+                  <span>{finite(row.days_overdue) == null ? '—' : `${Math.round(Number(row.days_overdue))}d overdue`}</span>
+                  <span>{finite(row.distance_km) == null ? '—' : `${Number(row.distance_km).toFixed(1)} km`}</span>
                   <span className={`saw-score-pill ${scoreTone(row.score)}`}>
                     {Number(row.score).toFixed(3)}
                   </span>
@@ -465,6 +618,17 @@ export function SawResultsPage({ navigate, showToast }) {
             </span>
           </h3>
         </div>
+        {results.length > 0 ? (
+          <p className={`saw-audit-note${scoresCheckOut && ranksCheckOut ? ' ok' : ''}`}>
+            {missingFactors > 0
+              ? `${missingFactors} saved row${missingFactors === 1 ? '' : 's'} still have only a score and rank. Recompute Org SAW to store the balance, days overdue, distance, and normalized values.`
+              : scoresCheckOut && ranksCheckOut
+                ? 'Saved scores match the stored weights and normalized values, and the displayed ranks follow those scores.'
+                : fullQueueLoaded
+                  ? 'A saved score or rank does not match the stored factors. Recompute Org SAW and review the highlighted rows.'
+                  : 'Clear the search, branch, and score filters to check that every displayed rank follows the saved scores.'}
+          </p>
+        ) : null}
 
         {sorted.length === 0 ? (
           <EmptyState
@@ -482,7 +646,10 @@ export function SawResultsPage({ navigate, showToast }) {
                     <th>Branch</th>
                     <th>Territory</th>
                     <th>Collector</th>
-                    <th>Outstanding</th>
+                    <th>Balance</th>
+                    <th>Days overdue</th>
+                    <th>Distance</th>
+                    <th>Normalized values</th>
                     <th>Score</th>
                     <th>Generated</th>
                     <th>Actions</th>
@@ -510,7 +677,12 @@ export function SawResultsPage({ navigate, showToast }) {
                         <td>{row.branch_name || '—'}</td>
                         <td>{row.territory_name || '—'}</td>
                         <td>{row.collector_name || '—'}</td>
-                        <td>{formatCurrency(Number(row.outstanding_balance) || 0)}</td>
+                        <td>{formatSavedMoney(row.outstanding_balance)}</td>
+                        <td>{finite(row.days_overdue) == null ? '—' : Math.round(Number(row.days_overdue))}</td>
+                        <td>{finite(row.distance_km) == null ? '—' : `${Number(row.distance_km).toFixed(3)} km`}</td>
+                        <td>
+                          <SawFactorCell row={row} />
+                        </td>
                         <td>
                           <div className="saw-score-cell">
                             <span className={`saw-score-pill ${tone}`}>
@@ -519,6 +691,7 @@ export function SawResultsPage({ navigate, showToast }) {
                             <div className="saw-score-meter compact" aria-hidden="true">
                               <span style={{ width: `${pct}%` }} />
                             </div>
+                            <SawScoreCheck row={row} />
                           </div>
                         </td>
                         <td>{formatDisplayDateTime(row.generated_at)}</td>

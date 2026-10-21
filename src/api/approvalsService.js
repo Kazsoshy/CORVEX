@@ -72,6 +72,28 @@ export async function patchSalesInvoiceReview(id, body) {
   }
 }
 
+export async function fetchCollectionsForReview(status = 'Pending') {
+  try {
+    const response = await apiClient.get('/approvals/collections', { params: { status } });
+    return response.data;
+  } catch (error) {
+    console.error('Failed to fetch collections for review:', error);
+    return { success: false, data: [] };
+  }
+}
+
+export async function patchCollectionReview(id, body) {
+  try {
+    const response = await apiClient.patch(`/approvals/collections/${id}`, body);
+    return response.data;
+  } catch (error) {
+    return {
+      success: false,
+      message: error.response?.data?.message || 'Update failed.',
+    };
+  }
+}
+
 export async function fetchApprovalCenterSummary() {
   try {
     const response = await apiClient.get('/approvals/center-summary');

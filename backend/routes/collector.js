@@ -1,7 +1,6 @@
 import express from 'express';
 import { requireRole } from '../middleware/auth.js';
 import { insertUserNotification, notifyCreditInvestigationSubmitted } from '../lib/creditInvestigationNotifications.js';
-import { clearOverdueDedup, notifyOverdueAccounts } from '../lib/operationalNotifications.js';
 import {
   computeCollectorSawPriority,
   computeAssignedSawRoute,
@@ -10,71 +9,10 @@ import {
 } from '../lib/sawCollectionData.js';
 import { osrmDrivingRoute, osrmDrivingTrip } from '../lib/osrm.js';
 import { nearestNeighborOrder, sortStopsBySaw } from '../lib/routeOrder.js';
+import { manilaDateString } from '../lib/sawCollection.js';
+import { applyCollectionPayment, assertCollectorCustomerAccess, manilaNow } from '../lib/collectionPayment.js';
 
 const router = express.Router();
-
-function manilaNow() {
-  const parts = new Intl.DateTimeFormat('en-CA', {
-    timeZone: 'Asia/Manila',
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit',
-    hour12: false,
-  }).formatToParts(new Date());
-  const get = (type) => parts.find((p) => p.type === type)?.value || '';
-  return {
-    date: `${get('year')}-${get('month')}-${get('day')}`,
-    time: `${get('hour')}:${get('minute')}:${get('second')}`,
-  };
-}
-
-async function assertCollectorCustomerAccess(pool, user, customerId) {
-  const result = await pool.query(
-    `SELECT customer_id, branch_id, first_name, last_name FROM customers WHERE customer_id = $1`,
-    [customerId]
-  );
-  if (!result.rows.length) return { ok: false, status: 404, message: 'Customer not found.' };
-  const row = result.rows[0];
-  if (user.branchId != null && row.branch_id !== user.branchId) {
-    return { ok: false, status: 403, message: 'Customer is outside your branch.' };
-  }
-  return { ok: true, row };
-}
-
-async function nextReceiptNumber(client) {
-  const year = new Date().getFullYear();
-  const prefix = `RCP-${year}-`;
-  const r = await client.query(
-    `SELECT receipt_number FROM collection_payment
-     WHERE receipt_number LIKE $1
-     ORDER BY collectionpayment_id DESC LIMIT 1`,
-    [`${prefix}%`]
-  );
-  let seq = 1;
-  if (r.rows.length) {
-    const tail = r.rows[0].receipt_number.split('-').pop();
-    seq = (Number(tail) || 0) + 1;
-  }
-  return `${prefix}${String(seq).padStart(4, '0')}`;
-}
-
-async function resolvePaymentMethodId(client, methodName) {
-  const aliases = { 'Mobile Money': 'GCash' };
-  const lookup = aliases[String(methodName || '').trim()] || String(methodName || 'Cash').trim();
-  const r = await client.query(
-    `SELECT payment_method_id FROM payment_methods
-     WHERE LOWER(method_name) = LOWER($1) AND status = 'Active' LIMIT 1`,
-    [lookup]
-  );
-  if (r.rows.length) return r.rows[0].payment_method_id;
-  const cash = await client.query(
-    `SELECT payment_method_id FROM payment_methods WHERE method_name = 'Cash' LIMIT 1`
-  );
-  return cash.rows[0]?.payment_method_id || 1;
-}
 
 function mapIncidentSeverity(severity) {
   const s = String(severity || 'Medium').toLowerCase();
@@ -86,40 +24,69 @@ function mapIncidentSeverity(severity) {
 // All routes here require the collector role
 router.use(requireRole(['collector']));
 
-// GET /api/collector/saw-priority — today's BM-assigned customers, SAW-ordered (sawmodel.ipynb)
+function parseScheduledDate(value) {
+  if (value == null || String(value).trim() === '') return manilaDateString();
+  const text = String(value).trim().slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(text)) return null;
+  const [year, month, day] = text.split('-').map(Number);
+  const utc = new Date(Date.UTC(year, month - 1, day));
+  if (utc.getUTCFullYear() !== year || utc.getUTCMonth() !== month - 1 || utc.getUTCDate() !== day) {
+    return null;
+  }
+  return text;
+}
+
+// GET /api/collector/saw-priority — SAW order for a chosen date.
+// Assigned customers are returned when the branch manager scheduled them.
+// With no assignments, the collector's eligible customers are ranked instead.
 router.get('/saw-priority', async (req, res) => {
   const pool = req.app.locals.pool;
   const userId = req.currentUser.id;
   const branchId = req.currentUser.branchId;
   const persist = req.query.persist === 'true' || req.query.persist === '1';
   const fullList = req.query.full === 'true' || req.query.full === '1';
+  const scheduledDate = parseScheduledDate(req.query.date || req.query.scheduled_date);
+  if (!scheduledDate) {
+    return res.status(400).json({ success: false, message: 'date must be YYYY-MM-DD.' });
+  }
 
   try {
     let asOf;
     let ranked;
     let stats;
     let assignmentMode = false;
-    let scheduledDate;
+    let listSource = 'saw';
 
     if (fullList) {
       ({ asOf, ranked, stats } = await computeCollectorSawPriority(pool, {
         collectorId: userId,
         branchId,
+        asOfDate: scheduledDate,
       }));
     } else {
-      ({
-        asOf,
-        ranked,
-        stats,
-        assignmentMode,
-        scheduledDate,
-      } = await computeAssignedSawRoute(pool, {
+      const assigned = await computeAssignedSawRoute(pool, {
         collectorId: userId,
         branchId,
-      }));
+        scheduledDate,
+        asOfDate: scheduledDate,
+      });
+      if (assigned.ranked.length) {
+        ({ asOf, ranked, stats } = assigned);
+        assignmentMode = true;
+        listSource = 'assigned';
+      } else {
+        ({ asOf, ranked, stats } = await computeCollectorSawPriority(pool, {
+          collectorId: userId,
+          branchId,
+          asOfDate: scheduledDate,
+        }));
+        assignmentMode = false;
+        listSource = 'saw';
+      }
     }
 
-    if (persist && ranked.length) {
+    const persisted = Boolean(persist && ranked.length && scheduledDate === manilaDateString());
+    if (persisted) {
       await persistSawResults(pool, ranked);
     }
 
@@ -129,8 +96,9 @@ router.get('/saw-priority', async (req, res) => {
       meta: {
         asOf,
         stats,
-        persisted: Boolean(persist && ranked.length),
+        persisted,
         assignmentMode,
+        listSource,
         scheduledDate,
       },
     });
@@ -430,6 +398,7 @@ router.get('/field-visits/today', async (req, res) => {
          fv.visit_type,
          fv.scheduled_date,
          fv.status,
+         fv.updated_at,
          COALESCE(NULLIF(CONCAT_WS(' ', c.first_name, c.last_name), ''), 'Customer') AS customer_name
        FROM field_visits fv
        JOIN customers c ON c.customer_id = fv.customer_id
@@ -535,7 +504,7 @@ router.post('/field-reports', async (req, res) => {
 
     const result = await pool.query(
       `INSERT INTO field_activity_reports (visit_id, user_id, activity_type, remarks, photo, sync_status)
-       VALUES ($1, $2, $3, $4, $5, 'Pending')
+       VALUES ($1, $2, $3, $4, $5, 'Synced')
        RETURNING report_id, visit_id, activity_type, remarks, photo, sync_status, created_at`,
       [Number(visit_id), userId, String(activity_type).trim(), String(remarks).trim(), photoValue]
     );
@@ -797,9 +766,6 @@ router.post('/payments', async (req, res) => {
   const user = req.currentUser;
   const customerId = Number(req.body.customer_id);
   const amount = Number(req.body.amount);
-  const generateReceipt = req.body.generate_receipt !== false;
-  const notes = req.body.notes ? String(req.body.notes).trim() : null;
-  const paymentMethodName = req.body.payment_method || 'Cash';
 
   if (!Number.isFinite(customerId) || !Number.isFinite(amount) || amount <= 0) {
     return res.status(400).json({ success: false, message: 'Valid customer_id and amount are required.' });
@@ -816,111 +782,30 @@ router.post('/payments', async (req, res) => {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
-
-    const balRow = await client.query(
-      `SELECT outstanding_balance FROM customer_activity WHERE customer_id = $1 FOR UPDATE`,
-      [customerId]
-    );
-    const previousBalance = Number(balRow.rows[0]?.outstanding_balance || 0);
-    if (previousBalance <= 0) {
-      await client.query('ROLLBACK');
-      return res.status(400).json({ success: false, message: 'Customer has no outstanding balance to collect.' });
-    }
-    if (amount > previousBalance) {
-      await client.query('ROLLBACK');
-      return res.status(400).json({
-        success: false,
-        message: `Amount exceeds outstanding balance (${previousBalance}).`,
-      });
-    }
-
-    const paymentMethodId = await resolvePaymentMethodId(client, paymentMethodName);
-    const receiptNumber = await nextReceiptNumber(client);
-    const { date, time } = manilaNow();
-
-    const paymentInsert = await client.query(
-      `INSERT INTO collection_payment (
-         receipt_number, customer_id, collector_id, branch_id, amount,
-         payment_method_id, payment_date, payment_time, status, notes
-       ) VALUES ($1, $2, $3, $4, $5, $6, $7::date, $8::time, 'Completed', $9)
-       RETURNING collectionpayment_id, receipt_number, amount, payment_date, payment_time, status`,
-      [
-        receiptNumber,
-        customerId,
-        user.id,
-        user.branchId,
-        amount,
-        paymentMethodId,
-        date,
-        time,
-        notes,
-      ]
-    );
-    const payment = paymentInsert.rows[0];
-    const collectionId = payment.collectionpayment_id;
-    const remainingBalance = Math.max(0, previousBalance - amount);
-    const paymentStatus = remainingBalance === 0 && previousBalance > 0 ? 'Paid' : 'Partial';
-
-    if (balRow.rows.length) {
-      await client.query(
-        `UPDATE customer_activity
-         SET outstanding_balance = $1, last_collection_date = $2::date, updated_at = NOW()
-         WHERE customer_id = $3`,
-        [remainingBalance, date, customerId]
-      );
-    } else {
-      await client.query(
-        `INSERT INTO customer_activity (customer_id, outstanding_balance, purchase_volume, last_collection_date)
-         VALUES ($1, $2, 0, $3::date)`,
-        [customerId, remainingBalance, date]
-      );
-    }
-
-    await client.query(
-      `INSERT INTO credit_history (
-         customer_id, collection_id, previous_balance, payment_amount, remaining_balance,
-         payment_status, transaction_date
-       ) VALUES ($1, $2, $3, $4, $5, $6, $7::date)`,
-      [customerId, collectionId, previousBalance, amount, remainingBalance, paymentStatus, date]
-    );
-
-    let receiptsId = null;
-    if (generateReceipt) {
-      const dr = await client.query(
-        `INSERT INTO digital_receipts (collection_id, receipt_number, receipt_date, generated_by)
-         VALUES ($1, $2, ($3::date + $4::time)::timestamp, $5)
-         RETURNING receipts_id`,
-        [collectionId, receiptNumber, date, time, user.id]
-      );
-      receiptsId = dr.rows[0].receipts_id;
-    }
-
-    await client.query(
-      `UPDATE field_visits
-       SET status = 'Completed'
-       WHERE user_id = $1 AND customer_id = $2
-         AND scheduled_date <= CURRENT_DATE
-         AND status <> 'Completed'`,
-      [user.id, customerId]
-    );
-
+    const applied = await applyCollectionPayment(client, user, req.body, req.ip);
     await client.query('COMMIT');
-
-    if (remainingBalance === 0) await clearOverdueDedup(pool, customerId);
-    await notifyOverdueAccounts(pool);
 
     return res.status(201).json({
       success: true,
-      message: generateReceipt ? 'Collection logged and receipt generated.' : 'Collection logged.',
+      message: applied.receiptsId
+        ? 'Collection submitted for review. The receipt is waiting with it.'
+        : 'Collection submitted for review. The balance stays until a manager confirms it.',
       data: {
-        ...payment,
-        customer_id: customerId,
-        receipts_id: receiptsId,
-        remaining_balance: remainingBalance,
+        ...applied.payment,
+        customer_id: applied.customerId,
+        receipts_id: applied.receiptsId,
+        remaining_balance: applied.remainingBalance,
       },
     });
   } catch (error) {
-    await client.query('ROLLBACK');
+    try { await client.query('ROLLBACK'); } catch { /* transaction already finished */ }
+    if (error.status || error.conflict) {
+      return res.status(error.status || 409).json({
+        success: false,
+        message: error.message,
+        conflict: Boolean(error.conflict),
+      });
+    }
     console.error('[Collector] POST /payments error:', error);
     return res.status(500).json({ success: false, message: 'Failed to log collection.' });
   } finally {

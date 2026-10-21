@@ -14,6 +14,7 @@ export async function login(email, password) {
   if (data.success && data.user && data.token) {
     localStorage.setItem('corvex_user', JSON.stringify(data.user));
     localStorage.setItem('corvex_token', data.token);
+    window.dispatchEvent(new Event('corvex-session-ready'));
   }
 
   return data;

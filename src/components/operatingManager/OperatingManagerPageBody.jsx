@@ -7,17 +7,16 @@ import { Link } from 'react-router-dom';
 import { AreaChart, Area, BarChart, Bar, LineChart, Line, RadarChart, Radar, PolarGrid, PolarAngleAxis, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
 import { AdminPageBody } from '../admin/AdminPageBody';
 import { BranchManagerPageBody } from '../branchManager/BranchManagerPageBody';
-import LeafletMap from '../common/LeafletMap';
 import { OrgLeafletPage } from './OrgLeafletPage';
 import { SawResultsPage } from './SawResultsPage';
-import { BRANCHES, BRANCH_RADAR, ENTERPRISE_KPIS, LEAFLET_LAYERS, MONTHLY_COLLECTIONS, MONTHLY_DELINQUENCY, MONTHLY_REVENUE, REPORT_CATEGORIES, TREND_DATA, WEEKLY_COLLECTION_RATE, WEEKLY_SALES_RATE, SALES_ANALYTICS, INVENTORY_ANALYTICS, PAYMENT_ANALYTICS, formatCurrency, getBranchById, getHighestPerformingBranch, getLowestPerformingBranch } from '../../data/operatingManagerMockData';
+import { BRANCHES, BRANCH_RADAR, ENTERPRISE_KPIS, MONTHLY_COLLECTIONS, MONTHLY_DELINQUENCY, MONTHLY_REVENUE, REPORT_CATEGORIES, TREND_DATA, WEEKLY_COLLECTION_RATE, WEEKLY_SALES_RATE, SALES_ANALYTICS, INVENTORY_ANALYTICS, PAYMENT_ANALYTICS, formatCurrency, getBranchById, getHighestPerformingBranch, getLowestPerformingBranch } from '../../data/operatingManagerMockData';
 import { fetchOperationalAlerts, patchOperationalAlert, mapOperationalAlertRow } from '../../api/operationalAlertsService.js';
 import { fetchNotifications, markNotificationRead, markAllNotificationsRead, mapNotificationRow, countUnreadNotifications } from '../../api/notificationService.js';
 import { AccountProfilePanel } from '../shared/AccountProfilePanel';
 import { formatDisplayDate, formatDisplayDateTime } from '../../utils/formatters.js';
 import { getPresetDateRange } from '../../utils/analyticsDateRange.js';
 import { formatMiddleNameDisplay } from '../../utils/customerDisplay.js';
-import { getExecutiveDashboard, getOperatingManagerAnalytics, getPerformanceHistory } from '../../api/reportsService';
+import { getExecutiveDashboard, getOperatingManagerAnalytics, getPerformanceHistory, savePerformanceTargets } from '../../api/reportsService';
 import { exportRows } from '../../utils/dataExport';
 import apiClient from '../../api/apiClient';
 import { fetchCustomers, fetchCustomerById } from '../../api/salesService';
@@ -30,6 +29,7 @@ import { TerritoriesPage } from '../territories/TerritoriesPage';
 import { SalesHistoryPage } from '../sales/SalesPageBody';
 import { InvoiceDetailsPage } from '../sales/InvoiceDetailsPage';
 import { fetchDigitalReceipts } from '../../api/digitalReceiptsService';
+import { patchCollectionReview } from '../../api/approvalsService.js';
 const COLORS = ['#255684', '#0c1031', '#ef4444', '#f59e0b'];
 const BRANCH_COLORS = {
   'Davao City': '#255684',
@@ -91,15 +91,33 @@ function DashboardPage({
   const [error, setError] = useState(null);
   const [unreadCount, setUnreadCount] = useState(0);
   const [recentNotifications, setRecentNotifications] = useState([]);
+  const [targetForm, setTargetForm] = useState({ collectionDaily: '', salesDaily: '' });
+  const [targetNote, setTargetNote] = useState('');
+  const [savingTargets, setSavingTargets] = useState(false);
+  const [reloadKey, setReloadKey] = useState(0);
+  const [filters, setFilters] = useState(() => {
+    const range = getPresetDateRange('this_month');
+    return {
+      preset: 'this_month',
+      startDate: range.startDate,
+      endDate: range.endDate,
+      branchId: 'all',
+    };
+  });
   useEffect(() => {
     async function load() {
       setLoading(true);
       const [result, notifRes] = await Promise.all([
-        getExecutiveDashboard(),
+        getExecutiveDashboard(buildAnalyticsParams(filters)),
         fetchNotifications(),
       ]);
       if (result.success) {
         setData(result.data);
+        setError(null);
+        setTargetForm({
+          collectionDaily: String(result.data.targets?.collectionDaily ?? ''),
+          salesDaily: String(result.data.targets?.salesDaily ?? ''),
+        });
       } else {
         setError('Failed to load dashboard data.');
       }
@@ -114,7 +132,22 @@ function DashboardPage({
       setLoading(false);
     }
     load();
-  }, []);
+  }, [reloadKey, filters.preset, filters.startDate, filters.endDate, filters.branchId]);
+
+  async function saveTargets(event) {
+    event.preventDefault();
+    setSavingTargets(true);
+    setTargetNote('');
+    const result = await savePerformanceTargets(Number(targetForm.collectionDaily), Number(targetForm.salesDaily));
+    setSavingTargets(false);
+    if (!result.success) {
+      setTargetNote(result.message || 'Failed to save targets.');
+      return;
+    }
+    setTargetNote('Targets saved.');
+    setReloadKey((value) => value + 1);
+  }
+
   if (loading) return <LoadingState message="Loading Executive Dashboard…" />;
   if (error || !data) {
     return <div className="page">
@@ -156,6 +189,13 @@ function DashboardPage({
   const bottomBranch = data.branchSummary.length ? [...data.branchSummary].sort((a, b) => a.totalCollections - b.totalCollections)[0] : null;
   const BRANCH_PALETTE = ['#255684', '#0c1031', '#ef4444', '#f59e0b'];
   return <div className="page">
+      <AnalyticsFilterBar
+        filters={filters}
+        setFilters={setFilters}
+        branchOptions={data.branches || data.branchSummary || []}
+        showInlineCustomDateRange
+        note="Sales, collections, and visits follow the selected dates and branch. Outstanding balance, overdue accounts, and credit stay the current snapshot."
+      />
       {/* ── Greeting ── */}
       <section className="panel dashboard-greeting">
         <div className="dashboard-greeting-main">
@@ -221,17 +261,32 @@ function DashboardPage({
           Stock Alerts       — COUNT(*) available_stock <= reorder_level
        */}
       <StatsGrid stats={[{
-      label: 'Total Collections (This Month)',
-      value: formatCurrency(data.totalCollections)
+      label: 'Total Collections',
+      value: formatCurrency(data.totalCollections),
+      title: `${data.filters?.label || 'Selected period'}. Outstanding balance and credit stay the current snapshot.`
     }, {
-      label: 'Total Sales (This Month)',
-      value: formatCurrency(data.totalSales)
+      label: 'Total Sales',
+      value: formatCurrency(data.totalSales),
+      title: `${data.filters?.label || 'Selected period'}. Draft and cancelled invoices are left out.`
     }, {
       label: 'Total Outstanding Balance',
       value: formatCurrency(data.totalOutstandingBalance)
     }, {
+      label: 'Credit Limit',
+      value: formatCurrency(data.totalCreditLimit),
+      title: 'Total credit limit on customer accounts.'
+    }, {
+      label: 'Credit Used',
+      value: formatCurrency(data.creditUsed),
+      title: 'Outstanding balance counted against those limits.'
+    }, {
+      label: 'Credit Remaining',
+      value: formatCurrency(data.creditRemaining),
+      title: 'Credit limit minus the outstanding balance.'
+    }, {
       label: 'Overdue Accounts',
-      value: String(data.overdueCount)
+      value: String(data.overdueCount),
+      title: 'Customers with an invoice past its due date.'
     }, {
       label: 'Route Compliance',
       value: `${data.routeCompliance}%`
@@ -239,6 +294,29 @@ function DashboardPage({
       label: 'Stock Alerts',
       value: String(data.stockAlerts)
     }]} />
+
+      <section className="panel content-panel">
+        <div className="panel-section-header">
+          <div>
+            <h3>Daily targets</h3>
+            <p className="muted" style={{ margin: '2px 0 0', fontSize: '0.85rem' }}>
+              Collection rate and sales efficiency divide by these stored amounts.
+            </p>
+          </div>
+        </div>
+        <form onSubmit={saveTargets} style={{ display: 'flex', flexWrap: 'wrap', gap: 12, alignItems: 'end' }}>
+          <label style={{ display: 'grid', gap: 4 }}>
+            <span className="muted">Collection target</span>
+            <input className="filter-input" type="number" min="0.01" step="0.01" value={targetForm.collectionDaily} onChange={(event) => setTargetForm((current) => ({ ...current, collectionDaily: event.target.value }))} />
+          </label>
+          <label style={{ display: 'grid', gap: 4 }}>
+            <span className="muted">Sales target</span>
+            <input className="filter-input" type="number" min="0.01" step="0.01" value={targetForm.salesDaily} onChange={(event) => setTargetForm((current) => ({ ...current, salesDaily: event.target.value }))} />
+          </label>
+          <button className="button" type="submit" disabled={savingTargets}>{savingTargets ? 'Saving…' : 'Save targets'}</button>
+          {targetNote ? <span className="muted">{targetNote}</span> : null}
+        </form>
+      </section>
 
       {/* ── Growth indicators ── */}
       <section className="panel content-panel">
@@ -249,7 +327,7 @@ function DashboardPage({
             margin: '2px 0 0',
             fontSize: '0.85rem'
           }}>
-              Current month vs previous month
+              {data.filters?.label || 'Selected period'} vs {data.filters?.compareLabel || 'the previous period'}
             </p>
           </div>
         </div>
@@ -283,7 +361,7 @@ function DashboardPage({
           }}>
               {data.salesGrowthRate !== null ? `${data.salesGrowthRate >= 0 ? '+' : ''}${data.salesGrowthRate}%` : '—'}
             </div>
-            <GrowthBadge rate={data.salesGrowthRate} label="vs last month" />
+            <GrowthBadge rate={data.salesGrowthRate} label="vs previous period" />
             <p className="muted" style={{
             fontSize: '0.75rem',
             marginTop: 6
@@ -315,7 +393,7 @@ function DashboardPage({
           }}>
               {data.collectionGrowthRate !== null ? `${data.collectionGrowthRate >= 0 ? '+' : ''}${data.collectionGrowthRate}%` : '—'}
             </div>
-            <GrowthBadge rate={data.collectionGrowthRate} label="vs last month" />
+            <GrowthBadge rate={data.collectionGrowthRate} label="vs previous period" />
             <p className="muted" style={{
             fontSize: '0.75rem',
             marginTop: 6
@@ -350,7 +428,7 @@ function DashboardPage({
             <span className="muted" style={{
             fontSize: '0.8rem'
           }}>
-              {data.activeCustomers} active · {data.overdueCount} overdue
+              {data.activeCustomers} active · {data.overdueCount} past due
             </span>
             <p className="muted" style={{
             fontSize: '0.75rem',
@@ -392,7 +470,7 @@ function DashboardPage({
             fontSize: '0.75rem',
             marginTop: 6
           }}>
-              Source: branch_inventory — available_stock vs reorder_level
+              In-stock items ÷ monitored items × 100
             </p>
           </div>
         </div>
@@ -400,11 +478,11 @@ function DashboardPage({
 
       {/* ── Collection trend + Sales trend (daily 7-day) ── */}
       <div className="grid two-up">
-        <ChartCard title="Collection Trend (7 Days)" subtitle={`TC = SUM(Ci) — Source: collection_payment`}>
+        <ChartCard title={`Collection Trend (${data.filters?.label || 'Selected period'})`} subtitle="TC = SUM(Ci) — Source: collection_payment">
           <ResponsiveContainer width="100%" height={220}>
             <AreaChart data={data.collectionTrend}>
               <CartesianGrid strokeDasharray="3 3" stroke="#c5c8d0" />
-              <XAxis dataKey="day" tick={{
+              <XAxis dataKey="label" tick={{
               fontSize: 12
             }} />
               <YAxis tick={{
@@ -418,11 +496,11 @@ function DashboardPage({
           </ResponsiveContainer>
         </ChartCard>
 
-        <ChartCard title="Sales Trend (7 Days)" subtitle={`TS = SUM(Si) — Source: sales_invoices`}>
+        <ChartCard title={`Sales Trend (${data.filters?.label || 'Selected period'})`} subtitle="TS = SUM(Si) — Source: sales_invoices">
           <ResponsiveContainer width="100%" height={220}>
             <AreaChart data={data.salesTrend}>
               <CartesianGrid strokeDasharray="3 3" stroke="#c5c8d0" />
-              <XAxis dataKey="day" tick={{
+              <XAxis dataKey="label" tick={{
               fontSize: 12
             }} />
               <YAxis tick={{
@@ -608,7 +686,7 @@ function DashboardPage({
         }, {
           label: 'Overdue Accounts',
           value: data.overdueCount,
-          source: 'customer_activity: outstanding_balance > 0'
+          source: 'sales_invoices: due date before today and still unpaid'
         }].map(m => <div key={m.label} style={{
           padding: 14,
           background: '#eef0f4',
@@ -1111,96 +1189,6 @@ function BranchDetailPage({
     }]} onAction={a => navigate(a.to)} />
     </div>;
 }
-function LeafletPage({
-  navigate,
-  subPage
-}) {
-  const [layers, setLayers] = useState(LEAFLET_LAYERS);
-  const [filters, setFilters] = useState({
-    branch: 'All Branches',
-    dateRange: 'This Month',
-    staffType: 'All Staff'
-  });
-  const toggleLayer = id => setLayers(prev => prev.map(l => l.id === id ? {
-    ...l,
-    active: !l.active
-  } : l));
-  const mockBranchMarkers = useMemo(() => [{
-    id: 'davao-city',
-    position: [7.1907, 125.4553],
-    label: 'DC',
-    color: '#0c1031',
-    popup: 'Davao City Branch - Healthy'
-  }, {
-    id: 'general-santos',
-    position: [6.1164, 125.1716],
-    label: 'GS',
-    color: '#255684',
-    popup: 'General Santos Branch - Top Performer'
-  }, {
-    id: 'davao-oriental',
-    position: [6.9534, 126.1558],
-    label: 'DO',
-    color: '#ef4444',
-    popup: 'Davao Oriental Branch - Needs Attention'
-  }], []);
-  return <div className="page">
-      <section className="panel content-panel">
-        <div className="panel-section-header"><h3>Map Filters</h3></div>
-        <div className="accounts-filters">
-          <select className="filter-select" value={filters.branch} onChange={e => setFilters(f => ({
-          ...f,
-          branch: e.target.value
-        }))}>
-            <option>All Branches</option>{BRANCHES.map(b => <option key={b.id}>{b.name}</option>)}
-          </select>
-          <select className="filter-select" value={filters.dateRange} onChange={e => setFilters(f => ({
-          ...f,
-          dateRange: e.target.value
-        }))}>
-            {['This Month', 'Last Month', 'Q2 2026', 'YTD'].map(d => <option key={d}>{d}</option>)}
-          </select>
-          <select className="filter-select" value={filters.staffType} onChange={e => setFilters(f => ({
-          ...f,
-          staffType: e.target.value
-        }))}>
-            {['All Staff', 'Collectors', 'Sales Agents'].map(s => <option key={s}>{s}</option>)}
-          </select>
-        </div>
-      </section>
-      <section className="panel content-panel">
-        <div className="panel-section-header">
-          <h3>{subPage ? {
-            delinquency: 'Delinquency Heatmap',
-            profitability: 'Profitability Analysis',
-            territory: 'Territory Analysis'
-          }[subPage] : 'Leaflet | OpenStreetMap'}</h3>
-        </div>
-        <LeafletMap markers={mockBranchMarkers} center={[6.7534, 125.6558]} zoom={8} height={560} />
-        <div className="layer-toggles" style={{
-        marginTop: 16
-      }}>
-          {layers.map(layer => <label key={layer.id} className="toggle-label">
-              <input type="checkbox" checked={layer.active} onChange={() => toggleLayer(layer.id)} />
-              {layer.label}
-            </label>)}
-        </div>
-      </section>
-      <PageToolbar actions={[{
-      label: 'Delinquency Heatmap',
-      to: '/operating-manager/leaflet/delinquency',
-      variant: 'secondary'
-    }, {
-      label: 'Profitability Analysis',
-      to: '/operating-manager/leaflet/profitability',
-      variant: 'secondary'
-    }, {
-      label: 'Territory Analysis',
-      to: '/operating-manager/leaflet/territory',
-      variant: 'secondary'
-    }]} onAction={a => navigate(a.to)} />
-    </div>;
-}
 function AlertsPage({
   navigate,
   showToast
@@ -1547,6 +1535,7 @@ function AnalyticsFilterBar({
   setFilters,
   branchOptions = [],
   showInlineCustomDateRange = false,
+  note,
 }) {
   const showPresetCustomDates = !showInlineCustomDateRange && filters.preset === 'custom';
   const showDateFields = showInlineCustomDateRange || showPresetCustomDates;
@@ -1591,9 +1580,9 @@ function AnalyticsFilterBar({
           margin: '2px 0 0',
           fontSize: '0.82rem'
         }}>
-            {showInlineCustomDateRange
+            {note || (showInlineCustomDateRange
               ? 'Choose a preset period or set a custom start and end date. KPIs, trends, and exceptions follow the active range.'
-              : 'Date range controls all operational KPIs, trends, and exceptions.'}
+              : 'Date range controls all operational KPIs, trends, and exceptions.')}
           </p>
         </div>
       </div>
@@ -1916,10 +1905,25 @@ function LiveOperationsDashboardPage({
           icon: 'credit-card',
           title: 'Total unpaid balances as of the reporting date.'
         }, {
+          label: 'Credit Limit',
+          value: formatCurrency(data.summary.totalCreditLimit),
+          icon: 'credit-card',
+          title: 'Total credit limit on customer accounts. The date range does not change this.'
+        }, {
+          label: 'Credit Used',
+          value: formatCurrency(data.summary.creditUsed),
+          icon: 'credit-card',
+          title: 'Outstanding balance counted against those limits.'
+        }, {
+          label: 'Credit Remaining',
+          value: formatCurrency(data.summary.creditRemaining),
+          icon: 'credit-card',
+          title: 'Credit limit minus the outstanding balance.'
+        }, {
           label: 'Overdue Accounts',
           value: String(data.summary.overdueCount),
           icon: 'clock',
-          title: 'Number of customer accounts with outstanding balances.'
+          title: 'Customers with an invoice past its due date.'
         }, {
           label: 'Route Compliance',
           value: `${data.summary.routeCompliance}%`,
@@ -2909,29 +2913,70 @@ function LiveHistoricalTrendsPage() {
 
 // ── Digital Receipts ──────────────────────────────────────────────────────────
 function DigitalReceiptsPage({
-  navigate,
   showToast
 }) {
   const [receipts, setReceipts] = useState([]);
+  const [branches, setBranches] = useState([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
+  const [branchId, setBranchId] = useState('');
+  const [paymentStatus, setPaymentStatus] = useState('');
+  const [reloadKey, setReloadKey] = useState(0);
+  useEffect(() => {
+    apiClient.get('/branches').then((res) => {
+      if (res.data?.success) setBranches(res.data.data || []);
+    }).catch(() => {});
+  }, []);
   useEffect(() => {
     async function load() {
       setLoading(true);
       try {
-        const result = await fetchDigitalReceipts(search ? {
-          search
-        } : {});
+        const params = {};
+        if (search.trim()) params.search = search.trim();
+        if (branchId) params.branch_id = branchId;
+        if (paymentStatus) params.payment_status = paymentStatus;
+        const result = await fetchDigitalReceipts(params);
         if (result.success) setReceipts(result.data || []);
+        else {
+          setReceipts([]);
+          showToast(result.message || 'Failed to load digital receipts.', 'error');
+        }
       } catch (err) {
+        setReceipts([]);
         showToast('Failed to load digital receipts.', 'error');
       }
       setLoading(false);
     }
     const t = setTimeout(load, 300);
     return () => clearTimeout(t);
-  }, [search]);
-  const pagination_receipts = usePagination(receipts);
+  }, [search, branchId, paymentStatus, reloadKey]);
+  const reviewReceipt = async (collectionId, action, reviewNote) => {
+    const result = await patchCollectionReview(collectionId, { action, review_note: reviewNote });
+    if (result.success) {
+      showToast(result.message || 'Collection updated.', 'success');
+      setReloadKey((current) => current + 1);
+    } else showToast(result.message || 'Update failed.', 'error');
+  };
+  const confirmReceipt = (collectionId) => reviewReceipt(collectionId, 'confirm');
+  const rejectReceipt = async (collectionId) => {
+    const reason = window.prompt('Rejection reason (required):');
+    if (!reason?.trim()) {
+      showToast('Reason required.', 'error');
+      return;
+    }
+    await reviewReceipt(collectionId, 'reject', reason.trim());
+  };
+  const reverseReceipt = async (collectionId) => {
+    const reason = window.prompt('Reversal reason (required):');
+    if (!reason?.trim()) {
+      showToast('Reason required.', 'error');
+      return;
+    }
+    await reviewReceipt(collectionId, 'reverse', reason.trim());
+  };
+  const pagination_receipts = usePagination(receipts, {
+    resetKey: `${search}|${branchId}|${paymentStatus}`
+  });
   const paginated_receipts = pagination_receipts.paginatedData;
   if (loading) return <LoadingState message="Loading digital receipts…" />;
   return <div className="page">
@@ -2941,26 +2986,45 @@ function DigitalReceiptsPage({
             fontWeight: 400,
             fontSize: '0.88rem'
           }}>({receipts.length})</span></h3>
+          <p className="list-section-subtitle">Filter by branch or payment status. Confirm, reject, or reverse the collection on the receipt.</p>
         </div>
         <div className="list-section-toolbar">
-          <div className="search-bar">
-            <NavIcon name="search" />
-            <input className="search-input" type="search" placeholder="Search by receipt # or name…" value={search} onChange={e => setSearch(e.target.value)} />
+          <div className="list-section-controls">
+            <div className="search-bar">
+              <NavIcon name="search" />
+              <input className="search-input" type="search" placeholder="Search by receipt # or name…" value={search} onChange={e => setSearch(e.target.value)} />
+            </div>
+            <select className="filter-select" value={branchId} onChange={e => setBranchId(e.target.value)} aria-label="Branch">
+              <option value="">All branches</option>
+              {branches.map((branch) => <option key={branch.branch_id} value={branch.branch_id}>{branch.branch_name}</option>)}
+            </select>
+            <select className="filter-select" value={paymentStatus} onChange={e => setPaymentStatus(e.target.value)} aria-label="Payment status">
+              <option value="">All payment statuses</option>
+              {['Pending', 'Completed', 'Cancelled'].map((status) => <option key={status} value={status}>{status}</option>)}
+            </select>
           </div>
         </div>
         {receipts.length === 0 ? <EmptyState title="No receipts found" description="No digital receipts match your search." /> : <><div className="corvex-table-wrapper">
             <table className="corvex-table">
-              <thead><tr><th>Receipt #</th><th>Customer</th><th>Amount</th><th>Payment Method</th><th>Generated By</th><th>Receipt Date</th></tr></thead>
+              <thead><tr><th>Receipt #</th><th>Customer</th><th>Branch</th><th>Amount</th><th>Payment Method</th><th>Payment Status</th><th>Generated By</th><th>Receipt Date</th><th>Actions</th></tr></thead>
               <tbody>
                 {paginated_receipts.map(r => <tr key={r.receipts_id}>
-                    <td style={{
-                  fontFamily: 'monospace'
-                }}>{r.receipt_number}</td>
+                    <td style={{ fontFamily: 'monospace' }}>{r.receipt_number}</td>
                     <td>{r.customer_name || '—'}</td>
+                    <td>{r.branch_name || '—'}</td>
                     <td>{r.collection_amount ? formatCurrency(Number(r.collection_amount)) : '—'}</td>
                     <td>{r.payment_method || '—'}</td>
+                    <td><StatusBadge status={r.payment_status || '—'} /></td>
                     <td>{r.generated_by_name || '—'}</td>
                     <td>{formatDisplayDateTime(r.receipt_date)}</td>
+                    <td className="table-actions">
+                      {r.payment_status === 'Pending' && r.collection_id ? <>
+                        <button className="icon-action-button" type="button" title="Confirm" onClick={() => confirmReceipt(r.collection_id)}><NavIcon name="check" /></button>
+                        <button className="icon-action-button danger" type="button" title="Reject" onClick={() => rejectReceipt(r.collection_id)}><NavIcon name="close" /></button>
+                      </> : null}
+                      {r.payment_status === 'Completed' && r.collection_id ? <button className="button ghost" type="button" onClick={() => reverseReceipt(r.collection_id)}>Reverse</button> : null}
+                      {r.payment_status !== 'Pending' && r.payment_status !== 'Completed' ? <span className="muted">—</span> : null}
+                    </td>
                   </tr>)}
               </tbody>
             </table>

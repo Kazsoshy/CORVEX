@@ -7,7 +7,27 @@ import {
   mapSawPriorityRow,
 } from '../lib/sawCollectionData.js';
 import { manilaDateString } from '../lib/sawCollection.js';
+import { buildCollectorSawRoad } from '../lib/sawRoad.js';
 import { notifyScheduleAssigned } from '../lib/operationalNotifications.js';
+import { inventoryHealthPercent } from '../lib/inventoryHealth.js';
+import { readPerformanceTargets } from '../lib/performanceTargets.js';
+import { readCreditExposure } from '../lib/creditExposure.js';
+
+const OVERDUE_CUSTOMER = `EXISTS (
+  SELECT 1
+  FROM sales_invoices si
+  LEFT JOIN (
+    SELECT sales_id, SUM(payment_amount) AS paid
+    FROM credit_history
+    WHERE sales_id IS NOT NULL
+    GROUP BY sales_id
+  ) paid ON paid.sales_id = si.sales_invoices_id
+  WHERE si.customer_id = c.customer_id
+    AND si.status IN ('Confirmed', 'Pending Review')
+    AND si.due_date IS NOT NULL
+    AND si.due_date < (CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Manila')::date
+    AND COALESCE(paid.paid, 0) < si.total_amount
+)`;
 
 const router = express.Router();
 router.use(requireRole(ROLE_SETS.branchOps), requireAssignedBranch);
@@ -66,7 +86,7 @@ router.get('/analytics', requireAuth, async (req, res) => {
            COUNT(*) AS total_customers,
            COUNT(*) FILTER (WHERE status = 'Active') AS active_customers,
            COALESCE(SUM(ca.outstanding_balance), 0) AS total_outstanding,
-           COUNT(*) FILTER (WHERE ca.outstanding_balance > 0) AS overdue_count
+           COUNT(*) FILTER (WHERE ${OVERDUE_CUSTOMER}) AS overdue_count
          FROM customers c
          LEFT JOIN customer_activity ca ON c.customer_id = ca.customer_id
          ${isBranchScoped ? 'WHERE c.branch_id = $1' : ''}`,
@@ -74,6 +94,7 @@ router.get('/analytics', requireAuth, async (req, res) => {
       ),
       pool.query(
         `SELECT
+           COUNT(*) AS product_count,
            COUNT(*) FILTER (WHERE available_stock <= 0) AS stockout_count,
            COUNT(*) FILTER (WHERE available_stock <= reorder_level) AS low_stock_count
          FROM branch_inventory
@@ -188,6 +209,8 @@ router.get('/analytics', requireAuth, async (req, res) => {
       pendingCiParams.push(bid);
     }
     const pendingCiResult = await pool.query(pendingCiSql, pendingCiParams);
+    const targets = await readPerformanceTargets(pool);
+    const credit = await readCreditExposure(pool, isBranchScoped ? bid : null);
     const pendingCI = pendingCiResult.rows[0]?.count || 0;
 
     return res.status(200).json({
@@ -196,8 +219,8 @@ router.get('/analytics', requireAuth, async (req, res) => {
         healthScore: Math.round(healthScore),
         collectionEfficiency: Math.round(collectorCompliance),
         salesEfficiency: Math.round(salesCompletion),
-        inventoryHealth: Number(inventory.stockout_count) === 0 ? 100 : Math.max(0, 100 - Number(inventory.stockout_count) * 10),
-        collectionRateToday: Number(collections.total_collections) > 0 ? Math.min(100, Math.round((Number(collections.total_amount_collected) / 180000) * 100)) : 0,
+        inventoryHealth: inventoryHealthPercent(inventory.stockout_count, inventory.product_count),
+        collectionRateToday: Number(collections.total_collections) > 0 ? Math.min(100, Math.round((Number(collections.total_amount_collected) / targets.collectionDaily) * 100)) : 0,
         routeCompliance: Math.round(collectorCompliance),
         salesVisitCompletion: Math.round(salesCompletion),
         stockAlertsCount: Number(inventory.low_stock_count),
@@ -207,6 +230,9 @@ router.get('/analytics', requireAuth, async (req, res) => {
         totalSalesToday: Number(sales.total_sales_amount),
         activeCollectors: Number(staff.active_collectors),
         activeSalesAgents: Number(staff.active_sales_agents),
+        totalCreditLimit: credit.totalCreditLimit,
+        creditUsed: credit.creditUsed,
+        creditRemaining: credit.creditRemaining,
       },
     });
   } catch (err) {
@@ -592,6 +618,83 @@ router.get('/map', requireAuth, async (req, res) => {
   } catch (err) {
     console.error('[Branch Manager] GET /map error:', err.message);
     return res.status(500).json({ success: false, message: 'Failed to load map data.' });
+  }
+});
+
+function parseMapDate(value) {
+  if (value == null || String(value).trim() === '') return manilaDateString();
+  const text = String(value).trim().slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(text)) return null;
+  const [year, month, day] = text.split('-').map(Number);
+  const utc = new Date(Date.UTC(year, month - 1, day));
+  if (utc.getUTCFullYear() !== year || utc.getUTCMonth() !== month - 1 || utc.getUTCDate() !== day) {
+    return null;
+  }
+  return text;
+}
+
+// GET /api/branch-manager/map/saw-roads
+// OSRM road geometry for each collector's SAW order on a date.
+router.get('/map/saw-roads', requireAuth, async (req, res) => {
+  try {
+    const pool = req.app.locals.pool;
+    const user = req.currentUser;
+    const { branchScoped, bid } = scopeUser(user);
+    const scheduledDate = parseMapDate(req.query.date);
+    if (!scheduledDate) {
+      return res.status(400).json({ success: false, message: 'date must be YYYY-MM-DD.' });
+    }
+
+    const collectorId = req.query.collector_id != null && req.query.collector_id !== '' && req.query.collector_id !== 'all'
+      ? Number(req.query.collector_id)
+      : null;
+    if (collectorId != null && !Number.isFinite(collectorId)) {
+      return res.status(400).json({ success: false, message: 'Invalid collector.' });
+    }
+
+    const requestedBranch = req.query.branch_id != null && req.query.branch_id !== '' && req.query.branch_id !== 'all'
+      ? Number(req.query.branch_id)
+      : null;
+    const branchId = branchScoped ? bid : requestedBranch;
+
+    const params = [];
+    let sql = `
+      SELECT u.id, u.branch_id,
+             TRIM(CONCAT_WS(' ', u.first_name, u.last_name)) AS name
+      FROM users u
+      JOIN roles r ON r.role_id = u.role_id
+      WHERE u.status = 'Active' AND r.slug = 'collector' AND u.branch_id IS NOT NULL
+    `;
+    if (branchId != null) {
+      params.push(branchId);
+      sql += ` AND u.branch_id = $${params.length}`;
+    }
+    if (collectorId != null) {
+      params.push(collectorId);
+      sql += ` AND u.id = $${params.length}`;
+    }
+    sql += ' ORDER BY u.first_name, u.last_name LIMIT 8';
+
+    const collectors = await pool.query(sql, params);
+    const roads = [];
+    for (const collector of collectors.rows) {
+      const road = await buildCollectorSawRoad(pool, {
+        collectorId: collector.id,
+        collectorName: collector.name,
+        branchId: collector.branch_id,
+        scheduledDate,
+      });
+      if (road?.positions?.length >= 2) roads.push(road);
+    }
+
+    return res.status(200).json({
+      success: true,
+      data: roads,
+      meta: { scheduledDate, count: roads.length },
+    });
+  } catch (err) {
+    console.error('[Branch Manager] GET /map/saw-roads error:', err.message);
+    return res.status(500).json({ success: false, message: 'Failed to build SAW road routes.' });
   }
 });
 

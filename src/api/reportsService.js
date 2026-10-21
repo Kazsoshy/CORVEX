@@ -85,6 +85,18 @@ export async function getExecutiveDashboard(branchId) {
   }
 }
 
+export async function savePerformanceTargets(collectionDaily, salesDaily) {
+  try {
+    const response = await apiClient.patch('/reports/targets', { collectionDaily, salesDaily });
+    return response.data;
+  } catch (error) {
+    return {
+      success: false,
+      message: error?.response?.data?.message || 'Failed to save targets.',
+    };
+  }
+}
+
 export async function getOperatingManagerAnalytics(params = {}) {
   try {
     const response = await apiClient.get('/reports/operating-manager', { params: normalizeReportParams(params) });

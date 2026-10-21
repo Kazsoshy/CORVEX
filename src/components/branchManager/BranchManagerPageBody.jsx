@@ -13,6 +13,8 @@ import {
   patchSpecialCollectionRequest,
   fetchPendingSalesInvoices,
   patchSalesInvoiceReview,
+  fetchCollectionsForReview,
+  patchCollectionReview,
   mapCreditInvestigationRow,
   mapSpecialCollectionRow,
 } from '../../api/approvalsService.js';
@@ -158,10 +160,23 @@ function DashboardPage({
       value: String(analytics?.pendingCI || 0)
     }, {
       label: 'Overdue Accounts',
-      value: String(kpi?.overdueCount || 0)
+      value: String(kpi?.overdueCount || 0),
+      title: 'Customers with an invoice past its due date.'
     }, {
       label: 'Stock Alerts',
       value: String(kpi?.stockAlertsCount || analytics?.stockAlertsCount || 0)
+    }, {
+      label: 'Credit Limit',
+      value: formatCurrency(kpi?.totalCreditLimit || 0),
+      title: 'Total credit limit on customer accounts.'
+    }, {
+      label: 'Credit Used',
+      value: formatCurrency(kpi?.creditUsed || 0),
+      title: 'Outstanding balance counted against those limits.'
+    }, {
+      label: 'Credit Remaining',
+      value: formatCurrency(kpi?.creditRemaining || 0),
+      title: 'Credit limit minus the outstanding balance.'
     }]} />
 
       {recentNotifications.length ? (
@@ -1263,6 +1278,18 @@ function ReportsHubPage({
               label: 'Outstanding Balance',
               value: formatCurrency(kpi?.totalOutstanding || 0)
             }, {
+              label: 'Credit Limit',
+              value: formatCurrency(kpi?.totalCreditLimit || 0),
+              title: 'Total credit limit on customer accounts.'
+            }, {
+              label: 'Credit Used',
+              value: formatCurrency(kpi?.creditUsed || 0),
+              title: 'Outstanding balance counted against those limits.'
+            }, {
+              label: 'Credit Remaining',
+              value: formatCurrency(kpi?.creditRemaining || 0),
+              title: 'Credit limit minus the outstanding balance.'
+            }, {
               label: 'Collections (7d)',
               value: formatCurrency(kpi?.totalCollectionsAmount || 0)
             }, {
@@ -1270,7 +1297,8 @@ function ReportsHubPage({
               value: formatCurrency(kpi?.totalSalesAmount || 0)
             }, {
               label: 'Inventory Health',
-              value: `${kpi?.inventoryHealth || 0}%`
+              value: `${kpi?.inventoryHealth || 0}%`,
+              title: 'In-stock items ÷ monitored items × 100.'
             }]} />
           </Card>
         </div>}
@@ -2044,14 +2072,18 @@ function ApprovalCenterPage({
   const [transferList, setTransferList] = useState([]);
   const [specialList, setSpecialList] = useState([]);
   const [invoiceList, setInvoiceList] = useState([]);
+  const [collectionList, setCollectionList] = useState([]);
+  const [confirmedCollections, setConfirmedCollections] = useState([]);
   const [loading, setLoading] = useState(true);
   const reload = async () => {
     setLoading(true);
-    const [ciRes, trRes, scRes, invRes] = await Promise.all([
+    const [ciRes, trRes, scRes, invRes, pendingPayRes, confirmedPayRes] = await Promise.all([
       fetchCreditInvestigations(),
       fetchInventoryTransfers(),
       fetchSpecialCollectionRequests(),
       fetchPendingSalesInvoices(),
+      fetchCollectionsForReview('Pending'),
+      fetchCollectionsForReview('Completed'),
     ]);
     if (ciRes.success) setCiList((ciRes.data || []).map(mapCreditInvestigationRow));
     if (trRes.success) {
@@ -2060,6 +2092,8 @@ function ApprovalCenterPage({
     }
     if (scRes.success) setSpecialList((scRes.data || []).map(mapSpecialCollectionRow));
     if (invRes.success) setInvoiceList(invRes.data || []);
+    if (pendingPayRes.success) setCollectionList(pendingPayRes.data || []);
+    if (confirmedPayRes.success) setConfirmedCollections(confirmedPayRes.data || []);
     setLoading(false);
   };
   useEffect(() => {
@@ -2077,8 +2111,11 @@ function ApprovalCenterPage({
   }, {
     key: 'invoices',
     label: `Sales Invoices (${invoiceList.length})`
+  }, {
+    key: 'collections',
+    label: `Collections (${collectionList.length})`
   }];
-  const totalPending = ciList.filter(c => c.status === 'Pending').length + transferList.filter(t => t.status === 'Pending Approval').length + specialList.filter(s => s.status === 'Pending').length + invoiceList.length;
+  const totalPending = ciList.filter(c => c.status === 'Pending').length + transferList.filter(t => t.status === 'Pending Approval').length + specialList.filter(s => s.status === 'Pending').length + invoiceList.length + collectionList.length;
   const approveCI = async (ciId) => {
     const result = await patchCreditInvestigation(ciId, { status: 'Approved' });
     if (result.success) {
@@ -2153,6 +2190,37 @@ function ApprovalCenterPage({
       reload();
     } else showToast(result.message || 'Reject failed.', 'error');
   };
+  const confirmCollection = async (paymentId) => {
+    const result = await patchCollectionReview(paymentId, { action: 'confirm' });
+    if (result.success) {
+      showToast(result.message || 'Collection confirmed.', 'success');
+      reload();
+    } else showToast(result.message || 'Confirm failed.', 'error');
+  };
+  const rejectCollection = async (paymentId) => {
+    const reason = window.prompt('Rejection reason (required):');
+    if (!reason?.trim()) {
+      showToast('Reason required.', 'error');
+      return;
+    }
+    const result = await patchCollectionReview(paymentId, { action: 'reject', review_note: reason.trim() });
+    if (result.success) {
+      showToast(result.message || 'Collection rejected.', 'success');
+      reload();
+    } else showToast(result.message || 'Reject failed.', 'error');
+  };
+  const reverseCollection = async (paymentId) => {
+    const reason = window.prompt('Reversal reason (required):');
+    if (!reason?.trim()) {
+      showToast('Reason required.', 'error');
+      return;
+    }
+    const result = await patchCollectionReview(paymentId, { action: 'reverse', review_note: reason.trim() });
+    if (result.success) {
+      showToast(result.message || 'Collection reversed.', 'success');
+      reload();
+    } else showToast(result.message || 'Reverse failed.', 'error');
+  };
   const RiskBadge = ({
     score
   }) => {
@@ -2172,7 +2240,11 @@ function ApprovalCenterPage({
   const paginated_specialList = pagination_specialList.paginatedData;
   const pagination_invoiceList = usePagination(invoiceList);
   const paginated_invoiceList = pagination_invoiceList.paginatedData;
-  if (loading && !ciList.length && !transferList.length && !specialList.length && !invoiceList.length) {
+  const pagination_collectionList = usePagination(collectionList);
+  const paginated_collectionList = pagination_collectionList.paginatedData;
+  const pagination_confirmedCollections = usePagination(confirmedCollections);
+  const paginated_confirmedCollections = pagination_confirmedCollections.paginatedData;
+  if (loading && !ciList.length && !transferList.length && !specialList.length && !invoiceList.length && !collectionList.length && !confirmedCollections.length) {
     return <LoadingState message="Loading approval center..." />;
   }
   return <div className="page">
@@ -2192,6 +2264,9 @@ function ApprovalCenterPage({
       }, {
         label: 'Sales Invoices',
         value: String(invoiceList.length),
+      }, {
+        label: 'Collections',
+        value: String(collectionList.length),
       }]} />
 
       {/* Tab navigation */}
@@ -2371,6 +2446,81 @@ function ApprovalCenterPage({
             </div>
             <Pagination {...pagination_invoiceList} />
           </> : <EmptyState title="No sales invoices to review" description="Invoices logged by sales agents will appear here until you confirm or reject them." />}
+        </section>}
+
+      {tab === 'collections' && <section className="panel content-panel relative overflow-hidden">
+          <div className="list-section-header">
+            <h3>Collections waiting for review <span className="text-ink/70">({collectionList.length})</span></h3>
+            <p className="list-section-subtitle">Confirm a collection to lower the balance. Reject it to leave the balance unchanged.</p>
+          </div>
+          {collectionList.length ? <>
+            <div className="corvex-table-wrapper">
+              <table className="corvex-table">
+                <thead>
+                  <tr>
+                    <th>Receipt</th>
+                    <th>Customer</th>
+                    <th>Collector</th>
+                    <th>Branch</th>
+                    <th>Method</th>
+                    <th>Amount</th>
+                    <th>Date</th>
+                    <th>Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {paginated_collectionList.map((payment) => <tr key={payment.collectionpayment_id}>
+                      <td><strong>{payment.receipt_number}</strong></td>
+                      <td>{payment.customer_name}</td>
+                      <td>{payment.collector_name}</td>
+                      <td>{payment.branch_name || '—'}</td>
+                      <td>{payment.payment_method}</td>
+                      <td style={{ fontWeight: 600 }}>{formatCurrency(Number(payment.amount))}</td>
+                      <td>{formatDisplayDate(payment.payment_date)}</td>
+                      <td className="table-actions">
+                        <button className="icon-action-button" type="button" title="Confirm" onClick={() => confirmCollection(payment.collectionpayment_id)}><NavIcon name="check" /></button>
+                        <button className="icon-action-button danger" type="button" title="Reject" onClick={() => rejectCollection(payment.collectionpayment_id)}><NavIcon name="close" /></button>
+                      </td>
+                    </tr>)}
+                </tbody>
+              </table>
+            </div>
+            <Pagination {...pagination_collectionList} />
+          </> : <EmptyState title="No collections to review" description="Collections logged by collectors will appear here until you confirm or reject them." />}
+
+          <div className="list-section-header" style={{ marginTop: 28 }}>
+            <h3>Confirmed collections <span className="text-ink/70">({confirmedCollections.length})</span></h3>
+            <p className="list-section-subtitle">Reverse a confirmed collection to put the amount back on the balance.</p>
+          </div>
+          {confirmedCollections.length ? <>
+            <div className="corvex-table-wrapper">
+              <table className="corvex-table">
+                <thead>
+                  <tr>
+                    <th>Receipt</th>
+                    <th>Customer</th>
+                    <th>Collector</th>
+                    <th>Amount</th>
+                    <th>Date</th>
+                    <th>Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {paginated_confirmedCollections.map((payment) => <tr key={payment.collectionpayment_id}>
+                      <td><strong>{payment.receipt_number}</strong></td>
+                      <td>{payment.customer_name}</td>
+                      <td>{payment.collector_name}</td>
+                      <td style={{ fontWeight: 600 }}>{formatCurrency(Number(payment.amount))}</td>
+                      <td>{formatDisplayDate(payment.payment_date)}</td>
+                      <td className="table-actions">
+                        <button className="button ghost" type="button" onClick={() => reverseCollection(payment.collectionpayment_id)}>Reverse</button>
+                      </td>
+                    </tr>)}
+                </tbody>
+              </table>
+            </div>
+            <Pagination {...pagination_confirmedCollections} />
+          </> : <EmptyState title="No confirmed collections" description="Confirmed collections can be reversed from here." />}
         </section>}
     </div>;
 }

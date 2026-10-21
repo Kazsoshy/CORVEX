@@ -122,7 +122,7 @@ export async function createSalesInvoice(payload) {
   } catch (error) {
     const message = error?.response?.data?.message || error?.message || 'Failed to log sale';
     console.error('Failed to create sales invoice:', error);
-    return { success: false, message };
+    return { success: false, offline: !error.response, message };
   }
 }
 
@@ -241,9 +241,13 @@ export async function submitSalesFieldReport(payload) {
     const response = await apiClient.post('/sales/field-reports', payload);
     return response.data;
   } catch (error) {
+    const unreachable = !error.response;
     return {
       success: false,
-      message: error.response?.data?.message || 'Failed to submit report.',
+      offline: unreachable,
+      message: error.response?.data?.message || (unreachable
+        ? 'The server could not be reached.'
+        : 'Failed to submit report.'),
     };
   }
 }

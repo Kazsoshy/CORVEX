@@ -26,6 +26,15 @@ export function defaultLayersForPage(pageType) {
   return ['Collector Routes', 'Delinquency Clusters'];
 }
 
+export function manilaMapDate() {
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Manila',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(new Date());
+}
+
 export function hasCoords(lat, lng) {
   const a = Number(lat);
   const b = Number(lng);
@@ -189,6 +198,7 @@ export function buildBranchLeafletView({
   staffType = 'all',
   paymentStatus = 'all',
   search = '',
+  sawRoads = [],
 }) {
   const active = new Set(layers);
   const allBranches = payload?.branches || [];
@@ -248,6 +258,41 @@ export function buildBranchLeafletView({
   const collectorIndex = new Map(filteredCollectors.map((c, i) => [String(c.id), i]));
   const showRoutes = active.has('Collector Routes') || active.has('Route Efficiency Layer');
   const efficiencyMode = active.has('Route Efficiency Layer');
+  const visibleSawRoads = (sawRoads || []).filter((road) => {
+    if (staffType === 'sales') return false;
+    if (staffId && staffId !== 'all' && String(road.collectorId) !== String(staffId)) return false;
+    if (branchId && branchId !== 'all' && Number(road.branchId) !== Number(branchId)) return false;
+    return Array.isArray(road.positions) && road.positions.length >= 2;
+  });
+  const roadByCollector = new Map(visibleSawRoads.map((road) => [String(road.collectorId), road]));
+  const drawnRoadIds = new Set();
+
+  function drawSawRoad(road, color) {
+    const distance = road.distanceKm != null ? `${road.distanceKm} km` : null;
+    const source = road.listSource === 'assigned' ? 'Assigned route' : 'Eligible SAW ranking';
+    const surface = road.provider === 'osrm' ? 'OSRM road' : 'SAW stop order';
+    polylines.push({
+      id: `saw-road-${road.collectorId}`,
+      positions: road.positions,
+      color,
+      weight: 5,
+      opacity: 0.9,
+      popup: [road.collectorName, 'SAW road', source, surface, `${road.stops?.length || 0} stops`, distance, road.scheduledDate]
+        .filter(Boolean)
+        .join(' · '),
+    });
+    (road.stops || []).forEach((stop) => {
+      markers.push({
+        id: `saw-stop-${road.collectorId}-${stop.customerId}`,
+        position: [Number(stop.lat), Number(stop.lng)],
+        label: stop.rank == null ? '•' : String(stop.rank),
+        color,
+        popup: `#${stop.rank ?? '—'} · ${stop.customerName || 'Customer'}${stop.score != null ? ` · ${Number(stop.score).toFixed(3)}` : ''}`,
+      });
+      bounds.push([Number(stop.lat), Number(stop.lng)]);
+    });
+    drawnRoadIds.add(String(road.collectorId));
+  }
 
   if (showRoutes) {
     const depotById = new Map(
@@ -280,6 +325,11 @@ export function buildBranchLeafletView({
         : staffColor(collectorIndex.get(key) ?? 0);
       const staffName = ordered[0]?.staffName || `Staff #${key}`;
       const isSales = ordered.some((s) => s.visitType === 'Sales') && ordered.every((s) => s.visitType !== 'Collection');
+      const road = roadByCollector.get(key);
+      if (road && !isSales) {
+        drawSawRoad(road, color);
+        return;
+      }
 
       if (points.length >= 2) {
         polylines.push({
@@ -310,8 +360,16 @@ export function buildBranchLeafletView({
       });
     });
 
+    roadByCollector.forEach((road, key) => {
+      if (drawnRoadIds.has(key)) return;
+      drawSawRoad(road, staffColor(collectorIndex.get(key) ?? 0));
+    });
+
     if (active.has('Collector Routes')) {
-      legend.push({ color: '#255684', label: 'Collector / sales routes' });
+      legend.push({
+        color: '#255684',
+        label: visibleSawRoads.length ? 'SAW road routes' : 'Collector / sales routes',
+      });
     }
     if (efficiencyMode) {
       legend.push({ color: '#0d9f6e', label: 'Efficient (≥80% completed)' });

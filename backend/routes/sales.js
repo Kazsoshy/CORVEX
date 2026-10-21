@@ -11,8 +11,7 @@ import {
   CREDIT_INVESTIGATION_SELECT,
 } from '../lib/creditInvestigationQueries.js';
 import { notifyCreditInvestigationSubmitted } from '../lib/creditInvestigationNotifications.js';
-import { insertStockMovement, upsertBranchInventoryStock } from '../lib/branchInventoryStock.js';
-import { manilaDateString } from '../lib/sawCollection.js';
+import { applySalesInvoice } from '../lib/salesInvoiceWrite.js';
 import {
   notifyInvoicePendingReview,
   notifyOverdueAccounts,
@@ -666,28 +665,6 @@ router.get('/payment-methods', async (req, res) => {
   }
 });
 
-async function generateInvoiceNumber(pool) {
-  const year = new Date().getFullYear();
-  const prefix = `INV-${year}-`;
-  const result = await pool.query(
-    `SELECT invoice_number
-     FROM sales_invoices
-     WHERE invoice_number LIKE $1
-     ORDER BY sales_invoices_id DESC
-     LIMIT 1`,
-    [`${prefix}%`]
-  );
-
-  let nextSeq = 1;
-  if (result.rows[0]?.invoice_number) {
-    const suffix = result.rows[0].invoice_number.slice(prefix.length);
-    const parsed = Number.parseInt(suffix, 10);
-    if (Number.isFinite(parsed)) nextSeq = parsed + 1;
-  }
-
-  return `${prefix}${String(nextSeq).padStart(6, '0')}`;
-}
-
 router.post('/invoices', async (req, res) => {
   const pool = req.app.locals.pool;
   const user = req.currentUser;
@@ -750,161 +727,9 @@ router.post('/invoices', async (req, res) => {
 
   try {
     await client.query('BEGIN');
-    await client.query('SELECT pg_advisory_xact_lock($1)', [748392001]);
-
-    const customerResult = await client.query(
-      `SELECT customer_id, branch_id
-       FROM customers
-       WHERE customer_id = $1`,
-      [customerId]
-    );
-
-    if (customerResult.rows.length === 0) {
-      await client.query('ROLLBACK');
-      return res.status(404).json({ success: false, message: 'Customer not found' });
-    }
-
-    if (customerResult.rows[0].branch_id !== user.branchId) {
-      await client.query('ROLLBACK');
-      return res.status(403).json({
-        success: false,
-        message: 'Access denied: customer is not in your assigned branch.',
-      });
-    }
-
-    const paymentResult = await client.query(
-      `SELECT payment_method_id
-       FROM payment_methods
-       WHERE payment_method_id = $1 AND status = 'Active'`,
-      [paymentMethodId]
-    );
-
-    if (paymentResult.rows.length === 0) {
-      await client.query('ROLLBACK');
-      return res.status(400).json({ success: false, message: 'Invalid payment method.' });
-    }
-
-    const lineItems = [];
-    const stockAlerts = [];
-    for (const item of normalizedItems) {
-      const productResult = await client.query(
-        `SELECT id, unit_price
-         FROM products
-         WHERE id = $1 AND status = 'Active'`,
-        [item.productId]
-      );
-
-      if (productResult.rows.length === 0) {
-        await client.query('ROLLBACK');
-        return res.status(400).json({
-          success: false,
-          message: `Product ${item.productId} was not found or is inactive.`,
-        });
-      }
-
-      const unitPrice = Number(productResult.rows[0].unit_price);
-
-      if (!Number.isFinite(unitPrice) || unitPrice <= 0) {
-        await client.query('ROLLBACK');
-        return res.status(400).json({
-          success: false,
-          message: `Product ${item.productId} has an invalid unit price.`,
-        });
-      }
-
-      let snapshot;
-      try {
-        snapshot = await upsertBranchInventoryStock(client, {
-          branchId: user.branchId,
-          productId: item.productId,
-          delta: -item.quantity,
-        });
-      } catch (stockError) {
-        await client.query('ROLLBACK');
-        if (stockError.message === 'INSUFFICIENT_STOCK') {
-          return res.status(400).json({
-            success: false,
-            message: `Not enough stock for product ${item.productId} at your branch.`,
-          });
-        }
-        throw stockError;
-      }
-      stockAlerts.push(snapshot);
-
-      lineItems.push({
-        productId: item.productId,
-        quantity: item.quantity,
-        unitPrice,
-        lineTotal: Math.round(unitPrice * item.quantity * 100) / 100,
-      });
-    }
-
-    const totalAmount = lineItems.reduce((sum, item) => sum + item.lineTotal, 0);
-    const invoiceNumber = await generateInvoiceNumber(client);
-
-    const invoiceInsert = await client.query(
-      `INSERT INTO sales_invoices
-         (invoice_number, customer_id, sales_agent_id, branch_id, total_amount,
-          payment_method_id, status, invoices_date, due_date, notes)
-       VALUES ($1, $2, $3, $4, $5, $6, 'Pending Review', $7, $8, $9)
-       RETURNING sales_invoices_id`,
-      [
-        invoiceNumber,
-        customerId,
-        user.id,
-        user.branchId,
-        totalAmount,
-        paymentMethodId,
-        invoicesDate,
-        dueDate && isValidDate(dueDate) ? dueDate : null,
-        notes || null,
-      ]
-    );
-
-    const invoiceId = invoiceInsert.rows[0].sales_invoices_id;
-
-    for (let index = 0; index < lineItems.length; index += 1) {
-      const item = lineItems[index];
-      await client.query(
-        `INSERT INTO sales_invoice_items
-           (invoices_id, product_id, quantity, unit_price, line_total)
-         VALUES ($1, $2, $3, $4, $5)`,
-        [invoiceId, item.productId, item.quantity, item.unitPrice, item.lineTotal]
-      );
-      await insertStockMovement(client, {
-        performedBy: user.id,
-        productId: item.productId,
-        branchId: user.branchId,
-        quantity: -item.quantity,
-        type: 'Sale Deduction',
-        movementRef: `SALE-${invoiceNumber}-${item.productId}-${index + 1}`,
-        movementDate: invoicesDate || manilaDateString(),
-      });
-    }
-
-    if (purchaseRequestId) {
-      const prCheck = await client.query(
-        `SELECT pr.request_id, pr.customer_id, pr.status, pr.sales_invoices_id
-         FROM purchase_requests pr
-         WHERE pr.request_id = $1`,
-        [purchaseRequestId]
-      );
-      if (!prCheck.rows.length || prCheck.rows[0].customer_id !== customerId) {
-        await client.query('ROLLBACK');
-        return res.status(400).json({ success: false, message: 'Invalid purchase request for this customer.' });
-      }
-      if (prCheck.rows[0].sales_invoices_id) {
-        await client.query('ROLLBACK');
-        return res.status(400).json({ success: false, message: 'This purchase request is already linked to an invoice.' });
-      }
-      await client.query(
-        `UPDATE purchase_requests
-         SET sales_invoices_id = $1, status = 'Invoiced', updated_at = CURRENT_TIMESTAMP
-         WHERE request_id = $2`,
-        [invoiceId, purchaseRequestId]
-      );
-    }
-
+    const applied = await applySalesInvoice(client, user, req.body);
+    const invoiceNumber = applied.invoiceNumber;
+    const stockAlerts = applied.stockAlerts;
     await client.query('COMMIT');
     await publishStockAlerts(pool, stockAlerts);
     await notifyOverdueAccounts(pool);
@@ -926,12 +751,19 @@ router.post('/invoices', async (req, res) => {
       console.error('[Sales] invoice lookup after commit:', lookupError.message);
       return res.status(201).json({
         success: true,
-        data: { invoice_number: invoiceNumber, sales_invoices_id: invoiceId },
+        data: { invoice_number: invoiceNumber, sales_invoices_id: applied.invoiceId },
         message: 'Sale logged successfully.',
       });
     }
   } catch (error) {
     try { await client.query('ROLLBACK'); } catch { /* transaction already finished */ }
+    if (error.status || error.conflict) {
+      return res.status(error.status || 409).json({
+        success: false,
+        message: error.message,
+        conflict: Boolean(error.conflict),
+      });
+    }
     console.error('[Sales] POST /invoices error:', error);
     return res.status(500).json({
       success: false,
@@ -1510,7 +1342,7 @@ router.post('/field-reports', async (req, res) => {
 
     const result = await pool.query(
       `INSERT INTO field_activity_reports (visit_id, user_id, activity_type, remarks, photo, sync_status)
-       VALUES ($1, $2, $3, $4, $5, 'Pending')
+       VALUES ($1, $2, $3, $4, $5, 'Synced')
        RETURNING report_id, visit_id, activity_type, remarks, photo, sync_status, created_at`,
       [Number(visit_id), userId, String(activity_type).trim(), String(remarks).trim(), photoValue]
     );

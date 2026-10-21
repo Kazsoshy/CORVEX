@@ -240,7 +240,7 @@ export function mapSawRowToRouteStop(row, visitByCustomer = new Map()) {
     daysOverdue,
     distanceKm: Number(row.distance_km) || 0,
     sawScore: row.score == null || row.score === '' ? null : Number(row.score),
-    rank: row.rank,
+    rank: Number.isFinite(Number(row.rank)) ? Number(row.rank) : null,
     status: visitDone ? 'Completed' : collectorStatus,
     visitId: visit?.visit_id,
     visitType: visit?.visit_type,
@@ -271,6 +271,7 @@ export async function submitFieldActivityReport(payload) {
     console.error('Failed to submit field activity report:', error);
     return {
       success: false,
+      offline: !error.response,
       message: error.response?.data?.message || 'Failed to submit report.',
     };
   }
@@ -304,6 +305,7 @@ export async function submitCollectionPayment(body) {
     console.error('Failed to submit collection payment:', error);
     return {
       success: false,
+      offline: !error.response,
       message: error.response?.data?.message || 'Failed to log collection.',
     };
   }

@@ -1,5 +1,6 @@
 import express from 'express';
 import { allow, isUnscoped, ROLE_SETS } from '../middleware/auth.js';
+import { normalizeProductName, productNameConflict, productNameTaken } from '../lib/productName.js';
 
 const router = express.Router();
 router.use(allow(ROLE_SETS.catalogRead, ROLE_SETS.catalogWrite));
@@ -233,9 +234,13 @@ router.post('/', async (req, res) => {
   try {
     const pool = req.app.locals.pool;
     const { name, sku, category_id, description, unit_price, unit_type, barcode, supplier_id, reorder_point } = req.body;
+    const productName = normalizeProductName(name);
 
-    if (!name || !sku) {
+    if (!productName || !sku) {
       return res.status(400).json({ success: false, message: 'name and sku are required.' });
+    }
+    if (await productNameTaken(pool, productName)) {
+      return res.status(409).json({ success: false, message: 'A product with this name already exists.' });
     }
 
     const skuCheck = await pool.query(`SELECT id FROM products WHERE sku = $1`, [sku.toUpperCase().trim()]);
@@ -248,7 +253,7 @@ router.post('/', async (req, res) => {
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
        RETURNING id AS product_id`,
       [
-        name.trim(),
+        productName,
         sku.toUpperCase().trim(),
         category_id ? Number(category_id) : null,
         description || null,
@@ -262,6 +267,8 @@ router.post('/', async (req, res) => {
 
     return res.status(201).json({ success: true, message: 'Product created.', data: result.rows[0] });
   } catch (err) {
+    const nameConflict = productNameConflict(err);
+    if (nameConflict) return res.status(409).json({ success: false, message: nameConflict });
     console.error('[Products] POST / error:', err.message);
     return res.status(500).json({ success: false, message: 'Failed to create product.' });
   }
@@ -274,17 +281,25 @@ router.put('/:id', async (req, res) => {
   try {
     const pool = req.app.locals.pool;
     const { name, category_id, description, unit_price, unit_type, barcode, supplier_id, reorder_point, status } = req.body;
+    const productId = Number(req.params.id);
+    const productName = name !== undefined ? normalizeProductName(name) : undefined;
 
-    const existing = await pool.query(`SELECT id FROM products WHERE id = $1`, [Number(req.params.id)]);
+    const existing = await pool.query(`SELECT id FROM products WHERE id = $1`, [productId]);
     if (existing.rows.length === 0) {
       return res.status(404).json({ success: false, message: 'Product not found.' });
+    }
+    if (name !== undefined && !productName) {
+      return res.status(400).json({ success: false, message: 'A product name is required.' });
+    }
+    if (productName && await productNameTaken(pool, productName, productId)) {
+      return res.status(409).json({ success: false, message: 'A product with this name already exists.' });
     }
 
     const updates = [];
     const params = [];
     let pIdx = 1;
 
-    if (name) { updates.push(`name = $${pIdx++}`); params.push(name.trim()); }
+    if (productName) { updates.push(`name = $${pIdx++}`); params.push(productName); }
     if (category_id !== undefined) { updates.push(`category_id = $${pIdx++}`); params.push(category_id ? Number(category_id) : null); }
     if (description !== undefined) { updates.push(`description = $${pIdx++}`); params.push(description || null); }
     if (unit_price !== undefined) { updates.push(`unit_price = $${pIdx++}`); params.push(Number(unit_price)); }
@@ -296,7 +311,7 @@ router.put('/:id', async (req, res) => {
 
     if (!updates.length) return res.status(400).json({ success: false, message: 'No fields to update.' });
 
-    params.push(Number(req.params.id));
+    params.push(productId);
     const result = await pool.query(
       `UPDATE products SET ${updates.join(', ')}, updated_at = NOW() WHERE id = $${pIdx} RETURNING id AS product_id`,
       params
@@ -305,6 +320,8 @@ router.put('/:id', async (req, res) => {
     if (result.rows.length === 0) return res.status(404).json({ success: false, message: 'Product not found.' });
     return res.status(200).json({ success: true, message: 'Product updated.', data: result.rows[0] });
   } catch (err) {
+    const nameConflict = productNameConflict(err);
+    if (nameConflict) return res.status(409).json({ success: false, message: nameConflict });
     console.error('[Products] PUT /:id error:', err.message);
     return res.status(500).json({ success: false, message: 'Failed to update product.' });
   }

@@ -156,6 +156,29 @@ select {
   font: inherit;
 }
 
+.offline-banner {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 3000;
+  padding: 8px 16px;
+  background: #0c1031;
+  color: #fff;
+  text-align: center;
+  font-size: 0.85rem;
+  line-height: 1.4;
+}
+
+.offline-root.is-offline {
+  padding-top: 40px;
+}
+
+.offline-root.is-offline .app-shell {
+  height: calc(100dvh - 40px);
+  max-height: calc(100dvh - 40px);
+}
+
 .app-shell {
   --sidebar-width-expanded: 260px;
   --sidebar-width-collapsed: 72px;
@@ -4168,6 +4191,7 @@ select {
 
 .saw-spotlight-meta {
   display: flex;
+  flex-wrap: wrap;
   justify-content: space-between;
   align-items: center;
   gap: 8px;
@@ -4276,7 +4300,39 @@ select {
 .saw-score-cell {
   display: grid;
   gap: 6px;
-  min-width: 110px;
+  min-width: 140px;
+}
+
+.saw-audit-note {
+  margin: 0 0 14px;
+  font-size: 0.86rem;
+  color: rgba(12, 16, 49, 0.72);
+}
+
+.saw-audit-note.ok {
+  color: #0d7a52;
+}
+
+.saw-factors-cell {
+  min-width: 240px;
+  font-size: 0.78rem;
+  line-height: 1.4;
+  font-variant-numeric: tabular-nums;
+}
+
+.saw-factors-math,
+.saw-factors-cohort {
+  color: rgba(12, 16, 49, 0.62);
+}
+
+.saw-factors-ok {
+  color: #0d7a52;
+  font-weight: 700;
+}
+
+.saw-factors-bad {
+  color: #b91c1c;
+  font-weight: 700;
 }
 
 .saw-score-meter {

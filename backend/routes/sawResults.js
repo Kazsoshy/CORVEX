@@ -4,22 +4,16 @@ import {
   computeOrgSawPriority,
   persistSawResults,
 } from '../lib/sawCollectionData.js';
+import { SAW_WEIGHTS } from '../lib/sawCollection.js';
 
 const router = express.Router();
 router.use(allow(ROLE_SETS.receipts));
-
-const SAW_WEIGHTS = {
-  balance: 0.4,
-  daysOverdue: 0.3,
-  distance: 0.3,
-};
 
 const SAW_FROM = `
   FROM saw_results sr
   LEFT JOIN customers c ON c.customer_id = sr.customer_id
   LEFT JOIN branches b ON b.id = c.branch_id
   LEFT JOIN territories t ON t.territory_id = c.territory_id
-  LEFT JOIN customer_activity ca ON ca.customer_id = c.customer_id
   LEFT JOIN users mgr ON mgr.id = c.account_manager_id
 `;
 
@@ -72,7 +66,18 @@ router.get('/', async (req, res) => {
            c.branch_id,
            b.name AS branch_name,
            t.territory_name,
-           COALESCE(ca.outstanding_balance, 0)::float AS outstanding_balance,
+           sr.outstanding_balance::float AS outstanding_balance,
+           sr.days_overdue,
+           sr.distance_km::float AS distance_km,
+           sr.balance_norm::float AS balance_norm,
+           sr.days_norm::float AS days_norm,
+           sr.distance_norm::float AS distance_norm,
+           sr.cohort_max_balance::float AS cohort_max_balance,
+           sr.cohort_max_days,
+           sr.cohort_min_distance::float AS cohort_min_distance,
+           sr.weight_balance::float AS weight_balance,
+           sr.weight_days::float AS weight_days,
+           sr.weight_distance::float AS weight_distance,
            COALESCE(NULLIF(TRIM(mgr.full_name), ''), TRIM(CONCAT_WS(' ', mgr.first_name, mgr.last_name))) AS collector_name,
            sr.score::float AS score,
            sr.ranking,
@@ -90,7 +95,8 @@ router.get('/', async (req, res) => {
            COALESCE(MAX(sr.score), 0)::float AS top_score,
            COALESCE(MIN(sr.score), 0)::float AS low_score,
            MAX(sr.generated_at) AS last_generated_at,
-           COUNT(DISTINCT c.branch_id)::int AS branches_covered
+           COUNT(DISTINCT c.branch_id)::int AS branches_covered,
+           COUNT(*) FILTER (WHERE sr.balance_norm IS NULL)::int AS missing_factors
          ${SAW_FROM}
          ${where}`,
         filterParams
@@ -125,6 +131,7 @@ router.get('/', async (req, res) => {
         lowScore: Number(summary.low_score) || 0,
         lastGeneratedAt: summary.last_generated_at || null,
         branchesCovered: Number(summary.branches_covered) || 0,
+        missingFactors: Number(summary.missing_factors) || 0,
       },
       byBranch: branchResult.rows.map((row) => ({
         branchId: Number(row.branch_id),

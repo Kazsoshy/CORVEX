@@ -61,6 +61,14 @@ const MIGRATIONS = [
   { file: '037_seed_password_and_davao_city.sql',     label: '037_seed_password_and_davao_city.sql' },
   { file: '038_sales_agent_notifications.sql',        label: '038_sales_agent_notifications.sql' },
   { file: '039_seed_davao_saw_collection.sql',        label: '039_seed_davao_saw_collection.sql' },
+  { file: '040_saw_results_factors.sql',              label: '040_saw_results_factors.sql' },
+  { file: '041_field_report_sync_status.sql',         label: '041_field_report_sync_status.sql' },
+  { file: '042_offline_sync_queue_unique.sql',        label: '042_offline_sync_queue_unique.sql' },
+  { file: '043_branch_inventory_nonnegative.sql',     label: '043_branch_inventory_nonnegative.sql' },
+  { file: '044_sale_reversal_movement.sql',           label: '044_sale_reversal_movement.sql' },
+  { file: '045_product_name_unique.sql',              label: '045_product_name_unique.sql' },
+  { file: '046_collection_review.sql',                label: '046_collection_review.sql' },
+  { file: '047_performance_targets.sql',             label: '047_performance_targets.sql' },
 ];
 
 async function ensureMigrationsTable() {
