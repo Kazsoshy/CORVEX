@@ -22,11 +22,14 @@ router.get('/', requireAuth, async (req, res) => {
     const result = await pool.query(
       `SELECT
          b.id            AS branch_id,
+         b.id            AS id,
          b.name          AS branch_name,
          b.address,
+         b.region,
          b.latitude,
          b.longitude,
          b.phone         AS contact_no,
+         b.phone,
          b.email,
          b.status,
          b.created_at,
@@ -46,7 +49,7 @@ router.get('/', requireAuth, async (req, res) => {
        LEFT JOIN customers c ON c.branch_id = b.id
        LEFT JOIN branch_inventory bi ON bi.branch_id = b.id
        ${branchWhere}
-       GROUP BY b.id, b.name, b.address, b.latitude, b.longitude, b.phone, b.email,
+       GROUP BY b.id, b.name, b.address, b.region, b.latitude, b.longitude, b.phone, b.email,
                 b.status, b.created_at, b.updated_at,
                 mgr.id, mgr.full_name, mgr.email
        ORDER BY b.name`,
@@ -72,11 +75,14 @@ router.get('/:id', requireAuth, async (req, res) => {
     const branchResult = await pool.query(
       `SELECT
          b.id            AS branch_id,
+         b.id            AS id,
          b.name          AS branch_name,
          b.address,
+         b.region,
          b.latitude,
          b.longitude,
          b.phone         AS contact_no,
+         b.phone,
          b.email,
          b.status,
          b.created_at,
@@ -173,6 +179,20 @@ function requireOrgScope(req, res, next) {
   return next();
 }
 
+function isValidEmail(email) {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(email || ''));
+}
+
+/** Accept PH mobile (09XXXXXXXXX) or landline with area code (7–8 local digits). */
+function isValidPhPhone(phone) {
+  const digits = String(phone || '').replace(/\D/g, '');
+  let local = digits;
+  if (local.startsWith('63') && local.length >= 11) local = `0${local.slice(2)}`;
+  if (/^09\d{9}$/.test(local)) return true;
+  // 0 + area(1–3) + local(7–8) → total 9–12 digits
+  return /^0\d{8,11}$/.test(local);
+}
+
 function normalizeBranchPayload(body, partial = false) {
   const out = {};
   const pick = (key, transform = (v) => v) => {
@@ -197,9 +217,22 @@ function normalizeBranchPayload(body, partial = false) {
     if (!Number.isFinite(out.longitude)) return { error: 'longitude is required.' };
     const phone = out.phone || out.contact_no;
     if (!phone) return { error: 'phone is required.' };
+    if (!isValidPhPhone(phone)) {
+      return { error: 'phone must be a valid Philippine mobile or landline number.' };
+    }
     if (!out.email) return { error: 'email is required.' };
+    if (!isValidEmail(out.email)) return { error: 'email format is invalid.' };
     out.branch_name = name;
     out.phone = phone;
+  } else {
+    const phone = out.phone || out.contact_no;
+    if (phone !== undefined && phone !== '' && !isValidPhPhone(phone)) {
+      return { error: 'phone must be a valid Philippine mobile or landline number.' };
+    }
+    if (out.email !== undefined && out.email !== '' && !isValidEmail(out.email)) {
+      return { error: 'email format is invalid.' };
+    }
+    if (phone) out.phone = phone;
   }
   return { data: out };
 }

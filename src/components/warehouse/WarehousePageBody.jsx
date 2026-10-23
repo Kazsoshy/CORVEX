@@ -580,7 +580,7 @@ function ProductDetailPage({
             {product.image_url ? <img src={product.image_url} alt={product_name} width={96} height={96} style={{
             objectFit: 'cover',
             borderRadius: 8,
-            border: '1px solid #c5c8d0'
+            border: '1px solid #BADBE9'
           }} /> : null}
             <div>
               <h3 style={{
@@ -695,7 +695,7 @@ function ProductDetailPage({
                     </td>
                     <td style={{
                   fontWeight: 600,
-                  color: (m.quantity || 0) > 0 ? '#4A6B12' : '#dc2626'
+                  color: (m.quantity || 0) > 0 ? '#2A9B6A' : '#dc2626'
                 }}>
                       {(m.quantity || 0) > 0 ? `+${m.quantity}` : m.quantity}
                     </td>
@@ -1393,7 +1393,7 @@ function MovementsPage({
                     }}>{m.sku}</span></> : null}</td>
                     <td style={{
                   fontWeight: 600,
-                  color: m.quantity > 0 ? '#4A6B12' : '#dc2626'
+                  color: m.quantity > 0 ? '#2A9B6A' : '#dc2626'
                 }}>
                       {m.quantity > 0 ? `+${m.quantity}` : m.quantity}
                     </td>
@@ -1905,7 +1905,7 @@ function RestockHistoryPage({
                     <td>{r.supplier_name}</td>
                     <td>{r.branch_name}</td>
                     <td style={{
-                  color: '#4A6B12',
+                  color: '#2A9B6A',
                   fontWeight: 600
                 }}>+{r.quantity}</td>
                     <td>{formatDisplayDate(r.received_date)}</td>

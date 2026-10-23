@@ -21,12 +21,15 @@ function branchScope(user, queryBranchId) {
 const router = express.Router();
 const ORG_REPORT_PATHS = new Set(['/executive', '/operating-manager', '/performance-history', '/targets']);
 const CREDIT_HISTORY_PATHS = new Set(['/credit-history']);
+const CHART_DETAILS_PATHS = new Set(['/chart-details']);
 router.use((req, res, next) => {
   const allowed = ORG_REPORT_PATHS.has(req.path)
     ? ROLE_SETS.reportsOrg
     : CREDIT_HISTORY_PATHS.has(req.path)
       ? ROLE_SETS.creditHistory
-      : ROLE_SETS.reportsBranch;
+      : CHART_DETAILS_PATHS.has(req.path)
+        ? [...ROLE_SETS.reportsBranch, 'sales_staff']
+        : ROLE_SETS.reportsBranch;
   return requireRole(allowed)(req, res, next);
 });
 router.use(requireAssignedBranch);
@@ -1507,6 +1510,412 @@ router.get('/operating-manager', requireAuth, async (req, res) => {
 // sales invoice number, and collection receipt number.
 // Branch-scoped automatically for branch-level roles.
 // ──────────────────────────────────────────────────────────────────────────────
+/**
+ * GET /api/reports/chart-details
+ * Returns underlying records for a clicked chart slice.
+ * Query: type, day|date|status|branch_id|metric|name|period, optional analytics window params.
+ */
+router.get('/chart-details', requireAuth, async (req, res) => {
+  try {
+    const pool = req.app.locals.pool;
+    const user = req.currentUser;
+    const type = String(req.query.type || '').trim();
+    const { isBranchScoped, bid } = branchScope(user, req.query.branch_id);
+    const branchId = isBranchScoped ? bid : (req.query.branch_id ? Number(req.query.branch_id) : null);
+    const day = String(req.query.day || '').trim();
+    const date = String(req.query.date || '').trim();
+    const status = String(req.query.status || '').trim();
+    const metric = String(req.query.metric || '').trim();
+    const name = String(req.query.name || '').trim();
+    const period = String(req.query.period || '').trim();
+    const dateWindow = resolveAnalyticsWindow(req.query);
+
+    const branchSql = (alias = '') => {
+      const col = alias ? `${alias}.branch_id` : 'branch_id';
+      if (Number.isFinite(Number(branchId))) return { sql: `AND ${col} = $BID`, bid: Number(branchId) };
+      return { sql: '', bid: null };
+    };
+
+    if (type === 'collection_day') {
+      const scope = branchSql('cp');
+      const params = [];
+      let p = 1;
+      let dayFilter = '';
+      if (day) {
+        dayFilter = `AND TO_CHAR(cp.payment_date, 'Dy') = $${p++}`;
+        params.push(day);
+      }
+      let bidSql = '';
+      if (scope.bid != null) {
+        bidSql = `AND cp.branch_id = $${p++}`;
+        params.push(scope.bid);
+      }
+      const result = await pool.query(
+        `SELECT cp.collectionpayment_id, cp.receipt_number, cp.amount, cp.payment_date::text AS payment_date,
+                cp.status, COALESCE(pm.method_name, '—') AS payment_method,
+                COALESCE(NULLIF(CONCAT_WS(' ', c.first_name, c.last_name), ''), 'Customer') AS customer_name,
+                COALESCE(NULLIF(CONCAT_WS(' ', u.first_name, u.last_name), ''), 'Collector') AS collector_name,
+                b.name AS branch_name
+         FROM collection_payment cp
+         JOIN customers c ON c.customer_id = cp.customer_id
+         JOIN users u ON u.id = cp.collector_id
+         JOIN branches b ON b.id = cp.branch_id
+         LEFT JOIN payment_methods pm ON pm.payment_method_id = cp.payment_method_id
+         WHERE cp.payment_date >= (CURRENT_TIMESTAMP AT TIME ZONE '+08')::DATE - INTERVAL '7 days'
+           ${dayFilter} ${bidSql}
+         ORDER BY cp.payment_date DESC, cp.collectionpayment_id DESC
+         LIMIT 500`,
+        params
+      );
+      const total = result.rows.reduce((s, r) => s + Number(r.amount || 0), 0);
+      return res.json({
+        success: true,
+        data: {
+          title: 'Collection records',
+          category: day ? `Day: ${day}` : 'Last 7 days',
+          dateRange: 'Last 7 days',
+          rows: result.rows,
+          totals: [
+            { label: 'Payments', value: result.rows.length },
+            { label: 'Total amount', value: total },
+          ],
+        },
+      });
+    }
+
+    if (type === 'sales_day' || type === 'sales_period' || type === 'sales_product' || type === 'sales_customer') {
+      const params = [];
+      let p = 1;
+      const conditions = [`${COUNTED_INVOICE_STATUS_SI}`];
+      if (user.roleSlug === 'sales_staff') {
+        conditions.push(`si.sales_agent_id = $${p++}`);
+        params.push(user.id);
+      } else if (Number.isFinite(Number(branchId))) {
+        conditions.push(`si.branch_id = $${p++}`);
+        params.push(Number(branchId));
+      }
+      if (type === 'sales_day' && day) {
+        conditions.push(`TO_CHAR(si.invoices_date, 'Dy') = $${p++}`);
+        params.push(day);
+        conditions.push(`si.invoices_date >= (CURRENT_TIMESTAMP AT TIME ZONE '+08')::DATE - INTERVAL '7 days'`);
+      } else if (type === 'sales_period') {
+        const todayExpr = `(CURRENT_TIMESTAMP AT TIME ZONE '+08')::DATE`;
+        if (period === 'daily') conditions.push(`si.invoices_date = ${todayExpr}`);
+        else if (period === 'weekly') conditions.push(`si.invoices_date >= ${todayExpr} - 6`);
+        else if (period === 'monthly') conditions.push(`si.invoices_date >= date_trunc('month', ${todayExpr})::date`);
+      } else if (type === 'sales_product' && name) {
+        conditions.push(`EXISTS (
+          SELECT 1 FROM sales_invoice_items sii
+          JOIN products p ON p.id = sii.product_id
+          WHERE sii.invoices_id = si.sales_invoices_id AND p.name = $${p++}
+        )`);
+        params.push(name);
+        conditions.push(`si.invoices_date >= (CURRENT_TIMESTAMP AT TIME ZONE '+08')::DATE - 30`);
+      } else if (type === 'sales_customer' && name) {
+        conditions.push(`COALESCE(NULLIF(CONCAT_WS(' ', c.first_name, c.last_name), ''), 'Customer') = $${p++}`);
+        params.push(name);
+        conditions.push(`si.invoices_date >= (CURRENT_TIMESTAMP AT TIME ZONE '+08')::DATE - 90`);
+      }
+      const result = await pool.query(
+        `SELECT si.sales_invoices_id, si.invoice_number, si.total_amount, si.status,
+                si.invoices_date::text AS invoices_date,
+                COALESCE(NULLIF(CONCAT_WS(' ', c.first_name, c.last_name), ''), 'Customer') AS customer_name,
+                agent.full_name AS sales_agent_name, b.name AS branch_name
+         FROM sales_invoices si
+         LEFT JOIN customers c ON c.customer_id = si.customer_id
+         LEFT JOIN users agent ON agent.id = si.sales_agent_id
+         LEFT JOIN branches b ON b.id = si.branch_id
+         WHERE ${conditions.join(' AND ')}
+         ORDER BY si.invoices_date DESC, si.sales_invoices_id DESC
+         LIMIT 500`,
+        params
+      );
+      const total = result.rows.reduce((s, r) => s + Number(r.total_amount || 0), 0);
+      return res.json({
+        success: true,
+        data: {
+          title: 'Sales invoices',
+          category: name || day || period || 'Sales',
+          dateRange: type === 'sales_day' ? 'Last 7 days' : type === 'sales_product' ? 'Last 30 days' : type === 'sales_customer' ? 'Last 90 days' : period || '',
+          rows: result.rows,
+          totals: [
+            { label: 'Invoices', value: result.rows.length },
+            { label: 'Total amount', value: total },
+          ],
+        },
+      });
+    }
+
+    if (type === 'inventory_status') {
+      const params = [];
+      let p = 1;
+      let bidSql = '';
+      if (Number.isFinite(Number(branchId))) {
+        bidSql = `AND bi.branch_id = $${p++}`;
+        params.push(Number(branchId));
+      }
+      let statusSql = '';
+      if (status === 'Sufficient') {
+        statusSql = `AND bi.available_stock > bi.reorder_level`;
+      } else if (status === 'Low Stock' || status === 'Critical') {
+        statusSql = `AND bi.available_stock > 0 AND bi.available_stock <= bi.reorder_level`;
+      } else if (status === 'Out of Stock') {
+        statusSql = `AND bi.available_stock <= 0`;
+      } else if (status) {
+        statusSql = `AND bi.stock_status = $${p++}`;
+        params.push(status);
+      }
+      const result = await pool.query(
+        `SELECT p.name AS product_name, p.sku, bi.available_stock, bi.reorder_level,
+                bi.stock_status AS status, b.name AS branch_name
+         FROM branch_inventory bi
+         JOIN products p ON p.id = bi.product_id
+         JOIN branches b ON b.id = bi.branch_id
+         WHERE 1=1 ${bidSql} ${statusSql}
+         ORDER BY bi.available_stock ASC, p.name
+         LIMIT 500`,
+        params
+      );
+      return res.json({
+        success: true,
+        data: {
+          title: 'Inventory records',
+          category: status || 'All statuses',
+          dateRange: 'Current stock',
+          rows: result.rows,
+          totals: [{ label: 'Products', value: result.rows.length }],
+        },
+      });
+    }
+
+    if (type === 'delinquency') {
+      const params = [];
+      let p = 1;
+      let bidSql = '';
+      if (Number.isFinite(Number(branchId))) {
+        bidSql = `AND c.branch_id = $${p++}`;
+        params.push(Number(branchId));
+      }
+      const result = await pool.query(
+        `SELECT c.customer_id,
+                COALESCE(NULLIF(CONCAT_WS(' ', c.first_name, c.last_name), ''), 'Customer') AS customer_name,
+                b.name AS branch_name,
+                COALESCE(ca.outstanding_balance, 0) AS outstanding_balance,
+                ca.last_collection_date::text AS last_collection_date,
+                (
+                  SELECT MIN(si.due_date)::text FROM sales_invoices si
+                  WHERE si.customer_id = c.customer_id AND ${COUNTED_INVOICE_STATUS_SI}
+                    AND si.due_date < (CURRENT_TIMESTAMP AT TIME ZONE '+08')::DATE
+                ) AS earliest_due_date
+         FROM customers c
+         JOIN branches b ON b.id = c.branch_id
+         LEFT JOIN customer_activity ca ON ca.customer_id = c.customer_id
+         WHERE c.status = 'Active' AND ${OVERDUE_CUSTOMER}
+           ${bidSql}
+         ORDER BY ca.outstanding_balance DESC NULLS LAST
+         LIMIT 500`,
+        params
+      );
+      const total = result.rows.reduce((s, r) => s + Number(r.outstanding_balance || 0), 0);
+      return res.json({
+        success: true,
+        data: {
+          title: 'Overdue accounts',
+          category: 'Delinquency',
+          dateRange: 'Current',
+          rows: result.rows,
+          totals: [
+            { label: 'Accounts', value: result.rows.length },
+            { label: 'Outstanding', value: total },
+          ],
+        },
+      });
+    }
+
+    if (type === 'om_collections' || type === 'om_sales') {
+      const params = [];
+      let p = 1;
+      const isCollections = type === 'om_collections';
+      let bidSql = '';
+      if (Number.isFinite(Number(branchId))) {
+        bidSql = isCollections ? `AND cp.branch_id = $${p++}` : `AND si.branch_id = $${p++}`;
+        params.push(Number(branchId));
+      }
+      let dateSql = '';
+      if (date) {
+        dateSql = isCollections ? `AND cp.payment_date = $${p++}::date` : `AND si.invoices_date = $${p++}::date`;
+        params.push(date);
+      } else {
+        dateSql = isCollections
+          ? `AND cp.payment_date >= $${p++}::date AND cp.payment_date <= $${p++}::date`
+          : `AND si.invoices_date >= $${p++}::date AND si.invoices_date <= $${p++}::date`;
+        params.push(dateWindow.startDate, dateWindow.endDate);
+      }
+      if (isCollections) {
+        const result = await pool.query(
+          `SELECT cp.collectionpayment_id, cp.receipt_number, cp.amount, cp.payment_date::text AS payment_date,
+                  cp.status, COALESCE(pm.method_name, '—') AS payment_method,
+                  COALESCE(NULLIF(CONCAT_WS(' ', c.first_name, c.last_name), ''), 'Customer') AS customer_name,
+                  b.name AS branch_name
+           FROM collection_payment cp
+           JOIN customers c ON c.customer_id = cp.customer_id
+           JOIN branches b ON b.id = cp.branch_id
+           LEFT JOIN payment_methods pm ON pm.payment_method_id = cp.payment_method_id
+           WHERE 1=1 ${bidSql} ${dateSql}
+           ORDER BY cp.payment_date DESC, cp.collectionpayment_id DESC
+           LIMIT 500`,
+          params
+        );
+        const total = result.rows.reduce((s, r) => s + Number(r.amount || 0), 0);
+        return res.json({
+          success: true,
+          data: {
+            title: 'Collection records',
+            category: date || 'Selected period',
+            dateRange: date || `${dateWindow.startDate} – ${dateWindow.endDate}`,
+            rows: result.rows,
+            totals: [
+              { label: 'Payments', value: result.rows.length },
+              { label: 'Total amount', value: total },
+            ],
+          },
+        });
+      }
+      const result = await pool.query(
+        `SELECT si.sales_invoices_id, si.invoice_number, si.total_amount, si.status,
+                si.invoices_date::text AS invoices_date,
+                COALESCE(NULLIF(CONCAT_WS(' ', c.first_name, c.last_name), ''), 'Customer') AS customer_name,
+                agent.full_name AS sales_agent_name, b.name AS branch_name
+         FROM sales_invoices si
+         LEFT JOIN customers c ON c.customer_id = si.customer_id
+         LEFT JOIN users agent ON agent.id = si.sales_agent_id
+         LEFT JOIN branches b ON b.id = si.branch_id
+         WHERE ${COUNTED_INVOICE_STATUS_SI} ${bidSql} ${dateSql}
+         ORDER BY si.invoices_date DESC, si.sales_invoices_id DESC
+         LIMIT 500`,
+        params
+      );
+      const total = result.rows.reduce((s, r) => s + Number(r.total_amount || 0), 0);
+      return res.json({
+        success: true,
+        data: {
+          title: 'Sales invoices',
+          category: date || 'Selected period',
+          dateRange: date || `${dateWindow.startDate} – ${dateWindow.endDate}`,
+          rows: result.rows,
+          totals: [
+            { label: 'Invoices', value: result.rows.length },
+            { label: 'Total amount', value: total },
+          ],
+        },
+      });
+    }
+
+    if (type === 'om_branch') {
+      const targetBranch = Number(req.query.detail_branch_id || branchId);
+      if (!Number.isFinite(targetBranch)) {
+        return res.status(400).json({ success: false, message: 'detail_branch_id is required.' });
+      }
+      if (metric === 'Outstanding' || metric === 'Customers') {
+        const result = await pool.query(
+          `SELECT c.customer_id,
+                  COALESCE(NULLIF(CONCAT_WS(' ', c.first_name, c.last_name), ''), 'Customer') AS customer_name,
+                  COALESCE(ca.outstanding_balance, 0) AS outstanding_balance,
+                  ca.last_collection_date::text AS last_collection_date,
+                  c.status
+           FROM customers c
+           LEFT JOIN customer_activity ca ON ca.customer_id = c.customer_id
+           WHERE c.branch_id = $1
+             ${metric === 'Outstanding' ? 'AND COALESCE(ca.outstanding_balance, 0) > 0' : ''}
+           ORDER BY ca.outstanding_balance DESC NULLS LAST
+           LIMIT 500`,
+          [targetBranch]
+        );
+        const total = result.rows.reduce((s, r) => s + Number(r.outstanding_balance || 0), 0);
+        return res.json({
+          success: true,
+          data: {
+            title: metric === 'Outstanding' ? 'Outstanding balances' : 'Branch customers',
+            category: name || `Branch #${targetBranch}`,
+            dateRange: 'Current',
+            rows: result.rows,
+            totals: [
+              { label: 'Customers', value: result.rows.length },
+              { label: 'Outstanding', value: total },
+            ],
+          },
+        });
+      }
+      if (metric === 'Sales') {
+        req.query.type = 'om_sales';
+        req.query.branch_id = String(targetBranch);
+        // fall through by recursive logic — inline instead
+        const result = await pool.query(
+          `SELECT si.sales_invoices_id, si.invoice_number, si.total_amount, si.status,
+                  si.invoices_date::text AS invoices_date,
+                  COALESCE(NULLIF(CONCAT_WS(' ', c.first_name, c.last_name), ''), 'Customer') AS customer_name,
+                  agent.full_name AS sales_agent_name
+           FROM sales_invoices si
+           LEFT JOIN customers c ON c.customer_id = si.customer_id
+           LEFT JOIN users agent ON agent.id = si.sales_agent_id
+           WHERE ${COUNTED_INVOICE_STATUS_SI}
+             AND si.branch_id = $1
+             AND si.invoices_date >= $2::date AND si.invoices_date <= $3::date
+           ORDER BY si.invoices_date DESC
+           LIMIT 500`,
+          [targetBranch, dateWindow.startDate, dateWindow.endDate]
+        );
+        const total = result.rows.reduce((s, r) => s + Number(r.total_amount || 0), 0);
+        return res.json({
+          success: true,
+          data: {
+            title: 'Branch sales invoices',
+            category: name || `Branch #${targetBranch}`,
+            dateRange: `${dateWindow.startDate} – ${dateWindow.endDate}`,
+            rows: result.rows,
+            totals: [
+              { label: 'Invoices', value: result.rows.length },
+              { label: 'Total amount', value: total },
+            ],
+          },
+        });
+      }
+      // default Collections
+      const result = await pool.query(
+        `SELECT cp.collectionpayment_id, cp.receipt_number, cp.amount, cp.payment_date::text AS payment_date,
+                cp.status,
+                COALESCE(NULLIF(CONCAT_WS(' ', c.first_name, c.last_name), ''), 'Customer') AS customer_name
+         FROM collection_payment cp
+         JOIN customers c ON c.customer_id = cp.customer_id
+         WHERE cp.branch_id = $1
+           AND cp.payment_date >= $2::date AND cp.payment_date <= $3::date
+         ORDER BY cp.payment_date DESC
+         LIMIT 500`,
+        [targetBranch, dateWindow.startDate, dateWindow.endDate]
+      );
+      const total = result.rows.reduce((s, r) => s + Number(r.amount || 0), 0);
+      return res.json({
+        success: true,
+        data: {
+          title: 'Branch collections',
+          category: name || `Branch #${targetBranch}`,
+          dateRange: `${dateWindow.startDate} – ${dateWindow.endDate}`,
+          rows: result.rows,
+          totals: [
+            { label: 'Payments', value: result.rows.length },
+            { label: 'Total amount', value: total },
+          ],
+        },
+      });
+    }
+
+    return res.status(400).json({ success: false, message: `Unsupported chart detail type: ${type || '(empty)'}` });
+  } catch (err) {
+    console.error('[Reports] GET /chart-details error:', err.message);
+    return res.status(500).json({ success: false, message: 'Failed to fetch chart details.' });
+  }
+});
+
 router.get('/credit-history', requireAuth, async (req, res) => {
   try {
     const pool = req.app.locals.pool;

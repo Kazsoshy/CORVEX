@@ -1,6 +1,7 @@
 import React, { useEffect } from 'react';
 import { MapContainer, TileLayer, Marker, Popup, Polyline, Circle, Polygon, useMap } from 'react-leaflet';
 import L from 'leaflet';
+import { brand } from '../../theme/palette.js';
 
 function FitBounds({ bounds, padding = [36, 36] }) {
   const map = useMap();
@@ -44,7 +45,7 @@ L.Icon.Default.mergeOptions({
 });
 
 // A custom DivIcon creator for more modern looking markers if needed
-export const createCustomIcon = (color = '#255684', label = '') => {
+export const createCustomIcon = (color = brand, label = '') => {
   return L.divIcon({
     className: 'custom-leaflet-marker',
     html: `<div style="
@@ -100,9 +101,9 @@ export default function LeafletMap({
             key={polygon.id}
             positions={polygon.positions}
             pathOptions={{
-              color: polygon.color || '#255684',
+              color: polygon.color || brand,
               weight: polygon.weight ?? 2,
-              fillColor: polygon.fillColor || polygon.color || '#255684',
+              fillColor: polygon.fillColor || polygon.color || brand,
               fillOpacity: polygon.fillOpacity ?? 0.18,
               opacity: polygon.opacity ?? 0.85,
               dashArray: polygon.dashArray,
@@ -118,9 +119,9 @@ export default function LeafletMap({
             center={circle.center}
             radius={circle.radius ?? 400}
             pathOptions={{
-              color: circle.color || '#255684',
+              color: circle.color || brand,
               weight: circle.weight ?? 1,
-              fillColor: circle.fillColor || circle.color || '#255684',
+              fillColor: circle.fillColor || circle.color || brand,
               fillOpacity: circle.fillOpacity ?? 0.22,
               opacity: circle.opacity ?? 0.8,
             }}
@@ -149,7 +150,7 @@ export default function LeafletMap({
           <Polyline 
             key={line.id} 
             positions={line.positions} 
-            color={line.color || '#255684'}
+            color={line.color || brand}
             weight={line.weight ?? 3}
             opacity={line.opacity ?? 0.7}
             dashArray={line.dashArray}

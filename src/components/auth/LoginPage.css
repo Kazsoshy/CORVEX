@@ -32,7 +32,7 @@
 .login-page-backdrop-overlay {
   position: absolute;
   inset: 0;
-  background: rgba(12, 16, 49, 0.62);
+  background: rgba(11, 30, 48, 0.62);
 }
 
 .login-shell {
@@ -71,9 +71,9 @@
   inset: 0;
   background: linear-gradient(
     165deg,
-    rgba(12, 16, 49, 0.55) 0%,
-    rgba(12, 16, 49, 0.2) 45%,
-    rgba(12, 16, 49, 0.65) 100%
+    rgba(11, 30, 48, 0.55) 0%,
+    rgba(11, 30, 48, 0.2) 45%,
+    rgba(11, 30, 48, 0.65) 100%
   );
   pointer-events: none;
 }

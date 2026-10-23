@@ -3,7 +3,7 @@ import { StatsGrid, Stats } from '../shared/StatsGrid';
 import { usePagination, DEFAULT_PAGE_SIZE } from '../../hooks/usePagination';
 import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { formatCurrency, formatDisplayDate, formatDisplayDateTime, formatPaymentTimestamp } from '../../utils/formatters.js';
+import { formatCurrency, formatDisplayDate, formatDisplayDateTime, formatPaymentTimestamp, formatPhone } from '../../utils/formatters.js';
 import {
   fetchAccounts,
   fetchAccountById,
@@ -125,7 +125,6 @@ function DashboardPage({
   }, [showToast]);
 
   const agentName = currentUser?.fullName || 'Collector';
-  const branchName = currentUser?.branch?.name || '—';
   const summary = dashboard?.summary || {};
   const recentCollections = dashboard?.recentCollections || [];
   const recentFieldReports = dashboard?.recentFieldReports || [];
@@ -147,12 +146,6 @@ function DashboardPage({
       </section>
 
       <StatsGrid stats={[{
-      label: 'Branch',
-      value: branchName
-    }, {
-      label: 'Notifications',
-      value: String(unreadCount)
-    }, {
       label: 'Collected Today',
       value: formatCurrency(summary.amountCollectedToday ?? 0)
     }, {
@@ -453,7 +446,7 @@ function FieldActivityReportsPage({
             <img
               src={form.photo}
               alt="Report preview"
-              style={{ marginTop: 8, maxWidth: 200, maxHeight: 140, borderRadius: 8, border: '1px solid #c5c8d0' }}
+              style={{ marginTop: 8, maxWidth: 200, maxHeight: 140, borderRadius: 8, border: '1px solid #BADBE9' }}
             />
           ) : null}
           {errors.photo ? <p className="form-error">{errors.photo}</p> : null}
@@ -499,7 +492,7 @@ function FieldActivityReportsPage({
                     <td>
                       {r.photo ? (
                         <a href={r.photo} target="_blank" rel="noreferrer">
-                          <img src={r.photo} alt="Report" style={{ width: 48, height: 48, objectFit: 'cover', borderRadius: 6, border: '1px solid #c5c8d0' }} />
+                          <img src={r.photo} alt="Report" style={{ width: 48, height: 48, objectFit: 'cover', borderRadius: 6, border: '1px solid #BADBE9' }} />
                         </a>
                       ) : '—'}
                     </td>
@@ -821,7 +814,7 @@ function CustomerMapPage({
       id: 'depot',
       position: [depot.latitude, depot.longitude],
       label: 'B',
-      color: '#255684',
+      color: '#1A4162',
       popup: `<strong>${depot.name || 'Branch'}</strong><br/>Start here`,
     });
   }
@@ -829,12 +822,12 @@ function CustomerMapPage({
     id: account.id,
     position: center,
     label: isRouteNav ? '1' : (account.customerName || 'CU').substring(0, 2).toUpperCase(),
-    color: '#0c1031',
+    color: '#0B1E30',
     popup: `<strong>${account.customerName}</strong><br/>${account.address || ''}`,
   });
   const fitBounds = markers.map((m) => m.position);
   const polylines = roadLeg?.positions?.length
-    ? [{ id: 'nav-leg', positions: roadLeg.positions, color: '#0c1031', weight: 4 }]
+    ? [{ id: 'nav-leg', positions: roadLeg.positions, color: '#0B1E30', weight: 4 }]
     : [];
 
   return <div className="page">
@@ -1051,7 +1044,7 @@ function AccountDetailPage({
         <div className="account-detail-grid two-up">
           <DetailRowsTable rows={[
             { label: 'Address', value: account.address || '—' },
-            { label: 'Contact', value: account.phone || '—' },
+            { label: 'Contact', value: formatPhone(account.phone) },
             { label: 'Branch', value: account.branch_name || '—' },
             { label: 'Account Manager', value: account.account_manager_name || '—' },
             { label: 'Last Visit', value: account.lastVisitDate || '—' },
@@ -1066,7 +1059,7 @@ function AccountDetailPage({
             id: account.id,
             position: account.latitude && account.longitude ? [account.latitude, account.longitude] : [7.1907, 125.4553],
             label: (account.customerName || 'CU').substring(0, 2).toUpperCase(),
-            color: '#0c1031',
+            color: '#0B1E30',
             popup: account.customerName
           }]} />
           </div>
@@ -1486,9 +1479,9 @@ function DigitalReceiptPage({
           { label: 'Customer', value: receipt.customer_name || '—' },
           { label: 'Customer ID', value: <span style={{ fontFamily: 'monospace' }}>{receipt.customer_id}</span> },
           { label: 'Customer Address', value: receipt.customer_address || '—' },
-          { label: 'Customer Phone', value: receipt.customer_phone || '—' },
+          { label: 'Customer Phone', value: formatPhone(receipt.customer_phone) },
           { label: 'Branch', value: receipt.branch_name || '—' },
-          { label: 'Amount', value: <span style={{ fontWeight: 700, color: '#0c1031' }}>{formatCurrency(Number(receipt.amount))}</span> },
+          { label: 'Amount', value: <span style={{ fontWeight: 700, color: '#0B1E30' }}>{formatCurrency(Number(receipt.amount))}</span> },
           { label: 'Payment Method', value: receipt.payment_method || '—' },
           { label: 'Payment Date', value: formatDisplayDate(receipt.payment_date) },
           { label: 'Payment Time', value: receipt.payment_time ? String(receipt.payment_time).slice(0, 8) : '—' },

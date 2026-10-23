@@ -153,7 +153,7 @@ export function OrgLeafletPage({
     setPeriod('month');
   };
 
-  if (loading && !payload) return <LoadingState message="Loading organization map..." />;
+  if (loading && !payload) return <LoadingState variant="map" message="Loading organization map..." />;
 
   return (
     <div className="page org-leaflet-page">

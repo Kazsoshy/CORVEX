@@ -29,6 +29,39 @@ export function formatCurrency(amount) {
   })}`;
 }
 
+/**
+ * Formats Philippine mobile or landline numbers for display.
+ * Preserves unrecognised values as trimmed text (does not invent digits).
+ * @param {string|number|null|undefined} value
+ * @returns {string}
+ */
+export function formatPhone(value) {
+  if (value === null || value === undefined || value === '') return '—';
+  const raw = String(value).trim();
+  if (!raw) return '—';
+  const digits = raw.replace(/\D/g, '');
+
+  // +63 / 63 → national format starting with 0
+  let local = digits;
+  if (local.startsWith('63') && local.length >= 11) local = `0${local.slice(2)}`;
+
+  // Mobile: 09XXXXXXXXX → 09XX XXX XXXX
+  if (/^09\d{9}$/.test(local)) {
+    return `${local.slice(0, 4)} ${local.slice(4, 7)} ${local.slice(7)}`;
+  }
+
+  // Landline: 0 + 1–3 digit area + 7 local digits → (0XX) XXX-XXXX
+  if (/^0\d{8,10}$/.test(local)) {
+    const localPart = local.slice(-7);
+    const area = local.slice(0, local.length - 7);
+    if (area.length >= 2 && area.length <= 4) {
+      return `(${area}) ${localPart.slice(0, 3)}-${localPart.slice(3)}`;
+    }
+  }
+
+  return raw;
+}
+
 /** @returns {string} e.g. January 19, 2026 */
 export function formatDisplayDate(value) {
   if (value === null || value === undefined || value === '') return '—';

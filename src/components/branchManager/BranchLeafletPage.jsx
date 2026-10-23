@@ -125,7 +125,7 @@ export function BranchLeafletPage({
     ));
   };
 
-  if (loading && !payload) return <LoadingState message="Loading map data..." />;
+  if (loading && !payload) return <LoadingState variant="map" message="Loading map data..." />;
 
   return (
     <div className="page">

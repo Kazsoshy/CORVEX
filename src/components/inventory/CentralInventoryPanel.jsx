@@ -23,13 +23,13 @@ const METRIC_DEFS = [
     key: 'lowStock',
     label: 'Low Stock',
     icon: 'alert-triangle',
-    tone: 'warn',
+    tone: 'neutral',
   },
   {
     key: 'outOfStock',
     label: 'Out of Stock',
     icon: 'package-x',
-    tone: 'danger',
+    tone: 'neutral',
   },
 ];
 
@@ -133,7 +133,7 @@ export function CentralInventoryPanel({
     }
   };
 
-  if (loading) return <LoadingState message="Loading inventory centralization…" />;
+  if (loading) return <LoadingState variant="dashboard" message="Loading inventory centralization…" />;
   if (error && !summary) return <EmptyState title="Central inventory unavailable" description={error} />;
 
   return (
@@ -144,10 +144,6 @@ export function CentralInventoryPanel({
           <div>
             <p className="inv-overview-eyebrow">Inventory Centralization</p>
             <h3>{title}</h3>
-            <p className="inv-overview-sub">
-              All branches · Live PostgreSQL records
-              {summary?.lastSyncedAt ? ` · Synced ${formatDisplayDateTime(summary.lastSyncedAt)}` : ''}
-            </p>
           </div>
           <div className="inv-overview-actions">
             <StatusBadge status={aligned ? 'Aligned' : 'Needs alignment'} />
@@ -171,15 +167,21 @@ export function CentralInventoryPanel({
         </div>
 
         <div className="inv-metric-grid">
-          {METRIC_DEFS.map((metric) => (
-            <article key={metric.key} className={`inv-metric-card tone-${metric.tone}`}>
-              <div className="inv-metric-icon" aria-hidden="true">
-                <NavIcon name={metric.icon} />
-              </div>
-              <strong className="inv-metric-value">{Number(metrics[metric.key] || 0).toLocaleString()}</strong>
-              <span className="inv-metric-label">{metric.label}</span>
-            </article>
-          ))}
+          {METRIC_DEFS.map((metric) => {
+            const value = Number(metrics[metric.key] || 0);
+            let tone = metric.tone || 'neutral';
+            if (metric.key === 'lowStock') tone = value > 0 ? 'warn' : 'neutral';
+            if (metric.key === 'outOfStock') tone = value > 0 ? 'danger' : 'neutral';
+            return (
+              <article key={metric.key} className={`inv-metric-card tone-${tone}`}>
+                <div className="inv-metric-icon" aria-hidden="true">
+                  <NavIcon name={metric.icon} />
+                </div>
+                <strong className="inv-metric-value">{value.toLocaleString()}</strong>
+                <span className="inv-metric-label">{metric.label}</span>
+              </article>
+            );
+          })}
         </div>
 
         <p className="inv-overview-footnote">

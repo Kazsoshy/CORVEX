@@ -19,12 +19,28 @@ import {
 import { downloadPdf } from '../../utils/dataExport.js';
 import { NotificationsInbox } from '../shared/NotificationsInbox';
 import { fetchNotifications } from '../../api/notificationService.js';
-import { formatDisplayDate, formatDisplayDateTime, formatCurrency } from '../../utils/formatters.js';
+import { formatDisplayDate, formatDisplayDateTime, formatCurrency, formatPhone } from '../../utils/formatters.js';
 import { EmptyState } from '../shared/EmptyState';
 import { LoadingState } from '../shared/LoadingState';
 import { DetailRowsTable } from '../shared/DetailRowsTable';
 import { StatusBadge } from '../StatusBadge';
 import { NavIcon } from '../../navIcons';
+
+function portalStatusLabel(status) {
+  switch (String(status || '').toLowerCase()) {
+    case 'invited':
+    case 'pending':
+      return 'Pending portal activation';
+    case 'active':
+      return 'Portal active';
+    case 'none':
+    case '':
+      return 'No portal account';
+    default:
+      return String(status);
+  }
+}
+
 function LoginPage({
   navigate,
   showToast
@@ -393,7 +409,7 @@ function AccountDetailsPage({
           { label: 'Address', value: account.address || '—' },
           { label: 'Branch', value: account.branch_name || '—' },
           { label: 'Account Status', value: <StatusBadge status={account.status || '—'} /> },
-          { label: 'Portal Status', value: <StatusBadge status={account.portal_status || '—'} /> },
+          { label: 'Portal Status', value: <StatusBadge status={portalStatusLabel(account.portal_status)} /> },
         ]} />
       </section>
 
@@ -811,7 +827,7 @@ function ProfilePage({
           </div>
         ) : (
           <DetailRowsTable rows={[
-            { label: 'Phone', value: account.contact_phone || '—' },
+            { label: 'Phone', value: formatPhone(account.contact_phone) },
             { label: 'Email', value: account.portal_email || '—' },
             { label: 'Address', value: account.address || '—' },
           ]} />

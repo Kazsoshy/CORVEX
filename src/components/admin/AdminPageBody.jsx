@@ -10,7 +10,7 @@ import { fetchAuditLogs } from '../../api/adminService';
 import { EmptyState } from '../shared/EmptyState';
 import { LoadingState } from '../shared/LoadingState';
 import { NavIcon } from '../../navIcons';
-import { formatCurrency, formatDisplayDate, formatDisplayDateTime } from '../../utils/formatters.js';
+import { formatCurrency, formatDisplayDate, formatDisplayDateTime, formatPhone } from '../../utils/formatters.js';
 import { exportRows } from '../../utils/dataExport.js';
 import { getOperatingManagerAnalytics } from '../../api/reportsService.js';
 import { NotificationsInbox } from '../shared/NotificationsInbox';
@@ -54,7 +54,7 @@ function buildUserDetailRows(user) {
     { key: 'middle', label: 'Middle Name', value: user.middle_name || '—' },
     { key: 'last', label: 'Last Name', value: user.last_name || '—' },
     { key: 'email', label: 'Email', value: user.email || '—' },
-    { key: 'phone', label: 'Contact', value: user.phone || '—' },
+    { key: 'phone', label: 'Contact', value: formatPhone(user.phone || user.contact_number) },
     { key: 'role', label: 'Role', value: user.role?.name || '—' },
     { key: 'branch', label: 'Branch', value: user.branch?.name || '—' },
     { key: 'status', label: 'Status', value: <StatusPill status={user.status} /> },
@@ -174,7 +174,7 @@ function DashboardPage({
         <Card title="User Growth" sub="Monthly registered users">
           <ResponsiveContainer width="100%" height={200}>
             <AreaChart data={USER_GROWTH}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#c5c8d0" />
+              <CartesianGrid strokeDasharray="3 3" stroke="#BADBE9" />
               <XAxis dataKey="month" tick={{
               fontSize: 12
             }} />
@@ -182,7 +182,7 @@ function DashboardPage({
               fontSize: 12
             }} />
               <Tooltip />
-              <Area type="monotone" dataKey="users" name="Users" stroke="#255684" fill="#255684" fillOpacity={0.1} strokeWidth={2} />
+              <Area type="monotone" dataKey="users" name="Users" stroke="#1A4162" fill="#1A4162" fillOpacity={0.1} strokeWidth={2} />
             </AreaChart>
           </ResponsiveContainer>
         </Card>
@@ -190,7 +190,7 @@ function DashboardPage({
         <Card title="Branch Overview" sub="Performance scores">
           <ResponsiveContainer width="100%" height={200}>
             <BarChart data={BRANCH_PERFORMANCE_CHART}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#c5c8d0" />
+              <CartesianGrid strokeDasharray="3 3" stroke="#BADBE9" />
               <XAxis dataKey="branch" tick={{
               fontSize: 12
             }} />
@@ -199,7 +199,7 @@ function DashboardPage({
             }} />
               <Tooltip />
               <Legend />
-              <Bar dataKey="performance" name="Performance" fill="#255684" radius={[4, 4, 0, 0]} />
+              <Bar dataKey="performance" name="Performance" fill="#1A4162" radius={[4, 4, 0, 0]} />
               <Bar dataKey="risk" name="Risk Score" fill="#ef4444" radius={[4, 4, 0, 0]} />
             </BarChart>
           </ResponsiveContainer>
@@ -418,8 +418,8 @@ function UserListPage({
   if (loading) return <div className="page"><LoadingState message="Loading users..." /></div>;
   return <div className="page">
       {confirmAction && <section className="panel content-panel relative overflow-hidden" style={{
-      borderColor: confirmAction.action === 'disable' ? '#fca5a5' : 'rgba(37, 86, 132, 0.35)',
-      background: confirmAction.action === 'disable' ? 'rgba(220,38,38,0.04)' : 'rgba(37, 86, 132, 0.04)',
+      borderColor: confirmAction.action === 'disable' ? '#fca5a5' : 'rgba(26, 65, 98, 0.35)',
+      background: confirmAction.action === 'disable' ? 'rgba(220,38,38,0.04)' : 'rgba(26, 65, 98, 0.04)',
       marginBottom: 24
     }}>
           {confirmAction.action === 'disable' ? <>
@@ -812,9 +812,10 @@ function buildBranchDetailRows(branch) {
     { key: 'id', label: 'Branch ID', value: branch.branch_id ?? '—' },
     { key: 'name', label: 'Branch Name', value: branch.branch_name || '—' },
     { key: 'address', label: 'Address', value: branch.address || '—' },
+    { key: 'region', label: 'Region', value: branch.region || '—' },
     { key: 'lat', label: 'Latitude', value: branch.latitude ?? '—' },
     { key: 'lng', label: 'Longitude', value: branch.longitude ?? '—' },
-    { key: 'contact', label: 'Contact No', value: branch.contact_no || '—' },
+    { key: 'contact', label: 'Contact No', value: formatPhone(branch.contact_no || branch.phone) },
     { key: 'email', label: 'Email', value: branch.email || '—' },
     { key: 'manager', label: 'Manager', value: branch.manager_name || '—' },
     { key: 'staff', label: 'Active Staff', value: branch.active_staff ?? '—' },
@@ -990,7 +991,7 @@ function BranchListPage({
               {branches.length === 0 ? <tr><td colSpan="5" style={{
                   textAlign: 'center',
                   padding: '40px',
-                  color: '#818697'
+                  color: '#5F7385'
                 }}>No branches found</td></tr> : paginatedBranches.map(b => {
                   const isInactive = String(b.status).toLowerCase() === 'inactive';
                   return <tr key={b.branch_id} className="clickable-row" onClick={() => openViewBranch(b)}>
@@ -999,8 +1000,8 @@ function BranchListPage({
                       <span className="user-meta-id">ID {b.branch_id}</span>
                     </td>
                     <td className="cell-address" title={b.address}>{b.address || '—'}</td>
-                    <td className="cell-contact" title={b.contact_no || b.email}>
-                      {b.contact_no || '—'}
+                    <td className="cell-contact" title={[formatPhone(b.contact_no || b.phone), b.email].filter(Boolean).join(' · ')}>
+                      <span className="contact-phone">{formatPhone(b.contact_no || b.phone)}</span>
                       {b.email ? <span className="user-meta-id">{b.email}</span> : null}
                     </td>
                     <td className="cell-status"><StatusPill status={b.status} /></td>
@@ -1697,14 +1698,14 @@ function ReportsPage({
         <Card title="Collections Trend" sub={analytics.scope || 'All branches'}>
           <ResponsiveContainer width="100%" height={240}>
             <AreaChart data={analytics.trends?.collections || []}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#c5c8d0" />
+              <CartesianGrid strokeDasharray="3 3" stroke="#BADBE9" />
               <XAxis dataKey="day" tick={{
               fontSize: 12
             }} /><YAxis tick={{
               fontSize: 11
             }} tickFormatter={v => `${(v / 1000).toFixed(0)}k`} />
               <Tooltip formatter={v => formatCurrency(v)} />
-              <Area type="monotone" dataKey="amount" name="Collections" stroke="#255684" fill="#255684" fillOpacity={0.1} strokeWidth={2} />
+              <Area type="monotone" dataKey="amount" name="Collections" stroke="#1A4162" fill="#1A4162" fillOpacity={0.1} strokeWidth={2} />
             </AreaChart>
           </ResponsiveContainer>
         </Card>
@@ -1742,15 +1743,15 @@ function ReportsPage({
               compliance: row.routeCompliance,
               inventory: row.inventoryHealth,
             }))}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#c5c8d0" />
+              <CartesianGrid strokeDasharray="3 3" stroke="#BADBE9" />
               <XAxis dataKey="branch" tick={{
               fontSize: 12
             }} /><YAxis domain={[0, 100]} tick={{
               fontSize: 12
             }} />
               <Tooltip /><Legend />
-              <Bar dataKey="compliance" name="Route Compliance" fill="#255684" radius={[4, 4, 0, 0]} />
-              <Bar dataKey="inventory" name="Inventory Health" fill="#255684" radius={[4, 4, 0, 0]} />
+              <Bar dataKey="compliance" name="Route Compliance" fill="#1A4162" radius={[4, 4, 0, 0]} />
+              <Bar dataKey="inventory" name="Inventory Health" fill="#1A4162" radius={[4, 4, 0, 0]} />
             </BarChart>
           </ResponsiveContainer>
         </Card>
@@ -1849,7 +1850,7 @@ function AuditLogsPage({
               {filtered.length === 0 ? <tr><td colSpan="6" style={{
                   textAlign: 'center',
                   padding: '40px',
-                  color: '#818697'
+                  color: '#5F7385'
                 }}>No audit logs found</td></tr> : paginated_filtered.map(l => <tr key={l.log_id}>
                     <td>{l.log_id}</td>
                     <td>{l.user_name || `User #${l.user_id}`}</td>

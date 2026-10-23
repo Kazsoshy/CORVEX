@@ -149,7 +149,7 @@ export function CreditHistoryListPage({
                     <td><strong>{r.customer_name}</strong></td>
                     <td style={{
                   fontWeight: 600,
-                  color: '#255684'
+                  color: 'var(--palette-navy)'
                 }}>{formatCurrency(r.payment_amount)}</td>
                     <td><StatusBadge status={r.payment_status} /></td>
                     <td>{formatDisplayDate(r.transaction_date)}</td>
@@ -201,11 +201,11 @@ export function CreditHistoryListPage({
               { label: 'Collection ID', value: <span style={{ fontFamily: 'monospace' }}>{selectedRecord.collection_id ?? '—'}</span> },
               { label: 'Receipt Number', value: <span style={{ fontFamily: 'monospace' }}>{selectedRecord.receipt_number || '—'}</span> },
               { label: 'Previous Balance', value: formatCurrency(selectedRecord.previous_balance) },
-              { label: 'Payment Amount', value: <span style={{ fontWeight: 700, color: '#255684' }}>{formatCurrency(selectedRecord.payment_amount)}</span> },
+              { label: 'Payment Amount', value: <span style={{ fontWeight: 700, color: 'var(--palette-navy)' }}>{formatCurrency(selectedRecord.payment_amount)}</span> },
               { label: 'Remaining Balance', value: (
                 <span style={{
                   fontWeight: 700,
-                  color: Number(selectedRecord.remaining_balance) > 0 ? '#dc2626' : '#4A6B12'
+                  color: Number(selectedRecord.remaining_balance) > 0 ? '#dc2626' : '#2A9B6A'
                 }}>
                   {formatCurrency(selectedRecord.remaining_balance)}
                 </span>
@@ -307,11 +307,11 @@ export function CreditHistoryDetailPage({
           { label: 'Collection ID', value: <span style={{ fontFamily: 'monospace' }}>{record.collection_id ?? '—'}</span> },
           { label: 'Receipt Number', value: <span style={{ fontFamily: 'monospace' }}>{record.receipt_number || '—'}</span> },
           { label: 'Previous Balance', value: formatCurrency(record.previous_balance) },
-          { label: 'Payment Amount', value: <span style={{ fontWeight: 700, color: '#255684' }}>{formatCurrency(record.payment_amount)}</span> },
+          { label: 'Payment Amount', value: <span style={{ fontWeight: 700, color: 'var(--palette-navy)' }}>{formatCurrency(record.payment_amount)}</span> },
           { label: 'Remaining Balance', value: (
             <span style={{
               fontWeight: 700,
-              color: Number(record.remaining_balance) > 0 ? '#dc2626' : '#4A6B12'
+              color: Number(record.remaining_balance) > 0 ? '#dc2626' : '#2A9B6A'
             }}>
               {formatCurrency(record.remaining_balance)}
             </span>

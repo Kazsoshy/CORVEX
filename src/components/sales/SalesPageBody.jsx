@@ -1,8 +1,12 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
+import { Bar, BarChart, CartesianGrid, Legend, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import { Pagination } from '../shared/Pagination';
 import { StatsGrid, Stats } from '../shared/StatsGrid';
 import { usePagination, useServerPagination, DEFAULT_PAGE_SIZE } from '../../hooks/usePagination';
+import { ChartDrilldownModal } from '../shared/ChartDrilldownModal.jsx';
+import { useChartDrilldown } from '../../hooks/useChartDrilldown.js';
+import { formatCurrency as formatMoney } from '../../utils/formatters.js';
 import {
   createCustomer,
   createSalesInvoice,
@@ -65,6 +69,7 @@ function DashboardPage({
 }) {
   const currentUser = getCurrentUser();
   const today = formatDisplayDate(new Date());
+  const { drilldown, closeDrilldown, openApiDrilldown } = useChartDrilldown({ showToast });
   const [dashboard, setDashboard] = useState(null);
   const [unreadCount, setUnreadCount] = useState(0);
   const [scheduleNotices, setScheduleNotices] = useState([]);
@@ -108,9 +113,6 @@ function DashboardPage({
     }, {
       label: 'Sales Commitments Logged',
       value: String(summary.salesLogged ?? 0)
-    }, {
-      label: 'Pending Visits',
-      value: String(summary.pendingVisits ?? 0)
     }, {
       label: 'Completed Visits',
       value: String(summary.completedVisits ?? 0)
@@ -167,9 +169,45 @@ function DashboardPage({
 
       <div className="dashboard-widgets grid two-up">
         <section className="panel content-panel">
-          <div className="panel-section-header"><h3>Today&apos;s Revenue</h3></div>
-          <p className="analytics-value">{formatCurrency(analytics.dailyRevenue || 0)}</p>
-          <p className="muted">Weekly: {formatCurrency(analytics.weeklyRevenue || 0)} · Monthly: {formatCurrency(analytics.monthlyRevenue || 0)}</p>
+          <div className="panel-section-header">
+            <h3>Revenue by Period</h3>
+            <p className="muted" style={{ margin: 0, fontSize: '0.82rem' }}>Click a bar to open matching invoices</p>
+          </div>
+          <ResponsiveContainer width="100%" height={220}>
+            <BarChart
+              data={[
+                { period: 'Today', amount: Number(analytics.dailyRevenue || 0), key: 'daily' },
+                { period: 'Weekly', amount: Number(analytics.weeklyRevenue || 0), key: 'weekly' },
+                { period: 'Monthly', amount: Number(analytics.monthlyRevenue || 0), key: 'monthly' },
+              ]}
+              style={{ cursor: 'pointer' }}
+              onClick={(state) => {
+                const label = state?.activeLabel;
+                const point = state?.activePayload?.[0]?.payload;
+                if (!point?.key) return;
+                openApiDrilldown(
+                  { type: 'sales_period', period: point.key },
+                  {
+                    title: 'Sales invoices',
+                    category: label || point.period,
+                    dateRange: point.key,
+                    columnSet: 'sales',
+                    legend: [{ label: 'Revenue', value: formatMoney(point.amount || 0) }],
+                    filenameBase: `sales-${point.key}`,
+                  }
+                );
+              }}
+            >
+              <CartesianGrid strokeDasharray="3 3" stroke="#BADBE9" />
+              <XAxis dataKey="period" tick={{ fontSize: 12 }} />
+              <YAxis tick={{ fontSize: 11 }} tickFormatter={(v) => `${(v / 1000).toFixed(0)}k`} />
+              <Tooltip formatter={(v) => formatCurrency(v)} />
+              <Bar dataKey="amount" name="Revenue" fill="#1A4162" radius={[4, 4, 0, 0]} />
+            </BarChart>
+          </ResponsiveContainer>
+          <p className="muted" style={{ marginTop: 8 }}>
+            Today: {formatCurrency(analytics.dailyRevenue || 0)} · Weekly: {formatCurrency(analytics.weeklyRevenue || 0)} · Monthly: {formatCurrency(analytics.monthlyRevenue || 0)}
+          </p>
         </section>
         <section className="panel content-panel">
           <div className="panel-section-header"><h3>Visit Completion Progress</h3></div>
@@ -193,13 +231,37 @@ function DashboardPage({
           </ul>
         </section>
         <section className="panel content-panel">
-          <div className="panel-section-header"><h3>Top Selling Products</h3></div>
-          <ul className="widget-list">
-            {(analytics.topProducts || []).map(product => <li key={product.name}>
-                <div><strong>{product.name}</strong></div>
-                <span>{product.units} units</span>
-              </li>)}
-          </ul>
+          <div className="panel-section-header">
+            <h3>Top Selling Products</h3>
+            <p className="muted" style={{ margin: 0, fontSize: '0.82rem' }}>Last 30 days · click a bar</p>
+          </div>
+          <ResponsiveContainer width="100%" height={220}>
+            <BarChart
+              data={analytics.topProducts || []}
+              style={{ cursor: 'pointer' }}
+              onClick={(state) => {
+                const name = state?.activeLabel || state?.activePayload?.[0]?.payload?.name;
+                if (!name) return;
+                openApiDrilldown(
+                  { type: 'sales_product', name },
+                  {
+                    title: 'Invoices for product',
+                    category: name,
+                    dateRange: 'Last 30 days',
+                    columnSet: 'sales',
+                    filenameBase: `product-${String(name).slice(0, 24)}`,
+                  }
+                );
+              }}
+            >
+              <CartesianGrid strokeDasharray="3 3" stroke="#BADBE9" />
+              <XAxis dataKey="name" tick={{ fontSize: 11 }} interval={0} angle={-15} textAnchor="end" height={60} />
+              <YAxis allowDecimals={false} tick={{ fontSize: 11 }} />
+              <Tooltip />
+              <Legend />
+              <Bar dataKey="units" name="Units" fill="#408DAD" radius={[4, 4, 0, 0]} />
+            </BarChart>
+          </ResponsiveContainer>
         </section>
       </div>
 
@@ -208,21 +270,36 @@ function DashboardPage({
           <h3>Sales Analytics</h3>
           <button className="button ghost" type="button" onClick={() => navigate('/sales/route-tracking')}>Route Tracking</button>
         </div>
-        <StatsGrid stats={[{
-          label: 'Daily Total',
-          value: formatCurrency(analytics.dailyRevenue || 0)
-        }, {
-          label: 'Weekly Total',
-          value: formatCurrency(analytics.weeklyRevenue || 0)
-        }, {
-          label: 'Monthly Total',
-          value: formatCurrency(analytics.monthlyRevenue || 0)
-        }]} />
         <h4 className="subsection-title">Top Customers</h4>
-        <ul className="widget-list">
-          {(analytics.topCustomers || []).map(customer => <li key={customer.name}><div><strong>{customer.name}</strong></div><span>{formatCurrency(customer.revenue)}</span></li>)}
-        </ul>
+        <p className="muted" style={{ marginTop: 0 }}>Last 90 days · click a bar for invoices</p>
+        <ResponsiveContainer width="100%" height={240}>
+          <BarChart
+            data={analytics.topCustomers || []}
+            style={{ cursor: 'pointer' }}
+            onClick={(state) => {
+              const name = state?.activeLabel || state?.activePayload?.[0]?.payload?.name;
+              if (!name) return;
+              openApiDrilldown(
+                { type: 'sales_customer', name },
+                {
+                  title: 'Invoices for customer',
+                  category: name,
+                  dateRange: 'Last 90 days',
+                  columnSet: 'sales',
+                  filenameBase: `customer-${String(name).slice(0, 24)}`,
+                }
+              );
+            }}
+          >
+            <CartesianGrid strokeDasharray="3 3" stroke="#BADBE9" />
+            <XAxis dataKey="name" tick={{ fontSize: 11 }} interval={0} angle={-15} textAnchor="end" height={60} />
+            <YAxis tick={{ fontSize: 11 }} tickFormatter={(v) => `${(v / 1000).toFixed(0)}k`} />
+            <Tooltip formatter={(v) => formatCurrency(v)} />
+            <Bar dataKey="revenue" name="Revenue" fill="#1A4162" radius={[4, 4, 0, 0]} />
+          </BarChart>
+        </ResponsiveContainer>
       </section>
+      <ChartDrilldownModal {...drilldown} onClose={closeDrilldown} showToast={showToast} />
     </div>;
 }
 function haversine(a, b) {
@@ -337,7 +414,7 @@ function SchedulePage({
     }
     return sum;
   }, [coordVisits]);
-  const visitColor = (v) => (v.status === 'Completed' ? '#255684' : v.status === 'Pending' ? '#0c1031' : '#f59e0b');
+  const visitColor = (v) => (v.status === 'Completed' ? '#1A4162' : v.status === 'Pending' ? '#0B1E30' : '#f59e0b');
   const mapMarkers = filtered.filter((v) => Number(v.latitude) && Number(v.longitude)).map((v) => ({
     id: v.visit_id,
     position: [Number(v.latitude), Number(v.longitude)],
@@ -454,7 +531,7 @@ function SchedulePage({
             <LeafletMap center={mapCenter} zoom={13} height={500} markers={mapMarkers} polylines={totalDistance ? [{
             id: 'route',
             positions: [...coordVisits].sort((a, b) => new Date(a.scheduled_date || 0) - new Date(b.scheduled_date || 0)).map(v => [Number(v.latitude), Number(v.longitude)]),
-            color: '#0c1031'
+            color: '#0B1E30'
           }] : []} />
           </div>
           <p className="muted">Visits mapped: {filtered.length}{totalDistance ? ` · Route distance: ${totalDistance.toFixed(1)} km` : ''}</p>
@@ -1189,7 +1266,7 @@ function CustomerDetailPage({
             <div className="progress-bar-container" style={{ marginTop: 8 }}>
               <div className="progress-bar" style={{
               width: `${Math.min(outstandingBalance / (creditLimit || 1) * 100, 100)}%`,
-              backgroundColor: outstandingBalance > creditLimit * 0.8 ? '#ef4444' : '#255684'
+              backgroundColor: outstandingBalance > creditLimit * 0.8 ? '#ef4444' : '#1A4162'
             }} />
             </div>
           </div>
@@ -1228,7 +1305,7 @@ function CustomerDetailPage({
           position: customer.latitude && customer.longitude ? [Number(customer.latitude), Number(customer.longitude)] : [7.1907, 125.4553],
           popup: `<strong>${customer.first_name} ${customer.last_name}</strong><br/>${customer.address}`,
           label: String(customer.customer_id),
-          color: '#0c1031'
+          color: '#0B1E30'
         }]} />
         </div>
       </section>
@@ -1264,7 +1341,7 @@ function CustomerDetailPage({
                   </td>
                 </tr>) : <tr><td colSpan="6" style={{
                 textAlign: 'center',
-                color: '#818697',
+                color: '#5F7385',
                 padding: 16
               }}>No recent payments</td></tr>}
             </tbody>
@@ -1724,7 +1801,7 @@ function VisitLogPage({
               position: [Number(visit.latitude), Number(visit.longitude)],
               popup: `<strong>${customerName}</strong><br/>${visit.address || ''}`,
               label: String(visit.visit_id),
-              color: visit.status === 'Completed' ? '#255684' : '#0c1031'
+              color: visit.status === 'Completed' ? '#1A4162' : '#0B1E30'
             }]} />
               </div> : null}
           </div>
@@ -2402,7 +2479,7 @@ function FieldActivityReportsPage({ showToast }) {
             }}
           />
           {form.photoName ? <p className="muted">Selected: {form.photoName}</p> : null}
-          {form.photo ? <img src={form.photo} alt="Report preview" style={{ marginTop: 8, maxWidth: 200, maxHeight: 140, borderRadius: 8, border: '1px solid #c5c8d0' }} /> : null}
+          {form.photo ? <img src={form.photo} alt="Report preview" style={{ marginTop: 8, maxWidth: 200, maxHeight: 140, borderRadius: 8, border: '1px solid #BADBE9' }} /> : null}
           {errors.photo ? <p className="form-error">{errors.photo}</p> : null}
         </div>
         <div className="flex justify-end">
@@ -2435,7 +2512,7 @@ function FieldActivityReportsPage({ showToast }) {
               <td>
                 {r.photo ? (
                   <a href={r.photo} target="_blank" rel="noreferrer">
-                    <img src={r.photo} alt="Report" style={{ width: 48, height: 48, objectFit: 'cover', borderRadius: 6, border: '1px solid #c5c8d0' }} />
+                    <img src={r.photo} alt="Report" style={{ width: 48, height: 48, objectFit: 'cover', borderRadius: 6, border: '1px solid #BADBE9' }} />
                   </a>
                 ) : '—'}
               </td>
@@ -2546,11 +2623,11 @@ function RouteTrackingPage({
     id: v.visit_id,
     position: [Number(v.latitude), Number(v.longitude)],
     label: String(v.visit_id),
-    color: v.status === 'Completed' ? '#255684' : '#f59e0b',
+    color: v.status === 'Completed' ? '#1A4162' : '#f59e0b',
     popup: `${v.customer_name} — ${v.status}`,
   }));
   const polyline = markers.length >= 2
-    ? [{ id: 'route', positions: markers.map(m => m.position), color: '#0c1031' }]
+    ? [{ id: 'route', positions: markers.map(m => m.position), color: '#0B1E30' }]
     : [];
   const coverage = visits.length ? Math.round((completed.length / visits.length) * 100) : 0;
   if (loading) return <LoadingState message="Loading route..." />;

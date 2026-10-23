@@ -15,7 +15,7 @@ const sectionStyle = {
 const itemsTableShellStyle = {
   maxHeight: 280,
   overflow: 'auto',
-  border: '1px solid var(--border, #c5c8d0)',
+  border: '1px solid var(--border, #BADBE9)',
   borderRadius: 8,
 };
 
