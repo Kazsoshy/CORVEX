@@ -172,12 +172,6 @@ function DashboardPage({
         </section>
       ) : null}
 
-      <div className="flex flex-wrap gap-2 justify-end mt-2 mb-2">
-        <button className="button secondary" type="button" onClick={() => navigate('/collector/accounts')}>View Accounts</button>
-        <button className="button secondary" type="button" onClick={() => navigate('/collector/incident')}>Report Incident</button>
-        <button className="button" type="button" onClick={() => navigate('/collector/route')}>Start Today's Route</button>
-      </div>
-
       <div className="dashboard-widgets grid two-up">
         <section className="panel content-panel relative overflow-hidden">
           <div className="list-section-header">
@@ -514,23 +508,6 @@ function manilaDateInputValue() {
   }).format(new Date());
 }
 
-function RouteDateControl({ value, onChange }) {
-  return (
-    <label className="muted" style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
-      Route date
-      <input
-        className="filter-input"
-        type="date"
-        value={value}
-        aria-label="Route date"
-        onChange={(event) => {
-          if (/^\d{4}-\d{2}-\d{2}$/.test(event.target.value)) onChange(event.target.value);
-        }}
-      />
-    </label>
-  );
-}
-
 function RoutePage({
   pageType,
   navigate,
@@ -542,7 +519,7 @@ function RoutePage({
   const [filter, setFilter] = useState('All');
   const [showMap, setShowMap] = useState(pageType === 'routeMap');
   const [roadStats, setRoadStats] = useState(null);
-  const [routeDate, setRouteDate] = useState(manilaDateInputValue);
+  const routeDate = manilaDateInputValue();
   useEffect(() => {
     let cancelled = false;
     async function load() {
@@ -616,18 +593,29 @@ function RoutePage({
   const pagination_filteredStops = usePagination(filteredStops);
   const paginated_filteredStops = pagination_filteredStops.paginatedData;
   const showingSawFallback = sawMeta?.listSource === 'saw';
-  const stopsLabel = routeDate === manilaDateInputValue() ? "Today's Stops" : 'Stops';
+  const stopsLabel = "Today's Stops";
   const routeNote = showingSawFallback
     ? `No customers were assigned for ${sawMeta?.scheduledDate || routeDate}. This list is the SAW ranking of eligible customers.`
     : `Assigned route · SAW rank · ${customers.length} stop${customers.length === 1 ? '' : 's'}${sawMeta?.scheduledDate ? ` · ${sawMeta.scheduledDate}` : ''}. Completed visits keep their SAW rank.`;
 
+  const routeToolbar = (
+    <div className="flex flex-wrap gap-2 justify-end items-center" style={{ marginTop: 4, marginBottom: 4 }}>
+      {actions.map((a) => (
+        <button
+          key={a.label}
+          className={a.variant === 'secondary' ? 'button secondary whitespace-nowrap' : 'button whitespace-nowrap'}
+          type="button"
+          onClick={() => navigate(a.to)}
+        >
+          {a.label}
+        </button>
+      ))}
+    </div>
+  );
+
   if (loading) return <LoadingState message="Loading route..." />;
   if (pageType === 'routeSummary') {
     return <div className="page">
-        <div className="flex flex-wrap gap-2 justify-end items-center mt-2 mb-2">
-          <RouteDateControl value={routeDate} onChange={setRouteDate} />
-          {actions.map(a => <button key={a.label} className={a.variant === 'secondary' ? 'button secondary' : 'button'} type="button" onClick={() => navigate(a.to)}>{a.label}</button>)}
-        </div>
         {showingSawFallback ? <p className="muted" style={{ marginTop: 0 }}>{routeNote}</p> : null}
         <StatsGrid stats={[{
         label: stopsLabel,
@@ -646,6 +634,7 @@ function RoutePage({
         label: 'SAW as of',
         value: sawMeta?.asOf || '—'
       }]} />
+        {routeToolbar}
         <section className="panel content-panel relative overflow-hidden">
           <div className="flex flex-col md:flex-row justify-between gap-4 items-start md:items-center mb-4">
             <h3>Route Summary</h3>
@@ -659,10 +648,6 @@ function RoutePage({
       </div>;
   }
   return <div className="page">
-      <div className="flex flex-wrap gap-2 justify-end items-center mt-2 mb-2">
-        <RouteDateControl value={routeDate} onChange={setRouteDate} />
-        {actions.map(a => <button key={a.label} className={a.variant === 'secondary' ? 'button secondary' : 'button'} type="button" onClick={() => navigate(a.to)}>{a.label}</button>)}
-      </div>
       <StatsGrid stats={[{
       label: stopsLabel,
       value: String(customers.length)
@@ -673,6 +658,7 @@ function RoutePage({
       label: 'Road distance',
       value: roadStats?.distanceKm != null ? `${roadStats.distanceKm} km` : '—'
       }]} />
+      {routeToolbar}
       <section className="panel content-panel relative overflow-hidden">
         <div className="flex flex-col md:flex-row justify-between gap-4 items-start md:items-center mb-4">
           <div>
@@ -1326,7 +1312,14 @@ function ReceiptsListPage({
       <section className="panel content-panel relative overflow-hidden">
         <div className="list-section-header">
           <h3>Digital Receipts</h3>
-          <div className="list-section-actions">
+        </div>
+        <div className="list-section-toolbar suppliers-toolbar audit-logs-toolbar">
+          <div className="list-section-controls audit-logs-filters">
+            <input className="filter-input search" type="search" placeholder="Search by receipt number, customer, or ID" value={search} onChange={e => setSearch(e.target.value)} aria-label="Search receipts" />
+            <input className="filter-input" type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)} aria-label="From date" />
+            <input className="filter-input" type="date" value={dateTo} onChange={e => setDateTo(e.target.value)} aria-label="To date" />
+          </div>
+          <div className="list-section-actions suppliers-toolbar-actions">
             <button
               className="button secondary whitespace-nowrap"
               type="button"
@@ -1347,14 +1340,6 @@ function ReceiptsListPage({
               Export PDF
             </button>
           </div>
-        </div>
-        <div className="list-section-toolbar">
-          <div className="list-section-controls">
-            <input className="filter-input search" type="search" placeholder="Search by receipt number, customer, or ID" value={search} onChange={e => setSearch(e.target.value)} />
-            <input className="filter-input" type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)} aria-label="From date" />
-            <input className="filter-input" type="date" value={dateTo} onChange={e => setDateTo(e.target.value)} aria-label="To date" />
-          </div>
-          <p className="list-section-subtitle">{receipts.length} record{receipts.length !== 1 ? 's' : ''} in database</p>
         </div>
         {filtered.length ? <><div className="corvex-table-wrapper">
             <table className="corvex-table">

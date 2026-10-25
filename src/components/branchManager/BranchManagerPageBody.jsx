@@ -1871,7 +1871,6 @@ function CIDetailPage({
 // ── Customers ─────────────────────────────────────────────────────────────────
 function CustomersPage({
   navigate,
-  branchName,
   opsBase,
   showToast
 }) {
@@ -1920,8 +1919,26 @@ function CustomersPage({
       <section className="panel content-panel relative overflow-hidden">
         <div className="list-section-header">
           <h3>Branch Customers</h3>
-          <div className="list-section-actions">
-            <button className="button secondary" type="button" onClick={() => {
+        </div>
+        <div className="list-section-toolbar suppliers-toolbar audit-logs-toolbar">
+          <div className="list-section-controls audit-logs-filters">
+            <input
+              className="filter-input search"
+              type="search"
+              placeholder="Search by customer name, address, or phone"
+              value={search}
+              onChange={e => setSearch(e.target.value)}
+              aria-label="Search customers"
+            />
+            <select className="filter-select" value={statusFilter} onChange={e => setStatusFilter(e.target.value)} aria-label="Filter by status">
+              {['All', 'Active', 'Inactive'].map(s => <option key={s} value={s}>{s === 'All' ? 'All Statuses' : s}</option>)}
+            </select>
+            <select className="filter-select" value={paymentFilter} onChange={e => setPaymentFilter(e.target.value)} aria-label="Filter by payment status">
+              {['All', 'Current', 'Overdue'].map(s => <option key={s} value={s}>{s === 'All' ? 'All Payment Status' : s}</option>)}
+            </select>
+          </div>
+          <div className="list-section-actions suppliers-toolbar-actions">
+            <button className="button secondary whitespace-nowrap" type="button" onClick={() => {
               const rows = filtered.map((c) => ({
                 customer: c.customerName,
                 address: c.address || '',
@@ -1934,18 +1951,6 @@ function CustomersPage({
               else showToast('Nothing to export.', 'error');
             }}>Export PDF</button>
           </div>
-        </div>
-        <div className="list-section-toolbar">
-          <div className="list-section-controls">
-            <input className="filter-input search" type="search" placeholder="Search by customer name, address, or phone" value={search} onChange={e => setSearch(e.target.value)} />
-            <select className="filter-select" value={statusFilter} onChange={e => setStatusFilter(e.target.value)}>
-              {['All', 'Active', 'Inactive'].map(s => <option key={s} value={s}>{s === 'All' ? 'All Statuses' : s}</option>)}
-            </select>
-            <select className="filter-select" value={paymentFilter} onChange={e => setPaymentFilter(e.target.value)}>
-              {['All', 'Current', 'Overdue'].map(s => <option key={s} value={s}>{s === 'All' ? 'All Payment Status' : s}</option>)}
-            </select>
-          </div>
-          <span className="list-section-subtitle">{branchName}</span>
         </div>
         {filtered.length ? <><div className="corvex-table-wrapper">
             <table className="corvex-table">

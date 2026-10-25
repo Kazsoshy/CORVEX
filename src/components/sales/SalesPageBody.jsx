@@ -39,6 +39,7 @@ import { DeviceQueue, loadWaiting } from '../../offline/DeviceQueue.jsx';
 import { flushOfflineQueue } from '../../offline/flushQueue.js';
 import { isSalesAutoSyncEnabled, isSalesOfflineEnabled } from '../../offline/prefs.js';
 import { AccountProfilePanel } from '../shared/AccountProfilePanel';
+import { QuantityStepper } from '../shared/QuantityStepper.jsx';
 import apiClient from '../../api/apiClient.js';
 import { CONTACT_RELATIONSHIP_OPTIONS, formatContactPersonName, formatCustomerDisplayId, formatCustomerFullName, formatMiddleNameDisplay, formatPurchaseVolumeUnits, formatSecondaryContactName } from '../../utils/customerDisplay';
 import { downloadPdf } from '../../utils/dataExport';
@@ -72,7 +73,6 @@ function DashboardPage({
   const { drilldown, closeDrilldown, openApiDrilldown } = useChartDrilldown({ showToast });
   const [dashboard, setDashboard] = useState(null);
   const [unreadCount, setUnreadCount] = useState(0);
-  const [scheduleNotices, setScheduleNotices] = useState([]);
   const [loading, setLoading] = useState(true);
   useEffect(() => {
     async function load() {
@@ -82,7 +82,6 @@ function DashboardPage({
       if (notifRes.success) {
         const rows = notifRes.data || [];
         setUnreadCount(rows.filter(n => n.status !== 'Read').length);
-        setScheduleNotices(rows.filter((n) => String(n.category || '').toLowerCase().includes('schedule')).slice(0, 4));
       }
       setLoading(false);
     }
@@ -121,31 +120,6 @@ function DashboardPage({
       value: String(summary.creditInvestigationsPending ?? 0)
     }]} />
 
-      {scheduleNotices.length ? <section className="panel content-panel relative overflow-hidden">
-          <div className="list-section-header">
-            <h3 style={{ margin: 0 }}>Today&apos;s schedule alerts</h3>
-            <button className="button secondary" type="button" onClick={() => navigate('/sales/schedule')}>Open schedule</button>
-          </div>
-          <ul className="notification-list" style={{ margin: 0 }}>
-            {scheduleNotices.map((n) => (
-              <li key={n.notification_id} className={`notification-item${n.status === 'Read' ? '' : ' unread'}`}>
-                <div>
-                  <strong>{n.title}</strong>
-                  <p className="muted">{n.message}</p>
-                </div>
-              </li>
-            ))}
-          </ul>
-        </section> : null}
-
-      {(summary.creditInvestigationsPending ?? 0) > 0 ? <section className="panel content-panel alert-panel">
-          <div className="panel-section-header">
-            <h3>Credit investigations awaiting approval</h3>
-            <p className="muted">{summary.creditInvestigationsPending} submission(s) pending branch or operating manager review.</p>
-          </div>
-          <button className="button secondary" type="button" onClick={() => navigate('/sales/credit-investigations')}>View My Credit Investigations</button>
-        </section> : null}
-
       {(dashboard?.lowStockItems || []).length ? <section className="panel content-panel alert-panel">
           <div className="panel-section-header">
             <h3>Low Stock Alerts</h3>
@@ -161,108 +135,101 @@ function DashboardPage({
           </ul>
         </section> : null}
 
-      <div className="flex flex-wrap justify-end gap-2 mt-4">
-        <button className="button" type="button" onClick={() => navigate('/sales/schedule')}>View Today's Schedule</button>
-        <button className="button secondary" type="button" onClick={() => navigate('/sales/log-sale')}>Log a Sale</button>
-        <button className="button secondary" type="button" onClick={() => navigate('/sales/inventory')}>Check Inventory</button>
-      </div>
-
       <div className="dashboard-widgets grid two-up">
-        <section className="panel content-panel">
-          <div className="panel-section-header">
-            <h3>Revenue by Period</h3>
-            <p className="muted" style={{ margin: 0, fontSize: '0.82rem' }}>Click a bar to open matching invoices</p>
-          </div>
-          <ResponsiveContainer width="100%" height={220}>
-            <BarChart
-              data={[
-                { period: 'Today', amount: Number(analytics.dailyRevenue || 0), key: 'daily' },
-                { period: 'Weekly', amount: Number(analytics.weeklyRevenue || 0), key: 'weekly' },
-                { period: 'Monthly', amount: Number(analytics.monthlyRevenue || 0), key: 'monthly' },
-              ]}
-              style={{ cursor: 'pointer' }}
-              onClick={(state) => {
-                const label = state?.activeLabel;
-                const point = state?.activePayload?.[0]?.payload;
-                if (!point?.key) return;
-                openApiDrilldown(
-                  { type: 'sales_period', period: point.key },
-                  {
-                    title: 'Sales invoices',
-                    category: label || point.period,
-                    dateRange: point.key,
-                    columnSet: 'sales',
-                    legend: [{ label: 'Revenue', value: formatMoney(point.amount || 0) }],
-                    filenameBase: `sales-${point.key}`,
-                  }
-                );
-              }}
-            >
-              <CartesianGrid strokeDasharray="3 3" stroke="#BADBE9" />
-              <XAxis dataKey="period" tick={{ fontSize: 12 }} />
-              <YAxis tick={{ fontSize: 11 }} tickFormatter={(v) => `${(v / 1000).toFixed(0)}k`} />
-              <Tooltip formatter={(v) => formatCurrency(v)} />
-              <Bar dataKey="amount" name="Revenue" fill="#1A4162" radius={[4, 4, 0, 0]} />
-            </BarChart>
-          </ResponsiveContainer>
-          <p className="muted" style={{ marginTop: 8 }}>
-            Today: {formatCurrency(analytics.dailyRevenue || 0)} · Weekly: {formatCurrency(analytics.weeklyRevenue || 0)} · Monthly: {formatCurrency(analytics.monthlyRevenue || 0)}
-          </p>
-        </section>
-        <section className="panel content-panel">
-          <div className="panel-section-header"><h3>Visit Completion Progress</h3></div>
-          <div className="progress-bar" role="progressbar" aria-valuenow={summary.visitProgress || 0} aria-valuemin={0} aria-valuemax={100}>
-            <div className="progress-fill" style={{
-            width: `${summary.visitProgress || 0}%`
-          }} />
-          </div>
-          <p className="muted progress-caption">{summary.completedVisits ?? 0} of {summary.accountsToVisit ?? 0} visits completed</p>
-        </section>
-      </div>
-
-      <div className="dashboard-widgets grid two-up">
-        <section className="panel content-panel">
-          <div className="panel-section-header"><h3>Recent Sales</h3></div>
-          <ul className="widget-list">
-            {(dashboard?.recentSales || []).slice(0, 3).map(sale => <li key={sale.id}>
-                <div><strong>{sale.customerName}</strong><span className="muted">{formatDisplayDate(sale.date)}</span></div>
-                <span>{formatCurrency(sale.totalAmount)}</span>
-              </li>)}
-          </ul>
-        </section>
-        <section className="panel content-panel">
-          <div className="panel-section-header">
-            <h3>Top Selling Products</h3>
-            <p className="muted" style={{ margin: 0, fontSize: '0.82rem' }}>Last 30 days · click a bar</p>
-          </div>
-          <ResponsiveContainer width="100%" height={220}>
-            <BarChart
-              data={analytics.topProducts || []}
-              style={{ cursor: 'pointer' }}
-              onClick={(state) => {
-                const name = state?.activeLabel || state?.activePayload?.[0]?.payload?.name;
-                if (!name) return;
-                openApiDrilldown(
-                  { type: 'sales_product', name },
-                  {
-                    title: 'Invoices for product',
-                    category: name,
-                    dateRange: 'Last 30 days',
-                    columnSet: 'sales',
-                    filenameBase: `product-${String(name).slice(0, 24)}`,
-                  }
-                );
-              }}
-            >
-              <CartesianGrid strokeDasharray="3 3" stroke="#BADBE9" />
-              <XAxis dataKey="name" tick={{ fontSize: 11 }} interval={0} angle={-15} textAnchor="end" height={60} />
-              <YAxis allowDecimals={false} tick={{ fontSize: 11 }} />
-              <Tooltip />
-              <Legend />
-              <Bar dataKey="units" name="Units" fill="#408DAD" radius={[4, 4, 0, 0]} />
-            </BarChart>
-          </ResponsiveContainer>
-        </section>
+        <div className="stack" style={{ gap: 12 }}>
+          <section className="panel content-panel">
+            <div className="panel-section-header">
+              <h3>Revenue by Period</h3>
+              <p className="muted" style={{ margin: 0, fontSize: '0.82rem' }}>Click a bar to open matching invoices</p>
+            </div>
+            <ResponsiveContainer width="100%" height={200}>
+              <BarChart
+                data={[
+                  { period: 'Today', amount: Number(analytics.dailyRevenue || 0), key: 'daily' },
+                  { period: 'Weekly', amount: Number(analytics.weeklyRevenue || 0), key: 'weekly' },
+                  { period: 'Monthly', amount: Number(analytics.monthlyRevenue || 0), key: 'monthly' },
+                ]}
+                style={{ cursor: 'pointer' }}
+                onClick={(state) => {
+                  const label = state?.activeLabel;
+                  const point = state?.activePayload?.[0]?.payload;
+                  if (!point?.key) return;
+                  openApiDrilldown(
+                    { type: 'sales_period', period: point.key },
+                    {
+                      title: 'Sales invoices',
+                      category: label || point.period,
+                      dateRange: point.key,
+                      columnSet: 'sales',
+                      legend: [{ label: 'Revenue', value: formatMoney(point.amount || 0) }],
+                      filenameBase: `sales-${point.key}`,
+                    }
+                  );
+                }}
+              >
+                <CartesianGrid strokeDasharray="3 3" stroke="#BADBE9" />
+                <XAxis dataKey="period" tick={{ fontSize: 12 }} />
+                <YAxis tick={{ fontSize: 11 }} tickFormatter={(v) => `${(v / 1000).toFixed(0)}k`} />
+                <Tooltip formatter={(v) => formatCurrency(v)} />
+                <Bar dataKey="amount" name="Revenue" fill="#1A4162" radius={[4, 4, 0, 0]} />
+              </BarChart>
+            </ResponsiveContainer>
+            <p className="muted" style={{ marginTop: 8, marginBottom: 0 }}>
+              Today: {formatCurrency(analytics.dailyRevenue || 0)} · Weekly: {formatCurrency(analytics.weeklyRevenue || 0)} · Monthly: {formatCurrency(analytics.monthlyRevenue || 0)}
+            </p>
+          </section>
+          <section className="panel content-panel">
+            <div className="panel-section-header"><h3>Recent Sales</h3></div>
+            <ul className="widget-list">
+              {(dashboard?.recentSales || []).slice(0, 3).map(sale => <li key={sale.id}>
+                  <div><strong>{sale.customerName}</strong><span className="muted">{formatDisplayDate(sale.date)}</span></div>
+                  <span>{formatCurrency(sale.totalAmount)}</span>
+                </li>)}
+            </ul>
+          </section>
+        </div>
+        <div className="stack" style={{ gap: 12 }}>
+          <section className="panel content-panel visit-progress-panel">
+            <div className="panel-section-header"><h3>Visit Completion Progress</h3></div>
+            <div className="progress-bar" role="progressbar" aria-valuenow={summary.visitProgress || 0} aria-valuemin={0} aria-valuemax={100}>
+              <div className="progress-fill" style={{ width: `${summary.visitProgress || 0}%` }} />
+            </div>
+            <p className="muted progress-caption">{summary.completedVisits ?? 0} of {summary.accountsToVisit ?? 0} visits completed</p>
+          </section>
+          <section className="panel content-panel">
+            <div className="panel-section-header">
+              <h3>Top Selling Products</h3>
+              <p className="muted" style={{ margin: 0, fontSize: '0.82rem' }}>Last 30 days · click a bar</p>
+            </div>
+            <ResponsiveContainer width="100%" height={200}>
+              <BarChart
+                data={analytics.topProducts || []}
+                style={{ cursor: 'pointer' }}
+                onClick={(state) => {
+                  const name = state?.activeLabel || state?.activePayload?.[0]?.payload?.name;
+                  if (!name) return;
+                  openApiDrilldown(
+                    { type: 'sales_product', name },
+                    {
+                      title: 'Invoices for product',
+                      category: name,
+                      dateRange: 'Last 30 days',
+                      columnSet: 'sales',
+                      filenameBase: `product-${String(name).slice(0, 24)}`,
+                    }
+                  );
+                }}
+              >
+                <CartesianGrid strokeDasharray="3 3" stroke="#BADBE9" />
+                <XAxis dataKey="name" tick={{ fontSize: 11 }} interval={0} angle={-15} textAnchor="end" height={60} />
+                <YAxis allowDecimals={false} tick={{ fontSize: 11 }} />
+                <Tooltip />
+                <Legend />
+                <Bar dataKey="units" name="Units" fill="#408DAD" radius={[4, 4, 0, 0]} />
+              </BarChart>
+            </ResponsiveContainer>
+          </section>
+        </div>
       </div>
 
       <section className="panel content-panel">
@@ -1610,7 +1577,7 @@ function LogSalePage({
         </div>
         {errors.items ? <p className="form-error">{errors.items}</p> : null}
         <div className="table-shell">
-          <table className="corvex-table">
+          <table className="corvex-table log-sale-lines-table">
             <thead>
               <tr>
                 <th>Product</th>
@@ -1635,7 +1602,12 @@ function LogSalePage({
                     </td>
                     <td>{product ? formatCurrency(unitPrice) : '—'}</td>
                     <td>
-                      <input type="number" min={1} value={line.quantity} onChange={e => updateLineItem(index, 'quantity', e.target.value)} />
+                      <QuantityStepper
+                        value={line.quantity}
+                        min={1}
+                        onChange={(next) => updateLineItem(index, 'quantity', next)}
+                        aria-label={`Quantity for line ${index + 1}`}
+                      />
                     </td>
                     <td>{product ? formatCurrency(lineTotal) : '—'}</td>
                     <td>

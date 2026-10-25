@@ -22,6 +22,7 @@ import {
 import { fetchNotifications } from '../../api/notificationService.js';
 import { getCurrentUser } from '../../api/authService.js';
 import { AccountProfilePanel } from '../shared/AccountProfilePanel';
+import { QuantityStepper } from '../shared/QuantityStepper.jsx';
 
 const PRODUCT_IMAGE_MAX_BYTES = 700 * 1024;
 
@@ -1079,7 +1080,12 @@ function AddProductPage({
               </select> : field.type === 'textarea' ? <textarea value={form[field.name]} onChange={e => setForm(p => ({
           ...p,
           [field.name]: e.target.value
-        }))} /> : <input type={field.type} value={form[field.name]} onChange={e => setForm(p => ({
+        }))} /> : field.name === 'initialQuantity' ? <QuantityStepper
+                value={form.initialQuantity}
+                min={0}
+                onChange={(next) => setForm((p) => ({ ...p, initialQuantity: next }))}
+                aria-label="Initial quantity"
+              /> : <input type={field.type} value={form[field.name]} onChange={e => setForm(p => ({
           ...p,
           [field.name]: e.target.value
         }))} />}
@@ -1160,7 +1166,7 @@ function StockCountPage({
         <div className="form-group"><label>System Quantity</label><p className="field-preview">{systemQty} units</p></div>
         <div className="form-group">
           <label>Physical Quantity<span className="required">*</span></label>
-          <input type="number" min="0" value={physical} onChange={e => setPhysical(e.target.value)} />
+          <QuantityStepper value={physical} min={0} onChange={setPhysical} aria-label="Physical quantity" />
           {errors.physical ? <p className="form-error">{errors.physical}</p> : null}
         </div>
         {variance !== null ? <div className={`form-group variance-display${hasVariance ? ' variance-alert' : ''}`}>
@@ -1240,10 +1246,12 @@ function RestockPage({
         <div className="form-group"><label>Product Name</label><p className="field-preview">{productName}</p></div>
         <div className="form-group">
           <label>Quantity Restocked<span className="required">*</span></label>
-          <input type="number" min="1" value={form.quantity} onChange={e => setForm(p => ({
-          ...p,
-          quantity: e.target.value
-        }))} />
+          <QuantityStepper
+            value={form.quantity}
+            min={1}
+            onChange={(next) => setForm((p) => ({ ...p, quantity: next }))}
+            aria-label="Quantity restocked"
+          />
           {errors.quantity ? <p className="form-error">{errors.quantity}</p> : null}
         </div>
         <div className="form-group">
@@ -1343,10 +1351,13 @@ function TransferPage({
         </div>
         <div className="form-group">
           <label>Quantity<span className="required">*</span></label>
-          <input type="number" min="1" max={systemQty || undefined} value={form.quantity} onChange={e => setForm(p => ({
-          ...p,
-          quantity: e.target.value
-        }))} />
+          <QuantityStepper
+            value={form.quantity}
+            min={1}
+            max={systemQty || undefined}
+            onChange={(next) => setForm((p) => ({ ...p, quantity: next }))}
+            aria-label="Transfer quantity"
+          />
           {errors.quantity ? <p className="form-error">{errors.quantity}</p> : null}
         </div>
         <div className="form-group"><label>Notes</label><textarea value={form.notes} onChange={e => setForm(p => ({
@@ -1611,7 +1622,13 @@ function TransferRequestNewPage({
         </div>
         <div className="form-group">
           <label>Quantity<span className="required">*</span></label>
-          <input type="number" min="1" max={availableQty || undefined} value={form.quantity} onChange={e => setForm(p => ({ ...p, quantity: e.target.value }))} />
+          <QuantityStepper
+            value={form.quantity}
+            min={1}
+            max={availableQty || undefined}
+            onChange={(next) => setForm((p) => ({ ...p, quantity: next }))}
+            aria-label="Transfer quantity"
+          />
           {selectedRow ? <p className="text-ink/60" style={{ fontSize: '0.82rem', margin: '4px 0 0' }}>Available: {availableQty}</p> : null}
           {errors.quantity ? <p className="form-error">{errors.quantity}</p> : null}
         </div>
