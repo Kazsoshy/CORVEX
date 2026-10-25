@@ -312,7 +312,6 @@ function haversine(a, b) {
   const x = Math.sin(dLat / 2) ** 2 + Math.cos(la1) * Math.cos(la2) * Math.sin(dLon / 2) ** 2;
   return R * 2 * Math.atan2(Math.sqrt(x), Math.sqrt(1 - x));
 }
-const SCHEDULE_PAGE_SIZE_OPTIONS = [5, 10, 25, 50];
 const SCHEDULE_STATUS_OPTIONS = ['All', 'Pending', 'Completed'];
 
 function getVisitCustomerName(visit) {
@@ -328,12 +327,10 @@ function SchedulePage({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [search, setSearch] = useState('');
-  const [customerFilter, setCustomerFilter] = useState('');
   const [statusFilter, setStatusFilter] = useState('All');
   const [agentFilter, setAgentFilter] = useState('All');
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo] = useState('');
-  const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE);
   const [showMap, setShowMap] = useState(pageType === 'scheduleMap');
 
   useEffect(() => {
@@ -360,7 +357,6 @@ function SchedulePage({
 
   const filtered = useMemo(() => {
     const query = search.trim().toLowerCase();
-    const customerQuery = customerFilter.trim().toLowerCase();
     return visits.filter((v) => {
       const customerName = getVisitCustomerName(v);
       const customerNameLower = customerName.toLowerCase();
@@ -372,23 +368,21 @@ function SchedulePage({
         || agentName.includes(query)
         || visitType.includes(query)
         || visitId.includes(query);
-      const matchesCustomer = !customerQuery || customerNameLower.includes(customerQuery);
       const matchesStatus = statusFilter === 'All' || v.status === statusFilter;
       const matchesAgent = agentFilter === 'All' || v.agent_name === agentFilter;
       const scheduled = String(v.scheduled_date || '');
       const matchesFrom = !dateFrom || scheduled >= dateFrom;
       const matchesTo = !dateTo || scheduled <= dateTo;
-      return matchesSearch && matchesCustomer && matchesStatus && matchesAgent && matchesFrom && matchesTo;
+      return matchesSearch && matchesStatus && matchesAgent && matchesFrom && matchesTo;
     });
-  }, [visits, search, customerFilter, statusFilter, agentFilter, dateFrom, dateTo]);
+  }, [visits, search, statusFilter, agentFilter, dateFrom, dateTo]);
 
-  const filterResetKey = `${search}|${customerFilter}|${statusFilter}|${agentFilter}|${dateFrom}|${dateTo}|${pageSize}`;
-  const pagination = usePagination(filtered, { pageSize, resetKey: filterResetKey });
+  const filterResetKey = `${search}|${statusFilter}|${agentFilter}|${dateFrom}|${dateTo}`;
+  const pagination = usePagination(filtered, { resetKey: filterResetKey });
   const rows = pagination.paginatedData;
 
   const clearScheduleFilters = () => {
     setSearch('');
-    setCustomerFilter('');
     setStatusFilter('All');
     setAgentFilter('All');
     setDateFrom('');
@@ -434,14 +428,6 @@ function SchedulePage({
           onChange={(e) => setSearch(e.target.value)}
           aria-label="Search schedule"
         />
-        <input
-          className="filter-input"
-          type="search"
-          placeholder="Customer name"
-          value={customerFilter}
-          onChange={(e) => setCustomerFilter(e.target.value)}
-          aria-label="Filter by customer name"
-        />
         <select
           className="filter-select"
           value={statusFilter}
@@ -477,16 +463,6 @@ function SchedulePage({
           onChange={(e) => setDateTo(e.target.value)}
           aria-label="Schedule to date"
         />
-        <select
-          className="filter-select"
-          value={pageSize}
-          onChange={(e) => setPageSize(Number(e.target.value) || DEFAULT_PAGE_SIZE)}
-          aria-label="Records per page"
-        >
-          {SCHEDULE_PAGE_SIZE_OPTIONS.map((size) => (
-            <option key={size} value={size}>{size} per page</option>
-          ))}
-        </select>
       </div>
     </div>
   );
@@ -1548,70 +1524,82 @@ function LogSalePage({
           ) : null}
         </div>
 
-        <div className="form-group">
-          <label htmlFor="log-sale-customer">Customer *</label>
-          <select id="log-sale-customer" className="filter-select" value={form.customerId} onChange={e => {
-          setForm(prev => ({
-            ...prev,
-            customerId: e.target.value
-          }));
-          setErrors(prev => ({
-            ...prev,
-            customerId: undefined
-          }));
-        }}>
-            <option value="">Select customer</option>
-            {customers.map(c => <option key={c.customer_id} value={c.customer_id}>
-                {c.first_name} {c.last_name} (ID {c.customer_id})
-              </option>)}
-          </select>
-          {errors.customerId ? <p className="form-error">{errors.customerId}</p> : null}
-        </div>
-
-        <div className="form-group">
-          <label htmlFor="log-sale-payment">Payment Method *</label>
-          <select id="log-sale-payment" className="filter-select" value={form.paymentMethodId} onChange={e => {
-          setForm(prev => ({
-            ...prev,
-            paymentMethodId: e.target.value
-          }));
-          setErrors(prev => ({
-            ...prev,
-            paymentMethodId: undefined
-          }));
-        }}>
-            <option value="">Select payment method</option>
-            {paymentMethods.map(method => <option key={method.payment_method_id} value={method.payment_method_id}>
-                {method.method_name}
-              </option>)}
-          </select>
-          {errors.paymentMethodId ? <p className="form-error">{errors.paymentMethodId}</p> : null}
-        </div>
-
-        <div className="account-detail-grid two-up">
-          <div className="form-group">
-            <label htmlFor="log-sale-date">Invoice Date *</label>
-            <input id="log-sale-date" type="date" value={form.invoicesDate} onChange={e => setForm(prev => ({
-            ...prev,
-            invoicesDate: e.target.value
-          }))} />
-            {errors.invoicesDate ? <p className="form-error">{errors.invoicesDate}</p> : null}
+        <div className="field-report-form">
+          <div className="field-report-filter-row log-sale-filter-row">
+            <label className="field-report-field" htmlFor="log-sale-customer">
+              <span>Customer *</span>
+              <select id="log-sale-customer" className="filter-select" value={form.customerId} onChange={e => {
+              setForm(prev => ({
+                ...prev,
+                customerId: e.target.value
+              }));
+              setErrors(prev => ({
+                ...prev,
+                customerId: undefined
+              }));
+            }}>
+                <option value="">Select customer</option>
+                {customers.map(c => <option key={c.customer_id} value={c.customer_id}>
+                    {c.first_name} {c.last_name} (ID {c.customer_id})
+                  </option>)}
+              </select>
+              {errors.customerId ? <p className="form-error">{errors.customerId}</p> : null}
+            </label>
+            <label className="field-report-field" htmlFor="log-sale-payment">
+              <span>Payment Method *</span>
+              <select id="log-sale-payment" className="filter-select" value={form.paymentMethodId} onChange={e => {
+              setForm(prev => ({
+                ...prev,
+                paymentMethodId: e.target.value
+              }));
+              setErrors(prev => ({
+                ...prev,
+                paymentMethodId: undefined
+              }));
+            }}>
+                <option value="">Select payment method</option>
+                {paymentMethods.map(method => <option key={method.payment_method_id} value={method.payment_method_id}>
+                    {method.method_name}
+                  </option>)}
+              </select>
+              {errors.paymentMethodId ? <p className="form-error">{errors.paymentMethodId}</p> : null}
+            </label>
+            <label className="field-report-field" htmlFor="log-sale-date">
+              <span>Invoice Date *</span>
+              <input
+                id="log-sale-date"
+                className="filter-input"
+                type="date"
+                value={form.invoicesDate}
+                onChange={e => setForm(prev => ({
+                  ...prev,
+                  invoicesDate: e.target.value
+                }))}
+              />
+              {errors.invoicesDate ? <p className="form-error">{errors.invoicesDate}</p> : null}
+            </label>
+            <label className="field-report-field" htmlFor="log-sale-due">
+              <span>Due Date</span>
+              <input
+                id="log-sale-due"
+                className="filter-input"
+                type="date"
+                value={form.dueDate}
+                onChange={e => setForm(prev => ({
+                  ...prev,
+                  dueDate: e.target.value
+                }))}
+              />
+            </label>
           </div>
-          <div className="form-group">
-            <label htmlFor="log-sale-due">Due Date</label>
-            <input id="log-sale-due" type="date" value={form.dueDate} onChange={e => setForm(prev => ({
+
+          <div className="form-group field-report-block">
+            <label htmlFor="log-sale-notes">Notes</label>
+            <textarea id="log-sale-notes" placeholder="Product details, delivery notes, or payment terms..." value={form.notes} onChange={e => setForm(prev => ({
             ...prev,
-            dueDate: e.target.value
+            notes: e.target.value
           }))} />
           </div>
-        </div>
-
-        <div className="form-group">
-          <label htmlFor="log-sale-notes">Notes</label>
-          <textarea id="log-sale-notes" placeholder="Product details, delivery notes, or payment terms..." value={form.notes} onChange={e => setForm(prev => ({
-          ...prev,
-          notes: e.target.value
-        }))} />
         </div>
       </section>
 
@@ -1838,7 +1826,6 @@ function SalesCISubmissionsPage({
       <section className="panel content-panel">
         <div className="list-section-header">
           <h3>My Credit Investigations</h3>
-          <p className="muted">Requests you submitted for branch manager and operating manager approval.</p>
         </div>
         <div className="list-section-toolbar" style={{ marginBottom: 12 }}>
           <div className="segmented-control">
@@ -1861,11 +1848,25 @@ function SalesCISubmissionsPage({
                     <td>{formatDisplayDate(ci.submissionDate)}</td>
                     <td><StatusBadge status={ci.status} /></td>
                     <td className="table-actions" onClick={e => e.stopPropagation()}>
-                      <button className="icon-action-button" type="button" title="View" onClick={() => navigate(`/sales/credit-investigations/${ci.ciId}`)}>
+                      <button
+                        className="icon-action-button"
+                        type="button"
+                        title="View"
+                        aria-label={`View credit investigation ${ci.ciId}`}
+                        onClick={() => navigate(`/sales/credit-investigations/${ci.ciId}`)}
+                      >
                         <NavIcon name="view" />
                       </button>
                       {(ci.status === 'Rejected' || ci.status === 'Revision Requested') && ci.customerId ? (
-                        <button className="button secondary" type="button" style={{ marginLeft: 8 }} onClick={() => navigate(`/sales/ci-form/${ci.customerId}?from=customers`)}>Resubmit</button>
+                        <button
+                          className="icon-action-button"
+                          type="button"
+                          title="Resubmit"
+                          aria-label={`Resubmit credit investigation ${ci.ciId}`}
+                          onClick={() => navigate(`/sales/ci-form/${ci.customerId}?from=customers`)}
+                        >
+                          <NavIcon name="reset" />
+                        </button>
                       ) : null}
                     </td>
                   </tr>)}
@@ -2042,14 +2043,47 @@ function InventoryPage({
     if (sortBy === 'Product Name') results.sort((a, b) => a.product_name.localeCompare(b.product_name));else if (sortBy === 'Unit Price') results.sort((a, b) => a.unit_price - b.unit_price);
     return results;
   }, [products, search, category, sortBy]);
+  const pagination = usePagination(filtered, {
+    resetKey: `${search}|${category}|${sortBy}`,
+  });
+  const paginated = pagination.paginatedData;
   if (loading) return <LoadingState message="Loading inventory..." />;
   return <div className="page">
       <section className="panel content-panel relative overflow-hidden">
         <div className="list-section-header">
           <h3>Inventory Viewer</h3>
-          <div className="list-section-actions">
+        </div>
+        <div className="list-section-toolbar suppliers-toolbar audit-logs-toolbar">
+          <div className="list-section-controls audit-logs-filters">
+            <input
+              className="filter-input search"
+              type="search"
+              placeholder="Search products by name or category"
+              value={search}
+              onChange={e => setSearch(e.target.value)}
+              aria-label="Search inventory"
+            />
+            <select
+              className="filter-select"
+              value={category}
+              onChange={e => setCategory(e.target.value)}
+              aria-label="Filter by category"
+            >
+              <option value="All">All Categories</option>
+              {categories.map(c => <option key={c.category_id} value={c.category_id}>{c.category_name}</option>)}
+            </select>
+            <select
+              className="filter-select"
+              value={sortBy}
+              onChange={e => setSortBy(e.target.value)}
+              aria-label="Sort inventory"
+            >
+              {['Product Name', 'Unit Price'].map(o => <option key={o} value={o}>Sort: {o}</option>)}
+            </select>
+          </div>
+          <div className="list-section-actions suppliers-toolbar-actions">
             <button
-              className="button secondary"
+              className="button secondary whitespace-nowrap"
               type="button"
               onClick={() => {
                 const rows = filtered.map((p) => ({
@@ -2067,24 +2101,12 @@ function InventoryPage({
             </button>
           </div>
         </div>
-        <div className="list-section-toolbar">
-          <div className="list-section-controls">
-            <input className="filter-input search" type="search" placeholder="Search products by name or category" value={search} onChange={e => setSearch(e.target.value)} />
-            <select className="filter-select" value={category} onChange={e => setCategory(e.target.value)}>
-              <option value="All">All Categories</option>
-              {categories.map(c => <option key={c.category_id} value={c.category_id}>{c.category_name}</option>)}
-            </select>
-            <select className="filter-select" value={sortBy} onChange={e => setSortBy(e.target.value)}>
-              {['Product Name', 'Unit Price'].map(o => <option key={o} value={o}>Sort: {o}</option>)}
-            </select>
-          </div>
-          <span className="muted">Read-only access</span>
-        </div>
-        {filtered.length ? <div className="corvex-table-wrapper">
+        {filtered.length ? <>
+          <div className="corvex-table-wrapper">
             <table className="corvex-table">
               <thead><tr><th>Product ID</th><th>Product Name</th><th>Category</th><th>Unit Price</th><th>Status</th><th>Actions</th></tr></thead>
               <tbody>
-                {filtered.map(product => <tr key={product.product_id} className="clickable-row" onClick={() => navigate(`/sales/inventory/${product.product_id}`)}>
+                {paginated.map(product => <tr key={product.product_id} className="clickable-row" onClick={() => navigate(`/sales/inventory/${product.product_id}`)}>
                     <td>{product.product_id}</td>
                     <td>{product.product_name}</td>
                     <td>{product.category_name || product.category_id}</td>
@@ -2098,7 +2120,9 @@ function InventoryPage({
                   </tr>)}
               </tbody>
             </table>
-          </div> : <EmptyState title="No products found" description="Adjust your search or category filter." />}
+          </div>
+          <Pagination {...pagination} />
+        </> : <EmptyState title="No products found" description="Adjust your search or category filter." />}
       </section>
       {selectedProduct ? <aside className="panel content-panel product-drawer" role="dialog" aria-label="Product details">
           <div className="panel-section-header">
@@ -2244,9 +2268,42 @@ export function SalesHistoryPage({
       <section className="panel content-panel relative overflow-hidden">
         <div className="list-section-header">
           <h3>Sales Transactions</h3>
-          <div className="list-section-actions">
+        </div>
+        <div className="list-section-toolbar suppliers-toolbar audit-logs-toolbar">
+          <div className="list-section-controls audit-logs-filters">
+            <input
+              className="filter-input search"
+              type="search"
+              placeholder="Search by customer or invoice number"
+              value={search}
+              onChange={e => setSearch(e.target.value)}
+              aria-label="Search sales history"
+            />
+            <select
+              className="filter-select"
+              value={statusFilter}
+              onChange={e => setStatusFilter(e.target.value)}
+              aria-label="Filter by status"
+            >
+              {['All', 'Confirmed', 'Pending Review', 'Draft', 'Cancelled'].map(o => (
+                <option key={o} value={o}>{o === 'All' ? 'All Statuses' : o}</option>
+              ))}
+            </select>
+            <select
+              className="filter-select"
+              value={productFilter}
+              onChange={e => setProductFilter(e.target.value)}
+              aria-label="Filter by product"
+            >
+              <option value="All">All Products</option>
+              {productNames.map(name => <option key={name} value={name}>{name}</option>)}
+            </select>
+            <input className="filter-input" type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)} aria-label="From date" />
+            <input className="filter-input" type="date" value={dateTo} onChange={e => setDateTo(e.target.value)} aria-label="To date" />
+          </div>
+          <div className="list-section-actions suppliers-toolbar-actions">
             <button
-              className="button secondary"
+              className="button secondary whitespace-nowrap"
               type="button"
               onClick={() => {
                 const exportRows = rows.map((item) => ({
@@ -2262,15 +2319,6 @@ export function SalesHistoryPage({
             >
               Export PDF
             </button>
-          </div>
-        </div>
-        <div className="list-section-toolbar">
-          <div className="list-section-controls">
-            <input className="filter-input search" type="search" placeholder="Search by customer or invoice number" value={search} onChange={e => setSearch(e.target.value)} />
-            <select className="filter-select" value={statusFilter} onChange={e => setStatusFilter(e.target.value)}>{['All', 'Confirmed', 'Pending Review', 'Draft', 'Cancelled'].map(o => <option key={o}>{o}</option>)}</select>
-            <select className="filter-select" value={productFilter} onChange={e => setProductFilter(e.target.value)}><option value="All">All Products</option>{productNames.map(name => <option key={name} value={name}>{name}</option>)}</select>
-            <input className="filter-input" type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)} aria-label="From date" />
-            <input className="filter-input" type="date" value={dateTo} onChange={e => setDateTo(e.target.value)} aria-label="To date" />
           </div>
         </div>
         {rows.length ? <>
@@ -2417,32 +2465,34 @@ function FieldActivityReportsPage({ showToast }) {
         <p className="muted">Submit visit activity for today's sales schedule ({reports.length} report{reports.length === 1 ? '' : 's'} on file).</p>
       </div>
       {deviceReports.length ? <DeviceQueue rows={deviceReports} /> : null}
-      <form className="grid gap-3" onSubmit={handleSubmit}>
-        <div className="form-group">
-          <label>Visit / Customer<span className="required">*</span></label>
-          <select className="filter-select" value={form.visit_id} onChange={(e) => setForm((p) => ({ ...p, visit_id: e.target.value }))}>
-            <option value="">Select today's visit</option>
-            {visits.map((v) => <option key={v.visit_id} value={v.visit_id}>
-              {v.customer_name} — {v.visit_type} ({formatDisplayDate(v.scheduled_date)}, {v.status})
-            </option>)}
-          </select>
-          {errors.visit_id ? <p className="form-error">{errors.visit_id}</p> : null}
-          {!visits.length ? <p className="muted">No visits scheduled for today. Reports can be filed once a visit is assigned.</p> : null}
+      <form className="field-report-form" onSubmit={handleSubmit}>
+        <div className="field-report-filter-row">
+          <label className="field-report-field">
+            <span>Visit / Customer<span className="required">*</span></span>
+            <select className="filter-select" value={form.visit_id} onChange={(e) => setForm((p) => ({ ...p, visit_id: e.target.value }))}>
+              <option value="">Select today's visit</option>
+              {visits.map((v) => <option key={v.visit_id} value={v.visit_id}>
+                {v.customer_name} — {v.visit_type} ({formatDisplayDate(v.scheduled_date)}, {v.status})
+              </option>)}
+            </select>
+            {errors.visit_id ? <p className="form-error">{errors.visit_id}</p> : null}
+          </label>
+          <label className="field-report-field">
+            <span>Activity Type<span className="required">*</span></span>
+            <select className="filter-select" value={form.activity_type} onChange={(e) => setForm((p) => ({ ...p, activity_type: e.target.value }))}>
+              <option value="">Select activity type</option>
+              {['Sales Visit', 'Canvassing', 'Delivery', 'Site Check', 'Follow-up', 'Customer Not Available'].map((t) => <option key={t} value={t}>{t}</option>)}
+            </select>
+            {errors.activity_type ? <p className="form-error">{errors.activity_type}</p> : null}
+          </label>
         </div>
-        <div className="form-group">
-          <label>Activity Type<span className="required">*</span></label>
-          <select className="filter-select" value={form.activity_type} onChange={(e) => setForm((p) => ({ ...p, activity_type: e.target.value }))}>
-            <option value="">Select activity type</option>
-            {['Sales Visit', 'Canvassing', 'Delivery', 'Site Check', 'Follow-up', 'Customer Not Available'].map((t) => <option key={t} value={t}>{t}</option>)}
-          </select>
-          {errors.activity_type ? <p className="form-error">{errors.activity_type}</p> : null}
-        </div>
-        <div className="form-group">
+        {!visits.length ? <p className="field-report-hint">No visits scheduled for today. Reports can be filed once a visit is assigned.</p> : null}
+        <div className="form-group field-report-block">
           <label>Remarks<span className="required">*</span></label>
           <textarea rows={3} placeholder="Describe the visit outcome, order taken, or follow-up needed..." value={form.remarks} onChange={(e) => setForm((p) => ({ ...p, remarks: e.target.value }))} />
           {errors.remarks ? <p className="form-error">{errors.remarks}</p> : null}
         </div>
-        <div className="form-group">
+        <div className="form-group field-report-block">
           <label>Photo Evidence<span className="required">*</span></label>
           <input
             type="file"
@@ -2557,18 +2607,33 @@ function NotificationsPage({
   }, [notifications, filter]);
   if (loading && !notifications.length) return <LoadingState message="Loading notifications..." />;
   return <div className="page">
-      <div className="flex justify-end mt-2 mb-2">
-        <button className="button secondary" type="button" onClick={async () => {
-        const res = await markAllNotificationsRead();
-        if (res.success) {
-          showToast('All notifications marked as read.', 'success');
-          load();
-        }
-      }}>Mark All as Read</button>
-      </div>
       <section className="panel content-panel">
-        <div className="segmented-control">
-          {['All', 'Unread', 'Read', 'Stock', 'Schedule', 'Sales', 'Assignments', 'CI'].map(item => <button key={item} className={filter === item ? 'segment active' : 'segment'} type="button" onClick={() => setFilter(item)}>{item}</button>)}
+        <div className="notifications-toolbar">
+          <div className="segmented-control" style={{ flexWrap: 'wrap' }}>
+            {['All', 'Unread', 'Read', 'Stock', 'Schedule', 'Sales', 'Assignments', 'CI'].map(item => (
+              <button
+                key={item}
+                className={filter === item ? 'segment active' : 'segment'}
+                type="button"
+                onClick={() => setFilter(item)}
+              >
+                {item}
+              </button>
+            ))}
+          </div>
+          <button
+            className="button secondary whitespace-nowrap"
+            type="button"
+            onClick={async () => {
+              const res = await markAllNotificationsRead();
+              if (res.success) {
+                showToast('All notifications marked as read.', 'success');
+                load();
+              }
+            }}
+          >
+            Mark All as Read
+          </button>
         </div>
       </section>
       {filtered.length ? <div className="notification-list">
@@ -2741,16 +2806,56 @@ function SalesPurchaseRequestsPage({ navigate, showToast }) {
                     <td className="table-actions">
                       {req.status === 'Pending' || req.status === 'In Review' ? <>
                           {req.status === 'Pending' ? (
-                            <button className="button ghost" type="button" onClick={() => updateStatus(req.request_id, 'In Review', req.customer_id)}>Review</button>
+                            <button
+                              className="icon-action-button"
+                              type="button"
+                              title="Review"
+                              aria-label={`Review request ${req.request_id}`}
+                              onClick={() => updateStatus(req.request_id, 'In Review', req.customer_id)}
+                            >
+                              <NavIcon name="view" />
+                            </button>
                           ) : null}
-                          <button className="button" type="button" onClick={() => updateStatus(req.request_id, 'Confirmed', req.customer_id)}>Confirm & Log Sale</button>
-                          <button className="button ghost" type="button" onClick={() => updateStatus(req.request_id, 'Rejected', req.customer_id)}>Reject</button>
+                          <button
+                            className="icon-action-button"
+                            type="button"
+                            title="Confirm & Log Sale"
+                            aria-label={`Confirm request ${req.request_id} and log sale`}
+                            onClick={() => updateStatus(req.request_id, 'Confirmed', req.customer_id)}
+                          >
+                            <NavIcon name="check" />
+                          </button>
+                          <button
+                            className="icon-action-button danger"
+                            type="button"
+                            title="Reject"
+                            aria-label={`Reject request ${req.request_id}`}
+                            onClick={() => updateStatus(req.request_id, 'Rejected', req.customer_id)}
+                          >
+                            <NavIcon name="close" />
+                          </button>
                         </> : null}
                       {req.status === 'Invoiced' && req.sales_invoices_id ? (
-                        <button className="button ghost" type="button" onClick={() => navigate(`/sales/invoices/${req.sales_invoices_id}`)}>View Invoice</button>
+                        <button
+                          className="icon-action-button"
+                          type="button"
+                          title="View Invoice"
+                          aria-label={`View invoice for request ${req.request_id}`}
+                          onClick={() => navigate(`/sales/invoices/${req.sales_invoices_id}`)}
+                        >
+                          <NavIcon name="receipt" />
+                        </button>
                       ) : null}
                       {req.status === 'Confirmed' ? (
-                        <button className="button" type="button" onClick={() => navigate(`/sales/log-sale/${req.customer_id}?purchaseRequestId=${req.request_id}`)}>Log Sale</button>
+                        <button
+                          className="icon-action-button"
+                          type="button"
+                          title="Log Sale"
+                          aria-label={`Log sale for request ${req.request_id}`}
+                          onClick={() => navigate(`/sales/log-sale/${req.customer_id}?purchaseRequestId=${req.request_id}`)}
+                        >
+                          <NavIcon name="add" />
+                        </button>
                       ) : null}
                     </td>
                   </tr>)}

@@ -353,12 +353,14 @@ async function main() {
           [name]
         );
         if (exists.rows.length) continue;
+        const phoneDigits = String(900000000 + ((i * 7919) % 100000000)).padStart(9, '0');
+        const contactNumber = `09${phoneDigits.slice(0, 2)} ${phoneDigits.slice(2, 5)} ${phoneDigits.slice(5)}`;
         await client.query(
           `INSERT INTO suppliers (supplier_name, contact, email, address, status)
            VALUES ($1, $2, $3, $4, 'Active')`,
           [
             name,
-            `${FIRST[i % FIRST.length]} ${LAST[i % LAST.length]}`,
+            contactNumber,
             `supplier${i + 1}@corvex-supply.ph`,
             `${100 + i} Industrial Park, Mindanao`,
           ]

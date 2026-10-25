@@ -13,7 +13,6 @@ export const customerRole = {
     { label: 'Digital Receipts', to: '/customer/receipts' },
     { label: 'Statements', to: '/customer/statements' },
     { label: 'Notifications', to: '/customer/notifications' },
-    { label: 'Profile', to: '/customer/profile' },
   ],
   routes: {},
 };

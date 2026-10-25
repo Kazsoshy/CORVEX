@@ -1,8 +1,6 @@
 const ROUTE_DEFINITIONS = [
   { pattern: /^\/warehouse\/dashboard$/, pageType: 'dashboard' },
   { pattern: /^\/warehouse\/settings$/, pageType: 'settings' },
-  { pattern: /^\/warehouse\/inventory$/, pageType: 'branchInventory' },
-  { pattern: /^\/warehouse\/branch-inventory$/, pageType: 'branchInventory' },
   { pattern: /^\/warehouse\/central-inventory$/, pageType: 'centralInventory' },
   { pattern: /^\/warehouse\/products$/, pageType: 'products' },
   { pattern: /^\/warehouse\/add-product$/, pageType: 'addProduct' },
@@ -32,6 +30,9 @@ const ROUTE_DEFINITIONS = [
 function normalizeWarehousePathname(pathname) {
   if (pathname === '/warehouse/transfer-requests') return '/warehouse/transfers';
   if (pathname === '/warehouse/transfer-requests/new') return '/warehouse/transfers/new';
+  if (pathname === '/warehouse/branch-inventory' || pathname === '/warehouse/inventory') {
+    return '/warehouse/central-inventory';
+  }
   const legacy = pathname.match(/^\/warehouse\/transfer-requests\/([^/]+)$/);
   if (legacy) return `/warehouse/transfers/${legacy[1]}`;
   return pathname;
@@ -60,8 +61,6 @@ export function buildWarehouseBreadcrumbs(pageType, params = {}) {
       return [{ label: 'Dashboard', to: '/warehouse/dashboard' }];
     case 'settings':
       return [...crumbs, { label: 'Settings', to: '/warehouse/settings' }];
-    case 'branchInventory':
-      return [...crumbs, { label: 'Branch Inventory', to: '/warehouse/branch-inventory' }];
     case 'centralInventory':
       return [...crumbs, { label: 'Inventory Management', to: '/warehouse/central-inventory' }];
     case 'products':
@@ -168,7 +167,6 @@ export function resolveWarehousePage(pathname, search = '') {
   const titles = {
     dashboard: 'Dashboard',
     settings: 'Settings',
-    branchInventory: 'Branch Inventory',
     centralInventory: 'Inventory Management',
     products: 'Products',
     addProduct: 'Add Product',
@@ -209,10 +207,11 @@ export function isWarehouseNavActive(fullPath, navTo) {
   if (navTo === '/warehouse/dashboard') {
     return pathname === '/warehouse/dashboard' || pathname === '/warehouse/settings' || pathname === '/warehouse/audit-log' || pathname === '/warehouse/reports';
   }
-  if (navTo === '/warehouse/branch-inventory') {
-    return pathname === '/warehouse/branch-inventory' || pathname === '/warehouse/inventory';
+  if (navTo === '/warehouse/central-inventory') {
+    return pathname === '/warehouse/central-inventory'
+      || pathname === '/warehouse/branch-inventory'
+      || pathname === '/warehouse/inventory';
   }
-  if (navTo === '/warehouse/central-inventory') return pathname === '/warehouse/central-inventory';
   if (navTo === '/warehouse/products') {
     return pathname === '/warehouse/products'
       || pathname === '/warehouse/add-product'

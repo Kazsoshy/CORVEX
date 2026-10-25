@@ -354,44 +354,37 @@ function FieldActivityReportsPage({
 
         <DeviceQueue rows={deviceReports} />
 
-        <form className="grid gap-3 mb-6" onSubmit={handleSubmit}>
-        <div className="form-group" style={{
-          marginBottom: 0
-        }}>
-          <label>Visit / Customer<span className="required">*</span></label>
-          <select className="filter-select" value={form.visit_id} onChange={e => setForm(p => ({
-            ...p,
-            visit_id: e.target.value
-          }))}>
-            <option value="">Select today&apos;s visit</option>
-            {visits.map(v => <option key={v.visit_id} value={v.visit_id}>
-                {v.customer_name} — {v.visit_type} ({formatDisplayDate(v.scheduled_date)}, {v.status})
-              </option>)}
-          </select>
-          {errors.visit_id ? <p className="form-error">{errors.visit_id}</p> : null}
-          {!visits.length ? <p className="text-ink/70" style={{
-            fontSize: '0.82rem',
-            marginTop: 6
-          }}>
-              No visits scheduled for today. Reports can be filed once a visit is assigned.
-            </p> : null}
+        <form className="field-report-form" onSubmit={handleSubmit}>
+        <div className="field-report-filter-row">
+          <label className="field-report-field">
+            <span>Visit / Customer<span className="required">*</span></span>
+            <select className="filter-select" value={form.visit_id} onChange={e => setForm(p => ({
+              ...p,
+              visit_id: e.target.value
+            }))}>
+              <option value="">Select today&apos;s visit</option>
+              {visits.map(v => <option key={v.visit_id} value={v.visit_id}>
+                  {v.customer_name} — {v.visit_type} ({formatDisplayDate(v.scheduled_date)}, {v.status})
+                </option>)}
+            </select>
+            {errors.visit_id ? <p className="form-error">{errors.visit_id}</p> : null}
+          </label>
+          <label className="field-report-field">
+            <span>Activity Type<span className="required">*</span></span>
+            <select className="filter-select" value={form.activity_type} onChange={e => setForm(p => ({
+              ...p,
+              activity_type: e.target.value
+            }))}>
+              <option value="">Select activity type</option>
+              {['Collection', 'Sales Visit', 'Delivery', 'Site Check', 'Follow-up', 'Customer Not Available'].map(t => <option key={t} value={t}>{t}</option>)}
+            </select>
+            {errors.activity_type ? <p className="form-error">{errors.activity_type}</p> : null}
+          </label>
         </div>
-        <div className="form-group" style={{
-          marginBottom: 0
-        }}>
-          <label>Activity Type<span className="required">*</span></label>
-          <select className="filter-select" value={form.activity_type} onChange={e => setForm(p => ({
-            ...p,
-            activity_type: e.target.value
-          }))}>
-            <option value="">Select activity type</option>
-            {['Collection', 'Sales Visit', 'Delivery', 'Site Check', 'Follow-up', 'Customer Not Available'].map(t => <option key={t} value={t}>{t}</option>)}
-          </select>
-          {errors.activity_type ? <p className="form-error">{errors.activity_type}</p> : null}
-        </div>
-        <div className="form-group" style={{
-          marginBottom: 0
-        }}>
+        {!visits.length ? <p className="field-report-hint">
+            No visits scheduled for today. Reports can be filed once a visit is assigned.
+          </p> : null}
+        <div className="form-group field-report-block">
           <label>Remarks<span className="required">*</span></label>
           <textarea rows={3} placeholder="Describe the visit outcome, payment collected, or follow-up needed..." value={form.remarks} onChange={e => setForm(p => ({
             ...p,
@@ -399,9 +392,7 @@ function FieldActivityReportsPage({
           }))} />
           {errors.remarks ? <p className="form-error">{errors.remarks}</p> : null}
         </div>
-        <div className="form-group" style={{
-          marginBottom: 0
-        }}>
+        <div className="form-group field-report-block">
           <label>Photo Evidence<span className="required">*</span></label>
           <input
             type="file"
@@ -1728,6 +1719,21 @@ function IncidentReportPage({
       </div>
     </div>;
 }
+function collectionPaymentPdfRow(payment) {
+  return {
+    payment_id: payment.collectionpayment_id,
+    receipt_number: payment.receipt_number || '',
+    customer: payment.customer_name || '',
+    collector: payment.collector_name || '',
+    branch: payment.branch_name || '',
+    payment_method: payment.payment_method || '',
+    amount: formatCurrency(Number(payment.amount)),
+    status: payment.status || '',
+    timestamp: formatPaymentTimestamp(payment.payment_date, payment.payment_time),
+    notes: payment.notes || '',
+  };
+}
+
 function CollectionHistoryPage({
   navigate,
   showToast
@@ -1740,6 +1746,8 @@ function CollectionHistoryPage({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [devicePayments, setDevicePayments] = useState([]);
+  const [selectedPayment, setSelectedPayment] = useState(null);
+  const [detailLoading, setDetailLoading] = useState(false);
   useEffect(() => {
     async function load() {
       setLoading(true);
@@ -1765,8 +1773,60 @@ function CollectionHistoryPage({
       return matchesSearch && matchesStatus && matchesFrom && matchesTo;
     });
   }, [payments, search, statusFilter, dateFrom, dateTo]);
-  const pagination_filtered = usePagination(filtered);
+  const pagination_filtered = usePagination(filtered, {
+    resetKey: `${search}|${statusFilter}|${dateFrom}|${dateTo}`,
+  });
   const paginated_filtered = pagination_filtered.paginatedData;
+
+  const openPaymentDetail = async (payment) => {
+    setSelectedPayment(payment);
+    setDetailLoading(true);
+    const result = await fetchCollectionPaymentById(payment.collectionpayment_id);
+    setDetailLoading(false);
+    if (result.success && result.data) {
+      setSelectedPayment(result.data);
+    } else {
+      showToast?.(result.message || 'Could not load full payment details.', 'error');
+    }
+  };
+
+  const closePaymentDetail = () => {
+    setSelectedPayment(null);
+    setDetailLoading(false);
+  };
+
+  const exportFilteredPdf = () => {
+    const rows = filtered.map((p) => ({
+      payment_id: p.collectionpayment_id,
+      receipt: p.receipt_number,
+      customer: p.customer_name,
+      amount: p.amount,
+      method: p.payment_method,
+      status: p.status,
+      date: p.payment_date,
+    }));
+    if (downloadPdf(rows, { filename: 'collector-payments.pdf', title: 'Collector Payments' })) {
+      showToast('Payments exported as PDF.', 'success');
+    } else {
+      showToast('Nothing to export.', 'error');
+    }
+  };
+
+  const exportSelectedPdf = () => {
+    if (!selectedPayment) return;
+    const row = collectionPaymentPdfRow(selectedPayment);
+    const filename = `collection-payment-${selectedPayment.collectionpayment_id}.pdf`;
+    if (downloadPdf([row], {
+      filename,
+      title: 'Collection Payment Details',
+      subtitle: selectedPayment.receipt_number || `Payment #${selectedPayment.collectionpayment_id}`,
+    })) {
+      showToast('Payment exported as PDF.', 'success');
+    } else {
+      showToast('Nothing to export.', 'error');
+    }
+  };
+
   if (loading) return <LoadingState message="Loading collection payments..." />;
   if (error && !payments.length) {
     return <div className="page">
@@ -1779,38 +1839,33 @@ function CollectionHistoryPage({
       <section className="panel content-panel relative overflow-hidden">
         <div className="list-section-header">
           <h3>Collection Payments</h3>
-          <div className="list-section-actions">
-            <button
-              className="button secondary whitespace-nowrap"
-              type="button"
-              onClick={() => {
-                const rows = filtered.map(p => ({
-                  payment_id: p.collectionpayment_id,
-                  receipt: p.receipt_number,
-                  customer: p.customer_name,
-                  amount: p.amount,
-                  method: p.payment_method,
-                  status: p.status,
-                  date: p.payment_date,
-                }));
-                if (downloadPdf(rows, { filename: 'collector-payments.pdf', title: 'Collector Payments' })) showToast('Payments exported as PDF.', 'success');
-                else showToast('Nothing to export.', 'error');
-              }}
-            >
-              Export PDF
-            </button>
-          </div>
         </div>
-        <div className="list-section-toolbar">
-          <div className="list-section-controls">
-            <input className="filter-input search" type="search" placeholder="Search by customer, receipt number, or ID" value={search} onChange={e => setSearch(e.target.value)} />
-            <select className="filter-select" value={statusFilter} onChange={e => setStatusFilter(e.target.value)}>
+        <div className="list-section-toolbar suppliers-toolbar audit-logs-toolbar">
+          <div className="list-section-controls audit-logs-filters">
+            <input
+              className="filter-input search"
+              type="search"
+              placeholder="Search by customer, receipt number, or ID"
+              value={search}
+              onChange={e => setSearch(e.target.value)}
+              aria-label="Search collection payments"
+            />
+            <select
+              className="filter-select"
+              value={statusFilter}
+              onChange={e => setStatusFilter(e.target.value)}
+              aria-label="Filter by status"
+            >
               {['All', 'Pending', 'Completed', 'Cancelled'].map(option => <option key={option} value={option}>Status: {option}</option>)}
             </select>
             <input className="filter-input" type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)} aria-label="From date" />
             <input className="filter-input" type="date" value={dateTo} onChange={e => setDateTo(e.target.value)} aria-label="To date" />
           </div>
-          <p className="list-section-subtitle">{payments.length} record{payments.length !== 1 ? 's' : ''} in database</p>
+          <div className="list-section-actions suppliers-toolbar-actions">
+            <button className="button secondary whitespace-nowrap" type="button" onClick={exportFilteredPdf}>
+              Export PDF
+            </button>
+          </div>
         </div>
         {filtered.length ? <><div className="corvex-table-wrapper">
             <table className="corvex-table">
@@ -1848,7 +1903,7 @@ function CollectionHistoryPage({
                 }}>{formatPaymentTimestamp(p.payment_date, p.payment_time)}</td>
                     <td><StatusBadge status={p.status} /></td>
                     <td className="table-actions">
-                      <button className="icon-action-button" type="button" title="View" onClick={() => navigate(`/collector/history/${p.collectionpayment_id}`)}>
+                      <button className="icon-action-button" type="button" title="View" onClick={() => openPaymentDetail(p)}>
                         <NavIcon name="view" />
                       </button>
                     </td>
@@ -1858,6 +1913,68 @@ function CollectionHistoryPage({
           </div><Pagination {...pagination_filtered} /></>
         : <EmptyState title="No collection records found" description="Adjust your search or date filters." />}
       </section>
+
+      {selectedPayment ? (
+        <div
+          className="modal-overlay"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="collection-payment-detail-title"
+          onClick={closePaymentDetail}
+        >
+          <div className="modal-content" style={{ maxWidth: 640 }} onClick={(e) => e.stopPropagation()}>
+            <div className="flex flex-col md:flex-row justify-between gap-4 items-start md:items-center mb-4">
+              <div>
+                <h3 id="collection-payment-detail-title" style={{ margin: 0 }}>Collection Payment Details</h3>
+                <p className="text-ink/70" style={{ margin: '4px 0 0', fontSize: '0.82rem' }}>
+                  Payment ID {selectedPayment.collectionpayment_id}
+                  {selectedPayment.receipt_number ? ` · ${selectedPayment.receipt_number}` : ''}
+                </p>
+              </div>
+              <StatusBadge status={selectedPayment.status} />
+            </div>
+            {detailLoading ? (
+              <LoadingState message="Loading payment details..." />
+            ) : (
+              <DetailRowsTable rows={[
+                { label: 'Payment ID', value: <span style={{ fontFamily: 'monospace' }}>{selectedPayment.collectionpayment_id}</span> },
+                { label: 'Receipt ID', value: <span style={{ fontFamily: 'monospace' }}>{selectedPayment.receipts_id ?? '—'}</span> },
+                { label: 'Receipt Number', value: <span style={{ fontFamily: 'monospace' }}>{selectedPayment.receipt_number || '—'}</span> },
+                { label: 'Customer', value: selectedPayment.customer_name || '—' },
+                { label: 'Customer ID', value: <span style={{ fontFamily: 'monospace' }}>{selectedPayment.customer_id ?? '—'}</span> },
+                { label: 'Collector', value: selectedPayment.collector_name || '—' },
+                { label: 'Branch', value: selectedPayment.branch_name || '—' },
+                { label: 'Branch ID', value: <span style={{ fontFamily: 'monospace' }}>{selectedPayment.branch_id ?? '—'}</span> },
+                { label: 'Payment Method', value: selectedPayment.payment_method || '—' },
+                { label: 'Amount', value: <span style={{ fontWeight: 700, color: 'var(--palette-navy)' }}>{formatCurrency(Number(selectedPayment.amount))}</span> },
+                { label: 'Timestamp', value: formatPaymentTimestamp(selectedPayment.payment_date, selectedPayment.payment_time) },
+                { label: 'Status', value: <StatusBadge status={selectedPayment.status} /> },
+                { label: 'Created At', value: formatDisplayDateTime(selectedPayment.created_at) },
+                { label: 'Updated At', value: formatDisplayDateTime(selectedPayment.updated_at) },
+                ...(selectedPayment.notes ? [{ label: 'Notes', value: selectedPayment.notes }] : []),
+              ]} />
+            )}
+            <div className="modal-actions">
+              {selectedPayment.receipts_id ? (
+                <button
+                  className="button ghost"
+                  type="button"
+                  onClick={() => {
+                    closePaymentDetail();
+                    navigate(`/collector/receipts/${selectedPayment.receipts_id}`);
+                  }}
+                >
+                  Open Receipt
+                </button>
+              ) : null}
+              <button className="button secondary" type="button" onClick={exportSelectedPdf} disabled={detailLoading}>
+                Export PDF
+              </button>
+              <button className="button" type="button" onClick={closePaymentDetail}>Close</button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </div>;
 }
 function CollectionPaymentDetailPage({

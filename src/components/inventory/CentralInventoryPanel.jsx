@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { fetchCentralInventory, realignCentralInventory } from '../../api/inventoryService.js';
 import { formatDisplayDate, formatDisplayDateTime } from '../../utils/formatters.js';
+import { usePagination } from '../../hooks/usePagination';
 import { NavIcon } from '../../navIcons';
 import { EmptyState } from '../shared/EmptyState';
 import { LoadingState } from '../shared/LoadingState';
+import { Pagination } from '../shared/Pagination';
 import { StatusBadge } from '../StatusBadge';
 
 const METRIC_DEFS = [
@@ -105,6 +107,11 @@ export function CentralInventoryPanel({
       );
     });
   }, [rows, search, statusFilter]);
+
+  const matrixPagination = usePagination(filteredRows, {
+    resetKey: `${search}|${statusFilter}|${branchId}|${view}`,
+  });
+  const paginatedMatrixRows = matrixPagination.paginatedData;
 
   const metrics = useMemo(() => ({
     totalStock: summary?.totalStock ?? 0,
@@ -356,55 +363,58 @@ export function CentralInventoryPanel({
                 {!filteredRows.length ? (
                   <EmptyState title="No products" description="Adjust filters or add products to the catalog." />
                 ) : (
-                  <div className="corvex-table-wrapper">
-                    <table className="corvex-table">
-                      <thead>
-                        <tr>
-                          <th>Product</th>
-                          <th>SKU</th>
-                          <th>Central quantity</th>
-                          {selectedBranch ? (
-                            <th>{selectedBranch.branch_name}</th>
-                          ) : (
-                            branches.map((branch) => (
-                              <th key={branch.branch_id}>{branch.branch_name}</th>
-                            ))
-                          )}
-                          <th>Status</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {filteredRows.map((row) => {
-                          const byBranchMap = new Map((row.branches || []).map((branch) => [branch.branch_id, branch]));
-                          const visibleBranches = selectedBranch ? [selectedBranch] : branches;
-                          return (
-                            <tr key={row.product_id}>
-                              <td><strong>{row.product_name}</strong></td>
-                              <td>{row.sku || '—'}</td>
-                              <td>{row.central_quantity ?? 0}</td>
-                              {visibleBranches.map((branch) => {
-                                const stock = byBranchMap.get(branch.branch_id);
-                                const quantity = stock?.available_stock;
-                                return (
-                                  <td key={branch.branch_id}>
-                                    {quantity == null ? '—' : quantity}
-                                    {stock?.stock_status ? (
-                                      <div style={{ marginTop: 4 }}>
-                                        <StatusBadge status={stock.stock_status} />
-                                      </div>
-                                    ) : null}
-                                  </td>
-                                );
-                              })}
-                              <td>
-                                <StatusBadge status={row.aligned ? 'Aligned' : 'Out of balance'} />
-                              </td>
-                            </tr>
-                          );
-                        })}
-                      </tbody>
-                    </table>
-                  </div>
+                  <>
+                    <div className="corvex-table-wrapper">
+                      <table className="corvex-table">
+                        <thead>
+                          <tr>
+                            <th>Product</th>
+                            <th>SKU</th>
+                            <th>Central quantity</th>
+                            {selectedBranch ? (
+                              <th>{selectedBranch.branch_name}</th>
+                            ) : (
+                              branches.map((branch) => (
+                                <th key={branch.branch_id}>{branch.branch_name}</th>
+                              ))
+                            )}
+                            <th>Status</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {paginatedMatrixRows.map((row) => {
+                            const byBranchMap = new Map((row.branches || []).map((branch) => [branch.branch_id, branch]));
+                            const visibleBranches = selectedBranch ? [selectedBranch] : branches;
+                            return (
+                              <tr key={row.product_id}>
+                                <td><strong>{row.product_name}</strong></td>
+                                <td>{row.sku || '—'}</td>
+                                <td>{row.central_quantity ?? 0}</td>
+                                {visibleBranches.map((branch) => {
+                                  const stock = byBranchMap.get(branch.branch_id);
+                                  const quantity = stock?.available_stock;
+                                  return (
+                                    <td key={branch.branch_id}>
+                                      {quantity == null ? '—' : quantity}
+                                      {stock?.stock_status ? (
+                                        <div style={{ marginTop: 4 }}>
+                                          <StatusBadge status={stock.stock_status} />
+                                        </div>
+                                      ) : null}
+                                    </td>
+                                  );
+                                })}
+                                <td>
+                                  <StatusBadge status={row.aligned ? 'Aligned' : 'Out of balance'} />
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                    <Pagination {...matrixPagination} />
+                  </>
                 )}
               </>
             ) : (

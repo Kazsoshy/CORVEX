@@ -233,11 +233,15 @@ router.get('/:id', async (req, res) => {
 router.post('/', async (req, res) => {
   try {
     const pool = req.app.locals.pool;
-    const { name, sku, category_id, description, unit_price, unit_type, barcode, supplier_id, reorder_point } = req.body;
+    const { name, sku, category_id, description, unit_price, unit_type, barcode, supplier_id, reorder_point, image_url } = req.body;
     const productName = normalizeProductName(name);
+    const normalizedImage = typeof image_url === 'string' && image_url.trim() ? image_url.trim() : null;
 
     if (!productName || !sku) {
       return res.status(400).json({ success: false, message: 'name and sku are required.' });
+    }
+    if (normalizedImage && !(normalizedImage.startsWith('data:image/') || /^https?:\/\//i.test(normalizedImage))) {
+      return res.status(400).json({ success: false, message: 'image_url must be an image upload or URL.' });
     }
     if (await productNameTaken(pool, productName)) {
       return res.status(409).json({ success: false, message: 'A product with this name already exists.' });
@@ -249,8 +253,8 @@ router.post('/', async (req, res) => {
     }
 
     const result = await pool.query(
-      `INSERT INTO products (name, sku, category_id, description, unit_price, unit_type, barcode, supplier_id, reorder_point)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+      `INSERT INTO products (name, sku, category_id, description, unit_price, unit_type, barcode, supplier_id, reorder_point, image_url)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
        RETURNING id AS product_id`,
       [
         productName,
@@ -262,6 +266,7 @@ router.post('/', async (req, res) => {
         barcode || null,
         supplier_id ? Number(supplier_id) : null,
         Number(reorder_point) || 5,
+        normalizedImage,
       ]
     );
 
@@ -280,7 +285,7 @@ router.post('/', async (req, res) => {
 router.put('/:id', async (req, res) => {
   try {
     const pool = req.app.locals.pool;
-    const { name, category_id, description, unit_price, unit_type, barcode, supplier_id, reorder_point, status } = req.body;
+    const { name, category_id, description, unit_price, unit_type, barcode, supplier_id, reorder_point, status, image_url } = req.body;
     const productId = Number(req.params.id);
     const productName = name !== undefined ? normalizeProductName(name) : undefined;
 
@@ -293,6 +298,12 @@ router.put('/:id', async (req, res) => {
     }
     if (productName && await productNameTaken(pool, productName, productId)) {
       return res.status(409).json({ success: false, message: 'A product with this name already exists.' });
+    }
+    if (image_url !== undefined && image_url !== null && String(image_url).trim()) {
+      const normalizedImage = String(image_url).trim();
+      if (!(normalizedImage.startsWith('data:image/') || /^https?:\/\//i.test(normalizedImage))) {
+        return res.status(400).json({ success: false, message: 'image_url must be an image upload or URL.' });
+      }
     }
 
     const updates = [];
@@ -308,6 +319,10 @@ router.put('/:id', async (req, res) => {
     if (supplier_id !== undefined) { updates.push(`supplier_id = $${pIdx++}`); params.push(supplier_id ? Number(supplier_id) : null); }
     if (reorder_point !== undefined) { updates.push(`reorder_point = $${pIdx++}`); params.push(Number(reorder_point)); }
     if (status) { updates.push(`status = $${pIdx++}`); params.push(status); }
+    if (image_url !== undefined) {
+      updates.push(`image_url = $${pIdx++}`);
+      params.push(image_url && String(image_url).trim() ? String(image_url).trim() : null);
+    }
 
     if (!updates.length) return res.status(400).json({ success: false, message: 'No fields to update.' });
 

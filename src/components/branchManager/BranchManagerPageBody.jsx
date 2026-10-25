@@ -379,6 +379,26 @@ function FieldOperationsHub({
   const paginated_staff_collectors = pagination_staff_collectors.paginatedData;
   const pagination_staff_sales = usePagination(staff.salesAgents);
   const paginated_staff_sales = pagination_staff_sales.paginatedData;
+  const routePerformanceRows = useMemo(() => [
+    ...(staff.collectors || []).map((c) => ({
+      id: `collector-${c.id}`,
+      name: c.name,
+      type: 'Collector',
+      compliance: `${c.complianceScore}%`,
+      recoveryOrRevenue: `${c.recoveryRate}%`,
+      missed: c.missedVisits,
+    })),
+    ...(staff.salesAgents || []).map((a) => ({
+      id: `sales-${a.id}`,
+      name: a.name,
+      type: 'Sales',
+      compliance: `${a.visitCompletionRate}%`,
+      recoveryOrRevenue: formatCurrency(a.totalSalesAmount),
+      missed: '—',
+    })),
+  ], [staff.collectors, staff.salesAgents]);
+  const pagination_route_performance = usePagination(routePerformanceRows);
+  const paginated_route_performance = pagination_route_performance.paginatedData;
   if (loading) return <LoadingState variant="dashboard" message="Loading field operations..." />;
   return <div className="page">
       <div className="segmented-control">
@@ -578,15 +598,27 @@ function FieldOperationsHub({
 
       {tab === 'performance' && <section className="panel content-panel relative overflow-hidden">
           <div className="flex flex-col md:flex-row justify-between gap-4 items-start md:items-center mb-4"><h3>Route Performance Summary</h3></div>
-          <><div className="corvex-table-wrapper">
-            <table className="corvex-table">
-              <thead><tr><th>Staff</th><th>Type</th><th>Compliance</th><th>Recovery / Revenue</th><th>Missed</th></tr></thead>
-              <tbody>
-                {paginated_staff_collectors.map(c => <tr key={c.id}><td>{c.name}</td><td>Collector</td><td>{c.complianceScore}%</td><td>{c.recoveryRate}%</td><td>{c.missedVisits}</td></tr>)}
-                {staff.salesAgents.map(a => <tr key={a.id}><td>{a.name}</td><td>Sales</td><td>{a.visitCompletionRate}%</td><td>{formatCurrency(a.totalSalesAmount)}</td><td>—</td></tr>)}
-              </tbody>
-            </table>
-          </div><Pagination {...pagination_staff_collectors} /></>
+          {!routePerformanceRows.length ? (
+            <EmptyState title="No route performance data" description="Collectors and sales agents assigned to this branch will appear here." />
+          ) : <>
+            <div className="corvex-table-wrapper">
+              <table className="corvex-table">
+                <thead><tr><th>Staff</th><th>Type</th><th>Compliance</th><th>Recovery / Revenue</th><th>Missed</th></tr></thead>
+                <tbody>
+                  {paginated_route_performance.map((row) => (
+                    <tr key={row.id}>
+                      <td>{row.name}</td>
+                      <td>{row.type}</td>
+                      <td>{row.compliance}</td>
+                      <td>{row.recoveryOrRevenue}</td>
+                      <td>{row.missed}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <Pagination {...pagination_route_performance} />
+          </>}
         </section>}
       <ChartDrilldownModal {...drilldown} onClose={closeDrilldown} showToast={showToast} />
     </div>;

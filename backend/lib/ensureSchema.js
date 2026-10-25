@@ -18,6 +18,7 @@ export async function ensureSchema(client) {
     ALTER TABLE customers ADD COLUMN IF NOT EXISTS secondary_contact_relationship VARCHAR(80);
 
     ALTER TABLE products ADD COLUMN IF NOT EXISTS image_url VARCHAR(500);
+    ALTER TABLE products ALTER COLUMN image_url TYPE TEXT;
     ALTER TABLE products ADD COLUMN IF NOT EXISTS category VARCHAR(50);
 
     ALTER TABLE notifications ADD COLUMN IF NOT EXISTS category VARCHAR(50);
@@ -135,5 +136,15 @@ export async function ensureSchema(client) {
       file_name   VARCHAR(200) NOT NULL,
       created_at  TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
     );
+  `);
+
+  // Supplier.contact stores phone numbers; replace name-only seed values.
+  await client.query(`
+    UPDATE suppliers
+    SET contact = '09' || LPAD(((suppliers_id * 7919) % 1000000000)::text, 9, '0'),
+        updated_at = NOW()
+    WHERE contact IS NULL
+       OR TRIM(contact) = ''
+       OR contact !~ '[0-9]';
   `);
 }

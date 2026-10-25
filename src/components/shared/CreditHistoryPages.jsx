@@ -116,7 +116,6 @@ export function CreditHistoryListPage({
       <section className="panel content-panel relative overflow-hidden">
         <div className="list-section-header">
           <h3>Credit History</h3>
-          <p className="text-ink/70">{records.length} record{records.length !== 1 ? 's' : ''} in database</p>
         </div>
         <div className="list-section-toolbar">
           <div className="list-section-controls">
