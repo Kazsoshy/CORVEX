@@ -124,7 +124,42 @@ function monthStartKey(monthStart) {
 
 const CAROUSEL_MAX_SLIDES = 10;
 const CAROUSEL_SWIPE_THRESHOLD = 48;
-const CAROUSEL_VISIBLE_SPAN = 2; // show ±2 neighbors around the center
+
+const PRODUCT_IMAGE_MODULES = import.meta.glob(
+  '../../assets/products-image/*.{jpg,jpeg,png,webp,avif}',
+  { eager: true, import: 'default' }
+);
+
+const PRODUCT_IMAGES_BY_SLUG = Object.entries(PRODUCT_IMAGE_MODULES).reduce(
+  (acc, [path, url]) => {
+    const file = path.split('/').pop() || '';
+    const slug = file.replace(/\.[^.]+$/, '').toLowerCase();
+    if (slug && url) acc[slug] = url;
+    return acc;
+  },
+  {}
+);
+
+const PRODUCT_IMAGE_LIST = Object.values(PRODUCT_IMAGES_BY_SLUG);
+
+function resolveCarouselProductImage(product, index = 0) {
+  if (product?.image_url) return product.image_url;
+  const slug = String(product?.product_name || product?.name || '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-|-$/g, '');
+  if (slug && PRODUCT_IMAGES_BY_SLUG[slug]) return PRODUCT_IMAGES_BY_SLUG[slug];
+  if (slug) {
+    const matchKey = Object.keys(PRODUCT_IMAGES_BY_SLUG).find(
+      (k) => slug.includes(k) || k.includes(slug)
+    );
+    if (matchKey) return PRODUCT_IMAGES_BY_SLUG[matchKey];
+  }
+  if (PRODUCT_IMAGE_LIST.length) {
+    return PRODUCT_IMAGE_LIST[index % PRODUCT_IMAGE_LIST.length];
+  }
+  return '';
+}
 
 function CustomerProductCarousel() {
   const [products, setProducts] = useState([]);
@@ -187,8 +222,6 @@ function CustomerProductCarousel() {
 
   if (loading || !slideCount) return null;
 
-  const active = products[activeIndex] || {};
-
   return (
     <section className="customer-product-carousel" aria-roledescription="carousel" aria-label="Featured products">
       <div
@@ -217,46 +250,60 @@ function CustomerProductCarousel() {
         }}
       >
         <div className="customer-product-carousel__viewport">
-          {products.map((product, index) => {
-            let offset = index - activeIndex;
-            if (offset > slideCount / 2) offset -= slideCount;
-            if (offset < -slideCount / 2) offset += slideCount;
-            const abs = Math.abs(offset);
-            if (abs > CAROUSEL_VISIBLE_SPAN) return null;
-
-            const name = product.product_name || 'Product';
-            const isCenter = offset === 0;
-            const slotClass =
-              abs === 0 ? 'is-center' : abs === 1 ? 'is-near' : 'is-edge';
-
-            return (
-              <article
-                key={product.product_id}
-                className={`customer-product-carousel__slide ${slotClass}`}
-                style={{ '--offset': offset }}
-                aria-hidden={!isCenter}
-                aria-label={`${index + 1} of ${slideCount}: ${name}`}
-                onClick={() => {
-                  if (!isCenter) goTo(index);
-                }}
-              >
-                <div className="customer-product-carousel__card">
-                  {product.image_url ? (
-                    <img
-                      className="customer-product-carousel__image"
-                      src={product.image_url}
-                      alt={name}
-                      draggable={false}
-                    />
-                  ) : (
-                    <div className="customer-product-carousel__fallback" aria-hidden="true">
-                      <span>{String(name).slice(0, 1).toUpperCase()}</span>
+          <div
+            className="customer-product-carousel__track"
+            style={{ transform: `translate3d(-${activeIndex * 100}%, 0, 0)` }}
+          >
+            {products.map((product, index) => {
+              const name = product.product_name || 'Product';
+              const isActive = index === activeIndex;
+              const imgSrc = resolveCarouselProductImage(product, index);
+              return (
+                <article
+                  key={product.product_id}
+                  className={`customer-product-carousel__slide${isActive ? ' is-active' : ''}`}
+                  aria-hidden={!isActive}
+                  aria-label={`${index + 1} of ${slideCount}: ${name}`}
+                >
+                  <div className="customer-product-carousel__card">
+                    {imgSrc ? (
+                      <img
+                        className="customer-product-carousel__image"
+                        src={imgSrc}
+                        alt={name}
+                        draggable={false}
+                      />
+                    ) : (
+                      <div className="customer-product-carousel__fallback" aria-hidden="true">
+                        <span>{String(name).slice(0, 1).toUpperCase()}</span>
+                      </div>
+                    )}
+                    <div className="customer-product-carousel__caption">
+                      <p className="customer-product-carousel__name">{name}</p>
+                      <p className="customer-product-carousel__price">
+                        {formatCurrency(Number(product.unit_price || 0))}
+                      </p>
                     </div>
-                  )}
-                </div>
-              </article>
-            );
-          })}
+                  </div>
+                </article>
+              );
+            })}
+          </div>
+          {slideCount > 1 ? (
+            <div className="customer-product-carousel__dots" role="tablist" aria-label="Product slides">
+              {products.map((product, index) => (
+                <button
+                  key={product.product_id}
+                  type="button"
+                  role="tab"
+                  className={`customer-product-carousel__dot${index === activeIndex ? ' is-active' : ''}`}
+                  aria-label={`${index + 1} of ${slideCount}: ${product.product_name || 'Product'}`}
+                  aria-selected={index === activeIndex}
+                  onClick={() => goTo(index)}
+                />
+              ))}
+            </div>
+          ) : null}
         </div>
 
         {slideCount > 1 ? (
@@ -267,7 +314,9 @@ function CustomerProductCarousel() {
               aria-label="Previous product"
               onClick={goPrev}
             >
-              <span className="customer-product-carousel__chevron" aria-hidden="true" />
+              <svg className="customer-product-carousel__arrow-icon" viewBox="0 0 36 44" aria-hidden="true">
+                <path d="M36 0 L0 22 L36 44 L26 22 Z" fill="currentColor" />
+              </svg>
             </button>
             <button
               type="button"
@@ -275,17 +324,12 @@ function CustomerProductCarousel() {
               aria-label="Next product"
               onClick={goNext}
             >
-              <span className="customer-product-carousel__chevron" aria-hidden="true" />
+              <svg className="customer-product-carousel__arrow-icon" viewBox="0 0 36 44" aria-hidden="true">
+                <path d="M0 0 L36 22 L0 44 L10 22 Z" fill="currentColor" />
+              </svg>
             </button>
           </>
         ) : null}
-      </div>
-
-      <div className="customer-product-carousel__caption">
-        <p className="customer-product-carousel__name">{active.product_name || 'Product'}</p>
-        <p className="customer-product-carousel__price">
-          {formatCurrency(Number(active.unit_price || 0))}
-        </p>
       </div>
     </section>
   );

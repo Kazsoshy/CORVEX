@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import LeafletMap, { createCustomIcon } from '../common/LeafletMap';
 import { fetchDrivingRoute, fetchRouteDepot } from '../../api/routingService';
 import { formatCurrency } from '../../utils/formatters.js';
@@ -14,6 +14,12 @@ function stopCoords(stop) {
   return null;
 }
 
+function stopsIdentityKey(stops) {
+  return (stops || [])
+    .map((s) => `${s.id}:${s.latitude}:${s.longitude}:${s.rank ?? ''}`)
+    .join('|');
+}
+
 export default function CollectionRouteMap({
   stops,
   showToast,
@@ -25,46 +31,21 @@ export default function CollectionRouteMap({
   const [routeData, setRouteData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [selectedId, setSelectedId] = useState(null);
+  const showToastRef = useRef(showToast);
+  const onRoadStatsRef = useRef(onRoadStats);
+  showToastRef.current = showToast;
+  onRoadStatsRef.current = onRoadStats;
+
+  // Stable key so parent re-renders that pass a new array with the same stops
+  // do not re-trigger the OSRM fetch (which caused the map loading loop).
+  const stopsKey = useMemo(() => stopsIdentityKey(stops), [stops]);
 
   const coordStops = useMemo(
     () => (stops || []).map((s) => ({ ...s, coords: stopCoords(s) })).filter((s) => s.coords),
-    [stops]
+    // stopsKey is the intentional content dependency; `stops` alone changes every parent render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [stopsKey]
   );
-
-  const loadRoute = useCallback(async () => {
-    if (!coordStops.length) {
-      setRouteData(null);
-      setLoading(false);
-      return;
-    }
-    setLoading(true);
-    const payload = coordStops.map((s) => ({
-      id: s.id,
-      customer_id: s.id,
-      latitude: s.coords.lat,
-      longitude: s.coords.lng,
-      rank: s.rank,
-      customer_name: s.customerName,
-      address: s.address,
-      outstanding_balance: s.outstandingBalance,
-      days_overdue: s.daysOverdue,
-      saw_score: s.sawScore,
-      status: s.status,
-      phone: s.phone,
-    }));
-    const res = await fetchDrivingRoute(orderMode, payload);
-    if (res.success) {
-      setRouteData(res.data);
-      onRoadStats?.(res.data?.road);
-      if (res.data?.road?.error && showToast) {
-        showToast(`Road routing fallback: ${res.data.road.error}`, 'error');
-      }
-    } else {
-      showToast?.(res.message || 'Road route unavailable.', 'error');
-      setRouteData(null);
-    }
-    setLoading(false);
-  }, [coordStops, orderMode, onRoadStats, showToast]);
 
   useEffect(() => {
     fetchRouteDepot().then((r) => {
@@ -73,8 +54,44 @@ export default function CollectionRouteMap({
   }, []);
 
   useEffect(() => {
-    loadRoute();
-  }, [loadRoute]);
+    let cancelled = false;
+    (async () => {
+      if (!coordStops.length) {
+        setRouteData(null);
+        setLoading(false);
+        return;
+      }
+      setLoading(true);
+      const payload = coordStops.map((s) => ({
+        id: s.id,
+        customer_id: s.id,
+        latitude: s.coords.lat,
+        longitude: s.coords.lng,
+        rank: s.rank,
+        customer_name: s.customerName,
+        address: s.address,
+        outstanding_balance: s.outstandingBalance,
+        days_overdue: s.daysOverdue,
+        saw_score: s.sawScore,
+        status: s.status,
+        phone: s.phone,
+      }));
+      const res = await fetchDrivingRoute(orderMode, payload);
+      if (cancelled) return;
+      if (res.success) {
+        setRouteData(res.data);
+        onRoadStatsRef.current?.(res.data?.road);
+        if (res.data?.road?.error) {
+          showToastRef.current?.(`Road routing fallback: ${res.data.road.error}`, 'error');
+        }
+      } else {
+        showToastRef.current?.(res.message || 'Road route unavailable.', 'error');
+        setRouteData(null);
+      }
+      setLoading(false);
+    })();
+    return () => { cancelled = true; };
+  }, [coordStops, orderMode]);
 
   const orderedStops = routeData?.orderedStops?.length
     ? routeData.orderedStops

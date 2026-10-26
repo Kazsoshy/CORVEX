@@ -572,6 +572,10 @@ function RoutePage({
     if (filter === 'Pending') return customers.filter((s) => !isRouteStopCompleted(s));
     return customers.filter(isRouteStopCompleted);
   }, [filter, customers]);
+  const mapStops = useMemo(
+    () => filteredStops.filter((s) => accountMapPosition(s).hasCoords),
+    [filteredStops]
+  );
   const routeCounts = useMemo(() => ({
     All: customers.length,
     Pending: customers.filter((s) => !isRouteStopCompleted(s)).length,
@@ -685,7 +689,7 @@ function RoutePage({
           />
         ) : showMap || pageType === 'routeMap' ? (
           <CollectionRouteMap
-            stops={filteredStops.filter((s) => accountMapPosition(s).hasCoords)}
+            stops={mapStops}
             showToast={showToast}
             navigate={navigate}
             onRoadStats={setRoadStats}
