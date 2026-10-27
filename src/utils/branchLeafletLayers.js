@@ -1,4 +1,5 @@
 import { formatCurrency, formatDisplayDate } from './formatters.js';
+import { mapSeries, palette } from '../theme/palette.js';
 
 export const LAYER_OPTIONS = [
   'Collector Routes',
@@ -16,8 +17,8 @@ export const PERIOD_OPTIONS = [
   { value: 'month', label: 'This Month' },
 ];
 
-const STAFF_COLORS = ['#255684', '#7c3aed', '#0d9f6e', '#d97706', '#db2777', '#0891b2', '#4f46e5'];
-const TERRITORY_COLORS = ['#255684', '#0d9f6e', '#d97706', '#7c3aed', '#db2777', '#0c1031'];
+const STAFF_COLORS = mapSeries;
+const TERRITORY_COLORS = [palette.navy, palette.cyan, palette.midnight, palette.powder, '#2A9B6A', '#d97706'];
 
 export function defaultLayersForPage(pageType) {
   if (pageType === 'leafletDelinquency') return ['Delinquency Clusters'];
@@ -167,7 +168,14 @@ function matchesSearch(account, search) {
   ].some((value) => String(value || '').toLowerCase().includes(q));
 }
 
-export const BRANCH_MARKER_COLORS = ['#255684', '#0c1031', '#c2410c', '#0d9f6e', '#7c3aed', '#db2777'];
+export const BRANCH_MARKER_COLORS = [
+  palette.navy,
+  palette.midnight,
+  palette.cyan,
+  '#2A9B6A',
+  palette.powder,
+  '#d97706',
+];
 
 export function branchMarkerColor(index) {
   return BRANCH_MARKER_COLORS[index % BRANCH_MARKER_COLORS.length];
@@ -321,7 +329,7 @@ export function buildBranchLeafletView({
       const missed = ordered.filter((s) => s.status === 'Missed').length;
       const rate = ordered.length ? Math.round((completed / ordered.length) * 100) : 0;
       const color = efficiencyMode
-        ? (rate >= 80 ? '#0d9f6e' : rate >= 50 ? '#d97706' : '#dc2626')
+        ? (rate >= 80 ? '#2A9B6A' : rate >= 50 ? '#d97706' : '#dc2626')
         : staffColor(collectorIndex.get(key) ?? 0);
       const staffName = ordered[0]?.staffName || `Staff #${key}`;
       const isSales = ordered.some((s) => s.visitType === 'Sales') && ordered.every((s) => s.visitType !== 'Collection');
@@ -347,7 +355,7 @@ export function buildBranchLeafletView({
         const stopColor = stop.status === 'Missed'
           ? '#dc2626'
           : stop.status === 'Completed'
-            ? '#0d9f6e'
+            ? '#2A9B6A'
             : color;
         markers.push({
           id: `stop-${stop.visitId}`,
@@ -367,12 +375,12 @@ export function buildBranchLeafletView({
 
     if (active.has('Collector Routes')) {
       legend.push({
-        color: '#255684',
+        color: '#1A4162',
         label: visibleSawRoads.length ? 'SAW road routes' : 'Collector / sales routes',
       });
     }
     if (efficiencyMode) {
-      legend.push({ color: '#0d9f6e', label: 'Efficient (≥80% completed)' });
+      legend.push({ color: '#2A9B6A', label: 'Efficient (≥80% completed)' });
       legend.push({ color: '#d97706', label: 'Watch (50–79%)' });
       legend.push({ color: '#dc2626', label: 'Inefficient (<50% or missed)' });
     }
@@ -417,7 +425,7 @@ export function buildBranchLeafletView({
         bounds.push(center);
       }
     });
-    legend.push({ color: '#255684', label: 'Sales territories' });
+    legend.push({ color: '#1A4162', label: 'Sales territories' });
   }
 
   const cells = clusterByGrid(accounts);
@@ -425,7 +433,7 @@ export function buildBranchLeafletView({
   if (active.has('Payment Behavior Zones')) {
     cells.forEach((cell) => {
       const delinquent = cell.overdue >= cell.current;
-      const color = delinquent ? '#dc2626' : '#0d9f6e';
+      const color = delinquent ? '#dc2626' : '#2A9B6A';
       circles.push({
         id: `pay-${cell.id}`,
         center: cell.center,
@@ -437,7 +445,7 @@ export function buildBranchLeafletView({
       });
       bounds.push(cell.center);
     });
-    legend.push({ color: '#0d9f6e', label: 'Current-paying zones' });
+    legend.push({ color: '#2A9B6A', label: 'Current-paying zones' });
     legend.push({ color: '#dc2626', label: 'Overdue payment zones' });
   }
 
@@ -470,7 +478,7 @@ export function buildBranchLeafletView({
   if (active.has('Profitability Zones')) {
     cells.forEach((cell) => {
       const net = cell.purchaseVolume - cell.outstanding;
-      const color = net >= 0 ? '#0d9f6e' : '#dc2626';
+      const color = net >= 0 ? '#2A9B6A' : '#dc2626';
       circles.push({
         id: `profit-${cell.id}`,
         center: cell.center,
@@ -482,7 +490,7 @@ export function buildBranchLeafletView({
       });
       bounds.push(cell.center);
     });
-    legend.push({ color: '#0d9f6e', label: 'Higher purchase vs outstanding' });
+    legend.push({ color: '#2A9B6A', label: 'Higher purchase vs outstanding' });
     legend.push({ color: '#dc2626', label: 'Outstanding exceeds purchases' });
   }
 
@@ -491,7 +499,7 @@ export function buildBranchLeafletView({
     const source = collecting.length ? collecting : cells.filter((cell) => cell.outstanding > 0);
     source.forEach((cell) => {
       const amount = collecting.length ? cell.collected : cell.outstanding;
-      const color = '#0891b2';
+      const color = '#408DAD';
       circles.push({
         id: `collect-${cell.id}`,
         center: cell.center,
@@ -505,7 +513,7 @@ export function buildBranchLeafletView({
       });
       bounds.push(cell.center);
     });
-    legend.push({ color: '#0891b2', label: collecting.length ? 'High collection this period' : 'Collection opportunity (no payments in period)' });
+    legend.push({ color: '#408DAD', label: collecting.length ? 'High collection this period' : 'Collection opportunity (no payments in period)' });
   }
 
   const zoneOnly = ['Payment Behavior Zones', 'Delinquency Clusters', 'Profitability Zones', 'High Collection Areas', 'Sales Territories']
@@ -516,7 +524,7 @@ export function buildBranchLeafletView({
         id: `acct-${account.id}`,
         position: [account.lat, account.lng],
         label: (account.customerName || 'CU').slice(0, 2).toUpperCase(),
-        color: account.paymentStatus === 'Overdue' ? '#ef4444' : '#255684',
+        color: account.paymentStatus === 'Overdue' ? '#ef4444' : '#1A4162',
         popup: accountPopup(account),
       });
       bounds.push([account.lat, account.lng]);

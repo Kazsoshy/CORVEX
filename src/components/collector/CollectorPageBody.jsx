@@ -3,7 +3,7 @@ import { StatsGrid, Stats } from '../shared/StatsGrid';
 import { usePagination, DEFAULT_PAGE_SIZE } from '../../hooks/usePagination';
 import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { formatCurrency, formatDisplayDate, formatDisplayDateTime, formatPaymentTimestamp } from '../../utils/formatters.js';
+import { formatCurrency, formatDisplayDate, formatDisplayDateTime, formatPaymentTimestamp, formatPhone } from '../../utils/formatters.js';
 import {
   fetchAccounts,
   fetchAccountById,
@@ -126,7 +126,6 @@ function DashboardPage({
   }, [showToast]);
 
   const agentName = currentUser?.fullName || 'Collector';
-  const branchName = currentUser?.branch?.name || '—';
   const summary = dashboard?.summary || {};
   const recentCollections = dashboard?.recentCollections || [];
   const recentFieldReports = dashboard?.recentFieldReports || [];
@@ -148,12 +147,6 @@ function DashboardPage({
       </section>
 
       <StatsGrid stats={[{
-      label: 'Branch',
-      value: branchName
-    }, {
-      label: 'Notifications',
-      value: String(unreadCount)
-    }, {
       label: 'Collected Today',
       value: formatCurrency(summary.amountCollectedToday ?? 0)
     }, {
@@ -179,12 +172,6 @@ function DashboardPage({
           </ul>
         </section>
       ) : null}
-
-      <div className="flex flex-wrap gap-2 justify-end mt-2 mb-2">
-        <button className="button secondary" type="button" onClick={() => navigate('/collector/accounts')}>View Accounts</button>
-        <button className="button secondary" type="button" onClick={() => navigate('/collector/incident')}>Report Incident</button>
-        <button className="button" type="button" onClick={() => navigate('/collector/route')}>Start Today's Route</button>
-      </div>
 
       <div className="dashboard-widgets grid two-up">
         <section className="panel content-panel relative overflow-hidden">
@@ -362,44 +349,37 @@ function FieldActivityReportsPage({
 
         <DeviceQueue rows={deviceReports} />
 
-        <form className="grid gap-3 mb-6" onSubmit={handleSubmit}>
-        <div className="form-group" style={{
-          marginBottom: 0
-        }}>
-          <label>Visit / Customer<span className="required">*</span></label>
-          <select className="filter-select" value={form.visit_id} onChange={e => setForm(p => ({
-            ...p,
-            visit_id: e.target.value
-          }))}>
-            <option value="">Select today&apos;s visit</option>
-            {visits.map(v => <option key={v.visit_id} value={v.visit_id}>
-                {v.customer_name} — {v.visit_type} ({formatDisplayDate(v.scheduled_date)}, {v.status})
-              </option>)}
-          </select>
-          {errors.visit_id ? <p className="form-error">{errors.visit_id}</p> : null}
-          {!visits.length ? <p className="text-ink/70" style={{
-            fontSize: '0.82rem',
-            marginTop: 6
-          }}>
-              No visits scheduled for today. Reports can be filed once a visit is assigned.
-            </p> : null}
+        <form className="field-report-form" onSubmit={handleSubmit}>
+        <div className="field-report-filter-row">
+          <label className="field-report-field">
+            <span>Visit / Customer<span className="required">*</span></span>
+            <select className="filter-select" value={form.visit_id} onChange={e => setForm(p => ({
+              ...p,
+              visit_id: e.target.value
+            }))}>
+              <option value="">Select today&apos;s visit</option>
+              {visits.map(v => <option key={v.visit_id} value={v.visit_id}>
+                  {v.customer_name} — {v.visit_type} ({formatDisplayDate(v.scheduled_date)}, {v.status})
+                </option>)}
+            </select>
+            {errors.visit_id ? <p className="form-error">{errors.visit_id}</p> : null}
+          </label>
+          <label className="field-report-field">
+            <span>Activity Type<span className="required">*</span></span>
+            <select className="filter-select" value={form.activity_type} onChange={e => setForm(p => ({
+              ...p,
+              activity_type: e.target.value
+            }))}>
+              <option value="">Select activity type</option>
+              {['Collection', 'Sales Visit', 'Delivery', 'Site Check', 'Follow-up', 'Customer Not Available'].map(t => <option key={t} value={t}>{t}</option>)}
+            </select>
+            {errors.activity_type ? <p className="form-error">{errors.activity_type}</p> : null}
+          </label>
         </div>
-        <div className="form-group" style={{
-          marginBottom: 0
-        }}>
-          <label>Activity Type<span className="required">*</span></label>
-          <select className="filter-select" value={form.activity_type} onChange={e => setForm(p => ({
-            ...p,
-            activity_type: e.target.value
-          }))}>
-            <option value="">Select activity type</option>
-            {['Collection', 'Sales Visit', 'Delivery', 'Site Check', 'Follow-up', 'Customer Not Available'].map(t => <option key={t} value={t}>{t}</option>)}
-          </select>
-          {errors.activity_type ? <p className="form-error">{errors.activity_type}</p> : null}
-        </div>
-        <div className="form-group" style={{
-          marginBottom: 0
-        }}>
+        {!visits.length ? <p className="field-report-hint">
+            No visits scheduled for today. Reports can be filed once a visit is assigned.
+          </p> : null}
+        <div className="form-group field-report-block">
           <label>Remarks<span className="required">*</span></label>
           <textarea rows={3} placeholder="Describe the visit outcome, payment collected, or follow-up needed..." value={form.remarks} onChange={e => setForm(p => ({
             ...p,
@@ -407,9 +387,7 @@ function FieldActivityReportsPage({
           }))} />
           {errors.remarks ? <p className="form-error">{errors.remarks}</p> : null}
         </div>
-        <div className="form-group" style={{
-          marginBottom: 0
-        }}>
+        <div className="form-group field-report-block">
           <label>Photo Evidence<span className="required">*</span></label>
           <input
             type="file"
@@ -454,7 +432,7 @@ function FieldActivityReportsPage({
             <img
               src={form.photo}
               alt="Report preview"
-              style={{ marginTop: 8, maxWidth: 200, maxHeight: 140, borderRadius: 8, border: '1px solid #c5c8d0' }}
+              style={{ marginTop: 8, maxWidth: 200, maxHeight: 140, borderRadius: 8, border: '1px solid #BADBE9' }}
             />
           ) : null}
           {errors.photo ? <p className="form-error">{errors.photo}</p> : null}
@@ -500,7 +478,7 @@ function FieldActivityReportsPage({
                     <td>
                       {r.photo ? (
                         <a href={r.photo} target="_blank" rel="noreferrer">
-                          <img src={r.photo} alt="Report" style={{ width: 48, height: 48, objectFit: 'cover', borderRadius: 6, border: '1px solid #c5c8d0' }} />
+                          <img src={r.photo} alt="Report" style={{ width: 48, height: 48, objectFit: 'cover', borderRadius: 6, border: '1px solid #BADBE9' }} />
                         </a>
                       ) : '—'}
                     </td>
@@ -531,23 +509,6 @@ function manilaDateInputValue() {
   }).format(new Date());
 }
 
-function RouteDateControl({ value, onChange }) {
-  return (
-    <label className="muted" style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
-      Route date
-      <input
-        className="filter-input"
-        type="date"
-        value={value}
-        aria-label="Route date"
-        onChange={(event) => {
-          if (/^\d{4}-\d{2}-\d{2}$/.test(event.target.value)) onChange(event.target.value);
-        }}
-      />
-    </label>
-  );
-}
-
 function RoutePage({
   pageType,
   navigate,
@@ -559,7 +520,7 @@ function RoutePage({
   const [filter, setFilter] = useState('All');
   const [showMap, setShowMap] = useState(pageType === 'routeMap');
   const [roadStats, setRoadStats] = useState(null);
-  const [routeDate, setRouteDate] = useState(manilaDateInputValue);
+  const routeDate = manilaDateInputValue();
   useEffect(() => {
     let cancelled = false;
     async function load() {
@@ -612,6 +573,10 @@ function RoutePage({
     if (filter === 'Pending') return customers.filter((s) => !isRouteStopCompleted(s));
     return customers.filter(isRouteStopCompleted);
   }, [filter, customers]);
+  const mapStops = useMemo(
+    () => filteredStops.filter((s) => accountMapPosition(s).hasCoords),
+    [filteredStops]
+  );
   const routeCounts = useMemo(() => ({
     All: customers.length,
     Pending: customers.filter((s) => !isRouteStopCompleted(s)).length,
@@ -633,18 +598,29 @@ function RoutePage({
   const pagination_filteredStops = usePagination(filteredStops);
   const paginated_filteredStops = pagination_filteredStops.paginatedData;
   const showingSawFallback = sawMeta?.listSource === 'saw';
-  const stopsLabel = routeDate === manilaDateInputValue() ? "Today's Stops" : 'Stops';
+  const stopsLabel = "Today's Stops";
   const routeNote = showingSawFallback
     ? `No customers were assigned for ${sawMeta?.scheduledDate || routeDate}. This list is the SAW ranking of eligible customers.`
     : `Assigned route · SAW rank · ${customers.length} stop${customers.length === 1 ? '' : 's'}${sawMeta?.scheduledDate ? ` · ${sawMeta.scheduledDate}` : ''}. Completed visits keep their SAW rank.`;
 
+  const routeToolbar = (
+    <div className="flex flex-wrap gap-2 justify-end items-center" style={{ marginTop: 4, marginBottom: 4 }}>
+      {actions.map((a) => (
+        <button
+          key={a.label}
+          className={a.variant === 'secondary' ? 'button secondary whitespace-nowrap' : 'button whitespace-nowrap'}
+          type="button"
+          onClick={() => navigate(a.to)}
+        >
+          {a.label}
+        </button>
+      ))}
+    </div>
+  );
+
   if (loading) return <LoadingState message="Loading route..." />;
   if (pageType === 'routeSummary') {
     return <div className="page">
-        <div className="flex flex-wrap gap-2 justify-end items-center mt-2 mb-2">
-          <RouteDateControl value={routeDate} onChange={setRouteDate} />
-          {actions.map(a => <button key={a.label} className={a.variant === 'secondary' ? 'button secondary' : 'button'} type="button" onClick={() => navigate(a.to)}>{a.label}</button>)}
-        </div>
         {showingSawFallback ? <p className="muted" style={{ marginTop: 0 }}>{routeNote}</p> : null}
         <StatsGrid stats={[{
         label: stopsLabel,
@@ -663,6 +639,7 @@ function RoutePage({
         label: 'SAW as of',
         value: sawMeta?.asOf || '—'
       }]} />
+        {routeToolbar}
         <section className="panel content-panel relative overflow-hidden">
           <div className="flex flex-col md:flex-row justify-between gap-4 items-start md:items-center mb-4">
             <h3>Route Summary</h3>
@@ -676,10 +653,6 @@ function RoutePage({
       </div>;
   }
   return <div className="page">
-      <div className="flex flex-wrap gap-2 justify-end items-center mt-2 mb-2">
-        <RouteDateControl value={routeDate} onChange={setRouteDate} />
-        {actions.map(a => <button key={a.label} className={a.variant === 'secondary' ? 'button secondary' : 'button'} type="button" onClick={() => navigate(a.to)}>{a.label}</button>)}
-      </div>
       <StatsGrid stats={[{
       label: stopsLabel,
       value: String(customers.length)
@@ -690,6 +663,7 @@ function RoutePage({
       label: 'Road distance',
       value: roadStats?.distanceKm != null ? `${roadStats.distanceKm} km` : '—'
       }]} />
+      {routeToolbar}
       <section className="panel content-panel relative overflow-hidden">
         <div className="flex flex-col md:flex-row justify-between gap-4 items-start md:items-center mb-4">
           <div>
@@ -716,7 +690,7 @@ function RoutePage({
           />
         ) : showMap || pageType === 'routeMap' ? (
           <CollectionRouteMap
-            stops={filteredStops.filter((s) => accountMapPosition(s).hasCoords)}
+            stops={mapStops}
             showToast={showToast}
             navigate={navigate}
             onRoadStats={setRoadStats}
@@ -822,7 +796,7 @@ function CustomerMapPage({
       id: 'depot',
       position: [depot.latitude, depot.longitude],
       label: 'B',
-      color: '#255684',
+      color: '#1A4162',
       popup: `<strong>${depot.name || 'Branch'}</strong><br/>Start here`,
     });
   }
@@ -830,12 +804,12 @@ function CustomerMapPage({
     id: account.id,
     position: center,
     label: isRouteNav ? '1' : (account.customerName || 'CU').substring(0, 2).toUpperCase(),
-    color: '#0c1031',
+    color: '#0B1E30',
     popup: `<strong>${account.customerName}</strong><br/>${account.address || ''}`,
   });
   const fitBounds = markers.map((m) => m.position);
   const polylines = roadLeg?.positions?.length
-    ? [{ id: 'nav-leg', positions: roadLeg.positions, color: '#0c1031', weight: 4 }]
+    ? [{ id: 'nav-leg', positions: roadLeg.positions, color: '#0B1E30', weight: 4 }]
     : [];
 
   return <div className="page">
@@ -1052,7 +1026,7 @@ function AccountDetailPage({
         <div className="account-detail-grid two-up">
           <DetailRowsTable rows={[
             { label: 'Address', value: account.address || '—' },
-            { label: 'Contact', value: account.phone || '—' },
+            { label: 'Contact', value: formatPhone(account.phone) },
             { label: 'Branch', value: account.branch_name || '—' },
             { label: 'Account Manager', value: account.account_manager_name || '—' },
             { label: 'Last Visit', value: account.lastVisitDate || '—' },
@@ -1067,7 +1041,7 @@ function AccountDetailPage({
             id: account.id,
             position: account.latitude && account.longitude ? [account.latitude, account.longitude] : [7.1907, 125.4553],
             label: (account.customerName || 'CU').substring(0, 2).toUpperCase(),
-            color: '#0c1031',
+            color: '#0B1E30',
             popup: account.customerName
           }]} />
           </div>
@@ -1343,7 +1317,14 @@ function ReceiptsListPage({
       <section className="panel content-panel relative overflow-hidden">
         <div className="list-section-header">
           <h3>Digital Receipts</h3>
-          <div className="list-section-actions">
+        </div>
+        <div className="list-section-toolbar suppliers-toolbar audit-logs-toolbar">
+          <div className="list-section-controls audit-logs-filters">
+            <input className="filter-input search" type="search" placeholder="Search by receipt number, customer, or ID" value={search} onChange={e => setSearch(e.target.value)} aria-label="Search receipts" />
+            <input className="filter-input" type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)} aria-label="From date" />
+            <input className="filter-input" type="date" value={dateTo} onChange={e => setDateTo(e.target.value)} aria-label="To date" />
+          </div>
+          <div className="list-section-actions suppliers-toolbar-actions">
             <button
               className="button secondary whitespace-nowrap"
               type="button"
@@ -1364,14 +1345,6 @@ function ReceiptsListPage({
               Export PDF
             </button>
           </div>
-        </div>
-        <div className="list-section-toolbar">
-          <div className="list-section-controls">
-            <input className="filter-input search" type="search" placeholder="Search by receipt number, customer, or ID" value={search} onChange={e => setSearch(e.target.value)} />
-            <input className="filter-input" type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)} aria-label="From date" />
-            <input className="filter-input" type="date" value={dateTo} onChange={e => setDateTo(e.target.value)} aria-label="To date" />
-          </div>
-          <p className="list-section-subtitle">{receipts.length} record{receipts.length !== 1 ? 's' : ''} in database</p>
         </div>
         {filtered.length ? <><div className="corvex-table-wrapper">
             <table className="corvex-table">
@@ -1487,9 +1460,9 @@ function DigitalReceiptPage({
           { label: 'Customer', value: receipt.customer_name || '—' },
           { label: 'Customer ID', value: <span style={{ fontFamily: 'monospace' }}>{receipt.customer_id}</span> },
           { label: 'Customer Address', value: receipt.customer_address || '—' },
-          { label: 'Customer Phone', value: receipt.customer_phone || '—' },
+          { label: 'Customer Phone', value: formatPhone(receipt.customer_phone) },
           { label: 'Branch', value: receipt.branch_name || '—' },
-          { label: 'Amount', value: <span style={{ fontWeight: 700, color: '#0c1031' }}>{formatCurrency(Number(receipt.amount))}</span> },
+          { label: 'Amount', value: <span style={{ fontWeight: 700, color: '#0B1E30' }}>{formatCurrency(Number(receipt.amount))}</span> },
           { label: 'Payment Method', value: receipt.payment_method || '—' },
           { label: 'Payment Date', value: formatDisplayDate(receipt.payment_date) },
           { label: 'Payment Time', value: receipt.payment_time ? String(receipt.payment_time).slice(0, 8) : '—' },
@@ -1736,6 +1709,21 @@ function IncidentReportPage({
       </div>
     </div>;
 }
+function collectionPaymentPdfRow(payment) {
+  return {
+    payment_id: payment.collectionpayment_id,
+    receipt_number: payment.receipt_number || '',
+    customer: payment.customer_name || '',
+    collector: payment.collector_name || '',
+    branch: payment.branch_name || '',
+    payment_method: payment.payment_method || '',
+    amount: formatCurrency(Number(payment.amount)),
+    status: payment.status || '',
+    timestamp: formatPaymentTimestamp(payment.payment_date, payment.payment_time),
+    notes: payment.notes || '',
+  };
+}
+
 function CollectionHistoryPage({
   navigate,
   showToast
@@ -1748,6 +1736,8 @@ function CollectionHistoryPage({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [devicePayments, setDevicePayments] = useState([]);
+  const [selectedPayment, setSelectedPayment] = useState(null);
+  const [detailLoading, setDetailLoading] = useState(false);
   useEffect(() => {
     async function load() {
       setLoading(true);
@@ -1773,8 +1763,60 @@ function CollectionHistoryPage({
       return matchesSearch && matchesStatus && matchesFrom && matchesTo;
     });
   }, [payments, search, statusFilter, dateFrom, dateTo]);
-  const pagination_filtered = usePagination(filtered);
+  const pagination_filtered = usePagination(filtered, {
+    resetKey: `${search}|${statusFilter}|${dateFrom}|${dateTo}`,
+  });
   const paginated_filtered = pagination_filtered.paginatedData;
+
+  const openPaymentDetail = async (payment) => {
+    setSelectedPayment(payment);
+    setDetailLoading(true);
+    const result = await fetchCollectionPaymentById(payment.collectionpayment_id);
+    setDetailLoading(false);
+    if (result.success && result.data) {
+      setSelectedPayment(result.data);
+    } else {
+      showToast?.(result.message || 'Could not load full payment details.', 'error');
+    }
+  };
+
+  const closePaymentDetail = () => {
+    setSelectedPayment(null);
+    setDetailLoading(false);
+  };
+
+  const exportFilteredPdf = () => {
+    const rows = filtered.map((p) => ({
+      payment_id: p.collectionpayment_id,
+      receipt: p.receipt_number,
+      customer: p.customer_name,
+      amount: p.amount,
+      method: p.payment_method,
+      status: p.status,
+      date: p.payment_date,
+    }));
+    if (downloadPdf(rows, { filename: 'collector-payments.pdf', title: 'Collector Payments' })) {
+      showToast('Payments exported as PDF.', 'success');
+    } else {
+      showToast('Nothing to export.', 'error');
+    }
+  };
+
+  const exportSelectedPdf = () => {
+    if (!selectedPayment) return;
+    const row = collectionPaymentPdfRow(selectedPayment);
+    const filename = `collection-payment-${selectedPayment.collectionpayment_id}.pdf`;
+    if (downloadPdf([row], {
+      filename,
+      title: 'Collection Payment Details',
+      subtitle: selectedPayment.receipt_number || `Payment #${selectedPayment.collectionpayment_id}`,
+    })) {
+      showToast('Payment exported as PDF.', 'success');
+    } else {
+      showToast('Nothing to export.', 'error');
+    }
+  };
+
   if (loading) return <LoadingState message="Loading collection payments..." />;
   if (error && !payments.length) {
     return <div className="page">
@@ -1787,38 +1829,33 @@ function CollectionHistoryPage({
       <section className="panel content-panel relative overflow-hidden">
         <div className="list-section-header">
           <h3>Collection Payments</h3>
-          <div className="list-section-actions">
-            <button
-              className="button secondary whitespace-nowrap"
-              type="button"
-              onClick={() => {
-                const rows = filtered.map(p => ({
-                  payment_id: p.collectionpayment_id,
-                  receipt: p.receipt_number,
-                  customer: p.customer_name,
-                  amount: p.amount,
-                  method: p.payment_method,
-                  status: p.status,
-                  date: p.payment_date,
-                }));
-                if (downloadPdf(rows, { filename: 'collector-payments.pdf', title: 'Collector Payments' })) showToast('Payments exported as PDF.', 'success');
-                else showToast('Nothing to export.', 'error');
-              }}
-            >
-              Export PDF
-            </button>
-          </div>
         </div>
-        <div className="list-section-toolbar">
-          <div className="list-section-controls">
-            <input className="filter-input search" type="search" placeholder="Search by customer, receipt number, or ID" value={search} onChange={e => setSearch(e.target.value)} />
-            <select className="filter-select" value={statusFilter} onChange={e => setStatusFilter(e.target.value)}>
+        <div className="list-section-toolbar suppliers-toolbar audit-logs-toolbar">
+          <div className="list-section-controls audit-logs-filters">
+            <input
+              className="filter-input search"
+              type="search"
+              placeholder="Search by customer, receipt number, or ID"
+              value={search}
+              onChange={e => setSearch(e.target.value)}
+              aria-label="Search collection payments"
+            />
+            <select
+              className="filter-select"
+              value={statusFilter}
+              onChange={e => setStatusFilter(e.target.value)}
+              aria-label="Filter by status"
+            >
               {['All', 'Pending', 'Completed', 'Cancelled'].map(option => <option key={option} value={option}>Status: {option}</option>)}
             </select>
             <input className="filter-input" type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)} aria-label="From date" />
             <input className="filter-input" type="date" value={dateTo} onChange={e => setDateTo(e.target.value)} aria-label="To date" />
           </div>
-          <p className="list-section-subtitle">{payments.length} record{payments.length !== 1 ? 's' : ''} in database</p>
+          <div className="list-section-actions suppliers-toolbar-actions">
+            <button className="button secondary whitespace-nowrap" type="button" onClick={exportFilteredPdf}>
+              Export PDF
+            </button>
+          </div>
         </div>
         {filtered.length ? <><div className="corvex-table-wrapper">
             <table className="corvex-table">
@@ -1856,7 +1893,7 @@ function CollectionHistoryPage({
                 }}>{formatPaymentTimestamp(p.payment_date, p.payment_time)}</td>
                     <td><StatusBadge status={p.status} /></td>
                     <td className="table-actions">
-                      <button className="icon-action-button" type="button" title="View" onClick={() => navigate(`/collector/history/${p.collectionpayment_id}`)}>
+                      <button className="icon-action-button" type="button" title="View" onClick={() => openPaymentDetail(p)}>
                         <NavIcon name="view" />
                       </button>
                     </td>
@@ -1866,6 +1903,68 @@ function CollectionHistoryPage({
           </div><Pagination {...pagination_filtered} /></>
         : <EmptyState title="No collection records found" description="Adjust your search or date filters." />}
       </section>
+
+      {selectedPayment ? (
+        <div
+          className="modal-overlay"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="collection-payment-detail-title"
+          onClick={closePaymentDetail}
+        >
+          <div className="modal-content" style={{ maxWidth: 640 }} onClick={(e) => e.stopPropagation()}>
+            <div className="flex flex-col md:flex-row justify-between gap-4 items-start md:items-center mb-4">
+              <div>
+                <h3 id="collection-payment-detail-title" style={{ margin: 0 }}>Collection Payment Details</h3>
+                <p className="text-ink/70" style={{ margin: '4px 0 0', fontSize: '0.82rem' }}>
+                  Payment ID {selectedPayment.collectionpayment_id}
+                  {selectedPayment.receipt_number ? ` · ${selectedPayment.receipt_number}` : ''}
+                </p>
+              </div>
+              <StatusBadge status={selectedPayment.status} />
+            </div>
+            {detailLoading ? (
+              <LoadingState message="Loading payment details..." />
+            ) : (
+              <DetailRowsTable rows={[
+                { label: 'Payment ID', value: <span style={{ fontFamily: 'monospace' }}>{selectedPayment.collectionpayment_id}</span> },
+                { label: 'Receipt ID', value: <span style={{ fontFamily: 'monospace' }}>{selectedPayment.receipts_id ?? '—'}</span> },
+                { label: 'Receipt Number', value: <span style={{ fontFamily: 'monospace' }}>{selectedPayment.receipt_number || '—'}</span> },
+                { label: 'Customer', value: selectedPayment.customer_name || '—' },
+                { label: 'Customer ID', value: <span style={{ fontFamily: 'monospace' }}>{selectedPayment.customer_id ?? '—'}</span> },
+                { label: 'Collector', value: selectedPayment.collector_name || '—' },
+                { label: 'Branch', value: selectedPayment.branch_name || '—' },
+                { label: 'Branch ID', value: <span style={{ fontFamily: 'monospace' }}>{selectedPayment.branch_id ?? '—'}</span> },
+                { label: 'Payment Method', value: selectedPayment.payment_method || '—' },
+                { label: 'Amount', value: <span style={{ fontWeight: 700, color: 'var(--palette-navy)' }}>{formatCurrency(Number(selectedPayment.amount))}</span> },
+                { label: 'Timestamp', value: formatPaymentTimestamp(selectedPayment.payment_date, selectedPayment.payment_time) },
+                { label: 'Status', value: <StatusBadge status={selectedPayment.status} /> },
+                { label: 'Created At', value: formatDisplayDateTime(selectedPayment.created_at) },
+                { label: 'Updated At', value: formatDisplayDateTime(selectedPayment.updated_at) },
+                ...(selectedPayment.notes ? [{ label: 'Notes', value: selectedPayment.notes }] : []),
+              ]} />
+            )}
+            <div className="modal-actions">
+              {selectedPayment.receipts_id ? (
+                <button
+                  className="button ghost"
+                  type="button"
+                  onClick={() => {
+                    closePaymentDetail();
+                    navigate(`/collector/receipts/${selectedPayment.receipts_id}`);
+                  }}
+                >
+                  Open Receipt
+                </button>
+              ) : null}
+              <button className="button secondary" type="button" onClick={exportSelectedPdf} disabled={detailLoading}>
+                Export PDF
+              </button>
+              <button className="button" type="button" onClick={closePaymentDetail}>Close</button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </div>;
 }
 function CollectionPaymentDetailPage({

@@ -153,7 +153,7 @@ export function OrgLeafletPage({
     setPeriod('month');
   };
 
-  if (loading && !payload) return <LoadingState message="Loading organization map..." />;
+  if (loading && !payload) return <LoadingState variant="map" message="Loading organization map..." />;
 
   return (
     <div className="page org-leaflet-page">
@@ -227,11 +227,12 @@ export function OrgLeafletPage({
             <label className="org-leaflet-field org-leaflet-field-wide">
               <span>Search</span>
               <input
-                className="filter-input search"
+                className="filter-input"
                 type="search"
                 value={search}
                 placeholder="Customer, staff, territory, or address"
                 onChange={(e) => setSearch(e.target.value)}
+                aria-label="Search map"
               />
             </label>
           </div>

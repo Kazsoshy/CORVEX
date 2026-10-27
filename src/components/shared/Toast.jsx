@@ -1,13 +1,15 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { notifyDesktop, playToastSound } from '../../settings/feedback.js';
 import { getPreferences } from '../../settings/preferences.js';
 
 export function useToast() {
   const [toast, setToast] = useState(null);
 
-  const showToast = (message, type = 'success') => {
+  const showToast = useCallback((message, type = 'success') => {
     setToast({ message, type, id: Date.now() });
-  };
+  }, []);
+
+  const clearToast = useCallback(() => setToast(null), []);
 
   useEffect(() => {
     if (!toast) return undefined;
@@ -22,7 +24,7 @@ export function useToast() {
     return () => window.clearTimeout(timer);
   }, [toast]);
 
-  return { toast, showToast, clearToast: () => setToast(null) };
+  return { toast, showToast, clearToast };
 }
 
 export function Toast({ toast, onDismiss }) {

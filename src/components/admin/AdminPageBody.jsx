@@ -10,7 +10,7 @@ import { fetchAuditLogs } from '../../api/adminService';
 import { EmptyState } from '../shared/EmptyState';
 import { LoadingState } from '../shared/LoadingState';
 import { NavIcon } from '../../navIcons';
-import { formatCurrency, formatDisplayDate, formatDisplayDateTime } from '../../utils/formatters.js';
+import { formatCurrency, formatDisplayDate, formatDisplayDateTime, formatPhone } from '../../utils/formatters.js';
 import { exportRows } from '../../utils/dataExport.js';
 import { getOperatingManagerAnalytics } from '../../api/reportsService.js';
 import { NotificationsInbox } from '../shared/NotificationsInbox';
@@ -56,7 +56,7 @@ function buildUserDetailRows(user) {
     { key: 'middle', label: 'Middle Name', value: user.middle_name || '—' },
     { key: 'last', label: 'Last Name', value: user.last_name || '—' },
     { key: 'email', label: 'Email', value: user.email || '—' },
-    { key: 'phone', label: 'Contact', value: user.phone || '—' },
+    { key: 'phone', label: 'Contact', value: formatPhone(user.phone || user.contact_number) },
     { key: 'role', label: 'Role', value: user.role?.name || '—' },
     { key: 'branch', label: 'Branch', value: user.branch?.name || '—' },
     { key: 'status', label: 'Status', value: <StatusPill status={user.status} /> },
@@ -176,7 +176,7 @@ function DashboardPage({
         <Card title="User Growth" sub="Monthly registered users">
           <ResponsiveContainer width="100%" height={200}>
             <AreaChart data={USER_GROWTH}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#c5c8d0" />
+              <CartesianGrid strokeDasharray="3 3" stroke="#BADBE9" />
               <XAxis dataKey="month" tick={{
               fontSize: 12
             }} />
@@ -184,7 +184,7 @@ function DashboardPage({
               fontSize: 12
             }} />
               <Tooltip />
-              <Area type="monotone" dataKey="users" name="Users" stroke="#255684" fill="#255684" fillOpacity={0.1} strokeWidth={2} />
+              <Area type="monotone" dataKey="users" name="Users" stroke="#1A4162" fill="#1A4162" fillOpacity={0.1} strokeWidth={2} />
             </AreaChart>
           </ResponsiveContainer>
         </Card>
@@ -192,7 +192,7 @@ function DashboardPage({
         <Card title="Branch Overview" sub="Performance scores">
           <ResponsiveContainer width="100%" height={200}>
             <BarChart data={BRANCH_PERFORMANCE_CHART}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#c5c8d0" />
+              <CartesianGrid strokeDasharray="3 3" stroke="#BADBE9" />
               <XAxis dataKey="branch" tick={{
               fontSize: 12
             }} />
@@ -201,7 +201,7 @@ function DashboardPage({
             }} />
               <Tooltip />
               <Legend />
-              <Bar dataKey="performance" name="Performance" fill="#255684" radius={[4, 4, 0, 0]} />
+              <Bar dataKey="performance" name="Performance" fill="#1A4162" radius={[4, 4, 0, 0]} />
               <Bar dataKey="risk" name="Risk Score" fill="#ef4444" radius={[4, 4, 0, 0]} />
             </BarChart>
           </ResponsiveContainer>
@@ -420,8 +420,8 @@ function UserListPage({
   if (loading) return <div className="page"><LoadingState message="Loading users..." /></div>;
   return <div className="page">
       {confirmAction && <section className="panel content-panel relative overflow-hidden" style={{
-      borderColor: confirmAction.action === 'disable' ? '#fca5a5' : 'rgba(37, 86, 132, 0.35)',
-      background: confirmAction.action === 'disable' ? 'rgba(220,38,38,0.04)' : 'rgba(37, 86, 132, 0.04)',
+      borderColor: confirmAction.action === 'disable' ? '#fca5a5' : 'rgba(26, 65, 98, 0.35)',
+      background: confirmAction.action === 'disable' ? 'rgba(220,38,38,0.04)' : 'rgba(26, 65, 98, 0.04)',
       marginBottom: 24
     }}>
           {confirmAction.action === 'disable' ? <>
@@ -814,9 +814,10 @@ function buildBranchDetailRows(branch) {
     { key: 'id', label: 'Branch ID', value: branch.branch_id ?? '—' },
     { key: 'name', label: 'Branch Name', value: branch.branch_name || '—' },
     { key: 'address', label: 'Address', value: branch.address || '—' },
+    { key: 'region', label: 'Region', value: branch.region || '—' },
     { key: 'lat', label: 'Latitude', value: branch.latitude ?? '—' },
     { key: 'lng', label: 'Longitude', value: branch.longitude ?? '—' },
-    { key: 'contact', label: 'Contact No', value: branch.contact_no || '—' },
+    { key: 'contact', label: 'Contact No', value: formatPhone(branch.contact_no || branch.phone) },
     { key: 'email', label: 'Email', value: branch.email || '—' },
     { key: 'manager', label: 'Manager', value: branch.manager_name || '—' },
     { key: 'staff', label: 'Active Staff', value: branch.active_staff ?? '—' },
@@ -992,7 +993,7 @@ function BranchListPage({
               {branches.length === 0 ? <tr><td colSpan="5" style={{
                   textAlign: 'center',
                   padding: '40px',
-                  color: '#818697'
+                  color: '#5F7385'
                 }}>No branches found</td></tr> : paginatedBranches.map(b => {
                   const isInactive = String(b.status).toLowerCase() === 'inactive';
                   return <tr key={b.branch_id} className="clickable-row" onClick={() => openViewBranch(b)}>
@@ -1001,8 +1002,8 @@ function BranchListPage({
                       <span className="user-meta-id">ID {b.branch_id}</span>
                     </td>
                     <td className="cell-address" title={b.address}>{b.address || '—'}</td>
-                    <td className="cell-contact" title={b.contact_no || b.email}>
-                      {b.contact_no || '—'}
+                    <td className="cell-contact" title={[formatPhone(b.contact_no || b.phone), b.email].filter(Boolean).join(' · ')}>
+                      <span className="contact-phone">{formatPhone(b.contact_no || b.phone)}</span>
                       {b.email ? <span className="user-meta-id">{b.email}</span> : null}
                     </td>
                     <td className="cell-status"><StatusPill status={b.status} /></td>
@@ -1475,13 +1476,14 @@ function InventoryPage({
 
       {tab === 'products' && <>
           <section className="panel content-panel relative overflow-hidden">
-            <div className="list-section-header">
+            <div className="list-section-header inventory-products-header">
               <h3>All Products</h3>
-              <div className="list-section-actions" style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+              <div className="list-section-actions inventory-products-actions">
                 <select
                   className="filter-select"
                   value={productStatusFilter}
                   onChange={(e) => setProductStatusFilter(e.target.value)}
+                  aria-label="Product status"
                 >
                   <option value="All">All Statuses</option>
                   <option value="Active">Active</option>
@@ -1755,14 +1757,14 @@ function ReportsPage({
         <Card title="Collections Trend" sub={analytics.scope || 'All branches'}>
           <ResponsiveContainer width="100%" height={240}>
             <AreaChart data={analytics.trends?.collections || []}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#c5c8d0" />
+              <CartesianGrid strokeDasharray="3 3" stroke="#BADBE9" />
               <XAxis dataKey="day" tick={{
               fontSize: 12
             }} /><YAxis tick={{
               fontSize: 11
             }} tickFormatter={v => `${(v / 1000).toFixed(0)}k`} />
               <Tooltip formatter={v => formatCurrency(v)} />
-              <Area type="monotone" dataKey="amount" name="Collections" stroke="#255684" fill="#255684" fillOpacity={0.1} strokeWidth={2} />
+              <Area type="monotone" dataKey="amount" name="Collections" stroke="#1A4162" fill="#1A4162" fillOpacity={0.1} strokeWidth={2} />
             </AreaChart>
           </ResponsiveContainer>
         </Card>
@@ -1800,15 +1802,15 @@ function ReportsPage({
               compliance: row.routeCompliance,
               inventory: row.inventoryHealth,
             }))}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#c5c8d0" />
+              <CartesianGrid strokeDasharray="3 3" stroke="#BADBE9" />
               <XAxis dataKey="branch" tick={{
               fontSize: 12
             }} /><YAxis domain={[0, 100]} tick={{
               fontSize: 12
             }} />
               <Tooltip /><Legend />
-              <Bar dataKey="compliance" name="Route Compliance" fill="#255684" radius={[4, 4, 0, 0]} />
-              <Bar dataKey="inventory" name="Inventory Health" fill="#255684" radius={[4, 4, 0, 0]} />
+              <Bar dataKey="compliance" name="Route Compliance" fill="#1A4162" radius={[4, 4, 0, 0]} />
+              <Bar dataKey="inventory" name="Inventory Health" fill="#1A4162" radius={[4, 4, 0, 0]} />
             </BarChart>
           </ResponsiveContainer>
         </Card>
@@ -1838,6 +1840,9 @@ function AuditLogsPage({
   const [auditLogs, setAuditLogs] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [searchFilter, setSearchFilter] = useState('');
+  const [actionFilter, setActionFilter] = useState('all');
+  const [userFilter, setUserFilter] = useState('all');
   useEffect(() => {
     async function loadAuditLogs() {
       setLoading(true);
@@ -1851,15 +1856,64 @@ function AuditLogsPage({
     }
     loadAuditLogs();
   }, []);
-  const [searchFilter, setSearchFilter] = useState('');
-  const filtered = useMemo(() => auditLogs.filter(l => {
-    if (searchFilter && !l.action.toLowerCase().includes(searchFilter.toLowerCase()) && !l.status_details.toLowerCase().includes(searchFilter.toLowerCase())) {
-      return false;
+
+  const actionOptions = useMemo(() => {
+    const values = new Set();
+    auditLogs.forEach((log) => {
+      const action = String(log.action || '').trim();
+      if (action) values.add(action);
+    });
+    return [...values].sort((a, b) => a.localeCompare(b));
+  }, [auditLogs]);
+
+  const userOptions = useMemo(() => {
+    const byKey = new Map();
+    auditLogs.forEach((log) => {
+      const key = String(log.user_id ?? log.user_name ?? '');
+      if (!key) return;
+      const label = log.user_name || `User #${log.user_id}`;
+      if (!byKey.has(key)) byKey.set(key, { value: key, label });
+    });
+    return [...byKey.values()].sort((a, b) => a.label.localeCompare(b.label));
+  }, [auditLogs]);
+
+  const filtered = useMemo(() => auditLogs.filter((log) => {
+    const action = String(log.action || '');
+    const details = String(log.status_details || '');
+    const userName = String(log.user_name || `User #${log.user_id || ''}`);
+    const userKey = String(log.user_id ?? log.user_name ?? '');
+    const q = searchFilter.trim().toLowerCase();
+
+    if (actionFilter !== 'all' && action !== actionFilter) return false;
+    if (userFilter !== 'all' && userKey !== userFilter) return false;
+    if (q) {
+      const haystack = [action, details, userName, log.ip_address].join(' ').toLowerCase();
+      if (!haystack.includes(q)) return false;
     }
     return true;
-  }), [auditLogs, searchFilter]);
-  const pagination_filtered = usePagination(filtered);
+  }), [auditLogs, searchFilter, actionFilter, userFilter]);
+
+  const pagination_filtered = usePagination(filtered, {
+    resetKey: `${searchFilter}|${actionFilter}|${userFilter}`,
+  });
   const paginated_filtered = pagination_filtered.paginatedData;
+
+  const exportPdf = () => {
+    const rows = filtered.map((l) => ({
+      log_id: l.log_id,
+      user: l.user_name || `User #${l.user_id}`,
+      action: l.action,
+      ip_address: l.ip_address,
+      status_details: l.status_details,
+      created_at: l.created_at,
+    }));
+    if (exportRows(rows, { format: 'pdf', filename: 'admin-audit-logs.pdf', title: 'Audit Logs' })) {
+      showToast('Logs exported as PDF.', 'success');
+    } else {
+      showToast('Nothing to export.', 'error');
+    }
+  };
+
   if (loading) {
     return <div className="page"><LoadingState message="Loading audit logs..." /></div>;
   }
@@ -1882,22 +1936,42 @@ function AuditLogsPage({
             fontWeight: 400,
             fontSize: '0.88rem'
           }}>({filtered.length} entries)</span></h3>
-          <button className="button" type="button" onClick={() => {
-            const rows = filtered.map((l) => ({
-              log_id: l.log_id,
-              user: l.user_name || `User #${l.user_id}`,
-              action: l.action,
-              ip_address: l.ip_address,
-              status_details: l.status_details,
-              created_at: l.created_at,
-            }));
-            if (exportRows(rows, { format: 'pdf', filename: 'admin-audit-logs.pdf', title: 'Audit Logs' })) showToast('Logs exported as PDF.', 'success');
-            else showToast('Nothing to export.', 'error');
-          }}>Export PDF</button>
         </div>
-        <div className="list-section-toolbar">
-          <div className="list-section-controls">
-            <input className="filter-input search" type="search" placeholder="Search by action or status..." value={searchFilter} onChange={e => setSearchFilter(e.target.value)} />
+        <div className="list-section-toolbar suppliers-toolbar audit-logs-toolbar">
+          <div className="list-section-controls audit-logs-filters">
+            <input
+              className="filter-input search"
+              type="search"
+              placeholder="Search by user, action, or status…"
+              value={searchFilter}
+              onChange={(e) => setSearchFilter(e.target.value)}
+              aria-label="Search audit logs"
+            />
+            <select
+              className="filter-select"
+              value={actionFilter}
+              onChange={(e) => setActionFilter(e.target.value)}
+              aria-label="Filter by action"
+            >
+              <option value="all">All Actions</option>
+              {actionOptions.map((action) => (
+                <option key={action} value={action}>{action}</option>
+              ))}
+            </select>
+            <select
+              className="filter-select"
+              value={userFilter}
+              onChange={(e) => setUserFilter(e.target.value)}
+              aria-label="Filter by user"
+            >
+              <option value="all">All Users</option>
+              {userOptions.map((user) => (
+                <option key={user.value} value={user.value}>{user.label}</option>
+              ))}
+            </select>
+          </div>
+          <div className="list-section-actions suppliers-toolbar-actions">
+            <button className="button" type="button" onClick={exportPdf}>Export PDF</button>
           </div>
         </div>
         <><div className="corvex-table-wrapper">
@@ -1907,7 +1981,7 @@ function AuditLogsPage({
               {filtered.length === 0 ? <tr><td colSpan="6" style={{
                   textAlign: 'center',
                   padding: '40px',
-                  color: '#818697'
+                  color: '#5F7385'
                 }}>No audit logs found</td></tr> : paginated_filtered.map(l => <tr key={l.log_id}>
                     <td>{l.log_id}</td>
                     <td>{l.user_name || `User #${l.user_id}`}</td>
@@ -1948,23 +2022,28 @@ function ProductCategoriesPage({
   const [categories, setCategories] = useState([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
+  const [statusFilter, setStatusFilter] = useState('all');
   const [showForm, setShowForm] = useState(false);
   const [editing, setEditing] = useState(null);
   const [formName, setFormName] = useState('');
-  const loadData = async () => {
+  const loadData = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await apiClient.get(`/product-categories${search ? `?search=${encodeURIComponent(search)}` : ''}`);
+      const params = new URLSearchParams();
+      if (search.trim()) params.set('search', search.trim());
+      if (statusFilter !== 'all') params.set('status', statusFilter);
+      const query = params.toString();
+      const res = await apiClient.get(`/product-categories${query ? `?${query}` : ''}`);
       if (res.data.success) setCategories(res.data.data || []);
     } catch (err) {
       showToast('Failed to load product categories.', 'error');
     }
     setLoading(false);
-  };
+  }, [search, statusFilter, showToast]);
   useEffect(() => {
     const t = setTimeout(loadData, 300);
     return () => clearTimeout(t);
-  }, [search]);
+  }, [search, statusFilter, loadData]);
   const handleAdd = () => {
     setEditing(null);
     setFormName('');
@@ -2006,7 +2085,9 @@ function ProductCategoriesPage({
       showToast(err.response?.data?.message || 'Failed to save.', 'error');
     }
   };
-  const pagination_categories = usePagination(categories);
+  const pagination_categories = usePagination(categories, {
+    resetKey: `${search}|${statusFilter}`,
+  });
   const paginated_categories = pagination_categories.paginatedData;
   return <div className="page">
       <section className="panel content-panel relative overflow-hidden">
@@ -2015,13 +2096,30 @@ function ProductCategoriesPage({
             fontWeight: 400,
             fontSize: '0.88rem'
           }}>({categories.length})</span></h3>
-          <div className="list-section-actions">
-            <button className="button" type="button" onClick={handleAdd}>+ Add Category</button>
-          </div>
         </div>
-        <div className="list-section-toolbar">
-          <div className="list-section-controls">
-            <input className="filter-input search" type="search" placeholder="Search categories…" value={search} onChange={e => setSearch(e.target.value)} />
+        <div className="list-section-toolbar suppliers-toolbar audit-logs-toolbar">
+          <div className="list-section-controls audit-logs-filters">
+            <input
+              className="filter-input search"
+              type="search"
+              placeholder="Search categories…"
+              value={search}
+              onChange={e => setSearch(e.target.value)}
+              aria-label="Search categories"
+            />
+            <select
+              className="filter-select"
+              value={statusFilter}
+              onChange={(e) => setStatusFilter(e.target.value)}
+              aria-label="Filter by status"
+            >
+              <option value="all">All Statuses</option>
+              <option value="Active">Active</option>
+              <option value="Inactive">Archived</option>
+            </select>
+          </div>
+          <div className="list-section-actions suppliers-toolbar-actions">
+            <button className="button" type="button" onClick={handleAdd}>+ Add Category</button>
           </div>
         </div>
         {loading ? <LoadingState message="Loading categories..." /> : categories.length === 0 ? <EmptyState title="No categories found" /> : <><div className="corvex-table-wrapper">
@@ -2071,6 +2169,7 @@ function SuppliersAdminPage({
   const [suppliers, setSuppliers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
+  const [statusFilter, setStatusFilter] = useState('all');
   const [showForm, setShowForm] = useState(false);
   const [editingSupplierId, setEditingSupplierId] = useState(null);
   const [confirmArchive, setConfirmArchive] = useState(null);
@@ -2093,17 +2192,21 @@ function SuppliersAdminPage({
   const loadData = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await apiClient.get(`/suppliers${search ? `?search=${encodeURIComponent(search)}` : ''}`);
+      const params = new URLSearchParams();
+      if (search.trim()) params.set('search', search.trim());
+      if (statusFilter !== 'all') params.set('status', statusFilter);
+      const query = params.toString();
+      const res = await apiClient.get(`/suppliers${query ? `?${query}` : ''}`);
       if (res.data.success) setSuppliers(res.data.data || []);
     } catch (err) {
       showToast('Failed to load suppliers.', 'error');
     }
     setLoading(false);
-  }, [search, showToast]);
+  }, [search, statusFilter, showToast]);
   useEffect(() => {
     const t = setTimeout(loadData, 300);
     return () => clearTimeout(t);
-  }, [search, loadData]);
+  }, [search, statusFilter, loadData]);
   const openForm = (supplier = null) => {
     if (supplier) {
       setEditingSupplierId(supplier.suppliers_id ?? supplier.supplier_id);
@@ -2184,7 +2287,9 @@ function SuppliersAdminPage({
       setSubmitting(false);
     }
   };
-  const pagination_suppliers = usePagination(suppliers);
+  const pagination_suppliers = usePagination(suppliers, {
+    resetKey: `${search}|${statusFilter}`,
+  });
   const paginated_suppliers = pagination_suppliers.paginatedData;
   return <div className="page">
       <section className="panel content-panel relative overflow-hidden">
@@ -2193,23 +2298,40 @@ function SuppliersAdminPage({
             fontWeight: 400,
             fontSize: '0.88rem'
           }}>({suppliers.length})</span></h3>
-          <div className="list-section-actions">
-            <button className="button" type="button" onClick={openForm}>+ Add Supplier</button>
-          </div>
         </div>
-        <div className="list-section-toolbar">
-          <div className="list-section-controls">
-            <input className="filter-input search" type="search" placeholder="Search suppliers…" value={search} onChange={e => setSearch(e.target.value)} />
+        <div className="list-section-toolbar suppliers-toolbar audit-logs-toolbar">
+          <div className="list-section-controls audit-logs-filters">
+            <input
+              className="filter-input search"
+              type="search"
+              placeholder="Search suppliers…"
+              value={search}
+              onChange={e => setSearch(e.target.value)}
+              aria-label="Search suppliers"
+            />
+            <select
+              className="filter-select"
+              value={statusFilter}
+              onChange={(e) => setStatusFilter(e.target.value)}
+              aria-label="Filter by status"
+            >
+              <option value="all">All Statuses</option>
+              <option value="Active">Active</option>
+              <option value="Inactive">Archived</option>
+            </select>
+          </div>
+          <div className="list-section-actions suppliers-toolbar-actions">
+            <button className="button" type="button" onClick={openForm}>+ Add Supplier</button>
           </div>
         </div>
         {loading ? <LoadingState message="Loading suppliers..." /> : suppliers.length === 0 ? <EmptyState title="No suppliers found" /> : <><div className="corvex-table-wrapper">
             <table className="corvex-table">
-              <thead><tr><th>ID</th><th>Supplier Name</th><th>Contact</th><th>Email</th><th>Address</th><th>Status</th><th>Actions</th></tr></thead>
+              <thead><tr><th>ID</th><th>Supplier Name</th><th>Contact Number</th><th>Email</th><th>Address</th><th>Status</th><th>Actions</th></tr></thead>
               <tbody>
                 {paginated_suppliers.map(s => <tr key={s.suppliers_id ?? s.supplier_id}>
                     <td>{s.suppliers_id ?? s.supplier_id ?? '—'}</td>
                     <td>{s.supplier_name}</td>
-                    <td>{s.contact_number || s.contact || '—'}</td>
+                    <td>{formatPhone(s.contact_number || s.contact)}</td>
                     <td>{s.email || '—'}</td>
                     <td>{s.address?.trim() ? s.address : '—'}</td>
                     <td><StatusPill status={s.status || 'Active'} /></td>

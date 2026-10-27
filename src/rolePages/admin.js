@@ -13,7 +13,6 @@ export const adminRole = {
     { label: 'System Reports',      to: '/admin/reports' },
     { label: 'Audit Logs',          to: '/admin/audit-logs' },
     { label: 'Notifications',       to: '/admin/notifications' },
-    { label: 'Profile',             to: '/admin/profile' },
   ],
   routes: {},
 };

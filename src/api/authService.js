@@ -42,6 +42,32 @@ export function getCurrentUser() {
   }
 }
 
+/**
+ * Sidebar / UI label for the user's assigned branch or location.
+ * Uses the primary `user.branch` from login/profile; if multiple branches
+ * are present on the session object, shows a concise summary.
+ * @param {object|null|undefined} user
+ * @returns {string}
+ */
+export function getUserAssignedLocation(user) {
+  if (!user) return 'No Branch Assigned';
+
+  const primaryName = String(user.branch?.name || user.branchName || '').trim();
+  if (primaryName) return primaryName;
+
+  const extra = Array.isArray(user.branches)
+    ? user.branches
+      .map((b) => (typeof b === 'string' ? b : b?.name))
+      .map((n) => String(n || '').trim())
+      .filter(Boolean)
+    : [];
+
+  if (extra.length === 1) return extra[0];
+  if (extra.length > 1) return `${extra[0]} +${extra.length - 1}`;
+
+  return 'No Branch Assigned';
+}
+
 /** Refresh stored session user after profile updates. */
 export function persistCurrentUserFromProfile(profile) {
   if (!profile) return;

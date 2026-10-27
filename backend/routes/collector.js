@@ -573,7 +573,7 @@ router.get('/receipts', async (req, res) => {
 
 // ──────────────────────────────────────────────────────────────────────────────
 // GET /api/collector/receipts/:id
-// Returns a single digital receipt by receipts_id.
+// Returns a single ipt by receipts_id.
 // ──────────────────────────────────────────────────────────────────────────────
 router.get('/receipts/:id', async (req, res) => {
   const pool = req.app.locals.pool;

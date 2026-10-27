@@ -8,7 +8,7 @@ import { BranchManagerPageBody } from './components/branchManager/BranchManagerP
 import { CustomerPageBody } from './components/customer/CustomerPageBody';
 import { SuperAdminPageBody } from './components/superAdmin/SuperAdminPageBody';
 import { Toast, useToast } from './components/shared/Toast';
-import { getEntryPathForRole, logout, getCurrentUser } from './api/authService.js';
+import { getEntryPathForRole, logout, getCurrentUser, getUserAssignedLocation } from './api/authService.js';
 import { startIdleSessionWatch } from './api/sessionActivity.js';
 import logo from './assets/corvex-logo.png';
 import { LoginPage } from './components/auth/LoginPage';
@@ -39,6 +39,32 @@ import { useMyAvatar } from './components/shared/ProfilePhoto.jsx';
 const ROLES = [collectorRole, salesRole, warehouseRole, operatingManagerRole, branchManagerRole, customerRole, superAdminRole];
 const ROLE_BY_KEY = Object.fromEntries(ROLES.map((role) => [role.key, role]));
 const ROUTE_REGISTRY = Object.assign({}, ...ROLES.map((role) => role.routes));
+
+/** Profile is opened from the sidebar footer, not the main nav list. */
+function isStandaloneProfileNavLink(link) {
+  if (!link) return false;
+  if (String(link.label || '').trim().toLowerCase() === 'profile') return true;
+  return /\/profile\/?$/i.test(String(link.to || ''));
+}
+
+function withoutStandaloneProfileNav(links = []) {
+  return links.filter((link) => !isStandaloneProfileNavLink(link));
+}
+
+function sidebarSectionsWithoutProfile(sections = []) {
+  return sections
+    .map((section) => ({
+      ...section,
+      items: withoutStandaloneProfileNav(section.items || []),
+    }))
+    .filter((section) => section.items.length > 0);
+}
+
+function profilePathForRole(role) {
+  if (!role?.entryPath) return null;
+  const prefix = String(role.entryPath).split('/').filter(Boolean)[0];
+  return prefix ? `/${prefix}/profile` : null;
+}
 
 function App() {
   return (
@@ -72,6 +98,7 @@ function PrototypeShell() {
   const isSuperAdmin = currentRole?.key === 'superAdmin';
   const currentUser = getCurrentUser();
   const avatarSrc = useMyAvatar(Boolean(currentUser));
+  const userAssignedLocation = getUserAssignedLocation(currentUser);
   const isRoleModule = isCollector || isSales || isWarehouse || isOperatingManager || isBranchManager || isCustomer || isSuperAdmin;
   const isCustomerLogin = isCustomerAuthPath(location.pathname);
   const fullPath = location.pathname + location.search;
@@ -205,8 +232,16 @@ function PrototypeShell() {
       ];
     }
 
-    return currentRole.navPages;
+    return withoutStandaloneProfileNav(currentRole.navPages || []);
   }, [currentRole, location.pathname]);
+
+  const sidebarSections = useMemo(
+    () => sidebarSectionsWithoutProfile(currentRole?.navSections || []),
+    [currentRole]
+  );
+
+  const profilePath = useMemo(() => profilePathForRole(currentRole), [currentRole]);
+  const isProfileActive = Boolean(profilePath && location.pathname === profilePath);
 
   const pageTitle = page?.title ?? (currentRole ? currentRole.label : 'CORVEX');
 
@@ -258,8 +293,8 @@ function PrototypeShell() {
           {currentRole && !isAuthPath(location.pathname) && !isCustomerLogin ? (
             <>
               <nav className="nav-links">
-                {currentRole?.navSections?.length ? (
-                  currentRole.navSections.map((section) => (
+                {sidebarSections.length ? (
+                  sidebarSections.map((section) => (
                     <details key={section.title} className="nav-group" open>
                       <summary className="nav-group-summary">
                         <span>{section.title}</span>
@@ -365,22 +400,25 @@ function PrototypeShell() {
         {currentRole && !isAuthPath(location.pathname) && !isCustomerLogin && (
           <div className="sidebar-footer">
             <div
-              className="sidebar-profile"
+              className={`sidebar-profile${isProfileActive ? ' active' : ''}`}
               onClick={() => {
-                const prefix = currentRole.entryPath.split('/')[1];
+                if (!profilePath) return;
                 closeMobileSidebar();
-                navigate(`/${prefix}/profile`);
+                navigate(profilePath);
               }}
               onKeyDown={(e) => {
                 if (e.key === 'Enter' || e.key === ' ') {
                   e.preventDefault();
-                  const prefix = currentRole.entryPath.split('/')[1];
+                  if (!profilePath) return;
                   closeMobileSidebar();
-                  navigate(`/${prefix}/profile`);
+                  navigate(profilePath);
                 }
               }}
               role="button"
               tabIndex={0}
+              aria-label="Open profile"
+              aria-current={isProfileActive ? 'page' : undefined}
+              title="Profile"
             >
               <div className="sidebar-profile-avatar">
                 {avatarSrc ? <img src={avatarSrc} alt="" /> : <NavIcon name="accounts" />}
@@ -388,6 +426,9 @@ function PrototypeShell() {
               <div className="sidebar-profile-info">
                 <div className="sidebar-profile-name">{currentUser?.fullName || currentUser?.name || 'User'}</div>
                 <div className="sidebar-profile-role">{currentRole.label}</div>
+                <div className="sidebar-profile-location" title={userAssignedLocation}>
+                  {userAssignedLocation}
+                </div>
               </div>
             </div>
             <button
@@ -620,8 +661,8 @@ function PageBody({ showMap, setShowMap, filter, setFilter, page, currentRole, n
                 zoom={12}
                 height={500}
                 markers={[
-                  { id: '1', position: [7.1907, 125.4553], label: 'A', color: '#0c1031', popup: 'Marker A' },
-                  { id: '2', position: [7.2000, 125.4500], label: 'B', color: '#255684', popup: 'Marker B' }
+                  { id: '1', position: [7.1907, 125.4553], label: 'A', color: '#0B1E30', popup: 'Marker A' },
+                  { id: '2', position: [7.2000, 125.4500], label: 'B', color: '#408DAD', popup: 'Marker B' }
                 ]}
               />
             </div>
@@ -661,8 +702,8 @@ function PageBody({ showMap, setShowMap, filter, setFilter, page, currentRole, n
                 zoom={12}
                 height={500}
                 markers={[
-                  { id: '1', position: [7.1907, 125.4553], label: 'P1', color: '#0c1031', popup: 'Location 1' },
-                  { id: '2', position: [7.2000, 125.4500], label: 'P2', color: '#255684', popup: 'Location 2' }
+                  { id: '1', position: [7.1907, 125.4553], label: 'P1', color: '#0B1E30', popup: 'Location 1' },
+                  { id: '2', position: [7.2000, 125.4500], label: 'P2', color: '#408DAD', popup: 'Location 2' }
                 ]}
               />
             </div>

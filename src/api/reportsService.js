@@ -142,3 +142,18 @@ export async function getCreditHistory(params = {}) {
     };
   }
 }
+
+/** Underlying records for a clicked chart slice (Sales / BM / OM). */
+export async function fetchChartDetails(params = {}) {
+  try {
+    const response = await apiClient.get('/reports/chart-details', { params: normalizeReportParams(params) });
+    return response.data;
+  } catch (error) {
+    console.error('Failed to fetch chart details:', error);
+    return {
+      success: false,
+      data: null,
+      message: error?.response?.data?.message || 'Failed to load chart details.',
+    };
+  }
+}

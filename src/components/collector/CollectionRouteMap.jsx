@@ -1,16 +1,23 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import LeafletMap, { createCustomIcon } from '../common/LeafletMap';
 import { fetchDrivingRoute, fetchRouteDepot } from '../../api/routingService';
 import { formatCurrency } from '../../utils/formatters.js';
 import { openPhoneCall } from '../../utils/mapsNavigation';
 import { StatusBadge } from '../StatusBadge';
 import { LoadingState } from '../shared/LoadingState';
+import { brand, brandDark, brandHover, textMuted } from '../../theme/palette.js';
 
 function stopCoords(stop) {
   const lat = Number(stop.latitude);
   const lng = Number(stop.longitude);
   if (Number.isFinite(lat) && Number.isFinite(lng)) return { lat, lng };
   return null;
+}
+
+function stopsIdentityKey(stops) {
+  return (stops || [])
+    .map((s) => `${s.id}:${s.latitude}:${s.longitude}:${s.rank ?? ''}`)
+    .join('|');
 }
 
 export default function CollectionRouteMap({
@@ -24,46 +31,21 @@ export default function CollectionRouteMap({
   const [routeData, setRouteData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [selectedId, setSelectedId] = useState(null);
+  const showToastRef = useRef(showToast);
+  const onRoadStatsRef = useRef(onRoadStats);
+  showToastRef.current = showToast;
+  onRoadStatsRef.current = onRoadStats;
+
+  // Stable key so parent re-renders that pass a new array with the same stops
+  // do not re-trigger the OSRM fetch (which caused the map loading loop).
+  const stopsKey = useMemo(() => stopsIdentityKey(stops), [stops]);
 
   const coordStops = useMemo(
     () => (stops || []).map((s) => ({ ...s, coords: stopCoords(s) })).filter((s) => s.coords),
-    [stops]
+    // stopsKey is the intentional content dependency; `stops` alone changes every parent render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [stopsKey]
   );
-
-  const loadRoute = useCallback(async () => {
-    if (!coordStops.length) {
-      setRouteData(null);
-      setLoading(false);
-      return;
-    }
-    setLoading(true);
-    const payload = coordStops.map((s) => ({
-      id: s.id,
-      customer_id: s.id,
-      latitude: s.coords.lat,
-      longitude: s.coords.lng,
-      rank: s.rank,
-      customer_name: s.customerName,
-      address: s.address,
-      outstanding_balance: s.outstandingBalance,
-      days_overdue: s.daysOverdue,
-      saw_score: s.sawScore,
-      status: s.status,
-      phone: s.phone,
-    }));
-    const res = await fetchDrivingRoute(orderMode, payload);
-    if (res.success) {
-      setRouteData(res.data);
-      onRoadStats?.(res.data?.road);
-      if (res.data?.road?.error && showToast) {
-        showToast(`Road routing fallback: ${res.data.road.error}`, 'error');
-      }
-    } else {
-      showToast?.(res.message || 'Road route unavailable.', 'error');
-      setRouteData(null);
-    }
-    setLoading(false);
-  }, [coordStops, orderMode, onRoadStats, showToast]);
 
   useEffect(() => {
     fetchRouteDepot().then((r) => {
@@ -72,8 +54,44 @@ export default function CollectionRouteMap({
   }, []);
 
   useEffect(() => {
-    loadRoute();
-  }, [loadRoute]);
+    let cancelled = false;
+    (async () => {
+      if (!coordStops.length) {
+        setRouteData(null);
+        setLoading(false);
+        return;
+      }
+      setLoading(true);
+      const payload = coordStops.map((s) => ({
+        id: s.id,
+        customer_id: s.id,
+        latitude: s.coords.lat,
+        longitude: s.coords.lng,
+        rank: s.rank,
+        customer_name: s.customerName,
+        address: s.address,
+        outstanding_balance: s.outstandingBalance,
+        days_overdue: s.daysOverdue,
+        saw_score: s.sawScore,
+        status: s.status,
+        phone: s.phone,
+      }));
+      const res = await fetchDrivingRoute(orderMode, payload);
+      if (cancelled) return;
+      if (res.success) {
+        setRouteData(res.data);
+        onRoadStatsRef.current?.(res.data?.road);
+        if (res.data?.road?.error) {
+          showToastRef.current?.(`Road routing fallback: ${res.data.road.error}`, 'error');
+        }
+      } else {
+        showToastRef.current?.(res.message || 'Road route unavailable.', 'error');
+        setRouteData(null);
+      }
+      setLoading(false);
+    })();
+    return () => { cancelled = true; };
+  }, [coordStops, orderMode]);
 
   const orderedStops = routeData?.orderedStops?.length
     ? routeData.orderedStops
@@ -103,12 +121,12 @@ export default function CollectionRouteMap({
         id: 'depot',
         position: [depot.latitude, depot.longitude],
         label: 'B',
-        color: '#255684',
+        color: brand,
         popupContent: (
           <div>
             <strong>{depot.name || 'Branch'}</strong>
             <div style={{ fontSize: '0.85rem', marginTop: 4 }}>Start / depot</div>
-            <div style={{ fontSize: '0.82rem', color: '#818697' }}>{depot.address || '—'}</div>
+            <div style={{ fontSize: '0.82rem', color: textMuted }}>{depot.address || '—'}</div>
           </div>
         ),
       });
@@ -119,13 +137,14 @@ export default function CollectionRouteMap({
       if (!Number.isFinite(lat) || !Number.isFinite(lng)) return;
       const id = String(stop.id);
       const selected = selectedId === id;
+      const markerColor = selected ? brandDark : stop.status === 'Completed' ? brandHover : brand;
       list.push({
         id,
         position: [lat, lng],
         label: String(stop.routeIndex ?? stop.rank ?? ''),
-        color: selected ? '#0c1031' : stop.status === 'Completed' ? '#255684' : '#0c1031',
+        color: markerColor,
         icon: createCustomIcon(
-          selected ? '#0c1031' : stop.status === 'Completed' ? '#255684' : '#0c1031',
+          markerColor,
           String(stop.routeIndex ?? stop.rank ?? '')
         ),
         popupContent: (
@@ -134,7 +153,7 @@ export default function CollectionRouteMap({
             <div style={{ marginTop: 6, fontSize: '0.85rem' }}>
               SAW rank #{stop.sawRank ?? stop.rank ?? '—'} · {formatCurrency(stop.outstanding_balance ?? stop.outstandingBalance ?? 0)}
             </div>
-            <div style={{ fontSize: '0.82rem', color: '#818697' }}>{stop.address || '—'}</div>
+            <div style={{ fontSize: '0.82rem', color: textMuted }}>{stop.address || '—'}</div>
           </div>
         ),
       });
@@ -150,7 +169,7 @@ export default function CollectionRouteMap({
     {
       id: 'osrm-road',
       positions: roadPositions,
-      color: orderMode === 'travel' ? '#0c1031' : '#0c1031',
+      color: orderMode === 'travel' ? brandHover : brand,
       weight: 4,
       opacity: 0.85,
     },
@@ -171,9 +190,9 @@ export default function CollectionRouteMap({
           borderRadius: 8,
         }}
       >
-        <p style={{ margin: '0 0 10px', fontSize: '0.88rem', color: '#818697', lineHeight: 1.5 }}>
-          <strong style={{ color: '#0c1031' }}>SAW</strong> ranks collection priority (who to visit first).{' '}
-          <strong style={{ color: '#0c1031' }}>OSRM</strong> draws the driving path on OpenStreetMap roads.
+        <p style={{ margin: '0 0 10px', fontSize: '0.88rem', color: textMuted, lineHeight: 1.5 }}>
+          <strong style={{ color: brandDark }}>SAW</strong> ranks collection priority (who to visit first).{' '}
+          <strong style={{ color: brandDark }}>OSRM</strong> draws the driving path on OpenStreetMap roads.
           Switch order to compare <em>priority</em> vs <em>minimum travel</em>.
         </p>
         <div className="flex flex-wrap gap-3 items-center justify-between">
@@ -193,7 +212,7 @@ export default function CollectionRouteMap({
               Travel optimized
             </button>
           </div>
-          <div style={{ fontSize: '0.85rem', color: '#818697' }}>
+          <div style={{ fontSize: '0.85rem', color: textMuted }}>
             {loading ? 'Calculating route…' : (
               <>
                 Road: {routeData?.road?.distanceKm != null ? `${routeData.road.distanceKm} km` : '—'}
@@ -211,7 +230,7 @@ export default function CollectionRouteMap({
       </div>
 
       {loading && !routeData ? (
-        <LoadingState message="Loading road route from OSRM…" />
+        <LoadingState variant="map" message="Loading road route from OSRM…" />
       ) : (
         <LeafletMap
           center={mapCenter}

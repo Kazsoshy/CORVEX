@@ -9,11 +9,10 @@ import { AdminPageBody } from '../admin/AdminPageBody';
 import { BranchManagerPageBody } from '../branchManager/BranchManagerPageBody';
 import { OrgLeafletPage } from './OrgLeafletPage';
 import { SawResultsPage } from './SawResultsPage';
-import { BRANCHES, BRANCH_RADAR, ENTERPRISE_KPIS, MONTHLY_COLLECTIONS, MONTHLY_DELINQUENCY, MONTHLY_REVENUE, REPORT_CATEGORIES, TREND_DATA, WEEKLY_COLLECTION_RATE, WEEKLY_SALES_RATE, SALES_ANALYTICS, INVENTORY_ANALYTICS, PAYMENT_ANALYTICS, formatCurrency, getBranchById, getHighestPerformingBranch, getLowestPerformingBranch } from '../../data/operatingManagerMockData';
 import { fetchOperationalAlerts, patchOperationalAlert, mapOperationalAlertRow } from '../../api/operationalAlertsService.js';
 import { fetchNotifications, markNotificationRead, markAllNotificationsRead, mapNotificationRow, countUnreadNotifications } from '../../api/notificationService.js';
 import { AccountProfilePanel } from '../shared/AccountProfilePanel';
-import { formatDisplayDate, formatDisplayDateTime } from '../../utils/formatters.js';
+import { formatCurrency, formatDisplayDate, formatDisplayDateTime, formatPhone } from '../../utils/formatters.js';
 import { getPresetDateRange } from '../../utils/analyticsDateRange.js';
 import { formatMiddleNameDisplay } from '../../utils/customerDisplay.js';
 import { getExecutiveDashboard, getOperatingManagerAnalytics, getPerformanceHistory, savePerformanceTargets } from '../../api/reportsService';
@@ -23,6 +22,8 @@ import { fetchCustomers, fetchCustomerById } from '../../api/salesService';
 import { EmptyState } from '../shared/EmptyState';
 import { LoadingState } from '../shared/LoadingState';
 import { DetailRowsTable } from '../shared/DetailRowsTable';
+import { ChartDrilldownModal } from '../shared/ChartDrilldownModal.jsx';
+import { useChartDrilldown } from '../../hooks/useChartDrilldown.js';
 import { NavIcon } from '../../navIcons';
 import { getCurrentUser } from '../../api/authService';
 import { TerritoriesPage } from '../territories/TerritoriesPage';
@@ -30,12 +31,7 @@ import { SalesHistoryPage } from '../sales/SalesPageBody';
 import { InvoiceDetailsPage } from '../sales/InvoiceDetailsPage';
 import { fetchDigitalReceipts } from '../../api/digitalReceiptsService';
 import { patchCollectionReview } from '../../api/approvalsService.js';
-const COLORS = ['#255684', '#0c1031', '#ef4444', '#f59e0b'];
-const BRANCH_COLORS = {
-  'Davao City': '#255684',
-  'General Santos': '#0c1031',
-  'Davao Oriental': '#ef4444'
-};
+const COLORS = ['#1A4162', '#0B1E30', '#ef4444', '#f59e0b'];
 function actionButtonClass(v) {
   if (v === 'secondary') return 'button secondary';
   if (v === 'ghost') return 'button ghost';
@@ -177,7 +173,7 @@ function DashboardPage({
       gap: 4,
       fontSize: '0.8rem',
       fontWeight: 700,
-      color: up ? '#4A6B12' : '#dc2626',
+      color: up ? '#2A9B6A' : '#dc2626',
       padding: '2px 8px'
     }}>
         {up ? '▲' : '▼'} {Math.abs(rate)}% {label}
@@ -187,7 +183,7 @@ function DashboardPage({
   // ── Derived values ────────────────────────────────────────────────────────
   const topBranch = data.branchSummary.length ? [...data.branchSummary].sort((a, b) => b.totalCollections - a.totalCollections)[0] : null;
   const bottomBranch = data.branchSummary.length ? [...data.branchSummary].sort((a, b) => a.totalCollections - b.totalCollections)[0] : null;
-  const BRANCH_PALETTE = ['#255684', '#0c1031', '#ef4444', '#f59e0b'];
+  const BRANCH_PALETTE = ['#1A4162', '#0B1E30', '#ef4444', '#f59e0b'];
   return <div className="page">
       <AnalyticsFilterBar
         filters={filters}
@@ -342,12 +338,12 @@ function DashboardPage({
           padding: 16,
           background: '#eef0f4',
           borderRadius: 10,
-          border: '1px solid #c5c8d0'
+          border: '1px solid #BADBE9'
         }}>
             <span style={{
             fontSize: '0.78rem',
             fontWeight: 700,
-            color: '#818697',
+            color: '#5F7385',
             textTransform: 'uppercase',
             letterSpacing: '0.06em'
           }}>
@@ -357,7 +353,7 @@ function DashboardPage({
             fontSize: '1.6rem',
             fontWeight: 800,
             margin: '6px 0 4px',
-            color: '#0c1031'
+            color: '#0B1E30'
           }}>
               {data.salesGrowthRate !== null ? `${data.salesGrowthRate >= 0 ? '+' : ''}${data.salesGrowthRate}%` : '—'}
             </div>
@@ -374,12 +370,12 @@ function DashboardPage({
           padding: 16,
           background: '#eef0f4',
           borderRadius: 10,
-          border: '1px solid #c5c8d0'
+          border: '1px solid #BADBE9'
         }}>
             <span style={{
             fontSize: '0.78rem',
             fontWeight: 700,
-            color: '#818697',
+            color: '#5F7385',
             textTransform: 'uppercase',
             letterSpacing: '0.06em'
           }}>
@@ -389,7 +385,7 @@ function DashboardPage({
             fontSize: '1.6rem',
             fontWeight: 800,
             margin: '6px 0 4px',
-            color: '#0c1031'
+            color: '#0B1E30'
           }}>
               {data.collectionGrowthRate !== null ? `${data.collectionGrowthRate >= 0 ? '+' : ''}${data.collectionGrowthRate}%` : '—'}
             </div>
@@ -406,12 +402,12 @@ function DashboardPage({
           padding: 16,
           background: '#eef0f4',
           borderRadius: 10,
-          border: '1px solid #c5c8d0'
+          border: '1px solid #BADBE9'
         }}>
             <span style={{
             fontSize: '0.78rem',
             fontWeight: 700,
-            color: '#818697',
+            color: '#5F7385',
             textTransform: 'uppercase',
             letterSpacing: '0.06em'
           }}>
@@ -421,7 +417,7 @@ function DashboardPage({
             fontSize: '1.6rem',
             fontWeight: 800,
             margin: '6px 0 4px',
-            color: '#0c1031'
+            color: '#0B1E30'
           }}>
               {data.totalCustomers}
             </div>
@@ -442,12 +438,12 @@ function DashboardPage({
           padding: 16,
           background: '#eef0f4',
           borderRadius: 10,
-          border: '1px solid #c5c8d0'
+          border: '1px solid #BADBE9'
         }}>
             <span style={{
             fontSize: '0.78rem',
             fontWeight: 700,
-            color: '#818697',
+            color: '#5F7385',
             textTransform: 'uppercase',
             letterSpacing: '0.06em'
           }}>
@@ -457,7 +453,7 @@ function DashboardPage({
             fontSize: '1.6rem',
             fontWeight: 800,
             margin: '6px 0 4px',
-            color: '#0c1031'
+            color: '#0B1E30'
           }}>
               {data.inventoryHealth}%
             </div>
@@ -481,7 +477,7 @@ function DashboardPage({
         <ChartCard title={`Collection Trend (${data.filters?.label || 'Selected period'})`} subtitle="TC = SUM(Ci) — Source: collection_payment">
           <ResponsiveContainer width="100%" height={220}>
             <AreaChart data={data.collectionTrend}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#c5c8d0" />
+              <CartesianGrid strokeDasharray="3 3" stroke="#BADBE9" />
               <XAxis dataKey="label" tick={{
               fontSize: 12
             }} />
@@ -490,8 +486,8 @@ function DashboardPage({
             }} tickFormatter={v => `${(v / 1000).toFixed(0)}k`} />
               <Tooltip formatter={v => formatCurrency(v)} />
               <Legend />
-              <Area type="monotone" dataKey="target" name="Target" stroke="#c5c8d0" fill="#c5c8d0" strokeWidth={2} strokeDasharray="5 5" />
-              <Area type="monotone" dataKey="amount" name="Collected" stroke="#255684" fill="#255684" fillOpacity={0.12} strokeWidth={2} />
+              <Area type="monotone" dataKey="target" name="Target" stroke="#BADBE9" fill="#BADBE9" strokeWidth={2} strokeDasharray="5 5" />
+              <Area type="monotone" dataKey="amount" name="Collected" stroke="#1A4162" fill="#1A4162" fillOpacity={0.12} strokeWidth={2} />
             </AreaChart>
           </ResponsiveContainer>
         </ChartCard>
@@ -499,7 +495,7 @@ function DashboardPage({
         <ChartCard title={`Sales Trend (${data.filters?.label || 'Selected period'})`} subtitle="TS = SUM(Si) — Source: sales_invoices">
           <ResponsiveContainer width="100%" height={220}>
             <AreaChart data={data.salesTrend}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#c5c8d0" />
+              <CartesianGrid strokeDasharray="3 3" stroke="#BADBE9" />
               <XAxis dataKey="label" tick={{
               fontSize: 12
             }} />
@@ -508,8 +504,8 @@ function DashboardPage({
             }} tickFormatter={v => `${(v / 1000).toFixed(0)}k`} />
               <Tooltip formatter={v => formatCurrency(v)} />
               <Legend />
-              <Area type="monotone" dataKey="target" name="Target" stroke="#c5c8d0" fill="#c5c8d0" strokeWidth={2} strokeDasharray="5 5" />
-              <Area type="monotone" dataKey="amount" name="Sales" stroke="#0c1031" fill="#0c1031" fillOpacity={0.12} strokeWidth={2} />
+              <Area type="monotone" dataKey="target" name="Target" stroke="#BADBE9" fill="#BADBE9" strokeWidth={2} strokeDasharray="5 5" />
+              <Area type="monotone" dataKey="amount" name="Sales" stroke="#0B1E30" fill="#0B1E30" fillOpacity={0.12} strokeWidth={2} />
             </AreaChart>
           </ResponsiveContainer>
         </ChartCard>
@@ -524,7 +520,7 @@ function DashboardPage({
           Sales: b.totalSales,
           Outstanding: b.totalOutstanding
         }))}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#c5c8d0" />
+              <CartesianGrid strokeDasharray="3 3" stroke="#BADBE9" />
               <XAxis dataKey="name" tick={{
             fontSize: 12
           }} />
@@ -533,8 +529,8 @@ function DashboardPage({
           }} tickFormatter={v => `${(v / 1000).toFixed(0)}k`} />
               <Tooltip formatter={v => formatCurrency(v)} />
               <Legend />
-              <Bar dataKey="Collections" fill="#255684" radius={[4, 4, 0, 0]} />
-              <Bar dataKey="Sales" fill="#0c1031" radius={[4, 4, 0, 0]} />
+              <Bar dataKey="Collections" fill="#1A4162" radius={[4, 4, 0, 0]} />
+              <Bar dataKey="Sales" fill="#0B1E30" radius={[4, 4, 0, 0]} />
               <Bar dataKey="Outstanding" fill="#ef4444" radius={[4, 4, 0, 0]} />
             </BarChart>
           </ResponsiveContainer>
@@ -568,7 +564,7 @@ function DashboardPage({
             <tbody>
               {data.branchSummary.length === 0 ? <tr><td colSpan={6} style={{
                 textAlign: 'center',
-                color: '#818697'
+                color: '#5F7385'
               }}>No branch data available.</td></tr> : data.branchSummary.map(b => {
               const inv = data.inventoryByBranch.find(i => i.branchId === b.branchId);
               return <tr key={b.branchId}>
@@ -596,7 +592,7 @@ function DashboardPage({
             <span style={{
           fontSize: '0.72rem',
           fontWeight: 700,
-          color: '#4A6B12',
+          color: '#2A9B6A',
           textTransform: 'uppercase',
           letterSpacing: '0.08em'
         }}>
@@ -691,12 +687,12 @@ function DashboardPage({
           padding: 14,
           background: '#eef0f4',
           borderRadius: 10,
-          border: '1px solid #c5c8d0'
+          border: '1px solid #BADBE9'
         }}>
               <span style={{
             fontSize: '0.75rem',
             fontWeight: 700,
-            color: '#818697',
+            color: '#5F7385',
             textTransform: 'uppercase',
             letterSpacing: '0.05em',
             display: 'block'
@@ -760,7 +756,7 @@ function PerformanceHistoryPanel() {
     });
   });
   const chartData = Object.values(periodMap);
-  const PALETTE = ['#255684', '#0c1031', '#818697', '#ef4444', '#f59e0b', '#255684'];
+  const PALETTE = ['#1A4162', '#0B1E30', '#5F7385', '#ef4444', '#f59e0b', '#1A4162'];
   const lineKeys = [];
   perfData.byBranch.forEach((branch, i) => {
     lineKeys.push({
@@ -786,7 +782,7 @@ function PerformanceHistoryPanel() {
       </div>
       <ResponsiveContainer width="100%" height={260}>
         <LineChart data={chartData}>
-          <CartesianGrid strokeDasharray="3 3" stroke="#c5c8d0" />
+          <CartesianGrid strokeDasharray="3 3" stroke="#BADBE9" />
           <XAxis dataKey="period" tick={{
           fontSize: 11
         }} />
@@ -869,7 +865,7 @@ function BranchPerformanceHub({
           {branchBarData.length > 0 && <ChartCard title="Branch Staff & Customer Overview" subtitle="Source: branches, users, customers, branch_inventory tables">
               <ResponsiveContainer width="100%" height={220}>
                 <BarChart data={branchBarData} barGap={4}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#c5c8d0" />
+                  <CartesianGrid strokeDasharray="3 3" stroke="#BADBE9" />
                   <XAxis dataKey="name" tick={{
               fontSize: 12
             }} />
@@ -878,8 +874,8 @@ function BranchPerformanceHub({
             }} />
                   <Tooltip />
                   <Legend />
-                  <Bar dataKey="Staff" fill="#255684" radius={[4, 4, 0, 0]} />
-                  <Bar dataKey="Customers" fill="#0c1031" radius={[4, 4, 0, 0]} />
+                  <Bar dataKey="Staff" fill="#1A4162" radius={[4, 4, 0, 0]} />
+                  <Bar dataKey="Customers" fill="#0B1E30" radius={[4, 4, 0, 0]} />
                   <Bar dataKey="LowStock" name="Low Stock Items" fill="#ef4444" radius={[4, 4, 0, 0]} />
                 </BarChart>
               </ResponsiveContainer>
@@ -911,8 +907,8 @@ function BranchPerformanceHub({
                 <tbody>
                   {branches.length === 0 ? <tr><td colSpan={8} style={{
                   textAlign: 'center',
-                  color: '#818697'
-                }}>No branches found.</td></tr> : branches.map(b => <tr key={b.id}>
+                  color: '#5F7385'
+                }}>No branches found.</td></tr> : branches.map(b => <tr key={b.branch_id ?? b.id}>
                       <td>
                         <strong>{b.branch_name}</strong>
                         <br /><span className="muted" style={{
@@ -920,7 +916,7 @@ function BranchPerformanceHub({
                   }}>{b.address}</span>
                       </td>
                       <td>{b.region || '—'}</td>
-                      <td>{b.phone || '—'}</td>
+                      <td>{formatPhone(b.contact_no || b.phone)}</td>
                       <td>{b.email || '—'}</td>
                       <td>{b.manager_name || '—'}</td>
                       <td>{b.active_staff || 0}</td>
@@ -935,239 +931,160 @@ function BranchPerformanceHub({
           </section>
         </>}
 
-      {activeTab === 'comparison' && <BranchComparisonPage navigate={navigate} showToast={() => {}} />}
-      {activeTab === 'trends' && <HistoricalTrendsPage />}
-    </div>;
-}
-function BranchComparisonPage({
-  navigate,
-  showToast
-}) {
-  const [loading, setLoading] = useState(true);
-  useEffect(() => {
-    const t = window.setTimeout(() => setLoading(false), 400);
-    return () => window.clearTimeout(t);
-  }, []);
-  if (loading) return <LoadingState message="Loading branch comparison…" />;
-  return <div className="page">
-      <div className="grid two-up">
-        <ChartCard title="Monthly Revenue by Branch" subtitle="6-month trend">
-          <ResponsiveContainer width="100%" height={240}>
-            <AreaChart data={MONTHLY_REVENUE}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#c5c8d0" />
-              <XAxis dataKey="month" tick={{
-              fontSize: 12
-            }} />
-              <YAxis tick={{
-              fontSize: 11
-            }} tickFormatter={v => `${(v / 1000000).toFixed(1)}M`} />
-              <Tooltip formatter={v => formatCurrency(v)} />
-              <Legend />
-              {Object.keys(BRANCH_COLORS).map(b => <Area key={b} type="monotone" dataKey={b} stroke={BRANCH_COLORS[b]} fill={BRANCH_COLORS[b]} fillOpacity={0.08} strokeWidth={2} />)}
-            </AreaChart>
-          </ResponsiveContainer>
-        </ChartCard>
-
-        <ChartCard title="Monthly Collections by Branch">
-          <ResponsiveContainer width="100%" height={240}>
-            <LineChart data={MONTHLY_COLLECTIONS}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#c5c8d0" />
-              <XAxis dataKey="month" tick={{
-              fontSize: 12
-            }} />
-              <YAxis tick={{
-              fontSize: 11
-            }} tickFormatter={v => `${(v / 1000000).toFixed(1)}M`} />
-              <Tooltip formatter={v => formatCurrency(v)} />
-              <Legend />
-              {Object.keys(BRANCH_COLORS).map(b => <Line key={b} type="monotone" dataKey={b} stroke={BRANCH_COLORS[b]} strokeWidth={2} dot={false} />)}
-            </LineChart>
-          </ResponsiveContainer>
-        </ChartCard>
-      </div>
-
-      <ChartCard title="KPI Comparison Matrix">
-        <div className="table-shell">
-          <table className="corvex-table">
-            <thead><tr><th>Metric</th>{BRANCHES.map(b => <th key={b.id}>{b.name}</th>)}</tr></thead>
-            <tbody>
-              {[{
-              metric: 'Collection Rate',
-              key: 'collectionRate',
-              suffix: '%'
-            }, {
-              metric: 'Sales Completion',
-              key: 'salesCompletionRate',
-              suffix: '%'
-            }, {
-              metric: 'Inventory Health',
-              key: 'inventoryHealth',
-              suffix: '%'
-            }, {
-              metric: 'Route Compliance',
-              key: 'routeCompliance',
-              suffix: '%'
-            }, {
-              metric: 'Overdue Accounts',
-              key: 'overdueAccounts',
-              suffix: ''
-            }, {
-              metric: 'Performance Score',
-              key: 'performanceScore',
-              suffix: '/100'
-            }].map(row => <tr key={row.metric}>
-                  <td>{row.metric}</td>
-                  {BRANCHES.map(b => <td key={b.id}>{b[row.key]}{row.suffix}</td>)}
-                </tr>)}
-            </tbody>
-          </table>
-        </div>
-      </ChartCard>
-    </div>;
-}
-function HistoricalTrendsPage() {
-  return <div className="page">
-      <div className="grid two-up">
-        <ChartCard title="Collection Rate Over Time" subtitle="Weekly % by branch">
-          <ResponsiveContainer width="100%" height={220}>
-            <LineChart data={WEEKLY_COLLECTION_RATE}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#c5c8d0" />
-              <XAxis dataKey="week" tick={{
-              fontSize: 12
-            }} />
-              <YAxis domain={[75, 100]} tick={{
-              fontSize: 12
-            }} unit="%" />
-              <Tooltip formatter={v => `${v}%`} />
-              <Legend />
-              {Object.keys(BRANCH_COLORS).map(b => <Line key={b} type="monotone" dataKey={b} stroke={BRANCH_COLORS[b]} strokeWidth={2} dot={false} />)}
-            </LineChart>
-          </ResponsiveContainer>
-        </ChartCard>
-
-        <ChartCard title="Delinquency Trend" subtitle="Monthly overdue accounts">
-          <ResponsiveContainer width="100%" height={220}>
-            <AreaChart data={MONTHLY_DELINQUENCY}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#c5c8d0" />
-              <XAxis dataKey="month" tick={{
-              fontSize: 12
-            }} />
-              <YAxis tick={{
-              fontSize: 12
-            }} />
-              <Tooltip />
-              <Legend />
-              {Object.keys(BRANCH_COLORS).map(b => <Area key={b} type="monotone" dataKey={b} stroke={BRANCH_COLORS[b]} fill={BRANCH_COLORS[b]} fillOpacity={0.1} strokeWidth={2} />)}
-            </AreaChart>
-          </ResponsiveContainer>
-        </ChartCard>
-      </div>
-
-      <ChartCard title="Branch Performance Radar" subtitle="Multi-dimensional KPI comparison">
-        <ResponsiveContainer width="100%" height={300}>
-          <RadarChart data={BRANCH_RADAR}>
-            <PolarGrid stroke="#c5c8d0" />
-            <PolarAngleAxis dataKey="metric" tick={{
-            fontSize: 12
-          }} />
-            {Object.keys(BRANCH_COLORS).map(b => <Radar key={b} name={b} dataKey={b} stroke={BRANCH_COLORS[b]} fill={BRANCH_COLORS[b]} fillOpacity={0.1} />)}
-            <Legend />
-            <Tooltip />
-          </RadarChart>
-        </ResponsiveContainer>
-      </ChartCard>
+      {activeTab === 'comparison' && <LiveBranchComparisonPage navigate={navigate} showToast={() => {}} />}
+      {activeTab === 'trends' && <LiveHistoricalTrendsPage />}
     </div>;
 }
 function BranchDetailPage({
   branchId,
   navigate
 }) {
-  const branch = getBranchById(branchId);
-  if (!branch) return <EmptyState title="Branch not found" description="Select a branch from Branch Performance." />;
-  const kpiData = [{
-    metric: 'Collection',
-    value: branch.collectionRate
-  }, {
-    metric: 'Sales',
-    value: branch.salesCompletionRate
-  }, {
-    metric: 'Inventory',
-    value: branch.inventoryHealth
-  }, {
-    metric: 'Compliance',
-    value: branch.routeCompliance
-  }, {
-    metric: 'Growth',
-    value: branch.growthScore
-  }];
+  const [branchMeta, setBranchMeta] = useState(null);
+  const [metaLoading, setMetaLoading] = useState(true);
+  const [metaError, setMetaError] = useState(null);
+  const filters = useMemo(() => ({
+    preset: 'this_month',
+    startDate: '',
+    endDate: '',
+    branchId: branchId != null && branchId !== '' ? String(branchId) : 'all',
+  }), [branchId]);
+  const {
+    data,
+    loading,
+    error
+  } = useOperatingManagerAnalytics(filters);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function load() {
+      if (branchId == null || branchId === '') {
+        setMetaLoading(false);
+        setMetaError('Branch not found');
+        return;
+      }
+      setMetaLoading(true);
+      setMetaError(null);
+      try {
+        const res = await apiClient.get(`/branches/${branchId}`);
+        if (cancelled) return;
+        if (res.data?.success) {
+          setBranchMeta(res.data.data);
+        } else {
+          setBranchMeta(null);
+          setMetaError(res.data?.message || 'Branch not found');
+        }
+      } catch (err) {
+        if (!cancelled) {
+          setBranchMeta(null);
+          setMetaError(err.response?.data?.message || 'Failed to load branch.');
+        }
+      } finally {
+        if (!cancelled) setMetaLoading(false);
+      }
+    }
+    load();
+    return () => {
+      cancelled = true;
+    };
+  }, [branchId]);
+
+  if (loading || metaLoading) return <LoadingState message="Loading branch details…" />;
+  if (metaError || !branchMeta) {
+    return <EmptyState
+      title="Branch not found"
+      description={metaError || 'Select a branch from Branch Performance.'}
+      actionLabel="Back"
+      onAction={() => navigate('/operating-manager/branch-performance')}
+    />;
+  }
+  if (error || !data) {
+    return <EmptyState title="Branch analytics unavailable" description={error || 'No analytics data available for this branch.'} />;
+  }
+
+  const summary = data.summary || {};
+  const row = (data.branchSummary || []).find((b) => String(b.branchId) === String(branchId))
+    || (data.branchSummary || [])[0]
+    || {};
+  const branchName = branchMeta.branch_name || row.branchName || 'Branch';
+  const collections = Number(row.totalCollections ?? summary.totalCollections) || 0;
+  const sales = Number(row.totalSales ?? summary.totalSales) || 0;
+  const outstanding = Number(row.totalOutstanding ?? summary.totalOutstandingBalance) || 0;
+  const routeCompliance = Number(row.routeCompliance ?? summary.routeCompliance) || 0;
+  const inventoryHealth = Number(row.inventoryHealth ?? summary.inventoryHealth) || 0;
+  const salesVisitCompletion = Number(summary.salesVisitCompletion) || 0;
+  const performanceScore = Number(summary.performanceScore);
+  const overdueCount = Number(summary.overdueCount) || 0;
+  const collectionShare = Math.max(0, Math.min(100, Math.round(
+    collections > 0 || outstanding > 0
+      ? (collections / Math.max(collections + outstanding, 1)) * 100
+      : 0
+  )));
+  const kpiData = [
+    { metric: 'Compliance', value: routeCompliance },
+    { metric: 'Sales Visits', value: salesVisitCompletion },
+    { metric: 'Inventory', value: inventoryHealth },
+    { metric: 'Collections', value: collectionShare },
+  ];
+  const activeStaff = branchMeta.active_staff
+    ?? ((Number(summary.activeCollectors) || 0) + (Number(summary.activeSalesAgents) || 0));
+  const customerCount = row.customerCount ?? branchMeta.customer_count ?? summary.totalCustomers ?? '—';
+
   return <div className="page">
       <section className="panel dashboard-greeting">
         <div className="dashboard-greeting-main">
-          <p className="dashboard-eyebrow"><StatusBadge status={branch.status} /></p>
-          <h2>{branch.name}</h2>
-          <p className="muted">{branch.collectors} collectors · {branch.salesAgents} sales agents · {branch.locations} locations</p>
+          <p className="dashboard-eyebrow"><StatusBadge status={branchMeta.status} /></p>
+          <h2>{branchName}</h2>
+          <p className="muted">
+            {[branchMeta.address, branchMeta.region].filter(Boolean).join(' · ') || 'No address on file'}
+          </p>
+          <p className="muted" style={{ marginTop: 4, fontSize: '0.85rem' }}>
+            {formatPhone(branchMeta.contact_no || branchMeta.phone)}
+            {branchMeta.email ? ` · ${branchMeta.email}` : ''}
+            {branchMeta.manager_name ? ` · Manager: ${branchMeta.manager_name}` : ''}
+          </p>
         </div>
       </section>
 
-      <StatsGrid stats={[{
-      label: 'Performance Score',
-      value: `${branch.performanceScore}/100`
-    }, {
-      label: 'Risk Score',
-      value: `${branch.riskScore}/100`
-    }, {
-      label: 'Growth Score',
-      value: `${branch.growthScore}/100`
-    }, {
-      label: 'Collection Rate',
-      value: `${branch.collectionRate}%`
-    }, {
-      label: 'Sales Completion',
-      value: `${branch.salesCompletionRate}%`
-    }, {
-      label: 'Inventory Health',
-      value: `${branch.inventoryHealth}%`
-    }]} />
+      <StatsGrid stats={[
+        Number.isFinite(performanceScore)
+          ? { label: 'Performance Score', value: `${performanceScore}/100` }
+          : null,
+        { label: 'Route Compliance', value: `${routeCompliance}%` },
+        { label: 'Sales Visit Completion', value: `${salesVisitCompletion}%` },
+        { label: 'Inventory Health', value: `${inventoryHealth}%` },
+        { label: 'Collections (period)', value: formatCurrency(collections) },
+        { label: 'Sales (period)', value: formatCurrency(sales) },
+        { label: 'Outstanding Balance', value: formatCurrency(outstanding) },
+        { label: 'Overdue Accounts', value: String(overdueCount) },
+        { label: 'Active Staff', value: String(activeStaff) },
+        { label: 'Customers', value: String(customerCount) },
+      ].filter(Boolean)} />
 
       <div className="grid two-up">
-        <ChartCard title="KPI Profile" subtitle="Branch performance dimensions">
+        <ChartCard title="KPI Profile" subtitle="Live metrics for the selected period">
           <ResponsiveContainer width="100%" height={240}>
             <RadarChart data={kpiData}>
-              <PolarGrid stroke="#c5c8d0" />
-              <PolarAngleAxis dataKey="metric" tick={{
-              fontSize: 12
-            }} />
-              <Radar name={branch.name} dataKey="value" stroke="#255684" fill="#255684" fillOpacity={0.18} />
-              <Tooltip formatter={v => `${v}%`} />
+              <PolarGrid stroke="#BADBE9" />
+              <PolarAngleAxis dataKey="metric" tick={{ fontSize: 12 }} />
+              <Radar name={branchName} dataKey="value" stroke="#1A4162" fill="#1A4162" fillOpacity={0.18} />
+              <Tooltip formatter={(v) => `${v}%`} />
             </RadarChart>
           </ResponsiveContainer>
         </ChartCard>
 
-        <ChartCard title="Financial Overview">
+        <ChartCard title="Financial Overview" subtitle="Recorded amounts for the selected period">
           <ResponsiveContainer width="100%" height={240}>
-            <BarChart data={[{
-            name: 'Revenue',
-            amount: branch.revenue
-          }, {
-            name: 'Collections',
-            amount: branch.collections
-          }, {
-            name: 'Sales',
-            amount: branch.sales
-          }, {
-            name: 'Delinquency',
-            amount: branch.delinquencies
-          }]}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#c5c8d0" />
-              <XAxis dataKey="name" tick={{
-              fontSize: 12
-            }} />
-              <YAxis tick={{
-              fontSize: 11
-            }} tickFormatter={v => `${(v / 1000000).toFixed(1)}M`} />
-              <Tooltip formatter={v => formatCurrency(v)} />
+            <BarChart data={[
+              { name: 'Collections', amount: collections },
+              { name: 'Sales', amount: sales },
+              { name: 'Outstanding', amount: outstanding },
+            ]}>
+              <CartesianGrid strokeDasharray="3 3" stroke="#BADBE9" />
+              <XAxis dataKey="name" tick={{ fontSize: 12 }} />
+              <YAxis tick={{ fontSize: 11 }} tickFormatter={(v) => `${(v / 1000).toFixed(0)}k`} />
+              <Tooltip formatter={(v) => formatCurrency(v)} />
               <Bar dataKey="amount" radius={[4, 4, 0, 0]}>
-                {[0, 1, 2, 3].map(i => <Cell key={i} fill={COLORS[i]} />)}
+                {[0, 1, 2].map((i) => <Cell key={i} fill={COLORS[i]} />)}
               </Bar>
             </BarChart>
           </ResponsiveContainer>
@@ -1186,7 +1103,7 @@ function BranchDetailPage({
       label: 'Back',
       to: '/operating-manager/branch-performance',
       variant: 'ghost'
-    }]} onAction={a => navigate(a.to)} />
+    }]} onAction={(a) => navigate(a.to)} />
     </div>;
 }
 function AlertsPage({
@@ -1302,12 +1219,28 @@ function CustomerRecordsPage({
   const [branchFilter, setBranchFilter] = useState('All');
   const [statusFilter, setStatusFilter] = useState('All');
   const [customers, setCustomers] = useState([]);
+  const [branchOptions, setBranchOptions] = useState([]);
   const [loading, setLoading] = useState(true);
   useEffect(() => {
     async function load() {
       setLoading(true);
-      const result = await fetchCustomers({ limit: 200, page: 1 });
+      const [result, branchesRes] = await Promise.all([
+        fetchCustomers({ limit: 200, page: 1 }),
+        apiClient.get('/branches').catch(() => null),
+      ]);
       if (result.success) setCustomers(result.data || []);
+      if (branchesRes?.data?.success) {
+        setBranchOptions(
+          (branchesRes.data.data || [])
+            .map((b) => b.branch_name)
+            .filter(Boolean)
+            .sort((a, b) => a.localeCompare(b))
+        );
+      } else {
+        const fromCustomers = [...new Set((result.data || []).map((r) => r.branch_name).filter(Boolean))];
+        fromCustomers.sort((a, b) => a.localeCompare(b));
+        setBranchOptions(fromCustomers);
+      }
       setLoading(false);
     }
     load();
@@ -1352,7 +1285,7 @@ function CustomerRecordsPage({
             />
             <select className="filter-select" value={branchFilter} onChange={e => setBranchFilter(e.target.value)}>
               <option value="All">All Branches</option>
-              {BRANCHES.map(b => <option key={b.id} value={b.name}>{b.name}</option>)}
+              {branchOptions.map(name => <option key={name} value={name}>{name}</option>)}
             </select>
             <select className="filter-select" value={statusFilter} onChange={e => setStatusFilter(e.target.value)}>
               {['All', 'Active', 'Inactive'].map(s => <option key={s} value={s}>{s === 'All' ? 'All Statuses' : s}</option>)}
@@ -1372,7 +1305,7 @@ function CustomerRecordsPage({
                     <td><strong>{r.first_name} {r.last_name}</strong></td>
                     <td>{r.branch_name}</td>
                     <td>{r.address}</td>
-                    <td>{r.contact_phone}</td>
+                    <td>{formatPhone(r.contact_phone)}</td>
                     <td><StatusBadge status={r.status} /></td>
                     <td className="table-actions">
                       <button className="icon-action-button" type="button" title="View" onClick={() => navigate(`/operating-manager/customers/${r.customer_id}`)}><NavIcon name="view" /></button>
@@ -1421,7 +1354,7 @@ function CustomerDetailPage({
       value: customer.branch_name || '—'
     }, {
       label: 'Contact Phone',
-      value: customer.contact_phone || '—'
+      value: formatPhone(customer.contact_phone)
     }, {
       label: 'Contact Person',
       value: `${customer.contact_person_fname} ${customer.contact_person_lname}`
@@ -1434,7 +1367,7 @@ function CustomerDetailPage({
             { label: 'Name', value: name },
             { label: 'Middle Name', value: formatMiddleNameDisplay(customer.middle_name) },
             { label: 'Address', value: customer.address || '—' },
-            { label: 'Contact Phone', value: customer.contact_phone || '—' },
+            { label: 'Contact Phone', value: formatPhone(customer.contact_phone) },
             { label: 'Contact Person', value: [customer.contact_person_fname, customer.contact_person_lname].filter(Boolean).join(' ') || '—' },
             { label: 'Contact Person Middle Name', value: formatMiddleNameDisplay(customer.contact_person_mname) },
             { label: 'Contact Person Phone', value: customer.contact_person_phone || '—' },
@@ -1588,16 +1521,22 @@ function AnalyticsFilterBar({
         </div>
       </div>
       <div className="list-section-controls analytics-filter-controls">
-          <select className="filter-select" value={filters.preset} onChange={e => handlePresetChange(e.target.value)}>
-            {ANALYTIC_RANGE_OPTIONS.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}
-          </select>
-          <select className="filter-select" value={filters.branchId} onChange={e => setFilters(current => ({
-          ...current,
-          branchId: e.target.value
-        }))}>
-            <option value="all">All Branches</option>
-            {branchOptions.map(branch => <option key={branch.branchId} value={String(branch.branchId)}>{branch.branchName}</option>)}
-          </select>
+          <label className="table-filter-field">
+            <span>Period</span>
+            <select className="filter-select" value={filters.preset} onChange={e => handlePresetChange(e.target.value)}>
+              {ANALYTIC_RANGE_OPTIONS.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}
+            </select>
+          </label>
+          <label className="table-filter-field">
+            <span>Branch</span>
+            <select className="filter-select" value={filters.branchId} onChange={e => setFilters(current => ({
+            ...current,
+            branchId: e.target.value
+          }))}>
+              <option value="all">All Branches</option>
+              {branchOptions.map(branch => <option key={branch.branchId} value={String(branch.branchId)}>{branch.branchName}</option>)}
+            </select>
+          </label>
           {showDateFields ? <>
               <label className="table-filter-field">
                 <span>Start date</span>
@@ -1838,8 +1777,10 @@ function describeTopProducts(products) {
 }
 
 function LiveOperationsDashboardPage({
-  navigate
+  navigate,
+  showToast
 }) {
+  const { drilldown, closeDrilldown, openApiDrilldown } = useChartDrilldown({ showToast });
   const [filters, setFilters] = useState(() => {
     const range = getPresetDateRange('this_month');
     return {
@@ -1854,7 +1795,7 @@ function LiveOperationsDashboardPage({
     loading,
     error
   } = useOperatingManagerAnalytics(filters);
-  if (loading) return <LoadingState message="Loading operating manager analytics…" />;
+  if (loading) return <LoadingState variant="dashboard" message="Loading operating manager analytics…" />;
   if (error || !data) {
     return <EmptyState title="Analytics unavailable" description={error || 'No analytics data available.'} />;
   }
@@ -1887,7 +1828,7 @@ function LiveOperationsDashboardPage({
             <NavIcon name="layout-dashboard" style={{
             width: 20,
             height: 20,
-            color: '#0c1031'
+            color: '#0B1E30'
           }} />
             <div>
               <h3>Key Performance Indicators</h3>
@@ -1906,16 +1847,6 @@ function LiveOperationsDashboardPage({
           icon: 'credit-card',
           title: 'Total unpaid balances as of the reporting date.'
         }, {
-          label: 'Credit Limit',
-          value: formatCurrency(data.summary.totalCreditLimit),
-          icon: 'credit-card',
-          title: 'Total credit limit on customer accounts. The date range does not change this.'
-        }, {
-          label: 'Credit Used',
-          value: formatCurrency(data.summary.creditUsed),
-          icon: 'credit-card',
-          title: 'Outstanding balance counted against those limits.'
-        }, {
           label: 'Credit Remaining',
           value: formatCurrency(data.summary.creditRemaining),
           icon: 'credit-card',
@@ -1931,11 +1862,6 @@ function LiveOperationsDashboardPage({
           icon: 'route',
           title: 'Route compliance = Completed visits ÷ Scheduled visits × 100.'
           // Kindly check whether this is still applicable, it needs to be updated to reflect the new definition of route compliance.
-        }, {
-          label: 'Inventory Health',
-          value: `${data.summary.inventoryHealth}%`,
-          icon: 'package',
-          title: 'Inventory health = In-stock items ÷ Total monitored items × 100.'
         }]} />
       </section>
 
@@ -1949,7 +1875,7 @@ function LiveOperationsDashboardPage({
             <NavIcon name="bar-chart-2" style={{
             width: 20,
             height: 20,
-            color: '#0c1031'
+            color: '#0B1E30'
           }} />
             <div>
               <h3>Period-over-Period Analysis</h3>
@@ -2038,7 +1964,7 @@ function LiveOperationsDashboardPage({
                     <NavIcon name={card.icon} style={{
                   width: 16,
                   height: 16,
-                  color: '#818697'
+                  color: '#5F7385'
                 }} />
                     {card.label}
                     {card.key === 'performance' && <span className="pop-card-badge">Derived</span>}
@@ -2046,7 +1972,7 @@ function LiveOperationsDashboardPage({
                   <NavIcon name={card.trendIcon} style={{
                 width: 16,
                 height: 16,
-                color: card.cardClass === 'good' ? '#255684' : card.cardClass === 'bad' ? '#ef4444' : '#818697'
+                color: card.cardClass === 'good' ? '#1A4162' : card.cardClass === 'bad' ? '#ef4444' : '#5F7385'
               }} />
                 </div>
                 <div className="pop-card-value">{card.value}</div>
@@ -2083,7 +2009,7 @@ function LiveOperationsDashboardPage({
               <NavIcon name="line-chart" style={{
               width: 18,
               height: 18,
-              color: '#0c1031'
+              color: '#0B1E30'
             }} />
               <div>
                 <h3>Collections Trend</h3>
@@ -2102,32 +2028,56 @@ function LiveOperationsDashboardPage({
             Daily customer payment amounts recorded during the selected period compared with the previous equivalent period, showing changes in collection activity over time.
           </p>
           <ResponsiveContainer width="100%" height={230}>
-            <LineChart data={trendCollections}>
-              <CartesianGrid strokeDasharray="2 4" stroke="#c5c8d0" vertical={false} />
+            <LineChart
+              data={trendCollections}
+              style={{ cursor: 'pointer' }}
+              onClick={(state) => {
+                const point = state?.activePayload?.[0]?.payload;
+                if (!point?.day) return;
+                openApiDrilldown(
+                  {
+                    type: 'om_collections',
+                    date: point.day,
+                    start_date: data.filters.startDate,
+                    end_date: data.filters.endDate,
+                    branch_id: filters.branchId === 'all' ? undefined : filters.branchId,
+                  },
+                  {
+                    title: 'Collection records',
+                    category: point.label || point.day,
+                    dateRange: point.day,
+                    columnSet: 'collection',
+                    legend: [{ label: 'Current', value: formatCurrency(point.amount || 0) }],
+                    filenameBase: `om-collections-${point.day}`,
+                  }
+                );
+              }}
+            >
+              <CartesianGrid strokeDasharray="2 4" stroke="#BADBE9" vertical={false} />
               <XAxis dataKey="label" tick={{
-              fill: '#818697',
+              fill: '#5F7385',
               fontSize: 11
             }} axisLine={{
-              stroke: '#c5c8d0'
+              stroke: '#BADBE9'
             }} tickLine={false} minTickGap={28} />
               <YAxis tick={{
-              fill: '#818697',
+              fill: '#5F7385',
               fontSize: 11
             }} tickFormatter={v => `${(v / 1000).toFixed(0)}k`} axisLine={false} tickLine={false} width={30} />
               <Tooltip contentStyle={{
               background: '#ffffff',
-              border: '1px solid #c5c8d0',
+              border: '1px solid #BADBE9',
               borderRadius: 4,
               fontSize: 12
             }} labelStyle={{
-              color: '#0c1031'
+              color: '#0B1E30'
             }} formatter={v => formatCurrency(v)} />
               <Legend wrapperStyle={{
               fontSize: 12,
-              color: '#818697'
+              color: '#5F7385'
             }} />
-              <Line type="monotone" dataKey="amount" name="Current" stroke="#255684" strokeWidth={2} dot={false} />
-              <Line type="monotone" dataKey="previous" name="Previous" stroke="#818697" strokeWidth={2} strokeDasharray="5 5" dot={false} />
+              <Line type="monotone" dataKey="amount" name="Current" stroke="#1A4162" strokeWidth={2} dot={{ r: 3 }} activeDot={{ r: 5 }} />
+              <Line type="monotone" dataKey="previous" name="Previous" stroke="#5F7385" strokeWidth={2} strokeDasharray="5 5" dot={false} />
             </LineChart>
           </ResponsiveContainer>
           <div className="analysis-box analysis-box-blue">
@@ -2154,7 +2104,7 @@ function LiveOperationsDashboardPage({
               <NavIcon name="line-chart" style={{
               width: 18,
               height: 18,
-              color: '#255684'
+              color: '#1A4162'
             }} />
               <div>
                 <h3>Sales Trend</h3>
@@ -2173,32 +2123,56 @@ function LiveOperationsDashboardPage({
             Daily sales revenue recorded during the selected period compared with the previous equivalent period, showing changes in sales activity over time.
           </p>
           <ResponsiveContainer width="100%" height={230}>
-            <LineChart data={trendSales}>
-              <CartesianGrid strokeDasharray="2 4" stroke="#c5c8d0" vertical={false} />
+            <LineChart
+              data={trendSales}
+              style={{ cursor: 'pointer' }}
+              onClick={(state) => {
+                const point = state?.activePayload?.[0]?.payload;
+                if (!point?.day) return;
+                openApiDrilldown(
+                  {
+                    type: 'om_sales',
+                    date: point.day,
+                    start_date: data.filters.startDate,
+                    end_date: data.filters.endDate,
+                    branch_id: filters.branchId === 'all' ? undefined : filters.branchId,
+                  },
+                  {
+                    title: 'Sales invoices',
+                    category: point.label || point.day,
+                    dateRange: point.day,
+                    columnSet: 'sales',
+                    legend: [{ label: 'Current', value: formatCurrency(point.amount || 0) }],
+                    filenameBase: `om-sales-${point.day}`,
+                  }
+                );
+              }}
+            >
+              <CartesianGrid strokeDasharray="2 4" stroke="#BADBE9" vertical={false} />
               <XAxis dataKey="label" tick={{
-              fill: '#818697',
+              fill: '#5F7385',
               fontSize: 11
             }} axisLine={{
-              stroke: '#c5c8d0'
+              stroke: '#BADBE9'
             }} tickLine={false} minTickGap={28} />
               <YAxis tick={{
-              fill: '#818697',
+              fill: '#5F7385',
               fontSize: 11
             }} tickFormatter={v => `${(v / 1000).toFixed(0)}k`} axisLine={false} tickLine={false} width={30} />
               <Tooltip contentStyle={{
               background: '#ffffff',
-              border: '1px solid #c5c8d0',
+              border: '1px solid #BADBE9',
               borderRadius: 4,
               fontSize: 12
             }} labelStyle={{
-              color: '#0c1031'
+              color: '#0B1E30'
             }} formatter={v => formatCurrency(v)} />
               <Legend wrapperStyle={{
               fontSize: 12,
-              color: '#818697'
+              color: '#5F7385'
             }} />
-              <Line type="monotone" dataKey="amount" name="Current" stroke="#255684" strokeWidth={2} dot={false} />
-              <Line type="monotone" dataKey="previous" name="Previous" stroke="#818697" strokeWidth={2} strokeDasharray="5 5" dot={false} />
+              <Line type="monotone" dataKey="amount" name="Current" stroke="#1A4162" strokeWidth={2} dot={{ r: 3 }} activeDot={{ r: 5 }} />
+              <Line type="monotone" dataKey="previous" name="Previous" stroke="#5F7385" strokeWidth={2} strokeDasharray="5 5" dot={false} />
             </LineChart>
           </ResponsiveContainer>
           <div className="analysis-box analysis-box-green">
@@ -2226,7 +2200,7 @@ function LiveOperationsDashboardPage({
             <NavIcon name="bar-chart-3" style={{
             width: 18,
             height: 18,
-            color: '#0c1031'
+            color: '#0B1E30'
           }} />
             <div>
               <h3>Branch Comparison</h3>
@@ -2251,31 +2225,31 @@ function LiveOperationsDashboardPage({
           Sales: branch.totalSales,
           Balance: branch.totalOutstanding
         }))}>
-            <CartesianGrid strokeDasharray="2 4" stroke="#c5c8d0" vertical={false} />
+            <CartesianGrid strokeDasharray="2 4" stroke="#BADBE9" vertical={false} />
             <XAxis dataKey="name" tick={{
-            fill: '#818697',
+            fill: '#5F7385',
             fontSize: 11
           }} axisLine={{
-            stroke: '#c5c8d0'
+            stroke: '#BADBE9'
           }} tickLine={false} />
             <YAxis tick={{
-            fill: '#818697',
+            fill: '#5F7385',
             fontSize: 11
           }} tickFormatter={v => `${(v / 1000).toFixed(0)}k`} axisLine={false} tickLine={false} width={28} />
             <Tooltip contentStyle={{
             background: '#ffffff',
-            border: '1px solid #c5c8d0',
+            border: '1px solid #BADBE9',
             borderRadius: 4,
             fontSize: 12
           }} labelStyle={{
-            color: '#0c1031'
+            color: '#0B1E30'
           }} formatter={v => formatCurrency(v)} />
             <Legend wrapperStyle={{
             fontSize: 12,
-            color: '#818697'
+            color: '#5F7385'
           }} />
-            <Bar dataKey="Collections" fill="#255684" radius={[0, 0, 0, 0]} />
-            <Bar dataKey="Sales" fill="#0c1031" radius={[0, 0, 0, 0]} />
+            <Bar dataKey="Collections" fill="#1A4162" radius={[0, 0, 0, 0]} />
+            <Bar dataKey="Sales" fill="#0B1E30" radius={[0, 0, 0, 0]} />
             <Bar dataKey="Balance" fill="#ef4444" radius={[2, 2, 0, 0]} />
           </BarChart>
           </ResponsiveContainer>
@@ -2299,7 +2273,7 @@ function LiveOperationsDashboardPage({
               <NavIcon name="building-2" style={{
               width: 18,
               height: 18,
-              color: '#0c1031'
+              color: '#0B1E30'
             }} />
               <div>
                 <h3>Branch Summary</h3>
@@ -2410,7 +2384,7 @@ function LiveOperationsDashboardPage({
               <NavIcon name="users" style={{
               width: 18,
               height: 18,
-              color: '#0c1031'
+              color: '#0B1E30'
             }} />
               <div>
                 <h3>Top Customers</h3>
@@ -2459,7 +2433,7 @@ function LiveOperationsDashboardPage({
               <NavIcon name="package" style={{
               width: 18,
               height: 18,
-              color: '#255684'
+              color: '#1A4162'
             }} />
               <div>
                 <h3>Top Products</h3>
@@ -2511,11 +2485,14 @@ function LiveOperationsDashboardPage({
       to: '/operating-manager/reports',
       variant: 'secondary'
     }]} onAction={action => navigate(action.to)} />
+      <ChartDrilldownModal {...drilldown} onClose={closeDrilldown} showToast={showToast} />
     </div>;
 }
 function LiveBranchComparisonPage({
-  navigate
+  navigate,
+  showToast
 }) {
+  const { drilldown, closeDrilldown, openApiDrilldown } = useChartDrilldown({ showToast });
   const [filters, setFilters] = useState({
     preset: 'this_month',
     startDate: '',
@@ -2529,16 +2506,46 @@ function LiveBranchComparisonPage({
   } = useOperatingManagerAnalytics(filters);
   if (loading) return <LoadingState message="Loading branch comparison…" />;
   if (error || !data) return <EmptyState title="Branch comparison unavailable" description={error || 'No comparison data available.'} />;
+
+  function openBranchMetric(branchName, metric) {
+    const branch = (data.branchSummary || []).find((b) => b.branchName === branchName);
+    if (!branch) return;
+    openApiDrilldown(
+      {
+        type: 'om_branch',
+        detail_branch_id: branch.branchId,
+        metric,
+        name: branch.branchName,
+        start_date: data.filters?.startDate || filters.startDate,
+        end_date: data.filters?.endDate || filters.endDate,
+      },
+      {
+        title: `${metric} · ${branch.branchName}`,
+        category: branch.branchName,
+        dateRange: data.filters?.label || `${data.filters?.startDate || ''} – ${data.filters?.endDate || ''}`,
+        columnSet: metric === 'Sales' ? 'sales' : metric === 'Outstanding' ? 'customers' : 'collection',
+        filenameBase: `branch-${branch.branchId}-${metric}`,
+      }
+    );
+  }
+
   return <div className="page">
       <AnalyticsFilterBar filters={filters} setFilters={setFilters} branchOptions={data.branchSummary || []} />
       <div className="grid two-up">
-        <ChartCard title="Collections by Branch" subtitle="Current filtered period">
+        <ChartCard title="Collections by Branch" subtitle="Click a bar for payment records">
           <ResponsiveContainer width="100%" height={240}>
-            <BarChart data={(data.branchSummary || []).map(branch => ({
+            <BarChart
+              data={(data.branchSummary || []).map(branch => ({
             name: branch.branchName,
             value: branch.totalCollections
-          }))}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#c5c8d0" />
+          }))}
+              style={{ cursor: 'pointer' }}
+              onClick={(state) => {
+                const name = state?.activeLabel;
+                if (name) openBranchMetric(name, 'Collections');
+              }}
+            >
+              <CartesianGrid strokeDasharray="3 3" stroke="#BADBE9" />
               <XAxis dataKey="name" tick={{
               fontSize: 12
             }} />
@@ -2546,17 +2553,24 @@ function LiveBranchComparisonPage({
               fontSize: 11
             }} tickFormatter={v => `${(v / 1000).toFixed(0)}k`} />
               <Tooltip formatter={v => formatCurrency(v)} />
-              <Bar dataKey="value" fill="#255684" radius={[4, 4, 0, 0]} />
+              <Bar dataKey="value" fill="#1A4162" radius={[4, 4, 0, 0]} />
             </BarChart>
           </ResponsiveContainer>
         </ChartCard>
-        <ChartCard title="Sales by Branch" subtitle="Current filtered period">
-          <ResponsiveContainer width="100%" height="240">
-            <BarChart data={(data.branchSummary || []).map(branch => ({
+        <ChartCard title="Sales by Branch" subtitle="Click a bar for invoices">
+          <ResponsiveContainer width="100%" height={240}>
+            <BarChart
+              data={(data.branchSummary || []).map(branch => ({
             name: branch.branchName,
             value: branch.totalSales
-          }))}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#c5c8d0" />
+          }))}
+              style={{ cursor: 'pointer' }}
+              onClick={(state) => {
+                const name = state?.activeLabel;
+                if (name) openBranchMetric(name, 'Sales');
+              }}
+            >
+              <CartesianGrid strokeDasharray="3 3" stroke="#BADBE9" />
               <XAxis dataKey="name" tick={{
               fontSize: 12
             }} />
@@ -2564,7 +2578,7 @@ function LiveBranchComparisonPage({
               fontSize: 11
             }} tickFormatter={v => `${(v / 1000).toFixed(0)}k`} />
               <Tooltip formatter={v => formatCurrency(v)} />
-              <Bar dataKey="value" fill="#255684" radius={[4, 4, 0, 0]} />
+              <Bar dataKey="value" fill="#1A4162" radius={[4, 4, 0, 0]} />
             </BarChart>
           </ResponsiveContainer>
         </ChartCard>
@@ -2575,8 +2589,13 @@ function LiveBranchComparisonPage({
           <table className="corvex-table">
             <thead><tr><th>Branch</th><th>Collections</th><th>Sales</th><th>Balance</th><th>Compliance</th><th>Inventory</th></tr></thead>
             <tbody>
-              {(data.branchSummary || []).map(branch => <tr key={branch.branchId}>
-                  <td>{branch.branchName}</td>
+              {(data.branchSummary || []).map(branch => <tr
+                key={branch.branchId}
+                className="clickable-row"
+                onClick={() => navigate(`/operating-manager/branch-performance/branch/${branch.branchId}`)}
+                style={{ cursor: 'pointer' }}
+              >
+                  <td><strong>{branch.branchName}</strong></td>
                   <td>{formatCurrency(branch.totalCollections)}</td>
                   <td>{formatCurrency(branch.totalSales)}</td>
                   <td>{formatCurrency(branch.totalOutstanding)}</td>
@@ -2592,6 +2611,7 @@ function LiveBranchComparisonPage({
       to: '/operating-manager/dashboard',
       variant: 'ghost'
     }]} onAction={action => navigate(action.to)} />
+      <ChartDrilldownModal {...drilldown} onClose={closeDrilldown} showToast={showToast} />
     </div>;
 }
 function LiveReportsPage({
@@ -2853,7 +2873,7 @@ function LiveHistoricalTrendsPage() {
             ...point,
             previous: data.trends.collectionsPrevious[index]?.amount ?? 0
           }))}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#c5c8d0" />
+              <CartesianGrid strokeDasharray="3 3" stroke="#BADBE9" />
               <XAxis dataKey="label" tick={{
               fontSize: 12
             }} />
@@ -2862,18 +2882,18 @@ function LiveHistoricalTrendsPage() {
             }} tickFormatter={v => `${(v / 1000).toFixed(0)}k`} />
               <Tooltip formatter={v => formatCurrency(v)} />
               <Legend />
-              <Line type="monotone" dataKey="amount" name="Current" stroke="#255684" strokeWidth={2} dot={false} />
-              <Line type="monotone" dataKey="previous" name="Previous" stroke="#818697" strokeWidth={2} strokeDasharray="5 5" dot={false} />
+              <Line type="monotone" dataKey="amount" name="Current" stroke="#1A4162" strokeWidth={2} dot={false} />
+              <Line type="monotone" dataKey="previous" name="Previous" stroke="#5F7385" strokeWidth={2} strokeDasharray="5 5" dot={false} />
             </LineChart>
           </ResponsiveContainer>
         </ChartCard>
         <ChartCard title="Sales Trend" subtitle="Current vs previous period">
-          <ResponsiveContainer width="100%" height="240">
+          <ResponsiveContainer width="100%" height={240}>
             <LineChart data={data.trends.sales.map((point, index) => ({
             ...point,
             previous: data.trends.salesPrevious[index]?.amount ?? 0
           }))}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#c5c8d0" />
+              <CartesianGrid strokeDasharray="3 3" stroke="#BADBE9" />
               <XAxis dataKey="label" tick={{
               fontSize: 12
             }} />
@@ -2882,8 +2902,8 @@ function LiveHistoricalTrendsPage() {
             }} tickFormatter={v => `${(v / 1000).toFixed(0)}k`} />
               <Tooltip formatter={v => formatCurrency(v)} />
               <Legend />
-              <Line type="monotone" dataKey="amount" name="Current" stroke="#255684" strokeWidth={2} dot={false} />
-              <Line type="monotone" dataKey="previous" name="Previous" stroke="#818697" strokeWidth={2} strokeDasharray="5 5" dot={false} />
+              <Line type="monotone" dataKey="amount" name="Current" stroke="#1A4162" strokeWidth={2} dot={false} />
+              <Line type="monotone" dataKey="previous" name="Previous" stroke="#5F7385" strokeWidth={2} strokeDasharray="5 5" dot={false} />
             </LineChart>
           </ResponsiveContainer>
         </ChartCard>
@@ -2923,6 +2943,9 @@ function DigitalReceiptsPage({
   const [branchId, setBranchId] = useState('');
   const [paymentStatus, setPaymentStatus] = useState('');
   const [reloadKey, setReloadKey] = useState(0);
+  const [reviewModal, setReviewModal] = useState(null);
+  const [reviewReason, setReviewReason] = useState('');
+  const [reviewSubmitting, setReviewSubmitting] = useState(false);
   useEffect(() => {
     apiClient.get('/branches').then((res) => {
       if (res.data?.success) setBranches(res.data.data || []);
@@ -2951,34 +2974,53 @@ function DigitalReceiptsPage({
     const t = setTimeout(load, 300);
     return () => clearTimeout(t);
   }, [search, branchId, paymentStatus, reloadKey]);
+  const closeReviewModal = () => {
+    if (reviewSubmitting) return;
+    setReviewModal(null);
+    setReviewReason('');
+  };
+  const openReviewModal = (collectionId, action, receipt) => {
+    setReviewModal({
+      collectionId,
+      action,
+      receiptNumber: receipt?.receipt_number || '',
+      customerName: receipt?.customer_name || '',
+      amount: receipt?.collection_amount,
+    });
+    setReviewReason('');
+  };
   const reviewReceipt = async (collectionId, action, reviewNote) => {
     const result = await patchCollectionReview(collectionId, { action, review_note: reviewNote });
     if (result.success) {
       showToast(result.message || 'Collection updated.', 'success');
       setReloadKey((current) => current + 1);
-    } else showToast(result.message || 'Update failed.', 'error');
+      return true;
+    }
+    showToast(result.message || 'Update failed.', 'error');
+    return false;
   };
   const confirmReceipt = (collectionId) => reviewReceipt(collectionId, 'confirm');
-  const rejectReceipt = async (collectionId) => {
-    const reason = window.prompt('Rejection reason (required):');
-    if (!reason?.trim()) {
+  const submitReviewModal = async (event) => {
+    event.preventDefault();
+    if (!reviewModal) return;
+    const reason = reviewReason.trim();
+    if (!reason) {
       showToast('Reason required.', 'error');
       return;
     }
-    await reviewReceipt(collectionId, 'reject', reason.trim());
-  };
-  const reverseReceipt = async (collectionId) => {
-    const reason = window.prompt('Reversal reason (required):');
-    if (!reason?.trim()) {
-      showToast('Reason required.', 'error');
-      return;
+    setReviewSubmitting(true);
+    const ok = await reviewReceipt(reviewModal.collectionId, reviewModal.action, reason);
+    setReviewSubmitting(false);
+    if (ok) {
+      setReviewModal(null);
+      setReviewReason('');
     }
-    await reviewReceipt(collectionId, 'reverse', reason.trim());
   };
   const pagination_receipts = usePagination(receipts, {
     resetKey: `${search}|${branchId}|${paymentStatus}`
   });
   const paginated_receipts = pagination_receipts.paginatedData;
+  const reviewIsReverse = reviewModal?.action === 'reverse';
   if (loading) return <LoadingState message="Loading digital receipts…" />;
   return <div className="page">
       <section className="panel content-panel">
@@ -2987,7 +3029,7 @@ function DigitalReceiptsPage({
             fontWeight: 400,
             fontSize: '0.88rem'
           }}>({receipts.length})</span></h3>
-          <p className="list-section-subtitle">Filter by branch or payment status. Confirm, reject, or reverse the collection on the receipt.</p>
+          
         </div>
         <div className="list-section-toolbar">
           <div className="list-section-controls">
@@ -3021,9 +3063,9 @@ function DigitalReceiptsPage({
                     <td className="table-actions">
                       {r.payment_status === 'Pending' && r.collection_id ? <>
                         <button className="icon-action-button" type="button" title="Confirm" onClick={() => confirmReceipt(r.collection_id)}><NavIcon name="check" /></button>
-                        <button className="icon-action-button danger" type="button" title="Reject" onClick={() => rejectReceipt(r.collection_id)}><NavIcon name="close" /></button>
+                        <button className="icon-action-button danger" type="button" title="Reject" onClick={() => openReviewModal(r.collection_id, 'reject', r)}><NavIcon name="close" /></button>
                       </> : null}
-                      {r.payment_status === 'Completed' && r.collection_id ? <button className="button ghost" type="button" onClick={() => reverseReceipt(r.collection_id)}>Reverse</button> : null}
+                      {r.payment_status === 'Completed' && r.collection_id ? <button className="button ghost" type="button" onClick={() => openReviewModal(r.collection_id, 'reverse', r)}>Reverse</button> : null}
                       {r.payment_status !== 'Pending' && r.payment_status !== 'Completed' ? <span className="muted">—</span> : null}
                     </td>
                   </tr>)}
@@ -3031,6 +3073,77 @@ function DigitalReceiptsPage({
             </table>
           </div><Pagination {...pagination_receipts} /></>}
       </section>
+
+      {reviewModal ? (
+        <div
+          className="modal-overlay"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="receipt-review-title"
+          onClick={(e) => {
+            if (e.target === e.currentTarget) closeReviewModal();
+          }}
+        >
+          <div className="modal-content" style={{ maxWidth: 480 }} onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <h3 id="receipt-review-title">{reviewIsReverse ? 'Reverse collection' : 'Reject collection'}</h3>
+              <button
+                className="icon-action-button"
+                type="button"
+                title="Close"
+                disabled={reviewSubmitting}
+                onClick={closeReviewModal}
+              >
+                <NavIcon name="close" />
+              </button>
+            </div>
+            <p className="muted" style={{ margin: '0 0 14px', fontSize: '0.88rem' }}>
+              {reviewIsReverse
+                ? 'This restores the amount to the customer outstanding balance and cancels the completed collection.'
+                : 'This rejects the pending collection. Provide a clear reason for the record.'}
+            </p>
+            {(reviewModal.receiptNumber || reviewModal.customerName) ? (
+              <div className="panel" style={{ padding: '10px 12px', marginBottom: 14, boxShadow: 'none' }}>
+                {reviewModal.receiptNumber ? (
+                  <div style={{ fontFamily: 'monospace', fontWeight: 650 }}>{reviewModal.receiptNumber}</div>
+                ) : null}
+                <div className="muted" style={{ fontSize: '0.85rem', marginTop: 4 }}>
+                  {[reviewModal.customerName, reviewModal.amount != null ? formatCurrency(Number(reviewModal.amount)) : null]
+                    .filter(Boolean)
+                    .join(' · ')}
+                </div>
+              </div>
+            ) : null}
+            <form onSubmit={submitReviewModal}>
+              <div className="form-group">
+                <label htmlFor="receipt-review-reason">
+                  {reviewIsReverse ? 'Reversal reason' : 'Rejection reason'} *
+                </label>
+                <textarea
+                  id="receipt-review-reason"
+                  value={reviewReason}
+                  onChange={(e) => setReviewReason(e.target.value)}
+                  rows={3}
+                  autoFocus
+                  required
+                  placeholder={reviewIsReverse ? 'Why is this collection being reversed?' : 'Why is this collection being rejected?'}
+                  disabled={reviewSubmitting}
+                />
+              </div>
+              <div className="modal-actions">
+                <button className="button secondary" type="button" disabled={reviewSubmitting} onClick={closeReviewModal}>
+                  Cancel
+                </button>
+                <button className="button" type="submit" disabled={reviewSubmitting || !reviewReason.trim()}>
+                  {reviewSubmitting
+                    ? (reviewIsReverse ? 'Reversing…' : 'Rejecting…')
+                    : (reviewIsReverse ? 'Confirm reverse' : 'Confirm reject')}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      ) : null}
     </div>;
 }
 
@@ -3076,7 +3189,7 @@ function PerformanceSummaryPage({
             }}>Sales Trend</h4>
                 <ResponsiveContainer width="100%" height={230}>
                   <AreaChart data={data}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="#c5c8d0" />
+                    <CartesianGrid strokeDasharray="3 3" stroke="#BADBE9" />
                     <XAxis dataKey="period" tick={{
                   fontSize: 11
                 }} />
@@ -3084,7 +3197,7 @@ function PerformanceSummaryPage({
                   fontSize: 11
                 }} tickFormatter={v => `${(v / 1000000).toFixed(1)}M`} />
                     <Tooltip formatter={v => formatCurrency(v)} />
-                    <Area type="monotone" dataKey="total_sales" name="Sales" stroke="#255684" fill="#255684" fillOpacity={0.08} strokeWidth={2} />
+                    <Area type="monotone" dataKey="total_sales" name="Sales" stroke="#1A4162" fill="#1A4162" fillOpacity={0.08} strokeWidth={2} />
                   </AreaChart>
                 </ResponsiveContainer>
               </div>
@@ -3094,7 +3207,7 @@ function PerformanceSummaryPage({
             }}>Collections Trend</h4>
                 <ResponsiveContainer width="100%" height={230}>
                   <AreaChart data={data}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="#c5c8d0" />
+                    <CartesianGrid strokeDasharray="3 3" stroke="#BADBE9" />
                     <XAxis dataKey="period" tick={{
                   fontSize: 11
                 }} />
@@ -3102,7 +3215,7 @@ function PerformanceSummaryPage({
                   fontSize: 11
                 }} tickFormatter={v => `${(v / 1000000).toFixed(1)}M`} />
                     <Tooltip formatter={v => formatCurrency(v)} />
-                    <Area type="monotone" dataKey="total_collections" name="Collections" stroke="#255684" fill="#255684" fillOpacity={0.08} strokeWidth={2} />
+                    <Area type="monotone" dataKey="total_collections" name="Collections" stroke="#1A4162" fill="#1A4162" fillOpacity={0.08} strokeWidth={2} />
                   </AreaChart>
                 </ResponsiveContainer>
               </div>
@@ -3130,7 +3243,7 @@ function HiddenPageRedirect({ navigate, to }) {
   useEffect(() => {
     navigate(to, { replace: true });
   }, [navigate, to]);
-  return <LoadingState message="Redirecting…" />;
+  return <LoadingState compact message="Redirecting…" />;
 }
 
 export function OperatingManagerPageBody({

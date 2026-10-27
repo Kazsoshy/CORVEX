@@ -4,7 +4,6 @@ import { usePagination } from '../../hooks/usePagination';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { login as apiLogin, getEntryPathForRole, requestLogout } from '../../api/authService.js';
-import { updateMyProfile } from '../../api/profileService.js';
 import {
   fetchCustomerPortalMe,
   fetchCustomerPortalPayments,
@@ -12,20 +11,36 @@ import {
   fetchCustomerPortalReceiptById,
   fetchCustomerPortalReceipts,
   fetchCustomerStatementSummary,
-  updateCustomerPortalContact,
 } from '../../api/customerPortalService.js';
 import { downloadPdf } from '../../utils/dataExport.js';
 import { NotificationsInbox } from '../shared/NotificationsInbox';
 import { fetchNotifications } from '../../api/notificationService.js';
-import { formatDisplayDate, formatCurrency } from '../../utils/formatters.js';
+import { formatDisplayDate, formatCurrency, formatPhone } from '../../utils/formatters.js';
 import { EmptyState } from '../shared/EmptyState';
 import { LoadingState } from '../shared/LoadingState';
 import { DetailRowsTable } from '../shared/DetailRowsTable';
+import { QuantityStepper } from '../shared/QuantityStepper.jsx';
 import { StatusBadge } from '../StatusBadge';
 import { NavIcon } from '../../navIcons';
 import { UserSettingsPanel } from '../shared/UserSettingsPanel';
 import { CustomerProfilePanel } from '../shared/CustomerProfilePanel';
 import { CustomerPurchaseDesk } from './CustomerPurchaseDesk';
+
+function portalStatusLabel(status) {
+  switch (String(status || '').toLowerCase()) {
+    case 'invited':
+    case 'pending':
+      return 'Pending portal activation';
+    case 'active':
+      return 'Portal active';
+    case 'none':
+    case '':
+      return 'No portal account';
+    default:
+      return String(status);
+  }
+}
+
 function LoginPage({
   navigate,
   showToast
@@ -106,15 +121,52 @@ function monthStartKey(monthStart) {
   return String(monthStart).slice(0, 10);
 }
 
-const CAROUSEL_MAX_SLIDES = 5;
+const CAROUSEL_MAX_SLIDES = 10;
 const CAROUSEL_SWIPE_THRESHOLD = 48;
+
+const PRODUCT_IMAGE_MODULES = import.meta.glob(
+  '../../assets/products-image/*.{jpg,jpeg,png,webp,avif}',
+  { eager: true, import: 'default' }
+);
+
+const PRODUCT_IMAGES_BY_SLUG = Object.entries(PRODUCT_IMAGE_MODULES).reduce(
+  (acc, [path, url]) => {
+    const file = path.split('/').pop() || '';
+    const slug = file.replace(/\.[^.]+$/, '').toLowerCase();
+    if (slug && url) acc[slug] = url;
+    return acc;
+  },
+  {}
+);
+
+const PRODUCT_IMAGE_LIST = Object.values(PRODUCT_IMAGES_BY_SLUG);
+
+function resolveCarouselProductImage(product, index = 0) {
+  if (product?.image_url) return product.image_url;
+  const slug = String(product?.product_name || product?.name || '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-|-$/g, '');
+  if (slug && PRODUCT_IMAGES_BY_SLUG[slug]) return PRODUCT_IMAGES_BY_SLUG[slug];
+  if (slug) {
+    const matchKey = Object.keys(PRODUCT_IMAGES_BY_SLUG).find(
+      (k) => slug.includes(k) || k.includes(slug)
+    );
+    if (matchKey) return PRODUCT_IMAGES_BY_SLUG[matchKey];
+  }
+  if (PRODUCT_IMAGE_LIST.length) {
+    return PRODUCT_IMAGE_LIST[index % PRODUCT_IMAGE_LIST.length];
+  }
+  return '';
+}
 
 function CustomerProductCarousel() {
   const [products, setProducts] = useState([]);
   const [loading, setLoading] = useState(true);
   const [activeIndex, setActiveIndex] = useState(0);
-  const touchStartX = useRef(null);
-  const touchDeltaX = useRef(0);
+  const dragStartX = useRef(null);
+  const dragDeltaX = useRef(0);
+  const isPointerDown = useRef(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -144,24 +196,24 @@ function CustomerProductCarousel() {
   const goPrev = () => goTo(activeIndex - 1);
   const goNext = () => goTo(activeIndex + 1);
 
-  const onTouchStart = (event) => {
-    const touch = event.touches?.[0];
-    if (!touch) return;
-    touchStartX.current = touch.clientX;
-    touchDeltaX.current = 0;
+  const beginDrag = (clientX) => {
+    if (clientX == null || Number.isNaN(Number(clientX))) return;
+    dragStartX.current = clientX;
+    dragDeltaX.current = 0;
+    isPointerDown.current = true;
   };
 
-  const onTouchMove = (event) => {
-    if (touchStartX.current == null) return;
-    const touch = event.touches?.[0];
-    if (!touch) return;
-    touchDeltaX.current = touch.clientX - touchStartX.current;
+  const moveDrag = (clientX) => {
+    if (!isPointerDown.current || dragStartX.current == null || clientX == null) return;
+    dragDeltaX.current = clientX - dragStartX.current;
   };
 
-  const onTouchEnd = () => {
-    const delta = touchDeltaX.current;
-    touchStartX.current = null;
-    touchDeltaX.current = 0;
+  const endDrag = () => {
+    if (!isPointerDown.current) return;
+    const delta = dragDeltaX.current;
+    dragStartX.current = null;
+    dragDeltaX.current = 0;
+    isPointerDown.current = false;
     if (Math.abs(delta) < CAROUSEL_SWIPE_THRESHOLD) return;
     if (delta < 0) goNext();
     else goPrev();
@@ -173,72 +225,116 @@ function CustomerProductCarousel() {
     <section className="customer-product-carousel" aria-roledescription="carousel" aria-label="Featured products">
       <div
         className="customer-product-carousel__stage"
-        onTouchStart={onTouchStart}
-        onTouchMove={onTouchMove}
-        onTouchEnd={onTouchEnd}
-        onTouchCancel={onTouchEnd}
+        onTouchStart={(e) => beginDrag(e.touches?.[0]?.clientX)}
+        onTouchMove={(e) => moveDrag(e.touches?.[0]?.clientX)}
+        onTouchEnd={endDrag}
+        onTouchCancel={endDrag}
+        onPointerDown={(e) => {
+          if (e.pointerType === 'touch') return;
+          if (e.target.closest('button')) return;
+          e.currentTarget.setPointerCapture?.(e.pointerId);
+          beginDrag(e.clientX);
+        }}
+        onPointerMove={(e) => {
+          if (e.pointerType === 'touch') return;
+          moveDrag(e.clientX);
+        }}
+        onPointerUp={(e) => {
+          if (e.pointerType === 'touch') return;
+          endDrag();
+        }}
+        onPointerCancel={(e) => {
+          if (e.pointerType === 'touch') return;
+          endDrag();
+        }}
       >
-        <div
-          className="customer-product-carousel__track"
-          style={{ transform: `translateX(-${activeIndex * 100}%)` }}
-        >
-          {products.map((product, index) => {
-            const name = product.product_name || 'Product';
-            const category = product.category_name || 'Uncategorized';
-            const price = formatCurrency(Number(product.unit_price || 0));
-            return (
-              <article
-                key={product.product_id}
-                className="customer-product-carousel__slide"
-                aria-hidden={index !== activeIndex}
-                aria-label={`${index + 1} of ${slideCount}`}
-              >
-                <p className="customer-product-carousel__eyebrow">{category}</p>
-                <h3 className="customer-product-carousel__title">{name}</h3>
-                <p className="customer-product-carousel__price">{price}</p>
-              </article>
-            );
-          })}
+        <div className="customer-product-carousel__viewport">
+          <div
+            className="customer-product-carousel__track"
+            style={{ transform: `translate3d(-${activeIndex * 100}%, 0, 0)` }}
+          >
+            {products.map((product, index) => {
+              const name = product.product_name || 'Product';
+              const isActive = index === activeIndex;
+              const imgSrc = resolveCarouselProductImage(product, index);
+              return (
+                <article
+                  key={product.product_id}
+                  className={`customer-product-carousel__slide${isActive ? ' is-active' : ''}`}
+                  aria-hidden={!isActive}
+                  aria-label={`${index + 1} of ${slideCount}: ${name}`}
+                >
+                  <div className="customer-product-carousel__card">
+                    {imgSrc ? (
+                      <img
+                        className="customer-product-carousel__image"
+                        src={imgSrc}
+                        alt={name}
+                        draggable={false}
+                      />
+                    ) : (
+                      <div className="customer-product-carousel__fallback" aria-hidden="true">
+                        <span>{String(name).slice(0, 1).toUpperCase()}</span>
+                      </div>
+                    )}
+                    <div className="customer-product-carousel__caption">
+                      <p className="customer-product-carousel__name">{name}</p>
+                      <p className="customer-product-carousel__price">
+                        {formatCurrency(Number(product.unit_price || 0))}
+                      </p>
+                    </div>
+                  </div>
+                </article>
+              );
+            })}
+          </div>
+          {slideCount > 1 ? (
+            <div className="customer-product-carousel__dots" role="tablist" aria-label="Product slides">
+              {products.map((product, index) => (
+                <button
+                  key={product.product_id}
+                  type="button"
+                  role="tab"
+                  className={`customer-product-carousel__dot${index === activeIndex ? ' is-active' : ''}`}
+                  aria-label={`${index + 1} of ${slideCount}: ${product.product_name || 'Product'}`}
+                  aria-selected={index === activeIndex}
+                  onClick={() => goTo(index)}
+                />
+              ))}
+            </div>
+          ) : null}
         </div>
 
-        <button
-          type="button"
-          className="customer-product-carousel__arrow customer-product-carousel__arrow--prev"
-          aria-label="Previous product"
-          onClick={goPrev}
-        >
-          <span className="customer-product-carousel__chevron" aria-hidden="true" />
-        </button>
-        <button
-          type="button"
-          className="customer-product-carousel__arrow customer-product-carousel__arrow--next"
-          aria-label="Next product"
-          onClick={goNext}
-        >
-          <span className="customer-product-carousel__chevron" aria-hidden="true" />
-        </button>
-
-        <div className="customer-product-carousel__dots" role="tablist" aria-label="Carousel slides">
-          {products.map((product, index) => (
+        {slideCount > 1 ? (
+          <>
             <button
-              key={product.product_id}
               type="button"
-              role="tab"
-              aria-label={`Show product ${index + 1}`}
-              aria-selected={index === activeIndex}
-              className={`customer-product-carousel__dot${index === activeIndex ? ' is-active' : ''}`}
-              onClick={() => goTo(index)}
-            />
-          ))}
-        </div>
+              className="customer-product-carousel__arrow customer-product-carousel__arrow--prev"
+              aria-label="Previous product"
+              onClick={goPrev}
+            >
+              <svg className="customer-product-carousel__arrow-icon" viewBox="0 0 36 44" aria-hidden="true">
+                <path d="M36 0 L0 22 L36 44 L26 22 Z" fill="currentColor" />
+              </svg>
+            </button>
+            <button
+              type="button"
+              className="customer-product-carousel__arrow customer-product-carousel__arrow--next"
+              aria-label="Next product"
+              onClick={goNext}
+            >
+              <svg className="customer-product-carousel__arrow-icon" viewBox="0 0 36 44" aria-hidden="true">
+                <path d="M0 0 L36 22 L0 44 L10 22 Z" fill="currentColor" />
+              </svg>
+            </button>
+          </>
+        ) : null}
       </div>
     </section>
   );
 }
 
-function HomePage({
-  navigate
-}) {
+function HomePage() {
   const [account, setAccount] = useState(null);
   const [recentPayments, setRecentPayments] = useState([]);
   const [unread, setUnread] = useState(0);
@@ -297,14 +393,6 @@ function HomePage({
 
       <CustomerProductCarousel />
 
-      <div className="flex flex-wrap gap-2 justify-end mt-4 mb-4">
-        <button className="button secondary" type="button" onClick={() => navigate('/customer/statements')}>Statements</button>
-        <button className="button secondary" type="button" onClick={() => navigate('/customer/account-details')}>Account Details</button>
-        <button className="button secondary" type="button" onClick={() => navigate('/customer/receipts')}>Receipts</button>
-        <button className="button" type="button" onClick={() => navigate('/customer/payment-history')}>Payment History</button>
-        <button className="button" type="button" onClick={() => navigate('/customer/purchase-requests')}>Request Purchase</button>
-      </div>
-
       <div className="dashboard-widgets grid two-up">
         <section className="panel content-panel relative overflow-hidden">
           <div className="flex flex-col md:flex-row justify-between gap-4 items-start md:items-center mb-4"><h3>Recent Payments</h3></div>
@@ -357,28 +445,13 @@ function HomePage({
       </section>
     </div>;
 }
-function AccountDetailsPage({
-  navigate,
-  showToast
-}) {
+function AccountDetailsPage() {
   const [account, setAccount] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [contact, setContact] = useState({ contactNumber: '', email: '' });
-  const [currentPassword, setCurrentPassword] = useState('');
-  const [password, setPassword] = useState('');
-  const [confirmPassword, setConfirmPassword] = useState('');
-  const [showPassword, setShowPassword] = useState(false);
-  const [saving, setSaving] = useState(false);
   useEffect(() => {
     async function load() {
       const res = await fetchCustomerPortalMe();
-      if (res.success && res.data) {
-        setAccount(res.data);
-        setContact({
-          contactNumber: res.data.contact_phone || '',
-          email: res.data.portal_email || '',
-        });
-      }
+      if (res.success && res.data) setAccount(res.data);
       setLoading(false);
     }
     load();
@@ -390,99 +463,35 @@ function AccountDetailsPage({
         <div className="list-section-header"><h3>Account Information</h3></div>
         <DetailRowsTable rows={[
           { label: 'Customer Name', value: <strong>{`${account.first_name || ''} ${account.last_name || ''}`.trim() || '—'}</strong> },
-          { label: 'Account Number', value: <span style={{ fontFamily: 'monospace', fontSize: '0.82rem' }}>{account.customer_code || account.customer_id || '—'}</span> },
+          { label: 'Account Number', value: <span className="mono-cell">{account.customer_code || account.customer_id || '—'}</span> },
           { label: 'Address', value: account.address || '—' },
           { label: 'Branch', value: account.branch_name || '—' },
           { label: 'Account Status', value: <StatusBadge status={account.status || '—'} /> },
-          { label: 'Portal Status', value: <StatusBadge status={account.portal_status || '—'} /> },
+          { label: 'Portal Status', value: <StatusBadge status={portalStatusLabel(account.portal_status)} /> },
         ]} />
       </section>
 
-      <section className="panel form-panel content-panel">
-        <div className="flex flex-col md:flex-row justify-between gap-4 items-start md:items-center mb-4"><h3>Contact Information</h3></div>
-        <label>Contact Number<input value={contact.contactNumber} onChange={e => setContact(c => ({
-          ...c,
-          contactNumber: e.target.value
-        }))} /></label>
-        <label>Email<input type="email" value={contact.email} onChange={e => setContact(c => ({
-          ...c,
-          email: e.target.value
-        }))} /></label>
+      <section className="panel content-panel relative overflow-hidden">
+        <div className="list-section-header"><h3>Contact Information</h3></div>
+        <DetailRowsTable rows={[
+          { label: 'Contact Number', value: formatPhone(account.contact_phone) },
+          { label: 'Email', value: account.portal_email || '—' },
+        ]} />
       </section>
-
-      {showPassword ? <section className="panel form-panel content-panel">
-        <div className="form-grid">
-          <label>Current password<input type="password" value={currentPassword} onChange={e => setCurrentPassword(e.target.value)} autoComplete="current-password" /></label>
-          <label>New password<input type="password" value={password} onChange={e => setPassword(e.target.value)} placeholder="Min. 8 characters" autoComplete="new-password" /></label>
-          <label>Confirm new password<input type="password" value={confirmPassword} onChange={e => setConfirmPassword(e.target.value)} placeholder="Re-enter new password" autoComplete="new-password" /></label>
-        </div>
-      </section> : null}
-      <div className="flex justify-end gap-2 mt-4">
-        <button className="button ghost" type="button" onClick={() => requestLogout()}>Logout</button>
-        <button className="button secondary" type="button" disabled={saving} onClick={async () => {
-          if (!showPassword) {
-            setShowPassword(true);
-            return;
-          }
-          if (!currentPassword) {
-            showToast('Enter your current password.', 'error');
-            return;
-          }
-          if (password.trim().length < 8) {
-            showToast('Password must be at least 8 characters.', 'error');
-            return;
-          }
-          if (password.trim() !== confirmPassword.trim()) {
-            showToast('New password and confirmation do not match.', 'error');
-            return;
-          }
-          setSaving(true);
-          const result = await updateMyProfile({
-            current_password: currentPassword,
-            password: password.trim(),
-            confirm_password: confirmPassword.trim(),
-          });
-          setSaving(false);
-          if (result.success) {
-            setCurrentPassword('');
-            setPassword('');
-            setConfirmPassword('');
-            setShowPassword(false);
-            showToast(result.message || 'Password updated.', 'success');
-          } else showToast(result.message || 'Failed to change password.', 'error');
-        }}>{showPassword ? 'Save Password' : 'Change Password'}</button>
-        {showPassword ? <button className="button ghost" type="button" disabled={saving} onClick={() => {
-          setShowPassword(false);
-          setCurrentPassword('');
-          setPassword('');
-          setConfirmPassword('');
-        }}>Cancel</button> : null}
-        <button className="button" type="button" disabled={saving} onClick={async () => {
-          setSaving(true);
-          const result = await updateCustomerPortalContact({
-            contact_phone: contact.contactNumber,
-            portal_email: contact.email,
-          });
-          setSaving(false);
-          if (result.success) {
-            setAccount(result.data);
-            showToast('Contact information updated.', 'success');
-          } else showToast(result.message || 'Failed to update contact information.', 'error');
-        }}>Update Contact Information</button>
-      </div>
     </div>;
 }
 function PaymentHistoryPage({
-  navigate,
   showToast
 }) {
   const [filters, setFilters] = useState({
+    search: '',
     dateFrom: '',
     dateTo: '',
     paymentType: 'All'
   });
   const [payments, setPayments] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [selectedPayment, setSelectedPayment] = useState(null);
   useEffect(() => {
     async function load() {
       setLoading(true);
@@ -500,30 +509,102 @@ function PaymentHistoryPage({
     const set = new Set((payments || []).map((p) => p.payment_method).filter(Boolean));
     return ['All', ...set];
   }, [payments]);
-  const filtered = payments;
+  const filtered = useMemo(() => {
+    const q = filters.search.trim().toLowerCase();
+    if (!q) return payments;
+    return payments.filter((p) => {
+      const hay = [
+        p.receipt_number,
+        p.collector_name,
+        p.payment_method,
+        p.amount,
+        formatDisplayDate(p.payment_date),
+      ].map((v) => String(v || '').toLowerCase()).join(' ');
+      return hay.includes(q);
+    });
+  }, [payments, filters.search]);
   const pagination_filtered = usePagination(filtered);
   const paginated_filtered = pagination_filtered.paginatedData;
+
+  const exportAllPdf = () => {
+    const rows = filtered.map((p) => ({
+      date: p.payment_date,
+      amount: p.amount,
+      method: p.payment_method,
+      collector: p.collector_name || '',
+      receipt: p.receipt_number || '',
+    }));
+    if (downloadPdf(rows, { filename: 'payment-history.pdf', title: 'Payment History' })) {
+      showToast('Payment history exported as PDF.', 'success');
+    } else showToast('Nothing to export.', 'error');
+  };
+
+  const exportSelectedPdf = () => {
+    if (!selectedPayment) return;
+    const rows = [{
+      date: selectedPayment.payment_date,
+      amount: selectedPayment.amount,
+      method: selectedPayment.payment_method,
+      collector: selectedPayment.collector_name || '',
+      receipt: selectedPayment.receipt_number || '',
+      status: selectedPayment.status || '',
+    }];
+    const ref = selectedPayment.receipt_number || selectedPayment.collectionpayment_id;
+    if (downloadPdf(rows, { filename: `payment-${ref}.pdf`, title: 'Payment Details' })) {
+      showToast('Payment exported as PDF.', 'success');
+    } else showToast('Nothing to export.', 'error');
+  };
+
   if (loading) return <LoadingState message="Loading payment history…" />;
   return <div className="page customer-page">
       <section className="panel content-panel relative overflow-hidden">
         <div className="list-section-header"><h3>Payment History</h3></div>
-        <div className="list-section-controls" style={{ marginBottom: 12 }}>
-          <label className="table-filter-field">From Date<input className="filter-input" type="date" value={filters.dateFrom} onChange={e => setFilters(f => ({
-            ...f,
-            dateFrom: e.target.value
-          }))} /></label>
-          <label className="table-filter-field">To Date<input className="filter-input" type="date" value={filters.dateTo} onChange={e => setFilters(f => ({
-            ...f,
-            dateTo: e.target.value
-          }))} /></label>
-          <label className="table-filter-field">Payment Type<select className="filter-select" value={filters.paymentType} onChange={e => setFilters(f => ({
-            ...f,
-            paymentType: e.target.value
-          }))}>
-            {paymentTypes.map((type) => <option key={type} value={type}>{type}</option>)}
-          </select></label>
+        <div className="list-section-toolbar suppliers-toolbar audit-logs-toolbar payment-history-toolbar">
+          <div className="list-section-controls audit-logs-filters payment-history-filters">
+            <input
+              className="filter-input search"
+              type="search"
+              placeholder="Search receipt, collector, amount…"
+              value={filters.search}
+              onChange={(e) => setFilters((f) => ({ ...f, search: e.target.value }))}
+              aria-label="Search payments"
+            />
+            <input
+              className="filter-input"
+              type="date"
+              value={filters.dateFrom}
+              onChange={(e) => setFilters((f) => ({ ...f, dateFrom: e.target.value }))}
+              aria-label="From date"
+              title="From date"
+            />
+            <input
+              className="filter-input"
+              type="date"
+              value={filters.dateTo}
+              onChange={(e) => setFilters((f) => ({ ...f, dateTo: e.target.value }))}
+              aria-label="To date"
+              title="To date"
+            />
+            <select
+              className="filter-select"
+              value={filters.paymentType}
+              onChange={(e) => setFilters((f) => ({ ...f, paymentType: e.target.value }))}
+              aria-label="Payment type"
+            >
+              {paymentTypes.map((type) => (
+                <option key={type} value={type}>
+                  {type === 'All' ? 'All Payment Types' : type}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div className="list-section-actions suppliers-toolbar-actions">
+            <button className="button secondary whitespace-nowrap" type="button" onClick={exportAllPdf}>
+              Export PDF
+            </button>
+          </div>
         </div>
-        {filtered.length === 0 ? <EmptyState title="No payments found" description="Try adjusting your date range or payment type filter." /> : <><div className="corvex-table-wrapper">
+        {filtered.length === 0 ? <EmptyState title="No payments found" description="Try adjusting your search or filters." /> : <><div className="corvex-table-wrapper">
             <table className="corvex-table">
               <thead><tr><th>Payment Date</th><th>Amount</th><th>Collector</th><th>Receipt #</th><th>Actions</th></tr></thead>
               <tbody>
@@ -533,13 +614,14 @@ function PaymentHistoryPage({
                     <td>{p.collector_name || '—'}</td>
                     <td>{p.receipt_number || '—'}</td>
                     <td className="table-actions">
-                      {p.receipts_id ? (
-                        <button className="icon-action-button" type="button" title="View receipt" onClick={() => navigate(`/customer/receipts/${p.receipts_id}`)}>
-                          <NavIcon name="view" />
-                        </button>
-                      ) : (
-                        <span className="muted">—</span>
-                      )}
+                      <button
+                        className="icon-action-button"
+                        type="button"
+                        title="View"
+                        onClick={() => setSelectedPayment(p)}
+                      >
+                        <NavIcon name="view" />
+                      </button>
                     </td>
                   </tr>)}
               </tbody>
@@ -548,19 +630,43 @@ function PaymentHistoryPage({
         }
       </section>
 
-      <div className="flex justify-end mt-4">
-        <button className="button secondary" type="button" onClick={() => {
-          const rows = filtered.map((p) => ({
-            date: p.payment_date,
-            amount: p.amount,
-            method: p.payment_method,
-            collector: p.collector_name || '',
-            receipt: p.receipt_number || '',
-          }));
-          if (downloadPdf(rows, { filename: 'payment-statement.pdf', title: 'Payment Statement' })) showToast('Statement exported as PDF.', 'success');
-          else showToast('Nothing to export.', 'error');
-        }}>Export PDF</button>
-      </div>
+      {selectedPayment ? (
+        <div
+          className="modal-overlay"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="customer-payment-detail-title"
+          onClick={() => setSelectedPayment(null)}
+        >
+          <div className="modal-content" style={{ maxWidth: 560 }} onClick={(e) => e.stopPropagation()}>
+            <div className="flex flex-col md:flex-row justify-between gap-4 items-start md:items-center mb-4">
+              <div>
+                <h3 id="customer-payment-detail-title" style={{ margin: 0 }}>Payment Details</h3>
+                <p className="text-ink/70" style={{ margin: '4px 0 0', fontSize: '0.82rem' }}>
+                  {selectedPayment.receipt_number || `Payment #${selectedPayment.collectionpayment_id}`}
+                </p>
+              </div>
+              {selectedPayment.status ? <StatusBadge status={selectedPayment.status} /> : null}
+            </div>
+            <DetailRowsTable rows={[
+              { label: 'Payment Date', value: formatDisplayDate(selectedPayment.payment_date) },
+              { label: 'Amount', value: <strong>{formatCurrency(Number(selectedPayment.amount))}</strong> },
+              { label: 'Payment Method', value: selectedPayment.payment_method || '—' },
+              { label: 'Collector', value: selectedPayment.collector_name || '—' },
+              { label: 'Receipt #', value: <span className="mono-cell">{selectedPayment.receipt_number || '—'}</span> },
+              ...(selectedPayment.notes ? [{ label: 'Notes', value: selectedPayment.notes }] : []),
+            ]} />
+            <div className="modal-actions">
+              <button className="button secondary" type="button" onClick={exportSelectedPdf}>
+                Export PDF
+              </button>
+              <button className="button" type="button" onClick={() => setSelectedPayment(null)}>
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </div>;
 }
 function ReceiptsPage({
@@ -653,14 +759,6 @@ function StatementsPage({
   const paginated_STATEMENTS = pagination_STATEMENTS.paginatedData;
   if (loading) return <LoadingState message="Loading statements…" />;
   return <div className="page customer-page">
-      <section className="panel content-panel relative overflow-hidden">
-        <div className="flex flex-col md:flex-row justify-between gap-4 items-start md:items-center mb-4"><h3>Outstanding Balance Summary</h3></div>
-        <StatsGrid stats={[{
-          label: 'Current Outstanding Balance',
-          value: formatCurrency(Number(summary?.outstanding_balance || 0))
-        }]} />
-      </section>
-
       {!months.length ? <EmptyState title="No statements" description="Monthly payment totals will appear here after collections are recorded." /> : <section className="panel content-panel relative overflow-hidden">
           <div className="flex flex-col md:flex-row justify-between gap-4 items-start md:items-center mb-4"><h3>Monthly Payment Summary</h3></div>
           <><div className="corvex-table-wrapper">

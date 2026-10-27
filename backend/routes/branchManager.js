@@ -73,9 +73,9 @@ router.get('/analytics', requireAuth, async (req, res) => {
     ] = await Promise.all([
       pool.query(
         `SELECT
-           COUNT(*) FILTER (WHERE status = 'Active') AS active_staff,
-           COUNT(*) FILTER (WHERE r.slug = 'collector') AS active_collectors,
-           COUNT(*) FILTER (WHERE r.slug = 'sales_staff') AS active_sales_agents
+           COUNT(*) FILTER (WHERE u.status = 'Active') AS active_staff,
+           COUNT(*) FILTER (WHERE u.status = 'Active' AND r.slug = 'collector') AS active_collectors,
+           COUNT(*) FILTER (WHERE u.status = 'Active' AND r.slug = 'sales_staff') AS active_sales_agents
          FROM users u
          JOIN roles r ON u.role_id = r.role_id
          ${isBranchScoped ? 'WHERE u.branch_id = $1' : ''}`,

@@ -1,8 +1,12 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
+import { Bar, BarChart, CartesianGrid, Legend, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import { Pagination } from '../shared/Pagination';
 import { StatsGrid, Stats } from '../shared/StatsGrid';
 import { usePagination, useServerPagination, DEFAULT_PAGE_SIZE } from '../../hooks/usePagination';
+import { ChartDrilldownModal } from '../shared/ChartDrilldownModal.jsx';
+import { useChartDrilldown } from '../../hooks/useChartDrilldown.js';
+import { formatCurrency as formatMoney } from '../../utils/formatters.js';
 import {
   createCustomer,
   createSalesInvoice,
@@ -36,6 +40,7 @@ import { isSalesGpsEnabled } from '../../settings/preferences.js';
 import { UserSettingsPanel } from '../shared/UserSettingsPanel';
 import { SalesPurchaseRequestsPage, SalesPurchaseReviewPage } from './SalesPurchaseRequests';
 import { AccountProfilePanel } from '../shared/AccountProfilePanel';
+import { QuantityStepper } from '../shared/QuantityStepper.jsx';
 import apiClient from '../../api/apiClient.js';
 import { CONTACT_RELATIONSHIP_OPTIONS, formatContactPersonName, formatCustomerDisplayId, formatCustomerFullName, formatMiddleNameDisplay, formatPurchaseVolumeUnits, formatSecondaryContactName } from '../../utils/customerDisplay';
 import { downloadPdf } from '../../utils/dataExport';
@@ -66,9 +71,9 @@ function DashboardPage({
 }) {
   const currentUser = getCurrentUser();
   const today = formatDisplayDate(new Date());
+  const { drilldown, closeDrilldown, openApiDrilldown } = useChartDrilldown({ showToast });
   const [dashboard, setDashboard] = useState(null);
   const [unreadCount, setUnreadCount] = useState(0);
-  const [scheduleNotices, setScheduleNotices] = useState([]);
   const [loading, setLoading] = useState(true);
   useEffect(() => {
     async function load() {
@@ -78,7 +83,6 @@ function DashboardPage({
       if (notifRes.success) {
         const rows = notifRes.data || [];
         setUnreadCount(rows.filter(n => n.status !== 'Read').length);
-        setScheduleNotices(rows.filter((n) => String(n.category || '').toLowerCase().includes('schedule')).slice(0, 4));
       }
       setLoading(false);
     }
@@ -110,40 +114,12 @@ function DashboardPage({
       label: 'Sales Commitments Logged',
       value: String(summary.salesLogged ?? 0)
     }, {
-      label: 'Pending Visits',
-      value: String(summary.pendingVisits ?? 0)
-    }, {
       label: 'Completed Visits',
       value: String(summary.completedVisits ?? 0)
     }, {
       label: 'Pending CIs',
       value: String(summary.creditInvestigationsPending ?? 0)
     }]} />
-
-      {scheduleNotices.length ? <section className="panel content-panel relative overflow-hidden">
-          <div className="list-section-header">
-            <h3 style={{ margin: 0 }}>Today&apos;s schedule alerts</h3>
-            <button className="button secondary" type="button" onClick={() => navigate('/sales/schedule')}>Open schedule</button>
-          </div>
-          <ul className="notification-list" style={{ margin: 0 }}>
-            {scheduleNotices.map((n) => (
-              <li key={n.notification_id} className={`notification-item${n.status === 'Read' ? '' : ' unread'}`}>
-                <div>
-                  <strong>{n.title}</strong>
-                  <p className="muted">{n.message}</p>
-                </div>
-              </li>
-            ))}
-          </ul>
-        </section> : null}
-
-      {(summary.creditInvestigationsPending ?? 0) > 0 ? <section className="panel content-panel alert-panel">
-          <div className="panel-section-header">
-            <h3>Credit investigations awaiting approval</h3>
-            <p className="muted">{summary.creditInvestigationsPending} submission(s) pending branch or operating manager review.</p>
-          </div>
-          <button className="button secondary" type="button" onClick={() => navigate('/sales/credit-investigations')}>View My Credit Investigations</button>
-        </section> : null}
 
       {(dashboard?.lowStockItems || []).length ? <section className="panel content-panel alert-panel">
           <div className="panel-section-header">
@@ -160,48 +136,101 @@ function DashboardPage({
           </ul>
         </section> : null}
 
-      <div className="flex flex-wrap justify-end gap-2 mt-4">
-        <button className="button" type="button" onClick={() => navigate('/sales/schedule')}>View Today's Schedule</button>
-        <button className="button secondary" type="button" onClick={() => navigate('/sales/log-sale')}>Log a Sale</button>
-        <button className="button secondary" type="button" onClick={() => navigate('/sales/inventory')}>Check Inventory</button>
-      </div>
-
       <div className="dashboard-widgets grid two-up">
-        <section className="panel content-panel">
-          <div className="panel-section-header"><h3>Today&apos;s Revenue</h3></div>
-          <p className="analytics-value">{formatCurrency(analytics.dailyRevenue || 0)}</p>
-          <p className="muted">Weekly: {formatCurrency(analytics.weeklyRevenue || 0)} · Monthly: {formatCurrency(analytics.monthlyRevenue || 0)}</p>
-        </section>
-        <section className="panel content-panel">
-          <div className="panel-section-header"><h3>Visit Completion Progress</h3></div>
-          <div className="progress-bar" role="progressbar" aria-valuenow={summary.visitProgress || 0} aria-valuemin={0} aria-valuemax={100}>
-            <div className="progress-fill" style={{
-            width: `${summary.visitProgress || 0}%`
-          }} />
-          </div>
-          <p className="muted progress-caption">{summary.completedVisits ?? 0} of {summary.accountsToVisit ?? 0} visits completed</p>
-        </section>
-      </div>
-
-      <div className="dashboard-widgets grid two-up">
-        <section className="panel content-panel">
-          <div className="panel-section-header"><h3>Recent Sales</h3></div>
-          <ul className="widget-list">
-            {(dashboard?.recentSales || []).slice(0, 3).map(sale => <li key={sale.id}>
-                <div><strong>{sale.customerName}</strong><span className="muted">{formatDisplayDate(sale.date)}</span></div>
-                <span>{formatCurrency(sale.totalAmount)}</span>
-              </li>)}
-          </ul>
-        </section>
-        <section className="panel content-panel">
-          <div className="panel-section-header"><h3>Top Selling Products</h3></div>
-          <ul className="widget-list">
-            {(analytics.topProducts || []).map(product => <li key={product.name}>
-                <div><strong>{product.name}</strong></div>
-                <span>{product.units} units</span>
-              </li>)}
-          </ul>
-        </section>
+        <div className="stack" style={{ gap: 12 }}>
+          <section className="panel content-panel">
+            <div className="panel-section-header">
+              <h3>Revenue by Period</h3>
+              <p className="muted" style={{ margin: 0, fontSize: '0.82rem' }}>Click a bar to open matching invoices</p>
+            </div>
+            <ResponsiveContainer width="100%" height={200}>
+              <BarChart
+                data={[
+                  { period: 'Today', amount: Number(analytics.dailyRevenue || 0), key: 'daily' },
+                  { period: 'Weekly', amount: Number(analytics.weeklyRevenue || 0), key: 'weekly' },
+                  { period: 'Monthly', amount: Number(analytics.monthlyRevenue || 0), key: 'monthly' },
+                ]}
+                style={{ cursor: 'pointer' }}
+                onClick={(state) => {
+                  const label = state?.activeLabel;
+                  const point = state?.activePayload?.[0]?.payload;
+                  if (!point?.key) return;
+                  openApiDrilldown(
+                    { type: 'sales_period', period: point.key },
+                    {
+                      title: 'Sales invoices',
+                      category: label || point.period,
+                      dateRange: point.key,
+                      columnSet: 'sales',
+                      legend: [{ label: 'Revenue', value: formatMoney(point.amount || 0) }],
+                      filenameBase: `sales-${point.key}`,
+                    }
+                  );
+                }}
+              >
+                <CartesianGrid strokeDasharray="3 3" stroke="#BADBE9" />
+                <XAxis dataKey="period" tick={{ fontSize: 12 }} />
+                <YAxis tick={{ fontSize: 11 }} tickFormatter={(v) => `${(v / 1000).toFixed(0)}k`} />
+                <Tooltip formatter={(v) => formatCurrency(v)} />
+                <Bar dataKey="amount" name="Revenue" fill="#1A4162" radius={[4, 4, 0, 0]} />
+              </BarChart>
+            </ResponsiveContainer>
+            <p className="muted" style={{ marginTop: 8, marginBottom: 0 }}>
+              Today: {formatCurrency(analytics.dailyRevenue || 0)} · Weekly: {formatCurrency(analytics.weeklyRevenue || 0)} · Monthly: {formatCurrency(analytics.monthlyRevenue || 0)}
+            </p>
+          </section>
+          <section className="panel content-panel">
+            <div className="panel-section-header"><h3>Recent Sales</h3></div>
+            <ul className="widget-list">
+              {(dashboard?.recentSales || []).slice(0, 3).map(sale => <li key={sale.id}>
+                  <div><strong>{sale.customerName}</strong><span className="muted">{formatDisplayDate(sale.date)}</span></div>
+                  <span>{formatCurrency(sale.totalAmount)}</span>
+                </li>)}
+            </ul>
+          </section>
+        </div>
+        <div className="stack" style={{ gap: 12 }}>
+          <section className="panel content-panel visit-progress-panel">
+            <div className="panel-section-header"><h3>Visit Completion Progress</h3></div>
+            <div className="progress-bar" role="progressbar" aria-valuenow={summary.visitProgress || 0} aria-valuemin={0} aria-valuemax={100}>
+              <div className="progress-fill" style={{ width: `${summary.visitProgress || 0}%` }} />
+            </div>
+            <p className="muted progress-caption">{summary.completedVisits ?? 0} of {summary.accountsToVisit ?? 0} visits completed</p>
+          </section>
+          <section className="panel content-panel">
+            <div className="panel-section-header">
+              <h3>Top Selling Products</h3>
+              <p className="muted" style={{ margin: 0, fontSize: '0.82rem' }}>Last 30 days · click a bar</p>
+            </div>
+            <ResponsiveContainer width="100%" height={200}>
+              <BarChart
+                data={analytics.topProducts || []}
+                style={{ cursor: 'pointer' }}
+                onClick={(state) => {
+                  const name = state?.activeLabel || state?.activePayload?.[0]?.payload?.name;
+                  if (!name) return;
+                  openApiDrilldown(
+                    { type: 'sales_product', name },
+                    {
+                      title: 'Invoices for product',
+                      category: name,
+                      dateRange: 'Last 30 days',
+                      columnSet: 'sales',
+                      filenameBase: `product-${String(name).slice(0, 24)}`,
+                    }
+                  );
+                }}
+              >
+                <CartesianGrid strokeDasharray="3 3" stroke="#BADBE9" />
+                <XAxis dataKey="name" tick={{ fontSize: 11 }} interval={0} angle={-15} textAnchor="end" height={60} />
+                <YAxis allowDecimals={false} tick={{ fontSize: 11 }} />
+                <Tooltip />
+                <Legend />
+                <Bar dataKey="units" name="Units" fill="#408DAD" radius={[4, 4, 0, 0]} />
+              </BarChart>
+            </ResponsiveContainer>
+          </section>
+        </div>
       </div>
 
       <section className="panel content-panel">
@@ -209,21 +238,36 @@ function DashboardPage({
           <h3>Sales Analytics</h3>
           <button className="button ghost" type="button" onClick={() => navigate('/sales/route-tracking')}>Route Tracking</button>
         </div>
-        <StatsGrid stats={[{
-          label: 'Daily Total',
-          value: formatCurrency(analytics.dailyRevenue || 0)
-        }, {
-          label: 'Weekly Total',
-          value: formatCurrency(analytics.weeklyRevenue || 0)
-        }, {
-          label: 'Monthly Total',
-          value: formatCurrency(analytics.monthlyRevenue || 0)
-        }]} />
         <h4 className="subsection-title">Top Customers</h4>
-        <ul className="widget-list">
-          {(analytics.topCustomers || []).map(customer => <li key={customer.name}><div><strong>{customer.name}</strong></div><span>{formatCurrency(customer.revenue)}</span></li>)}
-        </ul>
+        <p className="muted" style={{ marginTop: 0 }}>Last 90 days · click a bar for invoices</p>
+        <ResponsiveContainer width="100%" height={240}>
+          <BarChart
+            data={analytics.topCustomers || []}
+            style={{ cursor: 'pointer' }}
+            onClick={(state) => {
+              const name = state?.activeLabel || state?.activePayload?.[0]?.payload?.name;
+              if (!name) return;
+              openApiDrilldown(
+                { type: 'sales_customer', name },
+                {
+                  title: 'Invoices for customer',
+                  category: name,
+                  dateRange: 'Last 90 days',
+                  columnSet: 'sales',
+                  filenameBase: `customer-${String(name).slice(0, 24)}`,
+                }
+              );
+            }}
+          >
+            <CartesianGrid strokeDasharray="3 3" stroke="#BADBE9" />
+            <XAxis dataKey="name" tick={{ fontSize: 11 }} interval={0} angle={-15} textAnchor="end" height={60} />
+            <YAxis tick={{ fontSize: 11 }} tickFormatter={(v) => `${(v / 1000).toFixed(0)}k`} />
+            <Tooltip formatter={(v) => formatCurrency(v)} />
+            <Bar dataKey="revenue" name="Revenue" fill="#1A4162" radius={[4, 4, 0, 0]} />
+          </BarChart>
+        </ResponsiveContainer>
       </section>
+      <ChartDrilldownModal {...drilldown} onClose={closeDrilldown} showToast={showToast} />
     </div>;
 }
 function haversine(a, b) {
@@ -236,7 +280,6 @@ function haversine(a, b) {
   const x = Math.sin(dLat / 2) ** 2 + Math.cos(la1) * Math.cos(la2) * Math.sin(dLon / 2) ** 2;
   return R * 2 * Math.atan2(Math.sqrt(x), Math.sqrt(1 - x));
 }
-const SCHEDULE_PAGE_SIZE_OPTIONS = [5, 10, 25, 50];
 const SCHEDULE_STATUS_OPTIONS = ['All', 'Pending', 'Completed'];
 
 function getVisitCustomerName(visit) {
@@ -252,12 +295,10 @@ function SchedulePage({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [search, setSearch] = useState('');
-  const [customerFilter, setCustomerFilter] = useState('');
   const [statusFilter, setStatusFilter] = useState('All');
   const [agentFilter, setAgentFilter] = useState('All');
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo] = useState('');
-  const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE);
   const [showMap, setShowMap] = useState(pageType === 'scheduleMap');
 
   useEffect(() => {
@@ -284,7 +325,6 @@ function SchedulePage({
 
   const filtered = useMemo(() => {
     const query = search.trim().toLowerCase();
-    const customerQuery = customerFilter.trim().toLowerCase();
     return visits.filter((v) => {
       const customerName = getVisitCustomerName(v);
       const customerNameLower = customerName.toLowerCase();
@@ -296,23 +336,21 @@ function SchedulePage({
         || agentName.includes(query)
         || visitType.includes(query)
         || visitId.includes(query);
-      const matchesCustomer = !customerQuery || customerNameLower.includes(customerQuery);
       const matchesStatus = statusFilter === 'All' || v.status === statusFilter;
       const matchesAgent = agentFilter === 'All' || v.agent_name === agentFilter;
       const scheduled = String(v.scheduled_date || '');
       const matchesFrom = !dateFrom || scheduled >= dateFrom;
       const matchesTo = !dateTo || scheduled <= dateTo;
-      return matchesSearch && matchesCustomer && matchesStatus && matchesAgent && matchesFrom && matchesTo;
+      return matchesSearch && matchesStatus && matchesAgent && matchesFrom && matchesTo;
     });
-  }, [visits, search, customerFilter, statusFilter, agentFilter, dateFrom, dateTo]);
+  }, [visits, search, statusFilter, agentFilter, dateFrom, dateTo]);
 
-  const filterResetKey = `${search}|${customerFilter}|${statusFilter}|${agentFilter}|${dateFrom}|${dateTo}|${pageSize}`;
-  const pagination = usePagination(filtered, { pageSize, resetKey: filterResetKey });
+  const filterResetKey = `${search}|${statusFilter}|${agentFilter}|${dateFrom}|${dateTo}`;
+  const pagination = usePagination(filtered, { resetKey: filterResetKey });
   const rows = pagination.paginatedData;
 
   const clearScheduleFilters = () => {
     setSearch('');
-    setCustomerFilter('');
     setStatusFilter('All');
     setAgentFilter('All');
     setDateFrom('');
@@ -338,7 +376,7 @@ function SchedulePage({
     }
     return sum;
   }, [coordVisits]);
-  const visitColor = (v) => (v.status === 'Completed' ? '#255684' : v.status === 'Pending' ? '#0c1031' : '#f59e0b');
+  const visitColor = (v) => (v.status === 'Completed' ? '#1A4162' : v.status === 'Pending' ? '#0B1E30' : '#f59e0b');
   const mapMarkers = filtered.filter((v) => Number(v.latitude) && Number(v.longitude)).map((v) => ({
     id: v.visit_id,
     position: [Number(v.latitude), Number(v.longitude)],
@@ -357,14 +395,6 @@ function SchedulePage({
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           aria-label="Search schedule"
-        />
-        <input
-          className="filter-input"
-          type="search"
-          placeholder="Customer name"
-          value={customerFilter}
-          onChange={(e) => setCustomerFilter(e.target.value)}
-          aria-label="Filter by customer name"
         />
         <select
           className="filter-select"
@@ -401,16 +431,6 @@ function SchedulePage({
           onChange={(e) => setDateTo(e.target.value)}
           aria-label="Schedule to date"
         />
-        <select
-          className="filter-select"
-          value={pageSize}
-          onChange={(e) => setPageSize(Number(e.target.value) || DEFAULT_PAGE_SIZE)}
-          aria-label="Records per page"
-        >
-          {SCHEDULE_PAGE_SIZE_OPTIONS.map((size) => (
-            <option key={size} value={size}>{size} per page</option>
-          ))}
-        </select>
       </div>
     </div>
   );
@@ -455,7 +475,7 @@ function SchedulePage({
             <LeafletMap center={mapCenter} zoom={13} height={500} markers={mapMarkers} polylines={isSalesGpsEnabled() && totalDistance ? [{
             id: 'route',
             positions: [...coordVisits].sort((a, b) => new Date(a.scheduled_date || 0) - new Date(b.scheduled_date || 0)).map(v => [Number(v.latitude), Number(v.longitude)]),
-            color: '#0c1031'
+            color: '#0B1E30'
           }] : []} />
           </div>
           <p className="muted">Visits mapped: {filtered.length}{isSalesGpsEnabled() && totalDistance ? ` · Route distance: ${totalDistance.toFixed(1)} km` : ''}{isSalesGpsEnabled() ? '' : ' GPS route line is off. Turn it on in Settings.'}</p>
@@ -1190,7 +1210,7 @@ function CustomerDetailPage({
             <div className="progress-bar-container" style={{ marginTop: 8 }}>
               <div className="progress-bar" style={{
               width: `${Math.min(outstandingBalance / (creditLimit || 1) * 100, 100)}%`,
-              backgroundColor: outstandingBalance > creditLimit * 0.8 ? '#ef4444' : '#255684'
+              backgroundColor: outstandingBalance > creditLimit * 0.8 ? '#ef4444' : '#1A4162'
             }} />
             </div>
           </div>
@@ -1229,7 +1249,7 @@ function CustomerDetailPage({
           position: customer.latitude && customer.longitude ? [Number(customer.latitude), Number(customer.longitude)] : [7.1907, 125.4553],
           popup: `<strong>${customer.first_name} ${customer.last_name}</strong><br/>${customer.address}`,
           label: String(customer.customer_id),
-          color: '#0c1031'
+          color: '#0B1E30'
         }]} />
         </div>
       </section>
@@ -1265,7 +1285,7 @@ function CustomerDetailPage({
                   </td>
                 </tr>) : <tr><td colSpan="6" style={{
                 textAlign: 'center',
-                color: '#818697',
+                color: '#5F7385',
                 padding: 16
               }}>No recent payments</td></tr>}
             </tbody>
@@ -1472,70 +1492,82 @@ function LogSalePage({
           ) : null}
         </div>
 
-        <div className="form-group">
-          <label htmlFor="log-sale-customer">Customer *</label>
-          <select id="log-sale-customer" className="filter-select" value={form.customerId} onChange={e => {
-          setForm(prev => ({
-            ...prev,
-            customerId: e.target.value
-          }));
-          setErrors(prev => ({
-            ...prev,
-            customerId: undefined
-          }));
-        }}>
-            <option value="">Select customer</option>
-            {customers.map(c => <option key={c.customer_id} value={c.customer_id}>
-                {c.first_name} {c.last_name} (ID {c.customer_id})
-              </option>)}
-          </select>
-          {errors.customerId ? <p className="form-error">{errors.customerId}</p> : null}
-        </div>
-
-        <div className="form-group">
-          <label htmlFor="log-sale-payment">Payment Method *</label>
-          <select id="log-sale-payment" className="filter-select" value={form.paymentMethodId} onChange={e => {
-          setForm(prev => ({
-            ...prev,
-            paymentMethodId: e.target.value
-          }));
-          setErrors(prev => ({
-            ...prev,
-            paymentMethodId: undefined
-          }));
-        }}>
-            <option value="">Select payment method</option>
-            {paymentMethods.map(method => <option key={method.payment_method_id} value={method.payment_method_id}>
-                {method.method_name}
-              </option>)}
-          </select>
-          {errors.paymentMethodId ? <p className="form-error">{errors.paymentMethodId}</p> : null}
-        </div>
-
-        <div className="account-detail-grid two-up">
-          <div className="form-group">
-            <label htmlFor="log-sale-date">Invoice Date *</label>
-            <input id="log-sale-date" type="date" value={form.invoicesDate} onChange={e => setForm(prev => ({
-            ...prev,
-            invoicesDate: e.target.value
-          }))} />
-            {errors.invoicesDate ? <p className="form-error">{errors.invoicesDate}</p> : null}
+        <div className="field-report-form">
+          <div className="field-report-filter-row log-sale-filter-row">
+            <label className="field-report-field" htmlFor="log-sale-customer">
+              <span>Customer *</span>
+              <select id="log-sale-customer" className="filter-select" value={form.customerId} onChange={e => {
+              setForm(prev => ({
+                ...prev,
+                customerId: e.target.value
+              }));
+              setErrors(prev => ({
+                ...prev,
+                customerId: undefined
+              }));
+            }}>
+                <option value="">Select customer</option>
+                {customers.map(c => <option key={c.customer_id} value={c.customer_id}>
+                    {c.first_name} {c.last_name} (ID {c.customer_id})
+                  </option>)}
+              </select>
+              {errors.customerId ? <p className="form-error">{errors.customerId}</p> : null}
+            </label>
+            <label className="field-report-field" htmlFor="log-sale-payment">
+              <span>Payment Method *</span>
+              <select id="log-sale-payment" className="filter-select" value={form.paymentMethodId} onChange={e => {
+              setForm(prev => ({
+                ...prev,
+                paymentMethodId: e.target.value
+              }));
+              setErrors(prev => ({
+                ...prev,
+                paymentMethodId: undefined
+              }));
+            }}>
+                <option value="">Select payment method</option>
+                {paymentMethods.map(method => <option key={method.payment_method_id} value={method.payment_method_id}>
+                    {method.method_name}
+                  </option>)}
+              </select>
+              {errors.paymentMethodId ? <p className="form-error">{errors.paymentMethodId}</p> : null}
+            </label>
+            <label className="field-report-field" htmlFor="log-sale-date">
+              <span>Invoice Date *</span>
+              <input
+                id="log-sale-date"
+                className="filter-input"
+                type="date"
+                value={form.invoicesDate}
+                onChange={e => setForm(prev => ({
+                  ...prev,
+                  invoicesDate: e.target.value
+                }))}
+              />
+              {errors.invoicesDate ? <p className="form-error">{errors.invoicesDate}</p> : null}
+            </label>
+            <label className="field-report-field" htmlFor="log-sale-due">
+              <span>Due Date</span>
+              <input
+                id="log-sale-due"
+                className="filter-input"
+                type="date"
+                value={form.dueDate}
+                onChange={e => setForm(prev => ({
+                  ...prev,
+                  dueDate: e.target.value
+                }))}
+              />
+            </label>
           </div>
-          <div className="form-group">
-            <label htmlFor="log-sale-due">Due Date</label>
-            <input id="log-sale-due" type="date" value={form.dueDate} onChange={e => setForm(prev => ({
+
+          <div className="form-group field-report-block">
+            <label htmlFor="log-sale-notes">Notes</label>
+            <textarea id="log-sale-notes" placeholder="Product details, delivery notes, or payment terms..." value={form.notes} onChange={e => setForm(prev => ({
             ...prev,
-            dueDate: e.target.value
+            notes: e.target.value
           }))} />
           </div>
-        </div>
-
-        <div className="form-group">
-          <label htmlFor="log-sale-notes">Notes</label>
-          <textarea id="log-sale-notes" placeholder="Product details, delivery notes, or payment terms..." value={form.notes} onChange={e => setForm(prev => ({
-          ...prev,
-          notes: e.target.value
-        }))} />
         </div>
       </section>
 
@@ -1546,7 +1578,7 @@ function LogSalePage({
         </div>
         {errors.items ? <p className="form-error">{errors.items}</p> : null}
         <div className="table-shell">
-          <table className="corvex-table">
+          <table className="corvex-table log-sale-lines-table">
             <thead>
               <tr>
                 <th>Product</th>
@@ -1571,7 +1603,12 @@ function LogSalePage({
                     </td>
                     <td>{product ? formatCurrency(unitPrice) : '—'}</td>
                     <td>
-                      <input type="number" min={1} value={line.quantity} onChange={e => updateLineItem(index, 'quantity', e.target.value)} />
+                      <QuantityStepper
+                        value={line.quantity}
+                        min={1}
+                        onChange={(next) => updateLineItem(index, 'quantity', next)}
+                        aria-label={`Quantity for line ${index + 1}`}
+                      />
                     </td>
                     <td>{product ? formatCurrency(lineTotal) : '—'}</td>
                     <td>
@@ -1725,7 +1762,7 @@ function VisitLogPage({
               position: [Number(visit.latitude), Number(visit.longitude)],
               popup: `<strong>${customerName}</strong><br/>${visit.address || ''}`,
               label: String(visit.visit_id),
-              color: visit.status === 'Completed' ? '#255684' : '#0c1031'
+              color: visit.status === 'Completed' ? '#1A4162' : '#0B1E30'
             }]} />
               </div> : null}
           </div>
@@ -1762,7 +1799,6 @@ function SalesCISubmissionsPage({
       <section className="panel content-panel">
         <div className="list-section-header">
           <h3>My Credit Investigations</h3>
-          <p className="muted">Requests you submitted for branch manager and operating manager approval.</p>
         </div>
         <div className="list-section-toolbar" style={{ marginBottom: 12 }}>
           <div className="segmented-control">
@@ -1785,11 +1821,25 @@ function SalesCISubmissionsPage({
                     <td>{formatDisplayDate(ci.submissionDate)}</td>
                     <td><StatusBadge status={ci.status} /></td>
                     <td className="table-actions" onClick={e => e.stopPropagation()}>
-                      <button className="icon-action-button" type="button" title="View" onClick={() => navigate(`/sales/credit-investigations/${ci.ciId}`)}>
+                      <button
+                        className="icon-action-button"
+                        type="button"
+                        title="View"
+                        aria-label={`View credit investigation ${ci.ciId}`}
+                        onClick={() => navigate(`/sales/credit-investigations/${ci.ciId}`)}
+                      >
                         <NavIcon name="view" />
                       </button>
                       {(ci.status === 'Rejected' || ci.status === 'Revision Requested') && ci.customerId ? (
-                        <button className="button secondary" type="button" style={{ marginLeft: 8 }} onClick={() => navigate(`/sales/ci-form/${ci.customerId}?from=customers`)}>Resubmit</button>
+                        <button
+                          className="icon-action-button"
+                          type="button"
+                          title="Resubmit"
+                          aria-label={`Resubmit credit investigation ${ci.ciId}`}
+                          onClick={() => navigate(`/sales/ci-form/${ci.customerId}?from=customers`)}
+                        >
+                          <NavIcon name="reset" />
+                        </button>
                       ) : null}
                     </td>
                   </tr>)}
@@ -1966,14 +2016,47 @@ function InventoryPage({
     if (sortBy === 'Product Name') results.sort((a, b) => a.product_name.localeCompare(b.product_name));else if (sortBy === 'Unit Price') results.sort((a, b) => a.unit_price - b.unit_price);
     return results;
   }, [products, search, category, sortBy]);
+  const pagination = usePagination(filtered, {
+    resetKey: `${search}|${category}|${sortBy}`,
+  });
+  const paginated = pagination.paginatedData;
   if (loading) return <LoadingState message="Loading inventory..." />;
   return <div className="page">
       <section className="panel content-panel relative overflow-hidden">
         <div className="list-section-header">
           <h3>Inventory Viewer</h3>
-          <div className="list-section-actions">
+        </div>
+        <div className="list-section-toolbar suppliers-toolbar audit-logs-toolbar">
+          <div className="list-section-controls audit-logs-filters">
+            <input
+              className="filter-input search"
+              type="search"
+              placeholder="Search products by name or category"
+              value={search}
+              onChange={e => setSearch(e.target.value)}
+              aria-label="Search inventory"
+            />
+            <select
+              className="filter-select"
+              value={category}
+              onChange={e => setCategory(e.target.value)}
+              aria-label="Filter by category"
+            >
+              <option value="All">All Categories</option>
+              {categories.map(c => <option key={c.category_id} value={c.category_id}>{c.category_name}</option>)}
+            </select>
+            <select
+              className="filter-select"
+              value={sortBy}
+              onChange={e => setSortBy(e.target.value)}
+              aria-label="Sort inventory"
+            >
+              {['Product Name', 'Unit Price'].map(o => <option key={o} value={o}>Sort: {o}</option>)}
+            </select>
+          </div>
+          <div className="list-section-actions suppliers-toolbar-actions">
             <button
-              className="button secondary"
+              className="button secondary whitespace-nowrap"
               type="button"
               onClick={() => {
                 const rows = filtered.map((p) => ({
@@ -1991,24 +2074,12 @@ function InventoryPage({
             </button>
           </div>
         </div>
-        <div className="list-section-toolbar">
-          <div className="list-section-controls">
-            <input className="filter-input search" type="search" placeholder="Search products by name or category" value={search} onChange={e => setSearch(e.target.value)} />
-            <select className="filter-select" value={category} onChange={e => setCategory(e.target.value)}>
-              <option value="All">All Categories</option>
-              {categories.map(c => <option key={c.category_id} value={c.category_id}>{c.category_name}</option>)}
-            </select>
-            <select className="filter-select" value={sortBy} onChange={e => setSortBy(e.target.value)}>
-              {['Product Name', 'Unit Price'].map(o => <option key={o} value={o}>Sort: {o}</option>)}
-            </select>
-          </div>
-          <span className="muted">Read-only access</span>
-        </div>
-        {filtered.length ? <div className="corvex-table-wrapper">
+        {filtered.length ? <>
+          <div className="corvex-table-wrapper">
             <table className="corvex-table">
               <thead><tr><th>Product ID</th><th>Product Name</th><th>Category</th><th>Unit Price</th><th>Status</th><th>Actions</th></tr></thead>
               <tbody>
-                {filtered.map(product => <tr key={product.product_id} className="clickable-row" onClick={() => navigate(`/sales/inventory/${product.product_id}`)}>
+                {paginated.map(product => <tr key={product.product_id} className="clickable-row" onClick={() => navigate(`/sales/inventory/${product.product_id}`)}>
                     <td>{product.product_id}</td>
                     <td>{product.product_name}</td>
                     <td>{product.category_name || product.category_id}</td>
@@ -2022,7 +2093,9 @@ function InventoryPage({
                   </tr>)}
               </tbody>
             </table>
-          </div> : <EmptyState title="No products found" description="Adjust your search or category filter." />}
+          </div>
+          <Pagination {...pagination} />
+        </> : <EmptyState title="No products found" description="Adjust your search or category filter." />}
       </section>
       {selectedProduct ? <aside className="panel content-panel product-drawer" role="dialog" aria-label="Product details">
           <div className="panel-section-header">
@@ -2168,9 +2241,42 @@ export function SalesHistoryPage({
       <section className="panel content-panel relative overflow-hidden">
         <div className="list-section-header">
           <h3>Sales Transactions</h3>
-          <div className="list-section-actions">
+        </div>
+        <div className="list-section-toolbar suppliers-toolbar audit-logs-toolbar">
+          <div className="list-section-controls audit-logs-filters">
+            <input
+              className="filter-input search"
+              type="search"
+              placeholder="Search by customer or invoice number"
+              value={search}
+              onChange={e => setSearch(e.target.value)}
+              aria-label="Search sales history"
+            />
+            <select
+              className="filter-select"
+              value={statusFilter}
+              onChange={e => setStatusFilter(e.target.value)}
+              aria-label="Filter by status"
+            >
+              {['All', 'Confirmed', 'Pending Review', 'Draft', 'Cancelled'].map(o => (
+                <option key={o} value={o}>{o === 'All' ? 'All Statuses' : o}</option>
+              ))}
+            </select>
+            <select
+              className="filter-select"
+              value={productFilter}
+              onChange={e => setProductFilter(e.target.value)}
+              aria-label="Filter by product"
+            >
+              <option value="All">All Products</option>
+              {productNames.map(name => <option key={name} value={name}>{name}</option>)}
+            </select>
+            <input className="filter-input" type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)} aria-label="From date" />
+            <input className="filter-input" type="date" value={dateTo} onChange={e => setDateTo(e.target.value)} aria-label="To date" />
+          </div>
+          <div className="list-section-actions suppliers-toolbar-actions">
             <button
-              className="button secondary"
+              className="button secondary whitespace-nowrap"
               type="button"
               onClick={() => {
                 const exportRows = rows.map((item) => ({
@@ -2186,15 +2292,6 @@ export function SalesHistoryPage({
             >
               Export PDF
             </button>
-          </div>
-        </div>
-        <div className="list-section-toolbar">
-          <div className="list-section-controls">
-            <input className="filter-input search" type="search" placeholder="Search by customer or invoice number" value={search} onChange={e => setSearch(e.target.value)} />
-            <select className="filter-select" value={statusFilter} onChange={e => setStatusFilter(e.target.value)}>{['All', 'Confirmed', 'Pending Review', 'Draft', 'Cancelled'].map(o => <option key={o}>{o}</option>)}</select>
-            <select className="filter-select" value={productFilter} onChange={e => setProductFilter(e.target.value)}><option value="All">All Products</option>{productNames.map(name => <option key={name} value={name}>{name}</option>)}</select>
-            <input className="filter-input" type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)} aria-label="From date" />
-            <input className="filter-input" type="date" value={dateTo} onChange={e => setDateTo(e.target.value)} aria-label="To date" />
           </div>
         </div>
         {rows.length ? <>
@@ -2341,32 +2438,34 @@ function FieldActivityReportsPage({ showToast }) {
         <p className="muted">Submit visit activity for today's sales schedule ({reports.length} report{reports.length === 1 ? '' : 's'} on file).</p>
       </div>
       {deviceReports.length ? <DeviceQueue rows={deviceReports} /> : null}
-      <form className="grid gap-3" onSubmit={handleSubmit}>
-        <div className="form-group">
-          <label>Visit / Customer<span className="required">*</span></label>
-          <select className="filter-select" value={form.visit_id} onChange={(e) => setForm((p) => ({ ...p, visit_id: e.target.value }))}>
-            <option value="">Select today's visit</option>
-            {visits.map((v) => <option key={v.visit_id} value={v.visit_id}>
-              {v.customer_name} — {v.visit_type} ({formatDisplayDate(v.scheduled_date)}, {v.status})
-            </option>)}
-          </select>
-          {errors.visit_id ? <p className="form-error">{errors.visit_id}</p> : null}
-          {!visits.length ? <p className="muted">No visits scheduled for today. Reports can be filed once a visit is assigned.</p> : null}
+      <form className="field-report-form" onSubmit={handleSubmit}>
+        <div className="field-report-filter-row">
+          <label className="field-report-field">
+            <span>Visit / Customer<span className="required">*</span></span>
+            <select className="filter-select" value={form.visit_id} onChange={(e) => setForm((p) => ({ ...p, visit_id: e.target.value }))}>
+              <option value="">Select today's visit</option>
+              {visits.map((v) => <option key={v.visit_id} value={v.visit_id}>
+                {v.customer_name} — {v.visit_type} ({formatDisplayDate(v.scheduled_date)}, {v.status})
+              </option>)}
+            </select>
+            {errors.visit_id ? <p className="form-error">{errors.visit_id}</p> : null}
+          </label>
+          <label className="field-report-field">
+            <span>Activity Type<span className="required">*</span></span>
+            <select className="filter-select" value={form.activity_type} onChange={(e) => setForm((p) => ({ ...p, activity_type: e.target.value }))}>
+              <option value="">Select activity type</option>
+              {['Sales Visit', 'Canvassing', 'Delivery', 'Site Check', 'Follow-up', 'Customer Not Available'].map((t) => <option key={t} value={t}>{t}</option>)}
+            </select>
+            {errors.activity_type ? <p className="form-error">{errors.activity_type}</p> : null}
+          </label>
         </div>
-        <div className="form-group">
-          <label>Activity Type<span className="required">*</span></label>
-          <select className="filter-select" value={form.activity_type} onChange={(e) => setForm((p) => ({ ...p, activity_type: e.target.value }))}>
-            <option value="">Select activity type</option>
-            {['Sales Visit', 'Canvassing', 'Delivery', 'Site Check', 'Follow-up', 'Customer Not Available'].map((t) => <option key={t} value={t}>{t}</option>)}
-          </select>
-          {errors.activity_type ? <p className="form-error">{errors.activity_type}</p> : null}
-        </div>
-        <div className="form-group">
+        {!visits.length ? <p className="field-report-hint">No visits scheduled for today. Reports can be filed once a visit is assigned.</p> : null}
+        <div className="form-group field-report-block">
           <label>Remarks<span className="required">*</span></label>
           <textarea rows={3} placeholder="Describe the visit outcome, order taken, or follow-up needed..." value={form.remarks} onChange={(e) => setForm((p) => ({ ...p, remarks: e.target.value }))} />
           {errors.remarks ? <p className="form-error">{errors.remarks}</p> : null}
         </div>
-        <div className="form-group">
+        <div className="form-group field-report-block">
           <label>Photo Evidence<span className="required">*</span></label>
           <input
             type="file"
@@ -2403,7 +2502,7 @@ function FieldActivityReportsPage({ showToast }) {
             }}
           />
           {form.photoName ? <p className="muted">Selected: {form.photoName}</p> : null}
-          {form.photo ? <img src={form.photo} alt="Report preview" style={{ marginTop: 8, maxWidth: 200, maxHeight: 140, borderRadius: 8, border: '1px solid #c5c8d0' }} /> : null}
+          {form.photo ? <img src={form.photo} alt="Report preview" style={{ marginTop: 8, maxWidth: 200, maxHeight: 140, borderRadius: 8, border: '1px solid #BADBE9' }} /> : null}
           {errors.photo ? <p className="form-error">{errors.photo}</p> : null}
         </div>
         <div className="flex justify-end">
@@ -2436,7 +2535,7 @@ function FieldActivityReportsPage({ showToast }) {
               <td>
                 {r.photo ? (
                   <a href={r.photo} target="_blank" rel="noreferrer">
-                    <img src={r.photo} alt="Report" style={{ width: 48, height: 48, objectFit: 'cover', borderRadius: 6, border: '1px solid #c5c8d0' }} />
+                    <img src={r.photo} alt="Report" style={{ width: 48, height: 48, objectFit: 'cover', borderRadius: 6, border: '1px solid #BADBE9' }} />
                   </a>
                 ) : '—'}
               </td>
@@ -2481,18 +2580,33 @@ function NotificationsPage({
   }, [notifications, filter]);
   if (loading && !notifications.length) return <LoadingState message="Loading notifications..." />;
   return <div className="page">
-      <div className="flex justify-end mt-2 mb-2">
-        <button className="button secondary" type="button" onClick={async () => {
-        const res = await markAllNotificationsRead();
-        if (res.success) {
-          showToast('All notifications marked as read.', 'success');
-          load();
-        }
-      }}>Mark All as Read</button>
-      </div>
       <section className="panel content-panel">
-        <div className="segmented-control">
-          {['All', 'Unread', 'Read', 'Stock', 'Schedule', 'Sales', 'Assignments', 'CI'].map(item => <button key={item} className={filter === item ? 'segment active' : 'segment'} type="button" onClick={() => setFilter(item)}>{item}</button>)}
+        <div className="notifications-toolbar">
+          <div className="segmented-control" style={{ flexWrap: 'wrap' }}>
+            {['All', 'Unread', 'Read', 'Stock', 'Schedule', 'Sales', 'Assignments', 'CI'].map(item => (
+              <button
+                key={item}
+                className={filter === item ? 'segment active' : 'segment'}
+                type="button"
+                onClick={() => setFilter(item)}
+              >
+                {item}
+              </button>
+            ))}
+          </div>
+          <button
+            className="button secondary whitespace-nowrap"
+            type="button"
+            onClick={async () => {
+              const res = await markAllNotificationsRead();
+              if (res.success) {
+                showToast('All notifications marked as read.', 'success');
+                load();
+              }
+            }}
+          >
+            Mark All as Read
+          </button>
         </div>
       </section>
       {filtered.length ? <div className="notification-list">
@@ -2548,11 +2662,11 @@ function RouteTrackingPage({
     id: v.visit_id,
     position: [Number(v.latitude), Number(v.longitude)],
     label: String(v.visit_id),
-    color: v.status === 'Completed' ? '#255684' : '#f59e0b',
+    color: v.status === 'Completed' ? '#1A4162' : '#f59e0b',
     popup: `${v.customer_name} — ${v.status}`,
   }));
   const polyline = markers.length >= 2
-    ? [{ id: 'route', positions: markers.map(m => m.position), color: '#0c1031' }]
+    ? [{ id: 'route', positions: markers.map(m => m.position), color: '#0B1E30' }]
     : [];
   const coverage = visits.length ? Math.round((completed.length / visits.length) * 100) : 0;
   if (loading) return <LoadingState message="Loading route..." />;

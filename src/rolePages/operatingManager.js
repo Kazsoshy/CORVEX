@@ -68,12 +68,6 @@ export const operatingManagerRole = {
         { label: 'Settings', to: '/operating-manager/operations/settings' },
       ],
     },
-    {
-      title: 'Account',
-      items: [
-        { label: 'Profile', to: '/operating-manager/profile' },
-      ],
-    },
   ],
   navPages: [
     { label: 'Dashboard', to: '/operating-manager/dashboard' },
@@ -102,7 +96,7 @@ export const operatingManagerRole = {
     { label: 'Audit Logs', to: '/operating-manager/admin/audit-logs' },
     { label: 'Alerts & Exceptions', to: '/operating-manager/operations/alerts' },
     { label: 'Notifications', to: '/operating-manager/notifications' },
-    { label: 'Settings', to: '/operating-manager/operations/settings' },
+    { label: 'System Configuration', to: '/operating-manager/operations/settings' },
     { label: 'Profile', to: '/operating-manager/profile' },
   ],
   routes: {},

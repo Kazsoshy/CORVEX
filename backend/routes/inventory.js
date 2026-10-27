@@ -1316,6 +1316,7 @@ router.post('/products', requireAuth, requireRole(INVENTORY_WRITER_ROLES), async
     reorder_point: reorderPoint,
     supplier_id: supplierId,
     initial_quantity: initialQuantity,
+    image_url: imageUrl,
   } = req.body;
 
   if (!normalizeProductName(name) || !sku) {
@@ -1323,6 +1324,10 @@ router.post('/products', requireAuth, requireRole(INVENTORY_WRITER_ROLES), async
   }
   if (branchId == null) {
     return res.status(403).json({ success: false, message: 'No branch assigned.' });
+  }
+  const normalizedImage = typeof imageUrl === 'string' && imageUrl.trim() ? imageUrl.trim() : null;
+  if (normalizedImage && !(normalizedImage.startsWith('data:image/') || /^https?:\/\//i.test(normalizedImage))) {
+    return res.status(400).json({ success: false, message: 'image_url must be an image upload or URL.' });
   }
 
   const client = await pool.connect();
@@ -1340,8 +1345,8 @@ router.post('/products', requireAuth, requireRole(INVENTORY_WRITER_ROLES), async
     }
 
     const created = await client.query(
-      `INSERT INTO products (name, sku, category_id, description, unit_price, unit_type, supplier_id, reorder_point, status)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'Active')
+      `INSERT INTO products (name, sku, category_id, description, unit_price, unit_type, supplier_id, reorder_point, status, image_url)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'Active', $9)
        RETURNING id AS product_id`,
       [
         productName,
@@ -1352,6 +1357,7 @@ router.post('/products', requireAuth, requireRole(INVENTORY_WRITER_ROLES), async
         unitType || 'Unit',
         supplierId ? Number(supplierId) : null,
         Number(reorderPoint) || 5,
+        normalizedImage,
       ]
     );
     const productId = created.rows[0].product_id;

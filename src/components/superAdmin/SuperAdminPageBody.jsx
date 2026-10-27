@@ -20,8 +20,9 @@ import { EmptyState } from '../shared/EmptyState';
 import { LoadingState } from '../shared/LoadingState';
 import { NavIcon } from '../../navIcons';
 import { StatusBadge } from '../StatusBadge';
-import { formatDisplayDateTime } from '../../utils/formatters.js';
+import { formatDisplayDateTime, formatPhone } from '../../utils/formatters.js';
 import { UserSettingsPanel } from '../shared/UserSettingsPanel';
+import { brand, chartMuted, textMuted } from '../../theme/palette.js';
 function btn(v) {
   if (v === 'secondary') return 'button secondary';
   if (v === 'ghost') return 'button ghost';
@@ -71,7 +72,7 @@ function MetricBar({
   label,
   value,
   max = 100,
-  color = '#255684'
+  color = brand
 }) {
   return <div style={{
     marginBottom: 14
@@ -87,12 +88,12 @@ function MetricBar({
       }}>{label}</span>
         <span style={{
         fontSize: '0.88rem',
-        color: '#818697'
+        color: textMuted
       }}>{value}{max === 100 ? '%' : ' ms'}</span>
       </div>
       <div style={{
       height: 8,
-      background: '#c5c8d0',
+      background: chartMuted,
       borderRadius: 999,
       overflow: 'hidden'
     }}>
@@ -144,7 +145,7 @@ function DashboardPage({
   const pagination_auditLogs = usePagination(auditLogs || []);
   const paginated_auditLogs = pagination_auditLogs.paginatedData;
   if (loading) return <LoadingState message="Loading system dashboard..." />;
-  const dbColor = health?.dbStatus === 'Online' ? '#4A6B12' : '#dc2626';
+  const dbColor = health?.dbStatus === 'Online' ? '#2A9B6A' : '#dc2626';
   return <div className="page">
       <section className="panel dashboard-greeting">
         <div className="flex flex-col gap-1">
@@ -206,7 +207,7 @@ function DashboardPage({
                     <td><strong>{r.role}</strong></td>
                     <td>{r.total}</td>
                     <td style={{
-                  color: '#4A6B12'
+                  color: '#2A9B6A'
                 }}>{r.active}</td>
                     <td style={{
                   color: '#dc2626'
@@ -217,8 +218,8 @@ function DashboardPage({
           </div><Pagination {...pagination_userStats_byRole} /></>
         </Card> : null}
 
-      {/* Branch directory â€” from branches table with full fields */}
-      {branches.length ? <Card title="Branch Directory" sub="Source: branches table â€” branch_id, branch_name, address, latitude, longitude, contact_no, email, status, created_at">
+      {/* Branch directory — from branches table with full fields */}
+      {branches.length ? <Card title="Branch Directory" sub="Source: branches table — branch_id, branch_name, address, latitude, longitude, contact_no, email, status, created_at">
           <><div className="corvex-table-wrapper">
             <table className="corvex-table">
               <thead>
@@ -231,7 +232,7 @@ function DashboardPage({
                     <td>{b.address}</td>
                     <td>{b.latitude}</td>
                     <td>{b.longitude}</td>
-                    <td>{b.contact_no}</td>
+                    <td>{formatPhone(b.contact_no || b.phone)}</td>
                     <td>{b.email}</td>
                     <td><StatusBadge status={b.status} /></td>
                     <td>{formatDisplayDateTime(b.created_at)}</td>
@@ -246,7 +247,7 @@ function DashboardPage({
         <div style={{
         padding: '8px 0'
       }}>
-          {health?.memoryUsage != null ? <MetricBar label="Memory Usage" value={health.memoryUsage} color="#255684" /> : null}
+          {health?.memoryUsage != null ? <MetricBar label="Memory Usage" value={health.memoryUsage} color={brand} /> : null}
           <MetricBar label="API Response" value={health?.apiResponseMs || 0} max={500} color="#f59e0b" />
         </div>
       </Card>
@@ -517,7 +518,7 @@ function RolesPage({
                               <input type="checkbox" checked={r.permissions[p.permission_id] || false} disabled={r.slug === 'super_admin'} onChange={() => togglePermission(roleIdx, p.permission_id)} style={{
                       width: 16,
                       height: 16,
-                      accentColor: '#255684',
+                      accentColor: brand,
                       cursor: r.slug === 'super_admin' ? 'not-allowed' : 'pointer'
                     }} />
                             </td>)}
@@ -660,7 +661,7 @@ function RolesPage({
             })} style={{
               width: '100%',
               padding: '8px 12px',
-              border: '1px solid #c5c8d0',
+              border: '1px solid #BADBE9',
               borderRadius: 8
             }} /></div>
               <div style={{
@@ -1172,7 +1173,7 @@ function UsersPage({
                       width: 32,
                       height: 32,
                       borderRadius: "50%",
-                      background: "#0c1031",
+                      background: "#0B1E30",
                       color: "#fff",
                       display: "grid",
                       placeItems: "center",

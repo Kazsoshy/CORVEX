@@ -16,10 +16,13 @@ import { EmptyState } from '../shared/EmptyState';
 import { LoadingState } from '../shared/LoadingState';
 import { NavIcon } from '../../navIcons';
 import { fetchSawResults, recomputeOrgSawResults } from '../../api/sawResultsService';
-import { formatCurrency, formatDisplayDateTime } from '../../utils/formatters.js';
+import { formatCurrency, formatDisplayDate, formatDisplayDateTime } from '../../utils/formatters.js';
 import { downloadPdf } from '../../utils/dataExport.js';
+import { chartSeries } from '../../theme/palette.js';
+import { ChartDrilldownModal } from '../shared/ChartDrilldownModal.jsx';
+import { useChartDrilldown } from '../../hooks/useChartDrilldown.js';
 
-const BRANCH_COLORS = ['#255684', '#0c1031', '#c2410c', '#0d9f6e', '#7c3aed'];
+const BRANCH_COLORS = chartSeries;
 
 function scoreTone(score) {
   const value = Number(score) || 0;
@@ -100,67 +103,43 @@ function normsMatchCohort(row) {
   );
 }
 
-function formatFactorNumber(value, digits) {
-  const n = finite(value);
-  if (n == null) return '—';
-  return n.toFixed(digits);
-}
-
 function formatSavedMoney(value) {
   const n = finite(value);
   if (n == null) return '—';
   return formatCurrency(n);
 }
 
-function SawFactorCell({ row }) {
-  if (!hasStoredFactors(row)) {
-    return <span className="saw-factors-bad">Not stored</span>;
-  }
-  const expected = expectedNorms(row);
-  const normsOk = normsMatchCohort(row);
-  const maxBalance = formatSavedMoney(row.cohort_max_balance);
-  const maxDays = finite(row.cohort_max_days) == null ? '—' : Math.round(Number(row.cohort_max_days));
-  const minDistance = formatFactorNumber(row.cohort_min_distance, 3);
-  return (
-    <div className="saw-factors-cell">
-      <div className="saw-factors-math">
-        {formatFactorNumber(row.weight_balance, 2)}×{formatFactorNumber(row.balance_norm, 2)}
-        {' + '}
-        {formatFactorNumber(row.weight_days, 2)}×{formatFactorNumber(row.days_norm, 2)}
-        {' + '}
-        {formatFactorNumber(row.weight_distance, 2)}×{formatFactorNumber(row.distance_norm, 2)}
-      </div>
-      {expected ? (
-        <>
-          <div className="saw-factors-cohort">
-            Balance {formatSavedMoney(row.outstanding_balance)} / {maxBalance} = {formatFactorNumber(expected.balance_norm, 2)}
-          </div>
-          <div className="saw-factors-cohort">
-            Days {Math.round(Number(row.days_overdue))} / {maxDays} = {formatFactorNumber(expected.days_norm, 2)}
-          </div>
-          <div className="saw-factors-cohort">
-            Closest {minDistance} km / {formatFactorNumber(row.distance_km, 3)} km = {formatFactorNumber(expected.distance_norm, 2)}
-          </div>
-          <div className={normsOk ? 'saw-factors-ok' : 'saw-factors-bad'}>
-            {normsOk ? 'Normalized values match' : 'Normalized values do not match the saved inputs'}
-          </div>
-        </>
-      ) : (
-        <div className="saw-factors-bad">Cohort totals were not saved</div>
-      )}
-    </div>
-  );
-}
-
 function SawScoreCheck({ row }) {
   const next = recomputedScore(row);
   const matches = scoreMatchesStoredFactors(row);
-  if (next == null) return <span className="saw-factors-bad">Cannot recompute</span>;
+  if (next == null) {
+    return <span className="saw-factors-bad" title="Cannot recompute">—</span>;
+  }
+  const full = matches
+    ? `Recomputed ${next.toFixed(3)}`
+    : `Recomputed ${next.toFixed(3)} ≠ stored`;
   return (
-    <span className={matches ? 'saw-factors-ok' : 'saw-factors-bad'}>
-      {matches ? `Recomputed ${next.toFixed(3)}` : `Recomputed ${next.toFixed(3)} ≠ stored`}
+    <span
+      className={matches ? 'saw-factors-ok' : 'saw-factors-bad'}
+      title={full}
+    >
+      {matches ? next.toFixed(3) : `${next.toFixed(3)} ≠`}
     </span>
   );
+}
+
+function formatSawGeneratedParts(value) {
+  if (value === null || value === undefined || value === '') {
+    return { date: '—', time: '' };
+  }
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return { date: formatDisplayDateTime(value), time: '' };
+  }
+  return {
+    date: formatDisplayDate(value),
+    time: date.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' }),
+  };
 }
 
 function ranksFollowScores(rows) {
@@ -197,6 +176,7 @@ function exportSawPdf(rows) {
 }
 
 export function SawResultsPage({ navigate, showToast }) {
+  const { drilldown, closeDrilldown, openLocalDrilldown } = useChartDrilldown({ showToast });
   const [results, setResults] = useState([]);
   const [summary, setSummary] = useState(null);
   const [byBranch, setByBranch] = useState([]);
@@ -319,7 +299,7 @@ export function SawResultsPage({ navigate, showToast }) {
         id: row.result_id || row.customer_id,
         position: [Number(row.latitude), Number(row.longitude)],
         label: String(row.ranking || '#'),
-        color: scoreTone(row.score) === 'high' ? '#b91c1c' : scoreTone(row.score) === 'mid' ? '#c2410c' : '#255684',
+        color: scoreTone(row.score) === 'high' ? '#b91c1c' : scoreTone(row.score) === 'mid' ? '#c2410c' : '#1A4162',
         popup: `#${row.ranking} · ${row.customer_name} · ${Number(row.score).toFixed(3)} · ${row.branch_name || ''}`,
       })),
     [sorted]
@@ -338,7 +318,7 @@ export function SawResultsPage({ navigate, showToast }) {
   const scoresCheckOut = fullQueueLoaded && results.every((row) => scoreMatchesStoredFactors(row) && normsMatchCohort(row));
   const ranksCheckOut = fullQueueLoaded && ranksFollowScores(results);
 
-  if (loading && !results.length) return <LoadingState message="Loading SAW results…" />;
+  if (loading && !results.length) return <LoadingState variant="chart" message="Loading SAW results…" />;
 
   return (
     <div className="page saw-results-page">
@@ -532,8 +512,36 @@ export function SawResultsPage({ navigate, showToast }) {
           </div>
           {chartData.length ? (
             <ResponsiveContainer width="100%" height={220}>
-              <BarChart data={chartData}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#c5c8d0" />
+              <BarChart
+                data={chartData}
+                style={{ cursor: 'pointer' }}
+                onClick={(state) => {
+                  const label = state?.activeLabel;
+                  if (!label) return;
+                  const branchRows = results.filter((r) => String(r.branch_name || '').replace(' Branch', '') === label
+                    || String(r.branch_name || '') === label);
+                  openLocalDrilldown({
+                    title: 'SAW ranked customers',
+                    category: label,
+                    dateRange: 'Current SAW results',
+                    columnSet: 'saw',
+                    rows: branchRows.map((r) => ({
+                      ranking: r.ranking,
+                      customer_name: r.customer_name,
+                      branch_name: r.branch_name,
+                      score: r.score,
+                      outstanding_balance: r.outstanding_balance,
+                      days_overdue: r.days_overdue,
+                    })),
+                    totals: [
+                      { label: 'Customers', value: branchRows.length },
+                      { label: 'Outstanding', value: formatCurrency(branchRows.reduce((s, r) => s + Number(r.outstanding_balance || 0), 0)) },
+                    ],
+                    filenameBase: `saw-branch-${label}`,
+                  });
+                }}
+              >
+                <CartesianGrid strokeDasharray="3 3" stroke="#BADBE9" />
                 <XAxis dataKey="name" tick={{ fontSize: 12 }} />
                 <YAxis allowDecimals={false} tick={{ fontSize: 12 }} />
                 <Tooltip
@@ -558,18 +566,46 @@ export function SawResultsPage({ navigate, showToast }) {
             <div>
               <h3 style={{ margin: 0 }}>Score Distribution</h3>
               <p className="text-ink/70" style={{ margin: '4px 0 0', fontSize: '0.85rem' }}>
-                How preference scores cluster across the queue
+                How preference scores cluster across the queue · click a bar
               </p>
             </div>
           </div>
           {results.length ? (
             <ResponsiveContainer width="100%" height={220}>
-              <BarChart data={scoreHistogram}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#c5c8d0" />
+              <BarChart
+                data={scoreHistogram}
+                style={{ cursor: 'pointer' }}
+                onClick={(state) => {
+                  const label = state?.activeLabel;
+                  const bucket = scoreHistogram.find((b) => b.name === label);
+                  if (!bucket) return;
+                  const bandRows = results.filter((r) => {
+                    const score = Number(r.score) || 0;
+                    return score >= bucket.min && score < bucket.max;
+                  });
+                  openLocalDrilldown({
+                    title: 'SAW score band',
+                    category: label,
+                    dateRange: 'Current SAW results',
+                    columnSet: 'saw',
+                    rows: bandRows.map((r) => ({
+                      ranking: r.ranking,
+                      customer_name: r.customer_name,
+                      branch_name: r.branch_name,
+                      score: r.score,
+                      outstanding_balance: r.outstanding_balance,
+                      days_overdue: r.days_overdue,
+                    })),
+                    totals: [{ label: 'Customers', value: bandRows.length }],
+                    filenameBase: `saw-score-${label}`,
+                  });
+                }}
+              >
+                <CartesianGrid strokeDasharray="3 3" stroke="#BADBE9" />
                 <XAxis dataKey="name" tick={{ fontSize: 11 }} />
                 <YAxis allowDecimals={false} tick={{ fontSize: 12 }} />
                 <Tooltip />
-                <Bar dataKey="count" name="Customers" fill="#255684" radius={[4, 4, 0, 0]} />
+                <Bar dataKey="count" name="Customers" fill="#1A4162" radius={[4, 4, 0, 0]} />
               </BarChart>
             </ResponsiveContainer>
           ) : (
@@ -638,52 +674,49 @@ export function SawResultsPage({ navigate, showToast }) {
         ) : (
           <>
             <div className="corvex-table-wrapper">
-              <table className="corvex-table">
+              <table className="corvex-table corvex-table-saw">
                 <thead>
                   <tr>
-                    <th>Rank</th>
-                    <th>Customer</th>
-                    <th>Branch</th>
-                    <th>Territory</th>
-                    <th>Collector</th>
-                    <th>Balance</th>
-                    <th>Days overdue</th>
-                    <th>Distance</th>
-                    <th>Normalized values</th>
-                    <th>Score</th>
-                    <th>Generated</th>
-                    <th>Actions</th>
+                    <th className="saw-col-rank">Rank</th>
+                    <th className="saw-col-customer">Customer</th>
+                    <th className="saw-col-branch">Branch</th>
+                    <th className="saw-col-territory">Territory</th>
+                    <th className="saw-col-collector">Collector</th>
+                    <th className="saw-col-balance">Balance</th>
+                    <th className="saw-col-days">Days overdue</th>
+                    <th className="saw-col-distance">Distance</th>
+                    <th className="saw-col-score">Score</th>
+                    <th className="saw-col-generated">Generated</th>
+                    <th className="saw-col-actions">Actions</th>
                   </tr>
                 </thead>
                 <tbody>
                   {rows.map((row) => {
                     const tone = scoreTone(row.score);
                     const pct = Math.min(100, Math.max(4, Number(row.score) * 100));
+                    const generated = formatSawGeneratedParts(row.generated_at);
                     return (
                       <tr key={row.result_id} className={`saw-row-${tone}`}>
-                        <td>
+                        <td className="saw-col-rank">
                           <span className={`saw-rank-badge ${Number(row.ranking) <= 3 ? 'top' : ''}`}>
                             #{row.ranking}
                           </span>
                         </td>
-                        <td>
+                        <td className="saw-col-customer">
                           <strong>{row.customer_name || `Customer #${row.customer_id}`}</strong>
                           {row.address ? (
-                            <span className="text-ink/70" style={{ display: 'block', fontSize: '0.8rem' }}>
+                            <span className="saw-customer-address">
                               {row.address}
                             </span>
                           ) : null}
                         </td>
-                        <td>{row.branch_name || '—'}</td>
-                        <td>{row.territory_name || '—'}</td>
-                        <td>{row.collector_name || '—'}</td>
-                        <td>{formatSavedMoney(row.outstanding_balance)}</td>
-                        <td>{finite(row.days_overdue) == null ? '—' : Math.round(Number(row.days_overdue))}</td>
-                        <td>{finite(row.distance_km) == null ? '—' : `${Number(row.distance_km).toFixed(3)} km`}</td>
-                        <td>
-                          <SawFactorCell row={row} />
-                        </td>
-                        <td>
+                        <td className="saw-col-branch" title={row.branch_name || undefined}>{row.branch_name || '—'}</td>
+                        <td className="saw-col-territory" title={row.territory_name || undefined}>{row.territory_name || '—'}</td>
+                        <td className="saw-col-collector" title={row.collector_name || undefined}>{row.collector_name || '—'}</td>
+                        <td className="saw-col-balance">{formatSavedMoney(row.outstanding_balance)}</td>
+                        <td className="saw-col-days">{finite(row.days_overdue) == null ? '—' : Math.round(Number(row.days_overdue))}</td>
+                        <td className="saw-col-distance">{finite(row.distance_km) == null ? '—' : `${Number(row.distance_km).toFixed(3)} km`}</td>
+                        <td className="saw-col-score">
                           <div className="saw-score-cell">
                             <span className={`saw-score-pill ${tone}`}>
                               {Number(row.score).toFixed(4)}
@@ -694,8 +727,13 @@ export function SawResultsPage({ navigate, showToast }) {
                             <SawScoreCheck row={row} />
                           </div>
                         </td>
-                        <td>{formatDisplayDateTime(row.generated_at)}</td>
-                        <td className="table-actions">
+                        <td className="saw-col-generated" title={formatDisplayDateTime(row.generated_at)}>
+                          <span className="saw-generated-cell">
+                            <span className="saw-generated-date">{generated.date}</span>
+                            {generated.time ? <span className="saw-generated-time">{generated.time}</span> : null}
+                          </span>
+                        </td>
+                        <td className="table-actions saw-col-actions">
                           <button
                             className="icon-action-button"
                             type="button"
@@ -723,6 +761,7 @@ export function SawResultsPage({ navigate, showToast }) {
           </>
         )}
       </section>
+      <ChartDrilldownModal {...drilldown} onClose={closeDrilldown} showToast={showToast} />
     </div>
   );
 }

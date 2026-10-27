@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { fetchCentralInventory, realignCentralInventory } from '../../api/inventoryService.js';
 import { formatDisplayDate, formatDisplayDateTime } from '../../utils/formatters.js';
+import { usePagination } from '../../hooks/usePagination';
 import { NavIcon } from '../../navIcons';
 import { EmptyState } from '../shared/EmptyState';
 import { LoadingState } from '../shared/LoadingState';
+import { Pagination } from '../shared/Pagination';
 import { StatusBadge } from '../StatusBadge';
 
 const METRIC_DEFS = [
@@ -23,13 +25,13 @@ const METRIC_DEFS = [
     key: 'lowStock',
     label: 'Low Stock',
     icon: 'alert-triangle',
-    tone: 'warn',
+    tone: 'neutral',
   },
   {
     key: 'outOfStock',
     label: 'Out of Stock',
     icon: 'package-x',
-    tone: 'danger',
+    tone: 'neutral',
   },
 ];
 
@@ -106,6 +108,11 @@ export function CentralInventoryPanel({
     });
   }, [rows, search, statusFilter]);
 
+  const matrixPagination = usePagination(filteredRows, {
+    resetKey: `${search}|${statusFilter}|${branchId}|${view}`,
+  });
+  const paginatedMatrixRows = matrixPagination.paginatedData;
+
   const metrics = useMemo(() => ({
     totalStock: summary?.totalStock ?? 0,
     productsTracked: summary?.productsTracked ?? summary?.products ?? 0,
@@ -133,7 +140,7 @@ export function CentralInventoryPanel({
     }
   };
 
-  if (loading) return <LoadingState message="Loading inventory centralization…" />;
+  if (loading) return <LoadingState variant="dashboard" message="Loading inventory centralization…" />;
   if (error && !summary) return <EmptyState title="Central inventory unavailable" description={error} />;
 
   return (
@@ -144,10 +151,6 @@ export function CentralInventoryPanel({
           <div>
             <p className="inv-overview-eyebrow">Inventory Centralization</p>
             <h3>{title}</h3>
-            <p className="inv-overview-sub">
-              All branches · Live PostgreSQL records
-              {summary?.lastSyncedAt ? ` · Synced ${formatDisplayDateTime(summary.lastSyncedAt)}` : ''}
-            </p>
           </div>
           <div className="inv-overview-actions">
             <StatusBadge status={aligned ? 'Aligned' : 'Needs alignment'} />
@@ -171,15 +174,21 @@ export function CentralInventoryPanel({
         </div>
 
         <div className="inv-metric-grid">
-          {METRIC_DEFS.map((metric) => (
-            <article key={metric.key} className={`inv-metric-card tone-${metric.tone}`}>
-              <div className="inv-metric-icon" aria-hidden="true">
-                <NavIcon name={metric.icon} />
-              </div>
-              <strong className="inv-metric-value">{Number(metrics[metric.key] || 0).toLocaleString()}</strong>
-              <span className="inv-metric-label">{metric.label}</span>
-            </article>
-          ))}
+          {METRIC_DEFS.map((metric) => {
+            const value = Number(metrics[metric.key] || 0);
+            let tone = metric.tone || 'neutral';
+            if (metric.key === 'lowStock') tone = value > 0 ? 'warn' : 'neutral';
+            if (metric.key === 'outOfStock') tone = value > 0 ? 'danger' : 'neutral';
+            return (
+              <article key={metric.key} className={`inv-metric-card tone-${tone}`}>
+                <div className="inv-metric-icon" aria-hidden="true">
+                  <NavIcon name={metric.icon} />
+                </div>
+                <strong className="inv-metric-value">{value.toLocaleString()}</strong>
+                <span className="inv-metric-label">{metric.label}</span>
+              </article>
+            );
+          })}
         </div>
 
         <p className="inv-overview-footnote">
@@ -354,55 +363,58 @@ export function CentralInventoryPanel({
                 {!filteredRows.length ? (
                   <EmptyState title="No products" description="Adjust filters or add products to the catalog." />
                 ) : (
-                  <div className="corvex-table-wrapper">
-                    <table className="corvex-table">
-                      <thead>
-                        <tr>
-                          <th>Product</th>
-                          <th>SKU</th>
-                          <th>Central quantity</th>
-                          {selectedBranch ? (
-                            <th>{selectedBranch.branch_name}</th>
-                          ) : (
-                            branches.map((branch) => (
-                              <th key={branch.branch_id}>{branch.branch_name}</th>
-                            ))
-                          )}
-                          <th>Status</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {filteredRows.map((row) => {
-                          const byBranchMap = new Map((row.branches || []).map((branch) => [branch.branch_id, branch]));
-                          const visibleBranches = selectedBranch ? [selectedBranch] : branches;
-                          return (
-                            <tr key={row.product_id}>
-                              <td><strong>{row.product_name}</strong></td>
-                              <td>{row.sku || '—'}</td>
-                              <td>{row.central_quantity ?? 0}</td>
-                              {visibleBranches.map((branch) => {
-                                const stock = byBranchMap.get(branch.branch_id);
-                                const quantity = stock?.available_stock;
-                                return (
-                                  <td key={branch.branch_id}>
-                                    {quantity == null ? '—' : quantity}
-                                    {stock?.stock_status ? (
-                                      <div style={{ marginTop: 4 }}>
-                                        <StatusBadge status={stock.stock_status} />
-                                      </div>
-                                    ) : null}
-                                  </td>
-                                );
-                              })}
-                              <td>
-                                <StatusBadge status={row.aligned ? 'Aligned' : 'Out of balance'} />
-                              </td>
-                            </tr>
-                          );
-                        })}
-                      </tbody>
-                    </table>
-                  </div>
+                  <>
+                    <div className="corvex-table-wrapper">
+                      <table className="corvex-table">
+                        <thead>
+                          <tr>
+                            <th>Product</th>
+                            <th>SKU</th>
+                            <th>Central quantity</th>
+                            {selectedBranch ? (
+                              <th>{selectedBranch.branch_name}</th>
+                            ) : (
+                              branches.map((branch) => (
+                                <th key={branch.branch_id}>{branch.branch_name}</th>
+                              ))
+                            )}
+                            <th>Status</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {paginatedMatrixRows.map((row) => {
+                            const byBranchMap = new Map((row.branches || []).map((branch) => [branch.branch_id, branch]));
+                            const visibleBranches = selectedBranch ? [selectedBranch] : branches;
+                            return (
+                              <tr key={row.product_id}>
+                                <td><strong>{row.product_name}</strong></td>
+                                <td>{row.sku || '—'}</td>
+                                <td>{row.central_quantity ?? 0}</td>
+                                {visibleBranches.map((branch) => {
+                                  const stock = byBranchMap.get(branch.branch_id);
+                                  const quantity = stock?.available_stock;
+                                  return (
+                                    <td key={branch.branch_id}>
+                                      {quantity == null ? '—' : quantity}
+                                      {stock?.stock_status ? (
+                                        <div style={{ marginTop: 4 }}>
+                                          <StatusBadge status={stock.stock_status} />
+                                        </div>
+                                      ) : null}
+                                    </td>
+                                  );
+                                })}
+                                <td>
+                                  <StatusBadge status={row.aligned ? 'Aligned' : 'Out of balance'} />
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                    <Pagination {...matrixPagination} />
+                  </>
                 )}
               </>
             ) : (

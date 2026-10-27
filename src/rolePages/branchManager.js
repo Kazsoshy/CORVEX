@@ -44,12 +44,6 @@ export const branchManagerRole = {
         { label: 'Settings',            to: '/branch-manager/settings' },
       ],
     },
-    {
-      title: 'Account',
-      items: [
-        { label: 'Profile', to: '/branch-manager/profile' },
-      ],
-    },
   ],
   navPages: [
     { label: 'Dashboard',                          to: '/branch-manager/dashboard' },
@@ -68,7 +62,6 @@ export const branchManagerRole = {
     { label: 'Audit Log',                          to: '/branch-manager/audit-log' },
     { label: 'Notifications',                      to: '/branch-manager/notifications' },
     { label: 'Settings',                           to: '/branch-manager/settings' },
-    { label: 'Profile',                            to: '/branch-manager/profile' },
   ],
   routes: {},
 };

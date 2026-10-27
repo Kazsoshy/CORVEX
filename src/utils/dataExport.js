@@ -44,17 +44,32 @@ function formatCell(value) {
 /**
  * Download rows (array of plain objects) as a professionally formatted PDF.
  * Handles multi-page tables automatically for large datasets.
+ * Empty selections still produce a one-page PDF noting zero records.
  */
 export function downloadPdf(rows, options = {}) {
   const {
     filename = 'export.pdf',
     title = 'CORVEX Export',
     subtitle = '',
+    category = '',
+    dateRange = '',
+    columns = null,
+    totals = [],
+    allowEmpty = false,
   } = typeof options === 'string' ? { filename: options } : options;
 
-  if (!rows?.length) return false;
+  const list = Array.isArray(rows) ? rows : [];
+  if (!list.length && !allowEmpty) return false;
 
-  const keys = Object.keys(rows[0]);
+  const keys = columns?.length
+    ? columns.map((c) => (typeof c === 'string' ? c : c.key)).filter(Boolean)
+    : list.length
+      ? Object.keys(list[0])
+      : ['message'];
+  const headers = columns?.length
+    ? columns.map((c) => (typeof c === 'string' ? humanizeHeader(c) : (c.label || humanizeHeader(c.key))))
+    : keys.map(humanizeHeader);
+
   const generatedAt = new Date().toLocaleString();
   const doc = new jsPDF({
     orientation: keys.length > 6 ? 'landscape' : 'portrait',
@@ -67,32 +82,38 @@ export function downloadPdf(rows, options = {}) {
 
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(16);
-  doc.setTextColor(9, 56, 80);
+  doc.setTextColor(26, 65, 98);
   doc.text('CORVEX', marginX, 36);
 
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(13);
-  doc.setTextColor(15, 23, 42);
+  doc.setTextColor(11, 30, 48);
   doc.text(String(title), marginX, 58);
 
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(9);
-  doc.setTextColor(100, 116, 139);
+  doc.setTextColor(95, 115, 133);
   const meta = [
     `Generated: ${generatedAt}`,
-    `Records: ${rows.length}`,
+    `Records: ${list.length}`,
+    category ? `Category: ${category}` : null,
+    dateRange ? `Period: ${dateRange}` : null,
     subtitle ? String(subtitle) : null,
   ].filter(Boolean);
   doc.text(meta.join('  ·  '), marginX, 74);
 
-  doc.setDrawColor(226, 232, 240);
+  doc.setDrawColor(186, 219, 233);
   doc.setLineWidth(1);
   doc.line(marginX, 82, pageWidth - marginX, 82);
 
+  const body = list.length
+    ? list.map((row) => keys.map((key) => formatCell(row[key])))
+    : [keys.map((key, i) => (i === 0 ? 'No records found for this selection.' : ''))];
+
   autoTable(doc, {
     startY: 92,
-    head: [keys.map(humanizeHeader)],
-    body: rows.map((row) => keys.map((key) => formatCell(row[key]))),
+    head: [headers],
+    body,
     theme: 'grid',
     styles: {
       font: 'helvetica',
@@ -100,25 +121,25 @@ export function downloadPdf(rows, options = {}) {
       cellPadding: 5,
       overflow: 'linebreak',
       valign: 'middle',
-      textColor: [15, 23, 42],
-      lineColor: [226, 232, 240],
+      textColor: [11, 30, 48],
+      lineColor: [186, 219, 233],
       lineWidth: 0.5,
     },
     headStyles: {
-      fillColor: [241, 245, 249],
-      textColor: [100, 116, 139],
+      fillColor: [218, 241, 248],
+      textColor: [26, 65, 98],
       fontStyle: 'bold',
       fontSize: 8,
     },
     alternateRowStyles: {
-      fillColor: [250, 251, 252],
+      fillColor: [245, 248, 250],
     },
     margin: { left: marginX, right: marginX, bottom: 40 },
     didDrawPage: (data) => {
       const pageCount = doc.getNumberOfPages();
       const pageHeight = doc.internal.pageSize.getHeight();
       doc.setFontSize(8);
-      doc.setTextColor(148, 163, 184);
+      doc.setTextColor(95, 115, 133);
       doc.text(
         `Page ${data.pageNumber} of ${pageCount}`,
         pageWidth - marginX,
@@ -128,6 +149,89 @@ export function downloadPdf(rows, options = {}) {
       doc.text('CORVEX Report', marginX, pageHeight - 18);
     },
   });
+
+  if (totals?.length) {
+    let y = (doc.lastAutoTable?.finalY || 92) + 18;
+    const pageHeight = doc.internal.pageSize.getHeight();
+    if (y > pageHeight - 60) {
+      doc.addPage();
+      y = 48;
+    }
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(10);
+    doc.setTextColor(26, 65, 98);
+    doc.text('Totals', marginX, y);
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(9);
+    doc.setTextColor(11, 30, 48);
+    totals.forEach((item, index) => {
+      doc.text(`${item.label}: ${formatCell(item.value)}`, marginX, y + 14 + index * 14);
+    });
+  }
+
+  doc.save(normalizeFilename(filename, 'pdf'));
+  return true;
+}
+
+/** Compact PDF summarizing a selected chart slice (title, legend values, totals). */
+export function downloadChartSummaryPdf({
+  filename = 'chart-summary.pdf',
+  title = 'CORVEX Chart',
+  subtitle = '',
+  category = '',
+  dateRange = '',
+  legend = [],
+  summaryRows = [],
+} = {}) {
+  const doc = new jsPDF({ orientation: 'portrait', unit: 'pt', format: 'a4' });
+  const pageWidth = doc.internal.pageSize.getWidth();
+  const marginX = 40;
+  const generatedAt = new Date().toLocaleString();
+
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(16);
+  doc.setTextColor(26, 65, 98);
+  doc.text('CORVEX', marginX, 36);
+
+  doc.setFontSize(13);
+  doc.setTextColor(11, 30, 48);
+  doc.text(String(title), marginX, 58);
+
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(9);
+  doc.setTextColor(95, 115, 133);
+  doc.text(
+    [`Generated: ${generatedAt}`, category ? `Category: ${category}` : null, dateRange ? `Period: ${dateRange}` : null, subtitle || null]
+      .filter(Boolean)
+      .join('  ·  '),
+    marginX,
+    74
+  );
+  doc.setDrawColor(186, 219, 233);
+  doc.line(marginX, 82, pageWidth - marginX, 82);
+
+  const legendBody = (legend || []).map((item) => [item.label, formatCell(item.value)]);
+  autoTable(doc, {
+    startY: 96,
+    head: [['Series / Field', 'Value']],
+    body: legendBody.length ? legendBody : [['—', 'No series values']],
+    theme: 'grid',
+    styles: { fontSize: 9, cellPadding: 6, textColor: [11, 30, 48], lineColor: [186, 219, 233] },
+    headStyles: { fillColor: [218, 241, 248], textColor: [26, 65, 98], fontStyle: 'bold' },
+    margin: { left: marginX, right: marginX },
+  });
+
+  if (summaryRows?.length) {
+    autoTable(doc, {
+      startY: (doc.lastAutoTable?.finalY || 96) + 16,
+      head: [['Summary', 'Value']],
+      body: summaryRows.map((row) => [row.label, formatCell(row.value)]),
+      theme: 'grid',
+      styles: { fontSize: 9, cellPadding: 6, textColor: [11, 30, 48], lineColor: [186, 219, 233] },
+      headStyles: { fillColor: [206, 243, 223], textColor: [11, 30, 48], fontStyle: 'bold' },
+      margin: { left: marginX, right: marginX },
+    });
+  }
 
   doc.save(normalizeFilename(filename, 'pdf'));
   return true;

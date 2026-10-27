@@ -22,7 +22,7 @@ export function DetailRowsTable({
         <tbody>
           {rows.map((row) => (
             <tr key={row.key || row.label}>
-              <td style={{ fontWeight: 600, color: '#818697' }}>{row.label}</td>
+              <td style={{ fontWeight: 600, color: '#5F7385' }}>{row.label}</td>
               <td>{row.value ?? '—'}</td>
             </tr>
           ))}

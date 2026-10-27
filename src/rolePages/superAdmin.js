@@ -14,7 +14,6 @@ export const superAdminRole = {
     { label: 'Database Monitoring',    to: '/super-admin/monitoring' },
     { label: 'Audit Logs',             to: '/super-admin/audit-logs' },
     { label: 'Notifications',          to: '/super-admin/notifications' },
-    { label: 'Profile',                to: '/super-admin/profile' },
   ],
   routes: {},
 };

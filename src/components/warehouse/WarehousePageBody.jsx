@@ -2,7 +2,6 @@ import { Pagination } from '../shared/Pagination';
 import { StatsGrid, Stats } from '../shared/StatsGrid';
 import { usePagination } from '../../hooks/usePagination';
 import { useEffect, useMemo, useState } from 'react';
-import { Link } from 'react-router-dom';
 import {
   createInventoryTransfer,
   createRestock,
@@ -27,6 +26,19 @@ import { getCurrentUser } from '../../api/authService.js';
 import { AccountProfilePanel } from '../shared/AccountProfilePanel';
 import { isWarehouseBarcodeEnabled, isWarehouseLowStockEnabled } from '../../settings/preferences.js';
 import { UserSettingsPanel } from '../shared/UserSettingsPanel';
+import { QuantityStepper } from '../shared/QuantityStepper.jsx';
+
+function ProductThumb({ src, alt = '', size }) {
+  const style = size ? { width: size, height: size } : undefined;
+  if (src) {
+    return <img className="product-thumb" src={src} alt={alt} width={size || 40} height={size || 40} style={style} />;
+  }
+  return (
+    <span className="product-thumb product-thumb--empty" style={style} aria-hidden="true">
+      N/A
+    </span>
+  );
+}
 
 function transferWorkflowStepIndex(status) {
   if (status === 'Rejected') return -1;
@@ -49,7 +61,7 @@ import { DetailRowsTable } from '../shared/DetailRowsTable';
 import { NavIcon } from '../../navIcons';
 import { StatusBadge } from '../StatusBadge';
 import { CreditHistoryListPage, CreditHistoryDetailPage } from '../shared/CreditHistoryPages';
-import { formatCurrency, formatDisplayDate, formatDisplayDateTime } from '../../utils/formatters.js';
+import { formatCurrency, formatDisplayDate, formatDisplayDateTime, formatPhone } from '../../utils/formatters.js';
 import { CentralInventoryPanel } from '../inventory/CentralInventoryPanel';
 import { ProductImagePicker } from '../shared/ProductImagePicker';
 const PAGE_SIZE = 10;
@@ -57,9 +69,7 @@ function DashboardPage({
   navigate,
   showToast
 }) {
-  const user = getCurrentUser();
   const [dashboard, setDashboard] = useState(null);
-  const [unreadCount, setUnreadCount] = useState(0);
   const [recentNotifications, setRecentNotifications] = useState([]);
   const [loading, setLoading] = useState(true);
   useEffect(() => {
@@ -70,7 +80,6 @@ function DashboardPage({
       else if (showToast) showToast(dashRes.message || 'Failed to load dashboard.', 'error');
       if (notifRes.success) {
         const rows = notifRes.data || [];
-        setUnreadCount(rows.filter(n => n.status !== 'Read').length);
         setRecentNotifications(rows.filter((n) => String(n.category || '').toLowerCase().includes('stock')).slice(0, 5));
       }
       setLoading(false);
@@ -79,42 +88,16 @@ function DashboardPage({
   }, [showToast]);
 
   const summary = dashboard?.summary || {};
-  const health = dashboard?.inventoryHealth || {};
   const quickId = dashboard?.quickProductId;
   const transfers = dashboard?.recentTransfers || [];
   const restocks = dashboard?.recentRestocks || [];
   const topMoving = dashboard?.topMovingProducts || [];
   const criticalProducts = dashboard?.criticalProducts || [];
 
-  const transfersPager = usePagination(transfers);
-  const restocksPager = usePagination(restocks);
-  const topMovingPager = usePagination(topMoving);
-  const criticalPager = usePagination(criticalProducts);
-
   if (loading) return <LoadingState message="Loading dashboard..." />;
 
   return (
     <div className="warehouse-dashboard relative z-10 grid gap-5 w-full">
-      <section className="panel dashboard-greeting warehouse-dashboard-header">
-        <div className="dashboard-greeting-main">
-          <p className="dashboard-eyebrow">Warehouse operations</p>
-          <h2>{user?.fullName || 'Warehouse Staff'}</h2>
-          <p className="muted">{user?.branch?.name || 'Branch warehouse'}</p>
-        </div>
-        <Link
-          to="/warehouse/notifications"
-          className="relative p-2 text-ink/70 hover:text-blue hover:bg-blue/5 rounded-md transition-colors cursor-pointer"
-          aria-label={`${unreadCount} unread notifications`}
-        >
-          <NavIcon name="bell" />
-          {unreadCount > 0 ? (
-            <span className="absolute top-0 right-0 min-w-[18px] h-[18px] px-1 flex justify-center items-center rounded-full bg-red text-white text-[0.7rem] font-bold border-2 border-mint">
-              {unreadCount}
-            </span>
-          ) : null}
-        </Link>
-      </section>
-
       {/* Overview */}
       <section className="dashboard-section" aria-labelledby="wh-overview-heading">
         <div className="dashboard-section-header">
@@ -130,50 +113,47 @@ function DashboardPage({
         ]} />
 
         {isWarehouseLowStockEnabled() && recentNotifications.length ? (
-          <section className="panel content-panel relative overflow-hidden" style={{ marginTop: 14 }}>
-            <div className="list-section-header">
-              <h3 style={{ margin: 0 }}>Stock threshold alerts</h3>
+          <section className="panel dashboard-panel-compact alert-panel" style={{ marginTop: 14 }}>
+            <div className="dashboard-panel-heading">
+              <h4>Stock Threshold Alerts</h4>
               <button className="button secondary" type="button" onClick={() => navigate('/warehouse/notifications')}>
                 View all
               </button>
             </div>
-            <ul className="notification-list" style={{ margin: 0 }}>
+            <div className="wh-threshold-alerts">
               {recentNotifications.map((n) => (
-                <li key={n.notification_id} className={`notification-item${n.status === 'Read' ? '' : ' unread'}`}>
-                  <div>
+                <article
+                  key={n.notification_id}
+                  className={`wh-threshold-alert${n.status === 'Read' ? '' : ' unread'}`}
+                >
+                  <div className="wh-threshold-alert-copy">
                     <strong>{n.title}</strong>
                     <p className="muted">{n.message}</p>
                   </div>
-                </li>
+                  {n.created_at ? (
+                    <span className="wh-threshold-alert-time muted">
+                      {formatDisplayDateTime(n.created_at)}
+                    </span>
+                  ) : null}
+                </article>
               ))}
-            </ul>
+            </div>
           </section>
         ) : null}
 
-        <div className="dashboard-actions">
-          <button className="button" type="button" onClick={() => navigate('/warehouse/transfers/new')}>
-            New Transfer Request
-          </button>
-          <button className="button secondary" type="button" onClick={() => navigate('/warehouse/transfers')}>
-            Transfers
-          </button>
-          <button className="button secondary" type="button" onClick={() => navigate('/warehouse/branch-inventory')}>
-            View Branch Inventory
-          </button>
-          {quickId ? (
-            <>
-              <button className="button ghost" type="button" onClick={() => navigate(`/warehouse/product/${quickId}/transfer`)}>
-                Transfer Stock
-              </button>
-              <button className="button ghost" type="button" onClick={() => navigate(`/warehouse/product/${quickId}/restock`)}>
-                Record Restock
-              </button>
-              <button className="button ghost" type="button" onClick={() => navigate(`/warehouse/product/${quickId}/stock-count`)}>
-                Log Stock Count
-              </button>
-            </>
-          ) : null}
-        </div>
+        {quickId ? (
+          <div className="dashboard-actions">
+            <button className="button ghost" type="button" onClick={() => navigate(`/warehouse/product/${quickId}/transfer`)}>
+              Transfer Stock
+            </button>
+            <button className="button ghost" type="button" onClick={() => navigate(`/warehouse/product/${quickId}/restock`)}>
+              Record Restock
+            </button>
+            <button className="button ghost" type="button" onClick={() => navigate(`/warehouse/product/${quickId}/stock-count`)}>
+              Log Stock Count
+            </button>
+          </div>
+        ) : null}
 
         {criticalProducts.length ? (
           <section className="panel dashboard-panel-compact alert-panel">
@@ -192,7 +172,7 @@ function DashboardPage({
                   </tr>
                 </thead>
                 <tbody>
-                  {criticalPager.paginatedData.map((p) => (
+                  {criticalProducts.map((p) => (
                     <tr
                       key={p.product_id}
                       className="clickable-row"
@@ -207,7 +187,6 @@ function DashboardPage({
                 </tbody>
               </table>
             </div>
-            <Pagination {...criticalPager} />
           </section>
         ) : null}
       </section>
@@ -225,33 +204,30 @@ function DashboardPage({
               <h4>Recent Transfers</h4>
             </div>
             {transfers.length ? (
-              <>
-                <div className="corvex-table-wrapper dashboard-table-wrap">
-                  <table className="corvex-table">
-                    <thead>
-                      <tr>
-                        <th>Transfer ID</th>
-                        <th>Product</th>
-                        <th>Status</th>
+              <div className="corvex-table-wrapper dashboard-table-wrap">
+                <table className="corvex-table">
+                  <thead>
+                    <tr>
+                      <th>Transfer ID</th>
+                      <th>Product</th>
+                      <th>Status</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {transfers.map((t) => (
+                      <tr
+                        key={t.transfer_id}
+                        className="clickable-row"
+                        onClick={() => navigate(`/warehouse/transfers/${t.transfer_id}`)}
+                      >
+                        <td><span className="mono-cell">{t.transfer_ref}</span></td>
+                        <td>{t.product_name}</td>
+                        <td><StatusBadge status={t.status} /></td>
                       </tr>
-                    </thead>
-                    <tbody>
-                      {transfersPager.paginatedData.map((t) => (
-                        <tr
-                          key={t.transfer_id}
-                          className="clickable-row"
-                          onClick={() => navigate(`/warehouse/transfers/${t.transfer_id}`)}
-                        >
-                          <td><span className="mono-cell">{t.transfer_ref}</span></td>
-                          <td>{t.product_name}</td>
-                          <td><StatusBadge status={t.status} /></td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-                <Pagination {...transfersPager} />
-              </>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             ) : (
               <p className="dashboard-empty muted">No transfers yet.</p>
             )}
@@ -262,29 +238,26 @@ function DashboardPage({
               <h4>Recent Restocks</h4>
             </div>
             {restocks.length ? (
-              <>
-                <div className="corvex-table-wrapper dashboard-table-wrap">
-                  <table className="corvex-table">
-                    <thead>
-                      <tr>
-                        <th>Product</th>
-                        <th>Date</th>
-                        <th className="text-right">Quantity</th>
+              <div className="corvex-table-wrapper dashboard-table-wrap">
+                <table className="corvex-table">
+                  <thead>
+                    <tr>
+                      <th>Product</th>
+                      <th>Date</th>
+                      <th className="text-right">Quantity</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {restocks.map((r) => (
+                      <tr key={r.restock_id}>
+                        <td>{r.product_name}</td>
+                        <td>{formatDisplayDate(r.received_date)}</td>
+                        <td className="text-right qty-positive">+{r.quantity}</td>
                       </tr>
-                    </thead>
-                    <tbody>
-                      {restocksPager.paginatedData.map((r) => (
-                        <tr key={r.restock_id}>
-                          <td>{r.product_name}</td>
-                          <td>{formatDisplayDate(r.received_date)}</td>
-                          <td className="text-right qty-positive">+{r.quantity}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-                <Pagination {...restocksPager} />
-              </>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             ) : (
               <p className="dashboard-empty muted">No restocks yet.</p>
             )}
@@ -292,75 +265,46 @@ function DashboardPage({
         </div>
       </section>
 
-      {/* Product Activity + Inventory Health */}
+      {/* Product Activity */}
       <section className="dashboard-section" aria-labelledby="wh-product-heading">
         <div className="dashboard-section-header">
           <h3 id="wh-product-heading" className="dashboard-section-title">Product Activity</h3>
-          <p className="dashboard-section-sub">Movement trends and stock health</p>
+          <p className="dashboard-section-sub">Movement trends over the last 30 days</p>
         </div>
 
-        <div className="dashboard-widgets grid two-up dashboard-widgets-start">
-          <section className="panel dashboard-panel-compact">
-            <div className="dashboard-panel-heading">
-              <h4>Top Moving Products</h4>
-              <span className="muted">Last 30 days</span>
-            </div>
-            {topMoving.length ? (
-              <>
-                <div className="corvex-table-wrapper dashboard-table-wrap">
-                  <table className="corvex-table">
-                    <thead>
-                      <tr>
-                        <th>Product</th>
-                        <th className="text-right">Movements</th>
+        <section className="panel dashboard-panel-compact">
+          <div className="dashboard-panel-heading">
+            <h4>Top Moving Products</h4>
+            <span className="muted">Last 30 days</span>
+          </div>
+          {topMoving.length ? (
+            <div className="corvex-table-wrapper dashboard-table-wrap">
+              <table className="corvex-table">
+                <thead>
+                  <tr>
+                    <th>Product</th>
+                    <th className="text-right">Movements</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {topMoving.map((p) => {
+                    const count = Number(p.movements) || 0;
+                    return (
+                      <tr key={p.name}>
+                        <td>{p.name}</td>
+                        <td className="text-right" title={`${count} movement${count === 1 ? '' : 's'}`}>
+                          {count}
+                        </td>
                       </tr>
-                    </thead>
-                    <tbody>
-                      {topMovingPager.paginatedData.map((p) => {
-                        const count = Number(p.movements) || 0;
-                        return (
-                          <tr key={p.name}>
-                            <td>{p.name}</td>
-                            <td className="text-right" title={`${count} movement${count === 1 ? '' : 's'}`}>
-                              {count}
-                            </td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
-                </div>
-                <Pagination {...topMovingPager} />
-              </>
-            ) : (
-              <p className="dashboard-empty muted">No movement data (30 days).</p>
-            )}
-          </section>
-
-          <section className="panel dashboard-panel-compact" aria-labelledby="wh-health-heading">
-            <div className="dashboard-panel-heading">
-              <h4 id="wh-health-heading">Inventory Health</h4>
+                    );
+                  })}
+                </tbody>
+              </table>
             </div>
-            <div className="inventory-health-grid">
-              <article className="inventory-health-item health-sufficient">
-                <span className="inventory-health-label">Sufficient</span>
-                <strong className="inventory-health-value">{health.sufficient ?? 0}</strong>
-              </article>
-              <article className="inventory-health-item health-low">
-                <span className="inventory-health-label">Low Stock</span>
-                <strong className="inventory-health-value">{health.low ?? 0}</strong>
-              </article>
-              <article className="inventory-health-item health-critical">
-                <span className="inventory-health-label">Critical</span>
-                <strong className="inventory-health-value">{health.critical ?? 0}</strong>
-              </article>
-              <article className="inventory-health-item health-out">
-                <span className="inventory-health-label">Out of Stock</span>
-                <strong className="inventory-health-value">{health.outOfStock ?? 0}</strong>
-              </article>
-            </div>
-          </section>
-        </div>
+          ) : (
+            <p className="dashboard-empty muted">No movement data (30 days).</p>
+          )}
+        </section>
       </section>
     </div>
   );
@@ -417,33 +361,20 @@ function InventoryPage({
       <section className="panel content-panel relative overflow-hidden">
         <div className="list-section-header">
           <h3>Product List</h3>
-          <div className="list-section-actions">
-            <button
-              className="button secondary"
-              type="button"
-              onClick={() => {
-                const rows = filtered.map(p => ({
-                  sku: p.sku,
-                  name: p.product_name,
-                  category: p.category_name,
-                  unit_price: p.unit_price,
-                  status: p.status,
-                }));
-                if (downloadPdf(rows, { filename: 'warehouse-products.pdf', title: 'Warehouse Products' })) showToast('Products exported as PDF.', 'success');
-                else showToast('Nothing to export.', 'error');
-              }}
-            >
-              Export PDF
-            </button>
-            <button className="button" type="button" onClick={() => navigate('/warehouse/add-product')}>Add Product</button>
-          </div>
         </div>
-        <div className="list-section-toolbar">
-          <div className="list-section-controls">
-            <input className="filter-input search" type="search" placeholder="Search by name, SKU, or category" value={search} onChange={e => {
-            setSearch(e.target.value);
-            setPage(1);
-          }} />
+        <div className="list-section-toolbar suppliers-toolbar audit-logs-toolbar">
+          <div className="list-section-controls audit-logs-filters">
+            <input
+              className="filter-input search"
+              type="search"
+              placeholder="Search by name, SKU, or category"
+              value={search}
+              onChange={e => {
+                setSearch(e.target.value);
+                setPage(1);
+              }}
+              aria-label="Search products"
+            />
             {isWarehouseBarcodeEnabled() ? (
               <input
                 className="filter-input search"
@@ -468,29 +399,61 @@ function InventoryPage({
                 }}
               />
             ) : null}
-            <select className="filter-select" value={category} onChange={e => {
-            setCategory(e.target.value);
-            setPage(1);
-          }}>
+            <select
+              className="filter-select"
+              value={category}
+              onChange={e => {
+                setCategory(e.target.value);
+                setPage(1);
+              }}
+              aria-label="Filter by category"
+            >
               <option value="All">All Categories</option>
               {categories.map(c => <option key={c.category_id} value={c.category_id}>{c.category_name}</option>)}
             </select>
-            <select className="filter-select" value={sortBy} onChange={e => setSortBy(e.target.value)}>
-              {['Product Name', 'Unit Price'].map(s => <option key={s}>Sort: {s}</option>)}
+            <select
+              className="filter-select"
+              value={sortBy}
+              onChange={e => setSortBy(e.target.value)}
+              aria-label="Sort products"
+            >
+              {['Product Name', 'Unit Price'].map(s => <option key={s} value={s}>Sort: {s}</option>)}
             </select>
+          </div>
+          <div className="list-section-actions suppliers-toolbar-actions">
+            <button
+              className="button secondary whitespace-nowrap"
+              type="button"
+              onClick={() => {
+                const rows = filtered.map(p => ({
+                  sku: p.sku,
+                  name: p.product_name,
+                  category: p.category_name,
+                  unit_price: p.unit_price,
+                  status: p.status,
+                }));
+                if (downloadPdf(rows, { filename: 'warehouse-products.pdf', title: 'Warehouse Products' })) showToast('Products exported as PDF.', 'success');
+                else showToast('Nothing to export.', 'error');
+              }}
+            >
+              Export PDF
+            </button>
+            <button className="button whitespace-nowrap" type="button" onClick={() => navigate('/warehouse/add-product')}>
+              + Add Product
+            </button>
           </div>
         </div>
         {paginated.length ? <><div className="corvex-table-wrapper">
             <table className="corvex-table corvex-table-products">
               <colgroup>
+                <col style={{ width: 52 }} />
                 <col style={{ width: 72 }} />
+                <col style={{ width: 96 }} />
+                <col style={{ width: '26%' }} />
+                <col style={{ width: '16%' }} />
+                <col style={{ width: 96 }} />
                 <col style={{ width: 88 }} />
-                <col style={{ width: 120 }} />
-                <col />
-                <col style={{ width: 140 }} />
-                <col style={{ width: 112 }} />
-                <col style={{ width: 100 }} />
-                <col style={{ width: 108 }} />
+                <col style={{ width: 88 }} />
               </colgroup>
               <thead>
                 <tr>
@@ -507,11 +470,7 @@ function InventoryPage({
               <tbody>
                 {paginated.map(product => <tr key={product.product_id}>
                     <td className="cell-image">
-                      {product.image_url ? (
-                        <img src={product.image_url} alt="" width={48} height={48} />
-                      ) : (
-                        <span className="text-ink/50" style={{ fontSize: '0.75rem' }}>—</span>
-                      )}
+                      <ProductThumb src={product.image_url} alt={product.product_name || ''} />
                     </td>
                     <td>{product.product_id}</td>
                     <td><span className="mono-cell">{product.sku || '—'}</span></td>
@@ -606,11 +565,7 @@ function ProductDetailPage({
       <section className="panel content-panel relative overflow-hidden">
         <div className="flex flex-col md:flex-row justify-between gap-4 items-start md:items-center mb-4">
           <div className="flex gap-4 items-start">
-            {product.image_url ? <img src={product.image_url} alt={product_name} width={96} height={96} style={{
-            objectFit: 'cover',
-            borderRadius: 8,
-            border: '1px solid #c5c8d0'
-          }} /> : null}
+            <ProductThumb src={product.image_url} alt={product_name} size={96} />
             <div>
               <h3 style={{
               margin: 0
@@ -724,7 +679,7 @@ function ProductDetailPage({
                     </td>
                     <td style={{
                   fontWeight: 600,
-                  color: (m.quantity || 0) > 0 ? '#4A6B12' : '#dc2626'
+                  color: (m.quantity || 0) > 0 ? '#2A9B6A' : '#dc2626'
                 }}>
                       {(m.quantity || 0) > 0 ? `+${m.quantity}` : m.quantity}
                     </td>
@@ -771,6 +726,8 @@ function EditProductPage({
     reorderPoint: '5',
     supplierId: '',
     status: 'Active',
+    imageUrl: '',
+    imageName: '',
   });
   const [errors, setErrors] = useState({});
 
@@ -800,6 +757,8 @@ function EditProductPage({
             reorderPoint: p.reorder_point != null ? String(p.reorder_point) : '5',
             supplierId: p.supplier_id != null ? String(p.supplier_id) : '',
             status: p.status || 'Active',
+            imageUrl: p.image_url || '',
+            imageName: p.image_url ? 'Current image' : '',
           });
         }
       } catch (err) {
@@ -831,6 +790,7 @@ function EditProductPage({
         reorder_point: form.reorderPoint !== '' ? Number(form.reorderPoint) : 5,
         supplier_id: form.supplierId ? Number(form.supplierId) : null,
         status: form.status,
+        image_url: form.imageUrl || null,
       };
       const res = await apiClient.put(`/products/${productId}`, payload);
       if (!res.data?.success) {
@@ -951,7 +911,9 @@ function AddProductPage({
     unitPrice: '',
     reorderPoint: '5',
     supplierId: '',
-    initialQuantity: ''
+    initialQuantity: '',
+    imageUrl: '',
+    imageName: '',
   });
   const [errors, setErrors] = useState({});
 
@@ -994,6 +956,7 @@ function AddProductPage({
         unit_price: form.unitPrice !== '' ? Number(form.unitPrice) : 0,
         supplier_id: form.supplierId ? Number(form.supplierId) : null,
         initial_quantity: form.initialQuantity !== '' ? Number(form.initialQuantity) : 0,
+        image_url: form.imageUrl || null,
       });
       if (!result.success) {
         showToast(result.message || 'Failed to create product.', 'error');
@@ -1093,7 +1056,12 @@ function AddProductPage({
               </select> : field.type === 'textarea' ? <textarea value={form[field.name]} onChange={e => setForm(p => ({
           ...p,
           [field.name]: e.target.value
-        }))} /> : <input type={field.type} value={form[field.name]} onChange={e => setForm(p => ({
+        }))} /> : field.name === 'initialQuantity' ? <QuantityStepper
+                value={form.initialQuantity}
+                min={0}
+                onChange={(next) => setForm((p) => ({ ...p, initialQuantity: next }))}
+                aria-label="Initial quantity"
+              /> : <input type={field.type} value={form[field.name]} onChange={e => setForm(p => ({
           ...p,
           [field.name]: e.target.value
         }))} />}
@@ -1141,7 +1109,7 @@ function StockCountPage({
   const [errors, setErrors] = useState({});
   const [submitting, setSubmitting] = useState(false);
   if (loading) return <LoadingState message="Loading product..." />;
-  if (!product) return <EmptyState title="Product not found" actionLabel="Back" onAction={() => navigate('/warehouse/branch-inventory')} />;
+  if (!product) return <EmptyState title="Product not found" actionLabel="Back" onAction={() => navigate('/warehouse/products')} />;
   const variance = physical !== '' ? Number(physical) - systemQty : null;
   const hasVariance = variance !== null && variance !== 0;
   const handleSubmit = async () => {
@@ -1174,7 +1142,7 @@ function StockCountPage({
         <div className="form-group"><label>System Quantity</label><p className="field-preview">{systemQty} units</p></div>
         <div className="form-group">
           <label>Physical Quantity<span className="required">*</span></label>
-          <input type="number" min="0" value={physical} onChange={e => setPhysical(e.target.value)} />
+          <QuantityStepper value={physical} min={0} onChange={setPhysical} aria-label="Physical quantity" />
           {errors.physical ? <p className="form-error">{errors.physical}</p> : null}
         </div>
         {variance !== null ? <div className={`form-group variance-display${hasVariance ? ' variance-alert' : ''}`}>
@@ -1220,7 +1188,7 @@ function RestockPage({
     loadSuppliers();
   }, []);
   if (loading) return <LoadingState message="Loading product..." />;
-  if (!product) return <EmptyState title="Product not found" actionLabel="Back" onAction={() => navigate('/warehouse/branch-inventory')} />;
+  if (!product) return <EmptyState title="Product not found" actionLabel="Back" onAction={() => navigate('/warehouse/products')} />;
   const handleSubmit = async () => {
     const nextErrors = {};
     if (!form.quantity || Number(form.quantity) <= 0) nextErrors.quantity = 'Quantity must be positive.';
@@ -1254,10 +1222,12 @@ function RestockPage({
         <div className="form-group"><label>Product Name</label><p className="field-preview">{productName}</p></div>
         <div className="form-group">
           <label>Quantity Restocked<span className="required">*</span></label>
-          <input type="number" min="1" value={form.quantity} onChange={e => setForm(p => ({
-          ...p,
-          quantity: e.target.value
-        }))} />
+          <QuantityStepper
+            value={form.quantity}
+            min={1}
+            onChange={(next) => setForm((p) => ({ ...p, quantity: next }))}
+            aria-label="Quantity restocked"
+          />
           {errors.quantity ? <p className="form-error">{errors.quantity}</p> : null}
         </div>
         <div className="form-group">
@@ -1310,7 +1280,7 @@ function TransferPage({
     load();
   }, []);
   if (loading) return <LoadingState message="Loading product..." />;
-  if (!product) return <EmptyState title="Product not found" actionLabel="Back" onAction={() => navigate('/warehouse/branch-inventory')} />;
+  if (!product) return <EmptyState title="Product not found" actionLabel="Back" onAction={() => navigate('/warehouse/products')} />;
   const sourceBranchId = user?.branch?.id;
   const handleSubmit = async () => {
     const qty = Number(form.quantity);
@@ -1357,10 +1327,13 @@ function TransferPage({
         </div>
         <div className="form-group">
           <label>Quantity<span className="required">*</span></label>
-          <input type="number" min="1" max={systemQty || undefined} value={form.quantity} onChange={e => setForm(p => ({
-          ...p,
-          quantity: e.target.value
-        }))} />
+          <QuantityStepper
+            value={form.quantity}
+            min={1}
+            max={systemQty || undefined}
+            onChange={(next) => setForm((p) => ({ ...p, quantity: next }))}
+            aria-label="Transfer quantity"
+          />
           {errors.quantity ? <p className="form-error">{errors.quantity}</p> : null}
         </div>
         <div className="form-group"><label>Notes</label><textarea value={form.notes} onChange={e => setForm(p => ({
@@ -1479,7 +1452,7 @@ function MovementsPage({
                     }}>{m.sku}</span></> : null}</td>
                     <td style={{
                   fontWeight: 600,
-                  color: m.quantity > 0 ? '#4A6B12' : '#dc2626'
+                  color: m.quantity > 0 ? '#2A9B6A' : '#dc2626'
                 }}>
                       {m.quantity > 0 ? `+${m.quantity}` : m.quantity}
                     </td>
@@ -1625,7 +1598,13 @@ function TransferRequestNewPage({
         </div>
         <div className="form-group">
           <label>Quantity<span className="required">*</span></label>
-          <input type="number" min="1" max={availableQty || undefined} value={form.quantity} onChange={e => setForm(p => ({ ...p, quantity: e.target.value }))} />
+          <QuantityStepper
+            value={form.quantity}
+            min={1}
+            max={availableQty || undefined}
+            onChange={(next) => setForm((p) => ({ ...p, quantity: next }))}
+            aria-label="Transfer quantity"
+          />
           {selectedRow ? <p className="text-ink/60" style={{ fontSize: '0.82rem', margin: '4px 0 0' }}>Available: {availableQty}</p> : null}
           {errors.quantity ? <p className="form-error">{errors.quantity}</p> : null}
         </div>
@@ -1640,7 +1619,7 @@ function TransferRequestNewPage({
           {submitting ? 'Submitting…' : 'Submit request'}
         </button>
       </div>
-      {!stockOptions.length ? <p className="form-error">No products with stock at your branch. Restock or pick a product from Branch Inventory first.</p> : null}
+      {!stockOptions.length ? <p className="form-error">No products with stock at your branch. Restock or pick a product from Products first.</p> : null}
     </div>;
 }
 
@@ -1726,6 +1705,20 @@ function TransfersPage({
       value: String(counts.incoming)
     }]} /> : null}
 
+      <div className="transfers-toolbar" style={{ marginBottom: 16 }}>
+        <div className="segmented-control">
+          <button className={mainTab === 'requests' ? 'segment active' : 'segment'} type="button" onClick={() => setMainTab('requests')}>
+            Transfer requests
+          </button>
+          <button className={mainTab === 'history' ? 'segment active' : 'segment'} type="button" onClick={() => setMainTab('history')}>
+            History
+          </button>
+        </div>
+        <button className="button whitespace-nowrap" type="button" onClick={() => navigate('/warehouse/transfers/new')}>
+          New Transfer Request
+        </button>
+      </div>
+
       <section className="panel content-panel relative overflow-hidden">
         <div className="list-section-header">
           <div>
@@ -1734,44 +1727,36 @@ function TransfersPage({
               Submit requests from your branch, track approval, and view full history.
             </p>
           </div>
-          <div className="list-section-actions">
-            <button className="button" type="button" onClick={() => navigate('/warehouse/transfers/new')}>New transfer request</button>
-          </div>
-        </div>
-
-        <div className="segmented-control" style={{ marginBottom: 16 }}>
-          <button className={mainTab === 'requests' ? 'segment active' : 'segment'} type="button" onClick={() => setMainTab('requests')}>
-            Transfer requests
-          </button>
-          <button className={mainTab === 'history' ? 'segment active' : 'segment'} type="button" onClick={() => setMainTab('history')}>
-            History
-          </button>
         </div>
 
         {mainTab === 'requests' ? <>
-            <div className="segmented-control" style={{ marginBottom: 12 }}>
-              {['Action required', 'Awaiting approval', 'Incoming', 'All'].map(s => <button key={s} className={requestSegment === s ? 'segment active' : 'segment'} type="button" onClick={() => setRequestSegment(s)}>
-                  {s}
-                </button>)}
+            <div className="transfers-filter-bar" style={{ marginBottom: 12 }}>
+              <div className="segmented-control">
+                {['Action required', 'Awaiting approval', 'Incoming', 'All'].map(s => <button key={s} className={requestSegment === s ? 'segment active' : 'segment'} type="button" onClick={() => setRequestSegment(s)}>
+                    {s}
+                  </button>)}
+              </div>
             </div>
             {requestsFiltered.length ? <><div className="corvex-table-wrapper">
-                <table className="corvex-table">
+                <table className="corvex-table corvex-table-transfers">
                   <thead>
                     <tr>
                       <th>Ref</th>
                       <th>Product</th>
                       <th>Qty</th>
-                      <th>From → To</th>
+                      <th>From</th>
+                      <th>To</th>
                       <th>Submitted</th>
                       <th>Status</th>
                     </tr>
                   </thead>
                   <tbody>
                     {paginated_requests.map(t => <tr key={t.transfer_id} className="clickable-row" onClick={() => navigate(`/warehouse/transfers/${t.transfer_id}`)}>
-                        <td><span style={{ fontFamily: 'monospace', fontSize: '0.82rem' }}>{t.transfer_ref}</span></td>
+                        <td><span className="mono-cell">{t.transfer_ref}</span></td>
                         <td>{t.product_name}<br /><span className="text-ink/70" style={{ fontSize: '0.75rem' }}>{t.sku}</span></td>
                         <td>{t.quantity}</td>
-                        <td>{t.source_branch} → {t.destination_branch}</td>
+                        <td>{t.source_branch || '—'}</td>
+                        <td>{t.destination_branch || '—'}</td>
                         <td style={{ fontSize: '0.82rem' }}>{formatDisplayDate(t.submitted_date)}</td>
                         <td><StatusBadge status={t.status} /></td>
                       </tr>)}
@@ -1783,42 +1768,38 @@ function TransfersPage({
                 description={requestSegment === 'Action required'
                   ? 'Approved transfers ready for shipment will appear here.'
                   : 'Create a new request or check another filter.'}
-                actionLabel="New transfer request"
+                actionLabel="New Transfer Request"
                 onAction={() => navigate('/warehouse/transfers/new')}
               />}
           </> : <>
-            <div className="segmented-control" style={{ marginBottom: 12 }}>
-              {['All', 'Pending Transfers', 'Approved Transfers', 'Completed Transfers', 'Cancelled Transfers'].map(s => <button key={s} className={statusFilter === s ? 'segment active' : 'segment'} type="button" onClick={() => setStatusFilter(s)}>
-                  {s.replace(' Transfers', '')}
-                </button>)}
+            <div className="transfers-filter-bar" style={{ marginBottom: 12 }}>
+              <div className="segmented-control">
+                {['All', 'Pending Transfers', 'Approved Transfers', 'Completed Transfers', 'Cancelled Transfers'].map(s => <button key={s} className={statusFilter === s ? 'segment active' : 'segment'} type="button" onClick={() => setStatusFilter(s)}>
+                    {s.replace(' Transfers', '')}
+                  </button>)}
+              </div>
             </div>
             {historyFiltered.length ? <><div className="corvex-table-wrapper">
-                <table className="corvex-table">
+                <table className="corvex-table corvex-table-transfers">
                   <thead>
                     <tr>
-                      <th>Transfer Ref</th>
+                      <th>Ref</th>
                       <th>Product</th>
                       <th>Qty</th>
                       <th>From</th>
                       <th>To</th>
-                      <th>Submitted By</th>
-                      <th>Date</th>
-                      <th>Created At</th>
-                      <th>Updated At</th>
+                      <th>Submitted</th>
                       <th>Status</th>
                     </tr>
                   </thead>
                   <tbody>
                     {paginated_history.map(t => <tr key={t.transfer_id} className="clickable-row" onClick={() => navigate(`/warehouse/transfers/${t.transfer_id}`)}>
-                        <td><span style={{ fontFamily: 'monospace', fontSize: '0.82rem' }}>{t.transfer_ref}</span></td>
+                        <td><span className="mono-cell">{t.transfer_ref}</span></td>
                         <td>{t.product_name}<br /><span className="text-ink/70" style={{ fontSize: '0.75rem' }}>{t.sku}</span></td>
                         <td>{t.quantity}</td>
-                        <td>{t.source_branch}</td>
-                        <td>{t.destination_branch}</td>
-                        <td>{t.submitted_by_name || '—'}</td>
-                        <td className="text-ink/70" style={{ fontSize: '0.82rem' }}>{formatDisplayDate(t.submitted_date)}</td>
-                        <td style={{ fontSize: '0.82rem' }}>{formatDisplayDateTime(t.created_at)}</td>
-                        <td style={{ fontSize: '0.82rem' }}>{formatDisplayDateTime(t.updated_at)}</td>
+                        <td>{t.source_branch || '—'}</td>
+                        <td>{t.destination_branch || '—'}</td>
+                        <td style={{ fontSize: '0.82rem' }}>{formatDisplayDate(t.submitted_date)}</td>
                         <td><StatusBadge status={t.status} /></td>
                       </tr>)}
                   </tbody>
@@ -1976,7 +1957,6 @@ function RestockHistoryPage({
                   <th>Delivery Ref</th>
                   <th>Product</th>
                   <th>Supplier</th>
-                  <th>Branch</th>
                   <th>Quantity</th>
                   <th>Date Received</th>
                 </tr>
@@ -1989,9 +1969,8 @@ function RestockHistoryPage({
                   }}>{r.delivery_ref}</span></td>
                     <td>{r.product_name}</td>
                     <td>{r.supplier_name}</td>
-                    <td>{r.branch_name}</td>
                     <td style={{
-                  color: '#4A6B12',
+                  color: '#2A9B6A',
                   fontWeight: 600
                 }}>+{r.quantity}</td>
                     <td>{formatDisplayDate(r.received_date)}</td>
@@ -2056,7 +2035,7 @@ function NotificationsPage({
       resolveRelatedPath={(item) => {
         const category = String(item.category || '').toLowerCase();
         if (category.includes('inventory') || category.includes('stock')) {
-          return '/warehouse/branch-inventory';
+          return '/warehouse/central-inventory';
         }
         if (category.includes('restock')) {
           return '/warehouse/restock-history';
@@ -2282,28 +2261,40 @@ function SuppliersPage({
       <section className="panel content-panel relative overflow-hidden">
         <div className="list-section-header">
           <h3>Suppliers</h3>
-          <div className="list-section-actions">
-            <button className="button" type="button" onClick={handleAdd}>Add Supplier</button>
-          </div>
         </div>
-        <div className="list-section-toolbar">
-          <div className="list-section-controls">
-            <input className="filter-input search" type="search" placeholder="Search by name, contact, or email" value={search} onChange={e => {
-            setSearch(e.target.value);
-            setPage(1);
-          }} />
-            <select className="filter-select" value={statusFilter} onChange={e => {
-            setStatusFilter(e.target.value);
-            setPage(1);
-          }}>
-              {['All', 'Active', 'Inactive'].map(s => <option key={s}>{s === 'All' ? 'All Statuses' : s}</option>)}
+        <div className="list-section-toolbar suppliers-toolbar audit-logs-toolbar">
+          <div className="list-section-controls audit-logs-filters">
+            <input
+              className="filter-input search"
+              type="search"
+              placeholder="Search by name, contact number, or email"
+              value={search}
+              onChange={e => {
+                setSearch(e.target.value);
+                setPage(1);
+              }}
+              aria-label="Search suppliers"
+            />
+            <select
+              className="filter-select"
+              value={statusFilter}
+              onChange={e => {
+                setStatusFilter(e.target.value);
+                setPage(1);
+              }}
+              aria-label="Filter by status"
+            >
+              {['All', 'Active', 'Inactive'].map(s => <option key={s} value={s}>{s === 'All' ? 'All Statuses' : s}</option>)}
             </select>
+          </div>
+          <div className="list-section-actions suppliers-toolbar-actions">
+            <button className="button whitespace-nowrap" type="button" onClick={handleAdd}>Add Supplier</button>
           </div>
         </div>
         {suppliers.length ? <><div className="corvex-table-wrapper">
             <table className="corvex-table">
               <thead>
-                <tr><th>Supplier ID</th><th>Supplier Name</th><th>Contact</th><th>Email</th><th>Address</th><th>Status</th><th>Actions</th></tr>
+                <tr><th>Supplier ID</th><th>Supplier Name</th><th>Contact Number</th><th>Email</th><th>Address</th><th>Status</th><th>Actions</th></tr>
               </thead>
               <tbody>
                 {suppliers.map(supplier => <tr key={supplier.suppliers_id} className="clickable-row" onClick={() => navigate(`/warehouse/suppliers/${supplier.suppliers_id}`)}>
@@ -2312,7 +2303,7 @@ function SuppliersPage({
                     fontSize: '0.82rem'
                   }}>{supplier.suppliers_id}</span></td>
                     <td>{supplier.supplier_name}</td>
-                    <td>{supplier.contact || '—'}</td>
+                    <td>{formatPhone(supplier.contact_number || supplier.contact)}</td>
                     <td>{supplier.email || '—'}</td>
                     <td>{supplier.address || '—'}</td>
                     <td><StatusBadge status={supplier.status} /></td>
@@ -2382,11 +2373,11 @@ function SuppliersPage({
                 {errors.supplier_name && <p className="form-error">{errors.supplier_name}</p>}
               </div>
               <div className="form-group">
-                <label>Contact</label>
-                <input type="text" value={form.contact} onChange={e => setForm({
+                <label>Contact Number</label>
+                <input type="tel" value={form.contact} onChange={e => setForm({
               ...form,
               contact: e.target.value
-            })} />
+            })} placeholder="+63..." inputMode="tel" />
               </div>
               <div className="form-group">
                 <label>Email</label>
@@ -2459,12 +2450,13 @@ function SupplierDetailPage({
       label: 'Status',
       value: supplier.status
     }, {
-      label: 'Contact',
-      value: supplier.contact || '—'
+      label: 'Contact Number',
+      value: formatPhone(supplier.contact_number || supplier.contact)
     }]} />
       <section className="panel content-panel relative overflow-hidden">
         <DetailRowsTable rows={[
           { label: 'Supplier Name', value: supplier.supplier_name },
+          { label: 'Contact Number', value: formatPhone(supplier.contact_number || supplier.contact) },
           { label: 'Email', value: supplier.email || '—' },
           { label: 'Address', value: supplier.address || '—' },
           { label: 'Created At', value: formatDisplayDateTime(supplier.created_at) },
@@ -2476,101 +2468,6 @@ function SupplierDetailPage({
       </div>
     </div>;
 }
-function BranchInventoryPage({
-  navigate,
-  showToast
-}) {
-  const [records, setRecords] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
-  const [search, setSearch] = useState('');
-  const [statusFilter, setStatusFilter] = useState('All');
-  const [branchFilter, setBranchFilter] = useState('All');
-  useEffect(() => {
-    async function load() {
-      setLoading(true);
-      setError(null);
-      const result = await fetchBranchInventory();
-      if (result.success) {
-        setRecords(result.data || []);
-      } else {
-        setError(result.message || 'Failed to load branch inventory.');
-        if (showToast) showToast(result.message || 'Failed to load branch inventory', 'error');
-      }
-      setLoading(false);
-    }
-    load();
-  }, [showToast]);
-  const branches = useMemo(() => ['All', ...new Set(records.map(r => r.branch_name).filter(Boolean))], [records]);
-  const filtered = useMemo(() => {
-    const q = search.trim().toLowerCase();
-    return records.filter(r => {
-      const matchSearch = !q || (r.product_name || '').toLowerCase().includes(q) || (r.sku || '').toLowerCase().includes(q) || String(r.branch_inventory_id).includes(q);
-      const matchStatus = statusFilter === 'All' || r.stock_status === statusFilter;
-      const matchBranch = branchFilter === 'All' || r.branch_name === branchFilter;
-      return matchSearch && matchStatus && matchBranch;
-    });
-  }, [records, search, statusFilter, branchFilter]);
-  const pagination_filtered = usePagination(filtered);
-  const paginated_filtered = pagination_filtered.paginatedData;
-  if (loading) return <LoadingState message="Loading branch inventory..." />;
-  if (error && !records.length) {
-    return <EmptyState title="Unable to load branch inventory" description={error} actionLabel="Retry" onAction={() => window.location.reload()} />;
-  }
-  return <div className="page">
-      <section className="panel content-panel relative overflow-hidden">
-        <div className="list-section-header">
-          <h3>Branch Inventory</h3>
-          <p className="text-ink/70">{records.length} record{records.length !== 1 ? 's' : ''} in database</p>
-        </div>
-        <div className="list-section-toolbar">
-          <div className="list-section-controls">
-            <input className="filter-input search" type="search" placeholder="Search by product or branch name" value={search} onChange={e => setSearch(e.target.value)} />
-            <select className="filter-select" value={branchFilter} onChange={e => setBranchFilter(e.target.value)}>
-              {branches.map(b => <option key={b} value={b}>{b === 'All' ? 'All Branches' : b}</option>)}
-            </select>
-            <select className="filter-select" value={statusFilter} onChange={e => setStatusFilter(e.target.value)}>
-              {['All', 'Sufficient', 'Low Stock', 'Out of Stock'].map(s => <option key={s} value={s}>{s === 'All' ? 'All Statuses' : s}</option>)}
-            </select>
-          </div>
-        </div>
-        {filtered.length ? <><div className="corvex-table-wrapper">
-            <table className="corvex-table">
-              <thead>
-                <tr>
-                  <th>Inventory ID</th>
-                  <th>Branch</th>
-                  <th>Product</th>
-                  <th>Category</th>
-                  <th>Available Stock</th>
-                  <th>Reorder Level</th>
-                  <th>Status</th>
-                  <th>Created At</th>
-                  <th>Updated At</th>
-                </tr>
-              </thead>
-              <tbody>
-                {paginated_filtered.map(r => <tr key={r.branch_inventory_id} className="clickable-row" onClick={() => navigate(`/warehouse/product/${r.product_id}`)}>
-                    <td>{r.branch_inventory_id}</td>
-                    <td>{r.branch_name || '—'}</td>
-                    <td>{r.product_name || '—'}</td>
-                    <td>{r.category_name || '—'}</td>
-                    <td>{r.available_stock}</td>
-                    <td>{r.reorder_level}</td>
-                    <td>
-                      <StatusBadge status={r.stock_status || '—'} />
-                    </td>
-                    <td>{formatDisplayDateTime(r.created_at)}</td>
-                    <td>{formatDisplayDateTime(r.updated_at)}</td>
-                  </tr>)}
-              </tbody>
-            </table>
-          </div><Pagination {...pagination_filtered} /></>
-        : <EmptyState title="No records found" description="Adjust your search or filters." />}
-      </section>
-    </div>;
-}
-
 // ── Product Categories (View-Only for Warehouse) ──────────────────────────────
 function ProductCategoriesPage({
   navigate,
@@ -2654,9 +2551,6 @@ export function WarehousePageBody({
       return <DashboardPage {...props} />;
     case 'settings':
       return <SettingsPage {...props} />;
-    case 'inventory':
-    case 'branchInventory':
-      return <BranchInventoryPage {...props} />;
     case 'centralInventory':
       return <CentralInventoryPanel />;
     case 'products':

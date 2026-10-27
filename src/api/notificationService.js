@@ -55,7 +55,7 @@ export function mapNotificationRow(row, { opsBase = '/branch-manager', orgBase =
     relatedTo = isSales ? `${opsBase}/credit-investigations` : `${opsBase}/ci-approvals`;
   } else if (cat.includes('inventory') || cat.includes('stock')) {
     relatedTo = isWarehouse
-      ? `${opsBase}/branch-inventory`
+      ? `${opsBase}/central-inventory`
       : isSales
         ? `${opsBase}/inventory`
         : `${opsBase}/approval-center`;
