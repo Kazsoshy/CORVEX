@@ -11,20 +11,21 @@ import {
   fetchCustomerPortalProducts,
   fetchCustomerPortalReceiptById,
   fetchCustomerPortalReceipts,
-  fetchCustomerPurchaseRequests,
   fetchCustomerStatementSummary,
-  submitCustomerPurchaseRequest,
   updateCustomerPortalContact,
 } from '../../api/customerPortalService.js';
 import { downloadPdf } from '../../utils/dataExport.js';
 import { NotificationsInbox } from '../shared/NotificationsInbox';
 import { fetchNotifications } from '../../api/notificationService.js';
-import { formatDisplayDate, formatDisplayDateTime, formatCurrency } from '../../utils/formatters.js';
+import { formatDisplayDate, formatCurrency } from '../../utils/formatters.js';
 import { EmptyState } from '../shared/EmptyState';
 import { LoadingState } from '../shared/LoadingState';
 import { DetailRowsTable } from '../shared/DetailRowsTable';
 import { StatusBadge } from '../StatusBadge';
 import { NavIcon } from '../../navIcons';
+import { UserSettingsPanel } from '../shared/UserSettingsPanel';
+import { CustomerProfilePanel } from '../shared/CustomerProfilePanel';
+import { CustomerPurchaseDesk } from './CustomerPurchaseDesk';
 function LoginPage({
   navigate,
   showToast
@@ -760,237 +761,12 @@ function NotificationsPage({
   }} />;
 }
 function ProfilePage({
-  navigate,
   showToast
 }) {
-  const [account, setAccount] = useState(null);
-  const [loading, setLoading] = useState(true);
-  const [editingContact, setEditingContact] = useState(false);
-  const [contact, setContact] = useState({ contactNumber: '', email: '' });
-  const [otpEnabled, setOtpEnabled] = useState(() => localStorage.getItem('corvex_customer_otp') !== '0');
-  const [showPassword, setShowPassword] = useState(false);
-  const [currentPassword, setCurrentPassword] = useState('');
-  const [password, setPassword] = useState('');
-  const [confirmPassword, setConfirmPassword] = useState('');
-  const [saving, setSaving] = useState(false);
-  useEffect(() => {
-    async function load() {
-      const res = await fetchCustomerPortalMe();
-      if (res.success && res.data) {
-        setAccount(res.data);
-        setContact({
-          contactNumber: res.data.contact_phone || '',
-          email: res.data.portal_email || '',
-        });
-      }
-      setLoading(false);
-    }
-    load();
-  }, []);
-  if (loading) return <LoadingState message="Loading profile…" />;
-  if (!account) return <EmptyState title="Profile unavailable" description="Could not load your customer record." />;
-  const customerName = `${account.first_name || ''} ${account.middle_name || ''} ${account.last_name || ''}`.replace(/\s+/g, ' ').trim() || '—';
-  return <div className="page customer-page">
-      <section className="panel content-panel relative overflow-hidden">
-        <div className="list-section-header"><h3>Personal Information</h3></div>
-        <DetailRowsTable rows={[
-          { label: 'Name', value: <strong>{customerName}</strong> },
-          { label: 'Account Number', value: <span style={{ fontFamily: 'monospace', fontSize: '0.82rem' }}>{account.customer_code || account.customer_id || '—'}</span> },
-          { label: 'Branch', value: account.branch_name || '—' },
-          { label: 'Status', value: <StatusBadge status={account.status || '—'} /> },
-        ]} />
-      </section>
-
-      <section className="panel content-panel relative overflow-hidden">
-        <div className="list-section-header"><h3>Contact Information</h3></div>
-        {editingContact ? (
-          <div className="form-grid">
-            <label>Phone<input value={contact.contactNumber} onChange={e => setContact(c => ({ ...c, contactNumber: e.target.value }))} /></label>
-            <label>Email<input type="email" value={contact.email} onChange={e => setContact(c => ({ ...c, email: e.target.value }))} /></label>
-            <label>Address<input value={account.address || ''} readOnly /></label>
-          </div>
-        ) : (
-          <DetailRowsTable rows={[
-            { label: 'Phone', value: account.contact_phone || '—' },
-            { label: 'Email', value: account.portal_email || '—' },
-            { label: 'Address', value: account.address || '—' },
-          ]} />
-        )}
-      </section>
-
-      <section className="panel form-panel content-panel">
-        <div className="flex flex-col md:flex-row justify-between gap-4 items-start md:items-center mb-4"><h3>Security Settings</h3></div>
-        <label className="toggle-label">
-          <input type="checkbox" checked={otpEnabled} onChange={e => {
-            setOtpEnabled(e.target.checked);
-            localStorage.setItem('corvex_customer_otp', e.target.checked ? '1' : '0');
-          }} />
-          Enable OTP for login
-        </label>
-      </section>
-
-      {showPassword ? <section className="panel form-panel content-panel">
-        <div className="form-grid">
-          <label>Current password<input type="password" value={currentPassword} onChange={e => setCurrentPassword(e.target.value)} autoComplete="current-password" /></label>
-          <label>New password<input type="password" value={password} onChange={e => setPassword(e.target.value)} placeholder="Min. 8 characters" autoComplete="new-password" /></label>
-          <label>Confirm new password<input type="password" value={confirmPassword} onChange={e => setConfirmPassword(e.target.value)} placeholder="Re-enter new password" autoComplete="new-password" /></label>
-        </div>
-      </section> : null}
-      <div className="flex justify-end gap-2 mt-4">
-        <button className="button ghost" type="button" onClick={() => requestLogout()}>Logout</button>
-        <button className="button secondary" type="button" disabled={saving} onClick={async () => {
-          if (!showPassword) {
-            setShowPassword(true);
-            return;
-          }
-          if (!currentPassword) {
-            showToast('Enter your current password.', 'error');
-            return;
-          }
-          if (password.trim().length < 8) {
-            showToast('Password must be at least 8 characters.', 'error');
-            return;
-          }
-          if (password.trim() !== confirmPassword.trim()) {
-            showToast('New password and confirmation do not match.', 'error');
-            return;
-          }
-          setSaving(true);
-          const result = await updateMyProfile({
-            current_password: currentPassword,
-            password: password.trim(),
-            confirm_password: confirmPassword.trim(),
-          });
-          setSaving(false);
-          if (result.success) {
-            setCurrentPassword('');
-            setPassword('');
-            setConfirmPassword('');
-            setShowPassword(false);
-            showToast(result.message || 'Password updated.', 'success');
-          } else showToast(result.message || 'Failed to change password.', 'error');
-        }}>{showPassword ? 'Save Password' : 'Change Password'}</button>
-        {showPassword ? <button className="button ghost" type="button" disabled={saving} onClick={() => {
-          setShowPassword(false);
-          setCurrentPassword('');
-          setPassword('');
-          setConfirmPassword('');
-        }}>Cancel</button> : null}
-        {editingContact ? <>
-            <button className="button ghost" type="button" disabled={saving} onClick={() => {
-              setEditingContact(false);
-              setContact({
-                contactNumber: account.contact_phone || '',
-                email: account.portal_email || '',
-              });
-            }}>Cancel</button>
-            <button className="button" type="button" disabled={saving} onClick={async () => {
-              setSaving(true);
-              const result = await updateCustomerPortalContact({
-                contact_phone: contact.contactNumber,
-                portal_email: contact.email,
-              });
-              setSaving(false);
-              if (result.success) {
-                setAccount(result.data);
-                setEditingContact(false);
-                showToast('Profile updated.', 'success');
-              } else showToast(result.message || 'Failed to update profile.', 'error');
-            }}>Save Profile</button>
-          </> : <button className="button" type="button" onClick={() => setEditingContact(true)}>Update Profile</button>}
-      </div>
-    </div>;
+  return <CustomerProfilePanel showToast={showToast} />;
 }
-function CustomerPurchaseRequestsPage({ navigate, showToast }) {
-  const [products, setProducts] = useState([]);
-  const [requests, setRequests] = useState([]);
-  const [productId, setProductId] = useState('');
-  const [quantity, setQuantity] = useState('1');
-  const [notes, setNotes] = useState('');
-  const [loading, setLoading] = useState(true);
-  const [submitting, setSubmitting] = useState(false);
-  const load = async () => {
-    setLoading(true);
-    const [productsRes, requestsRes] = await Promise.all([
-      fetchCustomerPortalProducts(),
-      fetchCustomerPurchaseRequests(),
-    ]);
-    if (productsRes.success) setProducts(productsRes.data || []);
-    if (requestsRes.success) setRequests(requestsRes.data || []);
-    setLoading(false);
-  };
-  useEffect(() => {
-    load();
-  }, []);
-  const handleSubmit = async (e) => {
-    e.preventDefault();
-    const qty = Number(quantity);
-    if (!productId || !Number.isInteger(qty) || qty <= 0) {
-      showToast('Select a product and valid quantity.', 'error');
-      return;
-    }
-    setSubmitting(true);
-    const result = await submitCustomerPurchaseRequest({
-      notes: notes.trim() || undefined,
-      items: [{ product_id: Number(productId), quantity: qty }],
-    });
-    setSubmitting(false);
-    if (!result.success) {
-      showToast(result.message || 'Failed to submit request.', 'error');
-      return;
-    }
-    showToast(result.message || 'Request submitted.', 'success');
-    setNotes('');
-    setQuantity('1');
-    load();
-  };
-  if (loading) return <LoadingState message="Loading purchase requests…" />;
-  return <div className="page customer-page">
-      <section className="panel form-panel content-panel">
-        <div className="panel-section-header">
-          <h3>Request New Purchase</h3>
-          <p className="muted">Submit a request to your sales agent. They will review it before a sales order or invoice is created.</p>
-        </div>
-        <form onSubmit={handleSubmit}>
-          <div className="form-group">
-            <label htmlFor="pr-product">Product</label>
-            <select id="pr-product" className="filter-select" value={productId} onChange={(e) => setProductId(e.target.value)} required>
-              <option value="">Select product</option>
-              {products.map((p) => <option key={p.product_id} value={p.product_id}>
-                  {p.product_name} {p.sku ? `(${p.sku})` : ''} — {formatCurrency(Number(p.unit_price || 0))}
-                </option>)}
-            </select>
-          </div>
-          <div className="form-group">
-            <label htmlFor="pr-qty">Quantity</label>
-            <input id="pr-qty" type="number" min="1" value={quantity} onChange={(e) => setQuantity(e.target.value)} />
-          </div>
-          <div className="form-group">
-            <label htmlFor="pr-notes">Notes (optional)</label>
-            <textarea id="pr-notes" rows={3} value={notes} onChange={(e) => setNotes(e.target.value)} />
-          </div>
-          <button className="button" type="submit" disabled={submitting}>{submitting ? 'Submitting…' : 'Submit Request'}</button>
-        </form>
-      </section>
-      <section className="panel content-panel">
-        <div className="panel-section-header"><h3>Your Requests</h3></div>
-        {!requests.length ? <EmptyState title="No requests yet" description="Submitted purchase requests will appear here with status updates from your sales agent." /> : (
-          <div className="corvex-table-wrapper">
-            <table className="corvex-table">
-              <thead><tr><th>ID</th><th>Status</th><th>Items</th><th>Submitted</th></tr></thead>
-              <tbody>
-                {requests.map((req) => <tr key={req.request_id}>
-                    <td>{req.request_id}</td>
-                    <td><StatusBadge status={req.status} /></td>
-                    <td>{(req.items || []).map((item) => `${item.product_name} × ${item.quantity}`).join(', ')}</td>
-                    <td>{formatDisplayDateTime(req.created_at)}</td>
-                  </tr>)}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </section>
-    </div>;
+function CustomerPurchaseRequestsPage({ showToast }) {
+  return <CustomerPurchaseDesk showToast={showToast} />;
 }
 
 export function CustomerPageBody({
@@ -1026,6 +802,8 @@ export function CustomerPageBody({
       return <StatementDetailPage {...props} />;
     case 'notifications':
       return <NotificationsPage {...props} />;
+    case 'settings':
+      return <UserSettingsPanel role="customer" showToast={showToast} />;
     case 'profile':
       return <ProfilePage {...props} />;
     default:

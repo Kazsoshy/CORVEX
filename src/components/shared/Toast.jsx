@@ -1,4 +1,6 @@
 import { useEffect, useState } from 'react';
+import { notifyDesktop, playToastSound } from '../../settings/feedback.js';
+import { getPreferences } from '../../settings/preferences.js';
 
 export function useToast() {
   const [toast, setToast] = useState(null);
@@ -9,7 +11,14 @@ export function useToast() {
 
   useEffect(() => {
     if (!toast) return undefined;
-    const timer = window.setTimeout(() => setToast(null), 3200);
+    const prefs = getPreferences();
+    if (prefs.toastSound) {
+      try { playToastSound(); } catch { /* sound is optional */ }
+    }
+    if (prefs.desktopNotifications && document.hidden) {
+      notifyDesktop('CORVEX', toast.message);
+    }
+    const timer = window.setTimeout(() => setToast(null), prefs.longerToasts ? 8000 : 3200);
     return () => window.clearTimeout(timer);
   }, [toast]);
 

@@ -13,6 +13,7 @@ export const collectorRole = {
     { label: 'Collection History', to: '/collector/history' },
     { label: 'Digital Receipts', to: '/collector/receipts' },
     { label: 'Notifications', to: '/collector/notifications' },
+    { label: 'Settings', to: '/collector/settings' },
     { label: 'Profile', to: '/collector/profile' },
   ],
   routes: {},

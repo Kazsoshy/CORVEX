@@ -30,6 +30,7 @@ import systemRouter from './routes/system.js';
 import syncRouter from './routes/sync.js';
 import { requireAuth, requireBranchScope } from './middleware/auth.js';
 import { ensureSchema } from './lib/ensureSchema.js';
+import { loadProductImage } from './lib/productImages.js';
 import { startOperationalNotificationSweep } from './lib/operationalNotifications.js';
 import { isMailConfigured } from './lib/mail.js';
 
@@ -105,6 +106,20 @@ async function connectDatabase() {
 // direct API calls.
 // ──────────────────────────────────────────────────────────────────────────────
 app.use('/api/auth',      authRouter);
+
+// Catalog photos are shown in <img> tags, which cannot send the session token.
+app.get('/api/products/:id/image', async (req, res) => {
+  try {
+    const image = await loadProductImage(req.params.id);
+    if (!image) return res.status(404).end();
+    res.set('Content-Type', image.mime);
+    res.set('Cache-Control', 'public, max-age=31536000, immutable');
+    return res.status(200).send(image.buffer);
+  } catch (err) {
+    console.error('[Products] GET /:id/image error:', err.message);
+    return res.status(500).end();
+  }
+});
 
 // Protected routes — identity required
 app.use('/api/users',     requireAuth, usersRouter);

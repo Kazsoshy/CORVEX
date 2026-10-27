@@ -51,6 +51,7 @@ import { InvoiceDetailsPage } from '../sales/InvoiceDetailsPage';
 import { BranchLeafletPage } from './BranchLeafletPage';
 import { formatMiddleNameDisplay } from '../../utils/customerDisplay.js';
 import { downloadPdf, exportRows } from '../../utils/dataExport.js';
+import { UserSettingsPanel } from '../shared/UserSettingsPanel';
 
 // Re-export for use in other components
 export { getBranchAnalytics, getBranchStaff, getBranchCustomers, getBranchAlerts };
@@ -2054,11 +2055,12 @@ function ProfilePage({
 }) {
   return <AccountProfilePanel
     showToast={showToast}
-    title="Branch Manager Profile"
-    subtitle="View your personal details and update your account password."
+    title="Branch profile"
+    subtitle="Your name, contact details, and sign-in for this CORVEX account."
+    settingsPath={`${opsBase}/settings`}
     extraActions={<>
-      <button className="button ghost" type="button" onClick={() => navigate(`${opsBase}/audit-log`)}>Audit Log</button>
-      <button className="button ghost" type="button" onClick={() => navigate(`${opsBase}/approval-center`)}>Approval Center</button>
+      <button className="button ghost" type="button" onClick={() => navigate(`${opsBase}/audit-log`)}>Audit log</button>
+      <button className="button ghost" type="button" onClick={() => navigate(`${opsBase}/approval-center`)}>Approval center</button>
     </>}
   />;
 }
@@ -2552,18 +2554,17 @@ function SettingsPage({
   navigate,
   opsBase
 }) {
-  return <div className="page">
-      <section className="panel content-panel relative overflow-hidden">
-        <h3>Branch Settings</h3>
-        <p className="text-ink/70">Manage your profile, approvals, and audit history for this branch.</p>
-        <div className="flex flex-wrap gap-2 mt-4">
-          <button className="button" type="button" onClick={() => navigate(`${opsBase}/profile`)}>Profile</button>
-          <button className="button secondary" type="button" onClick={() => navigate(`${opsBase}/approval-center`)}>Approval Center</button>
-          <button className="button secondary" type="button" onClick={() => navigate(`${opsBase}/audit-log`)}>Audit Log</button>
-          <button className="button ghost" type="button" onClick={() => navigate(`${opsBase}/notifications`)}>Notifications</button>
-        </div>
-      </section>
-    </div>;
+  return (
+    <UserSettingsPanel role="branch">
+      <p className="muted">Profile, approvals, audit history, and notifications for this branch.</p>
+      <div className="settings-link-row">
+        <button className="button" type="button" onClick={() => navigate(`${opsBase}/profile`)}>Profile</button>
+        <button className="button secondary" type="button" onClick={() => navigate(`${opsBase}/approval-center`)}>Approval Center</button>
+        <button className="button secondary" type="button" onClick={() => navigate(`${opsBase}/audit-log`)}>Audit Log</button>
+        <button className="button ghost" type="button" onClick={() => navigate(`${opsBase}/notifications`)}>Notifications</button>
+      </div>
+    </UserSettingsPanel>
+  );
 }
 
 function AccountLocationDetailPage({

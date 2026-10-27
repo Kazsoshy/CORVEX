@@ -1,4 +1,14 @@
+import { usePreferences } from '../settings/PreferencesProvider.jsx';
+
 const NEUTRAL_EXACT = new Set(['draft', 'archived', 'disabled', 'n/a', '—', '-', 'na']);
+
+const STATUS_MARKS = {
+  success: '●',
+  warning: '▲',
+  danger: '■',
+  info: '◆',
+  neutral: '',
+};
 
 const ERROR_TERMS = [
   'inactive', 'cancelled', 'canceled', 'rejected', 'failed',
@@ -50,10 +60,14 @@ export function getStatusTextClass(status) {
  * `variant` is accepted for backward compatibility but always renders text.
  */
 export function StatusBadge({ status, className = '', variant: _variant }) {
+  const { prefs } = usePreferences();
   if (status === null || status === undefined || status === '') return null;
+  const tone = getStatusTone(status);
+  const mark = (prefs.colorPalette === 'colorblind' || prefs.highContrast) ? STATUS_MARKS[tone] : '';
 
   return (
     <span className={`${getStatusTextClass(status)} ${className}`.trim()}>
+      {mark ? <span aria-hidden="true">{mark} </span> : null}
       {status}
     </span>
   );

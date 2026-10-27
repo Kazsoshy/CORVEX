@@ -17,13 +17,11 @@ import {
   fetchSalesCreditInvestigationById,
   fetchSalesCreditInvestigations,
   fetchSalesPurchaseRequestById,
-  fetchSalesPurchaseRequests,
   fetchTerritories,
   fetchSalesFieldReports,
   submitSalesFieldReport,
   submitSalesCreditInvestigation,
   updateFieldVisit,
-  updateSalesPurchaseRequestStatus,
 } from '../../api/salesService';
 import { lookupCustomersForDuplicate, resendCustomerPortalInvitation } from '../../api/customerPortalService';
 import { fetchNotifications, markNotificationRead, markAllNotificationsRead, mapNotificationRow } from '../../api/notificationService.js';
@@ -34,6 +32,9 @@ import { listOfflineRecords, saveOfflineRecord } from '../../offline/db.js';
 import { DeviceQueue, loadWaiting } from '../../offline/DeviceQueue.jsx';
 import { flushOfflineQueue } from '../../offline/flushQueue.js';
 import { isSalesAutoSyncEnabled, isSalesOfflineEnabled } from '../../offline/prefs.js';
+import { isSalesGpsEnabled } from '../../settings/preferences.js';
+import { UserSettingsPanel } from '../shared/UserSettingsPanel';
+import { SalesPurchaseRequestsPage, SalesPurchaseReviewPage } from './SalesPurchaseRequests';
 import { AccountProfilePanel } from '../shared/AccountProfilePanel';
 import apiClient from '../../api/apiClient.js';
 import { CONTACT_RELATIONSHIP_OPTIONS, formatContactPersonName, formatCustomerDisplayId, formatCustomerFullName, formatMiddleNameDisplay, formatPurchaseVolumeUnits, formatSecondaryContactName } from '../../utils/customerDisplay';
@@ -451,13 +452,13 @@ function SchedulePage({
           </div>
           {scheduleFiltersToolbar}
           <div style={{ marginTop: 16 }}>
-            <LeafletMap center={mapCenter} zoom={13} height={500} markers={mapMarkers} polylines={totalDistance ? [{
+            <LeafletMap center={mapCenter} zoom={13} height={500} markers={mapMarkers} polylines={isSalesGpsEnabled() && totalDistance ? [{
             id: 'route',
             positions: [...coordVisits].sort((a, b) => new Date(a.scheduled_date || 0) - new Date(b.scheduled_date || 0)).map(v => [Number(v.latitude), Number(v.longitude)]),
             color: '#0c1031'
           }] : []} />
           </div>
-          <p className="muted">Visits mapped: {filtered.length}{totalDistance ? ` · Route distance: ${totalDistance.toFixed(1)} km` : ''}</p>
+          <p className="muted">Visits mapped: {filtered.length}{isSalesGpsEnabled() && totalDistance ? ` · Route distance: ${totalDistance.toFixed(1)} km` : ''}{isSalesGpsEnabled() ? '' : ' GPS route line is off. Turn it on in Settings.'}</p>
           {filtered.length ? <>
             <div className="panel-section-header"><h3>Visit List</h3></div>
             <div className="corvex-table-wrapper">
@@ -2516,9 +2517,10 @@ function ProfilePage({
       <OfflineBanner />
       <AccountProfilePanel
         showToast={showToast}
-        title="Sales Profile"
-        subtitle="View your personal details and update your account password."
-        extraActions={<button className="button ghost" type="button" onClick={() => navigate('/sales/audit-log')}>Audit Log</button>}
+        title="Sales profile"
+        subtitle="Your name, contact details, and sign-in for this CORVEX account."
+        settingsPath="/sales/settings"
+        extraActions={<button className="button ghost" type="button" onClick={() => navigate('/sales/audit-log')}>Audit log</button>}
       />
     </>;
 }
@@ -2570,9 +2572,9 @@ function RouteTrackingPage({
         <div style={{
         marginTop: 16
       }}>
-          <LeafletMap center={mapCenter} zoom={13} height={500} polylines={polyline} markers={markers} />
+          <LeafletMap center={mapCenter} zoom={13} height={500} polylines={isSalesGpsEnabled() ? polyline : []} markers={markers} />
         </div>
-        <p className="muted">Today&apos;s sales visits with customer coordinates on file.</p>
+        <p className="muted">{isSalesGpsEnabled() ? 'Today’s sales visits with customer coordinates on file.' : 'GPS route line is off. Turn it on in Settings to draw the path between visits.'}</p>
       </section>
       <section className="panel content-panel">
         <div className="panel-section-header"><h3>Visit Verification</h3></div>
@@ -2606,90 +2608,6 @@ function RouteTrackingPage({
       </div>
     </div>;
 }
-function SalesPurchaseRequestsPage({ navigate, showToast }) {
-  const [requests, setRequests] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const load = async () => {
-    setLoading(true);
-    const res = await fetchSalesPurchaseRequests();
-    if (res.success) setRequests(res.data || []);
-    setLoading(false);
-  };
-  useEffect(() => {
-    load();
-  }, []);
-  const updateStatus = async (requestId, status, customerId) => {
-    const result = await updateSalesPurchaseRequestStatus(requestId, status);
-    if (!result.success) {
-      showToast(result.message || 'Update failed.', 'error');
-      return;
-    }
-    showToast(result.message || 'Updated.', 'success');
-    if (status === 'Confirmed' && customerId) {
-      navigate(`/sales/log-sale/${customerId}?purchaseRequestId=${requestId}`);
-      return;
-    }
-    load();
-  };
-  const pagination = usePagination(requests);
-  const rows = pagination.paginatedData;
-  if (loading) return <LoadingState message="Loading purchase requests…" />;
-  return <div className="page">
-      <section className="panel content-panel">
-        <div className="panel-section-header">
-          <h3>Customer Purchase Requests</h3>
-          <p className="muted">Review requests from the customer portal before creating a sales order or invoice.</p>
-        </div>
-        {!requests.length ? <EmptyState title="No purchase requests" description="Requests from customer portal accounts will appear here." /> : (
-          <>
-          <div className="corvex-table-wrapper">
-            <table className="corvex-table">
-              <thead>
-                <tr>
-                  <th>ID</th>
-                  <th>Customer</th>
-                  <th>Status</th>
-                  <th>Items</th>
-                  <th>Created</th>
-                  <th>Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {rows.map((req) => <tr key={req.request_id}>
-                    <td>{req.request_id}</td>
-                    <td>{req.customer_name} ({req.customer_code || req.customer_id})</td>
-                    <td><StatusBadge status={req.status} /></td>
-                    <td>{(req.items || []).map((item) => `${item.product_name} × ${item.quantity}`).join(', ') || '—'}</td>
-                    <td>{formatDisplayDateTime(req.created_at)}</td>
-                    <td className="table-actions">
-                      {req.status === 'Pending' || req.status === 'In Review' ? <>
-                          {req.status === 'Pending' ? (
-                            <button className="button ghost" type="button" onClick={() => updateStatus(req.request_id, 'In Review', req.customer_id)}>Review</button>
-                          ) : null}
-                          <button className="button" type="button" onClick={() => updateStatus(req.request_id, 'Confirmed', req.customer_id)}>Confirm & Log Sale</button>
-                          <button className="button ghost" type="button" onClick={() => updateStatus(req.request_id, 'Rejected', req.customer_id)}>Reject</button>
-                        </> : null}
-                      {req.status === 'Invoiced' && req.sales_invoices_id ? (
-                        <button className="button ghost" type="button" onClick={() => navigate(`/sales/invoices/${req.sales_invoices_id}`)}>View Invoice</button>
-                      ) : null}
-                      {req.status === 'Confirmed' ? (
-                        <button className="button" type="button" onClick={() => navigate(`/sales/log-sale/${req.customer_id}?purchaseRequestId=${req.request_id}`)}>Log Sale</button>
-                      ) : null}
-                    </td>
-                  </tr>)}
-              </tbody>
-            </table>
-          </div>
-          <Pagination {...pagination} />
-          </>
-        )}
-      </section>
-      <div className="flex justify-end mt-4">
-        <button className="button ghost" type="button" onClick={() => navigate('/sales/dashboard')}>Back to Dashboard</button>
-      </div>
-    </div>;
-}
-
 function AuditLogPage({
   navigate
 }) {
@@ -2723,14 +2641,8 @@ function AuditLogPage({
     </div>;
 }
 function SettingsPage({
-  navigate,
   showToast
 }) {
-  const [prefs, setPrefs] = useState(() => ({
-    offline: isSalesOfflineEnabled(),
-    autosync: isSalesAutoSyncEnabled(),
-    gps: localStorage.getItem('corvex_sales_gps') !== '0',
-  }));
   const [pendingCount, setPendingCount] = useState(0);
   const [syncing, setSyncing] = useState(false);
   const refreshPending = async () => {
@@ -2747,16 +2659,6 @@ function SettingsPage({
   useEffect(() => {
     refreshPending();
   }, []);
-  const toggle = (key, storageKey) => {
-    setPrefs(p => {
-      const next = { ...p, [key]: !p[key] };
-      localStorage.setItem(storageKey, next[key] ? '1' : '0');
-      if (key === 'autosync' && next.autosync) {
-        window.dispatchEvent(new Event('corvex-session-ready'));
-      }
-      return next;
-    });
-  };
   const syncNow = async () => {
     setSyncing(true);
     const result = await flushOfflineQueue({ manual: true });
@@ -2781,20 +2683,14 @@ function SettingsPage({
       failed ? 'error' : 'success'
     );
   };
-  return <div className="page">
-      <section className="panel form-panel content-panel">
-        <div className="panel-section-header"><h3>Settings</h3><p className="muted">Offline mode keeps a field report or a sale on this device when the server cannot be reached. Auto-sync sends those saved records once you are online.</p></div>
-        <div className="form-group"><label className="toggle-label"><input type="checkbox" checked={prefs.offline} onChange={() => toggle('offline', 'corvex_sales_offline')} />Enable offline mode</label></div>
-        <div className="form-group"><label className="toggle-label"><input type="checkbox" checked={prefs.autosync} onChange={() => toggle('autosync', 'corvex_sales_autosync')} />Auto-sync when online</label></div>
-        <div className="form-group"><label className="toggle-label"><input type="checkbox" checked={prefs.gps} onChange={() => toggle('gps', 'corvex_sales_gps')} />Show GPS route tracking on map</label></div>
-        <p className="muted">{pendingCount} record{pendingCount === 1 ? '' : 's'} waiting on this device.</p>
+  return (
+    <UserSettingsPanel role="sales" showToast={showToast}>
+      <p className="muted">{pendingCount} record{pendingCount === 1 ? '' : 's'} waiting on this device.</p>
+      <div className="settings-link-row">
         <button className="button" type="button" onClick={syncNow} disabled={syncing}>{syncing ? 'Syncing…' : 'Sync now'}</button>
-      </section>
-      <div className="flex justify-end mt-4">
-        <button className="button ghost" type="button" onClick={() => navigate('/sales/profile')}>Profile</button>
-        <button className="button ghost" type="button" onClick={() => navigate('/sales/dashboard')}>Back to Dashboard</button>
       </div>
-    </div>;
+    </UserSettingsPanel>
+  );
 }
 export function SalesPageBody({
   page,
@@ -2810,6 +2706,7 @@ export function SalesPageBody({
     invoiceId: page.params?.invoiceId,
     parentContext: page.parentContext,
     purchaseRequestId: page.purchaseRequestId,
+    requestId: page.params?.requestId,
     navigate,
     showToast
   };
@@ -2827,6 +2724,8 @@ export function SalesPageBody({
       return <CustomersPage {...props} />;
     case 'purchaseRequests':
       return <SalesPurchaseRequestsPage {...props} />;
+    case 'purchaseRequestDetail':
+      return <SalesPurchaseReviewPage {...props} />;
     case 'customerForm':
       return <CustomerFormPage {...props} />;
     case 'clients':

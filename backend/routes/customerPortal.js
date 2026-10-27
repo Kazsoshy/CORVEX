@@ -110,7 +110,7 @@ router.get('/purchase-requests', async (req, res) => {
     }
 
     const result = await pool.query(
-      `SELECT pr.request_id, pr.status, pr.notes, pr.created_at, pr.updated_at,
+      `SELECT pr.request_id, pr.status, pr.notes, pr.agent_reply, pr.reviewed_at, pr.created_at, pr.updated_at,
               COALESCE(u.first_name || ' ' || u.last_name, 'Unassigned') AS sales_agent_name
        FROM purchase_requests pr
        LEFT JOIN users u ON u.id = pr.sales_agent_id
@@ -124,7 +124,7 @@ router.get('/purchase-requests', async (req, res) => {
     if (ids.length) {
       const items = await pool.query(
         `SELECT pri.request_id, pri.item_id, pri.product_id, pri.quantity, pri.notes,
-                p.name AS product_name, p.sku
+                p.name AS product_name, p.sku, p.image_url, p.unit_price
          FROM purchase_request_items pri
          JOIN products p ON p.id = pri.product_id
          WHERE pri.request_id = ANY($1::int[])`,

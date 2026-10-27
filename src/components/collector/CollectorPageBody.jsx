@@ -30,6 +30,7 @@ import { saveOfflineRecord } from '../../offline/db.js';
 import { DeviceQueue, loadWaiting } from '../../offline/DeviceQueue.jsx';
 import { flushOfflineQueue } from '../../offline/flushQueue.js';
 import { isCollectorAutoSyncEnabled } from '../../offline/prefs.js';
+import { UserSettingsPanel } from '../shared/UserSettingsPanel';
 import { downloadPdf } from '../../utils/dataExport';
 import { collectorMapPath, openPhoneCall } from '../../utils/mapsNavigation';
 import { NotificationsInbox } from '../shared/NotificationsInbox';
@@ -1936,25 +1937,18 @@ function NotificationsPage({
   );
 }
 function ProfilePage({
-  navigate,
   showToast
 }) {
   return <AccountProfilePanel
     showToast={showToast}
-    title="Collector Profile"
-    subtitle="View your personal details and update your account password."
-    extraActions={<button className="button ghost" type="button" onClick={() => navigate('/collector/settings')}>Settings</button>}
+    title="Collector profile"
+    subtitle="Your name, contact details, and sign-in for this CORVEX account."
+    settingsPath="/collector/settings"
   />;
 }
 function SettingsPage({
-  navigate,
   showToast
 }) {
-  const [prefs, setPrefs] = useState(() => ({
-    language: localStorage.getItem('corvex_collector_language') || 'English',
-    push: localStorage.getItem('corvex_collector_push') !== '0',
-    autosync: isCollectorAutoSyncEnabled(),
-  }));
   const [pendingCount, setPendingCount] = useState(0);
   const [syncing, setSyncing] = useState(false);
   const refreshPending = async () => {
@@ -1965,13 +1959,6 @@ function SettingsPage({
   useEffect(() => {
     refreshPending().catch(() => setPendingCount(0));
   }, []);
-  const save = (next) => {
-    setPrefs(next);
-    localStorage.setItem('corvex_collector_language', next.language);
-    localStorage.setItem('corvex_collector_push', next.push ? '1' : '0');
-    localStorage.setItem('corvex_collector_autosync', next.autosync ? '1' : '0');
-    if (next.autosync) window.dispatchEvent(new Event('corvex-session-ready'));
-  };
   const syncNow = async () => {
     setSyncing(true);
     const result = await flushOfflineQueue({ manual: true });
@@ -1992,38 +1979,14 @@ function SettingsPage({
       failed ? 'error' : 'success'
     );
   };
-  return <div className="page">
-      <section className="panel form-panel content-panel">
-        <div className="flex flex-col md:flex-row justify-between gap-4 items-start md:items-center mb-4">
-          <h3>Settings</h3>
-        </div>
-        <p className="text-ink/70">Auto-sync sends collections and field reports saved on this device once you are online.</p>
-        <div className="form-group">
-          <label>Language</label>
-          <select className="filter-select" value={prefs.language} onChange={(e) => save({ ...prefs, language: e.target.value })}>
-            <option>English</option>
-            <option>Filipino</option>
-          </select>
-        </div>
-        <div className="form-group">
-          <label className="toggle-label">
-            <input type="checkbox" checked={prefs.push} onChange={(e) => save({ ...prefs, push: e.target.checked })} />
-            Enable push notifications
-          </label>
-        </div>
-        <div className="form-group">
-          <label className="toggle-label">
-            <input type="checkbox" checked={prefs.autosync} onChange={(e) => save({ ...prefs, autosync: e.target.checked })} />
-            Auto-sync when online
-          </label>
-        </div>
-        <p className="muted">{pendingCount} record{pendingCount === 1 ? '' : 's'} waiting on this device.</p>
+  return (
+    <UserSettingsPanel role="collector" showToast={showToast}>
+      <p className="muted">{pendingCount} record{pendingCount === 1 ? '' : 's'} waiting on this device.</p>
+      <div className="settings-link-row">
         <button className="button" type="button" onClick={syncNow} disabled={syncing}>{syncing ? 'Syncing…' : 'Sync now'}</button>
-      </section>
-      <div className="flex justify-end mt-4">
-        <button className="button ghost" type="button" onClick={() => navigate('/collector/dashboard')}>Back to Dashboard</button>
       </div>
-    </div>;
+    </UserSettingsPanel>
+  );
 }
 export function CollectorPageBody({
   page,

@@ -44,14 +44,26 @@ export async function fetchSalesPurchaseRequestById(requestId) {
   }
 }
 
-export async function updateSalesPurchaseRequestStatus(requestId, status) {
+export async function updateSalesPurchaseRequestStatus(requestId, status, extra = {}) {
   try {
-    const response = await apiClient.patch(`/sales/purchase-requests/${requestId}`, { status });
+    const response = await apiClient.patch(`/sales/purchase-requests/${requestId}`, { status, ...extra });
     return response.data;
   } catch (error) {
     return {
       success: false,
       message: error.response?.data?.message || 'Failed to update request.',
+    };
+  }
+}
+
+export async function updateSalesPurchaseRequestItems(requestId, items) {
+  try {
+    const response = await apiClient.put(`/sales/purchase-requests/${requestId}/items`, { items });
+    return response.data;
+  } catch (error) {
+    return {
+      success: false,
+      message: error.response?.data?.message || 'Failed to update request lines.',
     };
   }
 }

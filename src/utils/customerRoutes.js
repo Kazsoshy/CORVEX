@@ -10,6 +10,7 @@ const ROUTE_DEFINITIONS = [
   { pattern: /^\/customer\/statements$/, pageType: 'statements' },
   { pattern: /^\/customer\/statements\/([^/]+)$/, pageType: 'statementDetail', params: ['statementId'] },
   { pattern: /^\/customer\/notifications$/, pageType: 'notifications' },
+  { pattern: /^\/customer\/settings$/, pageType: 'settings' },
   { pattern: /^\/customer\/profile$/, pageType: 'profile' },
 ];
 
@@ -36,7 +37,7 @@ export function buildCustomerBreadcrumbs(pageType, params = {}) {
     case 'home':
       return [{ label: 'Home', to: '/customer/home' }];
     case 'purchaseRequests':
-      return [...crumbs, { label: 'Purchase Requests', to: '/customer/purchase-requests' }];
+      return [...crumbs, { label: 'Purchase Products', to: '/customer/purchase-requests' }];
     case 'accountDetails':
       return [...crumbs, { label: 'Account Details', to: '/customer/account-details' }];
     case 'paymentHistory':
@@ -51,6 +52,8 @@ export function buildCustomerBreadcrumbs(pageType, params = {}) {
       return [...crumbs, { label: 'Statements', to: '/customer/statements' }, { label: 'Statement', to: `/customer/statements/${params.statementId}` }];
     case 'notifications':
       return [...crumbs, { label: 'Notifications', to: '/customer/notifications' }];
+    case 'settings':
+      return [...crumbs, { label: 'Settings', to: '/customer/settings' }];
     case 'profile':
       return [...crumbs, { label: 'Profile', to: '/customer/profile' }];
     default:
@@ -65,7 +68,7 @@ export function resolveCustomerPage(pathname) {
   const titles = {
     login: 'Customer Login',
     home: 'Home',
-    purchaseRequests: 'Purchase Requests',
+    purchaseRequests: 'Purchase Products',
     accountDetails: 'Account Details',
     paymentHistory: 'Payment History',
     receipts: 'Digital Receipts',
@@ -73,6 +76,7 @@ export function resolveCustomerPage(pathname) {
     statements: 'Statements',
     statementDetail: 'Statement Detail',
     notifications: 'Notifications',
+    settings: 'Settings',
     profile: 'Profile',
   };
 
@@ -84,6 +88,7 @@ export function resolveCustomerPage(pathname) {
     receipts: 'Digital receipts for all confirmed payments.',
     statements: 'Monthly account statements and summaries.',
     notifications: 'Payment reminders and account updates.',
+    settings: 'Accessibility, appearance, and notification preferences for this device.',
     profile: 'Personal information and security settings.',
   };
 

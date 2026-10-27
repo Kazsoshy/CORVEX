@@ -2,6 +2,13 @@ import express from 'express';
 import bcrypt from 'bcryptjs';
 import { issueSessionToken, requireAuth } from '../middleware/auth.js';
 import { activatePortalAccount, hashPortalToken } from '../lib/customerPortal.js';
+import {
+  avatarContentType,
+  deleteAvatarFile,
+  detectAvatarImage,
+  readAvatarFile,
+  saveAvatarFile,
+} from '../lib/avatars.js';
 
 const router = express.Router();
 
@@ -73,6 +80,7 @@ router.post('/login', async (req, res) => {
          u.email,
          u.password_hash,
          u.status,
+         u.avatar_file,
          u.created_at,
          r.role_id,
          r.role_name,
@@ -137,6 +145,8 @@ router.post('/login', async (req, res) => {
 
     loginAttempts.delete(attempt);
 
+    await pool.query(`UPDATE users SET last_login = NOW() WHERE id = $1`, [user.id]);
+
     // Log successful login
     await pool.query(
       `INSERT INTO audit_logs (user_id, user_name, action, ip_address, status_details)
@@ -165,6 +175,7 @@ router.post('/login', async (req, res) => {
         } : null,
         customerId: user.customer_id ?? null,
         customerCode: user.customer_code ?? null,
+        hasAvatar: Boolean(user.avatar_file),
       },
     });
   } catch (err) {
@@ -251,6 +262,7 @@ const PROFILE_SELECT = `
     u.created_at,
     u.updated_at,
     u.last_login,
+    u.avatar_file,
     r.role_name,
     r.slug AS role_slug,
     b.name AS branch_name
@@ -277,6 +289,7 @@ function formatProfileRow(row) {
     created_at: row.created_at || null,
     updated_at: row.updated_at || null,
     last_login: row.last_login || null,
+    has_avatar: Boolean(row.avatar_file),
     role: { id: row.role_id, name: row.role_name, slug: row.role_slug },
     branch: row.branch_id ? { id: row.branch_id, name: row.branch_name } : null,
   };
@@ -302,6 +315,83 @@ router.get('/me', requireAuth, async (req, res) => {
   } catch (err) {
     console.error('[Auth] GET /me error:', err.message);
     return res.status(500).json({ success: false, message: 'Failed to load profile.' });
+  }
+});
+
+function readAvatarBody(req, res, next) {
+  express.raw({ type: () => true, limit: '2mb' })(req, res, (error) => {
+    if (!error) return next();
+    if (error.status === 413 || error.type === 'entity.too.large') {
+      return res.status(413).json({ success: false, message: 'Photo must be 2 MB or smaller.' });
+    }
+    return next(error);
+  });
+}
+
+// GET /api/auth/me/avatar — the signed-in user's profile photo
+router.get('/me/avatar', requireAuth, async (req, res) => {
+  try {
+    const pool = req.app.locals.pool;
+    const result = await pool.query(`SELECT avatar_file FROM users WHERE id = $1`, [req.currentUser.id]);
+    const fileName = result.rows[0]?.avatar_file;
+    const file = fileName ? await readAvatarFile(fileName) : null;
+    if (!file) return res.status(404).json({ success: false, message: 'No profile photo.' });
+    res.set('Content-Type', avatarContentType(fileName));
+    res.set('Cache-Control', 'private, no-store');
+    return res.status(200).send(file);
+  } catch (err) {
+    console.error('[Auth] GET /me/avatar error:', err.message);
+    return res.status(500).json({ success: false, message: 'Failed to load profile photo.' });
+  }
+});
+
+// POST /api/auth/me/avatar — store a JPG, PNG, or WebP for the signed-in user
+router.post('/me/avatar', requireAuth, readAvatarBody, async (req, res) => {
+  try {
+    const detected = detectAvatarImage(req.body);
+    if (!detected) {
+      return res.status(400).json({
+        success: false,
+        message: 'Choose a JPG, PNG, or WebP image up to 2 MB.',
+      });
+    }
+    const pool = req.app.locals.pool;
+    const userId = req.currentUser.id;
+    const fileName = await saveAvatarFile(userId, req.body, detected.ext);
+    await pool.query(
+      `UPDATE users SET avatar_file = $1, updated_at = NOW() WHERE id = $2`,
+      [fileName, userId]
+    );
+    const result = await pool.query(PROFILE_SELECT, [userId]);
+    return res.status(200).json({
+      success: true,
+      message: 'Profile photo updated.',
+      data: formatProfileRow(result.rows[0]),
+    });
+  } catch (err) {
+    console.error('[Auth] POST /me/avatar error:', err.message);
+    return res.status(500).json({ success: false, message: 'Failed to save profile photo.' });
+  }
+});
+
+// DELETE /api/auth/me/avatar — remove the signed-in user's profile photo
+router.delete('/me/avatar', requireAuth, async (req, res) => {
+  try {
+    const pool = req.app.locals.pool;
+    const userId = req.currentUser.id;
+    const current = await pool.query(`SELECT avatar_file FROM users WHERE id = $1`, [userId]);
+    if (!current.rows.length) return res.status(404).json({ success: false, message: 'User not found.' });
+    await deleteAvatarFile(current.rows[0].avatar_file);
+    await pool.query(`UPDATE users SET avatar_file = NULL, updated_at = NOW() WHERE id = $1`, [userId]);
+    const result = await pool.query(PROFILE_SELECT, [userId]);
+    return res.status(200).json({
+      success: true,
+      message: 'Profile photo removed.',
+      data: formatProfileRow(result.rows[0]),
+    });
+  } catch (err) {
+    console.error('[Auth] DELETE /me/avatar error:', err.message);
+    return res.status(500).json({ success: false, message: 'Failed to remove profile photo.' });
   }
 });
 

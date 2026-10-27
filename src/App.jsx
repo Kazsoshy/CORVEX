@@ -32,6 +32,9 @@ import { customerRole } from './rolePages/customer';
 import { superAdminRole } from './rolePages/superAdmin';
 import { resolveSuperAdminPage, isSuperAdminNavActive } from './utils/superAdminRoutes';
 import { isBranchManagerNavActive, resolveBranchManagerPage } from './utils/branchManagerRoutes';
+import { SIDEBAR_EVENT } from './settings/preferences.js';
+import { ShortcutDialog } from './components/shared/ShortcutDialog';
+import { useMyAvatar } from './components/shared/ProfilePhoto.jsx';
 
 const ROLES = [collectorRole, salesRole, warehouseRole, operatingManagerRole, branchManagerRole, customerRole, superAdminRole];
 const ROLE_BY_KEY = Object.fromEntries(ROLES.map((role) => [role.key, role]));
@@ -68,6 +71,7 @@ function PrototypeShell() {
   const isCustomer = currentRole?.key === 'customer';
   const isSuperAdmin = currentRole?.key === 'superAdmin';
   const currentUser = getCurrentUser();
+  const avatarSrc = useMyAvatar(Boolean(currentUser));
   const isRoleModule = isCollector || isSales || isWarehouse || isOperatingManager || isBranchManager || isCustomer || isSuperAdmin;
   const isCustomerLogin = isCustomerAuthPath(location.pathname);
   const fullPath = location.pathname + location.search;
@@ -93,13 +97,22 @@ function PrototypeShell() {
 
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(() => localStorage.getItem('corvex_sidebar_collapsed') === 'true');
   const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
+  const [shortcutsOpen, setShortcutsOpen] = useState(false);
+  const [announce, setAnnounce] = useState('');
 
   const closeMobileSidebar = useCallback(() => setIsMobileSidebarOpen(false), []);
   const openMobileSidebar = useCallback(() => setIsMobileSidebarOpen(true), []);
 
   useEffect(() => {
-    localStorage.setItem('corvex_sidebar_collapsed', isSidebarCollapsed);
+    localStorage.setItem('corvex_sidebar_collapsed', String(isSidebarCollapsed));
+    window.dispatchEvent(new CustomEvent(SIDEBAR_EVENT, { detail: isSidebarCollapsed }));
   }, [isSidebarCollapsed]);
+
+  useEffect(() => {
+    const onSidebar = (event) => setIsSidebarCollapsed(Boolean(event.detail));
+    window.addEventListener(SIDEBAR_EVENT, onSidebar);
+    return () => window.removeEventListener(SIDEBAR_EVENT, onSidebar);
+  }, []);
 
   useEffect(() => {
     closeMobileSidebar();
@@ -107,7 +120,25 @@ function PrototypeShell() {
 
   useEffect(() => {
     const handleKeyDown = (e) => {
-      if (e.key === 'Escape') closeMobileSidebar();
+      const tag = e.target?.tagName;
+      const typing = tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || e.target?.isContentEditable;
+      if (e.key === 'Escape') {
+        setShortcutsOpen(false);
+        closeMobileSidebar();
+        return;
+      }
+      if (typing || e.metaKey || e.ctrlKey || e.altKey) return;
+      if (e.key === '?' ) {
+        e.preventDefault();
+        setShortcutsOpen((open) => !open);
+        return;
+      }
+      if (e.key === '/') {
+        const field = document.querySelector('#corvex-main input[type="search"], #corvex-main .filter-input.search');
+        if (!field) return;
+        e.preventDefault();
+        field.focus();
+      }
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
@@ -179,8 +210,16 @@ function PrototypeShell() {
 
   const pageTitle = page?.title ?? (currentRole ? currentRole.label : 'CORVEX');
 
+  useEffect(() => {
+    if (!pageTitle) return;
+    setAnnounce(`${pageTitle}`);
+  }, [location.pathname, pageTitle]);
+
   return (
     <div className={`app-shell ${isSidebarCollapsed ? 'collapsed' : ''} ${isMobileSidebarOpen ? 'mobile-open' : ''}`}>
+      <a className="skip-link" href="#corvex-main">Skip to content</a>
+      <div className="sr-only" role="status" aria-live="polite">{announce}</div>
+      <ShortcutDialog open={shortcutsOpen} onClose={() => setShortcutsOpen(false)} />
       <LogoutConfirmDialog
         isOpen={showLogoutConfirm}
         onConfirm={handleLogoutConfirm}
@@ -344,7 +383,7 @@ function PrototypeShell() {
               tabIndex={0}
             >
               <div className="sidebar-profile-avatar">
-                <NavIcon name="accounts" />
+                {avatarSrc ? <img src={avatarSrc} alt="" /> : <NavIcon name="accounts" />}
               </div>
               <div className="sidebar-profile-info">
                 <div className="sidebar-profile-name">{currentUser?.fullName || currentUser?.name || 'User'}</div>
@@ -365,7 +404,7 @@ function PrototypeShell() {
         )}
       </aside>
 
-      <main className="content">
+      <main id="corvex-main" className="content" tabIndex={-1}>
         <div className="content-ambient" aria-hidden="true" />
 
         <header className="mobile-app-bar">

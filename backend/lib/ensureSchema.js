@@ -7,6 +7,7 @@ export async function ensureSchema(client) {
     ALTER TABLE users ADD COLUMN IF NOT EXISTS middle_name VARCHAR(50) DEFAULT NULL;
     ALTER TABLE users ADD COLUMN IF NOT EXISTS phone VARCHAR(30);
     ALTER TABLE users ADD COLUMN IF NOT EXISTS full_name VARCHAR(120);
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS avatar_file VARCHAR(80);
 
     ALTER TABLE customers ADD COLUMN IF NOT EXISTS middle_name VARCHAR(50) DEFAULT NULL;
     ALTER TABLE customers ADD COLUMN IF NOT EXISTS contact_person_mname VARCHAR(100) DEFAULT NULL;
@@ -23,6 +24,8 @@ export async function ensureSchema(client) {
     ALTER TABLE notifications ADD COLUMN IF NOT EXISTS category VARCHAR(50);
 
     ALTER TABLE permissions ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP;
+    ALTER TABLE permissions ADD COLUMN IF NOT EXISTS status VARCHAR(20) NOT NULL DEFAULT 'Active';
+    ALTER TABLE roles ADD COLUMN IF NOT EXISTS status VARCHAR(20) NOT NULL DEFAULT 'Active';
 
     ALTER TABLE branch_inventory ADD COLUMN IF NOT EXISTS created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP;
     ALTER TABLE branch_inventory ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP;
@@ -36,6 +39,9 @@ export async function ensureSchema(client) {
     ALTER TABLE customers ADD COLUMN IF NOT EXISTS assigned_sales_agent_id INTEGER;
 
     ALTER TABLE purchase_requests ADD COLUMN IF NOT EXISTS sales_invoices_id INTEGER;
+    ALTER TABLE purchase_requests ADD COLUMN IF NOT EXISTS agent_reply TEXT;
+    ALTER TABLE purchase_requests ADD COLUMN IF NOT EXISTS reviewed_by INTEGER;
+    ALTER TABLE purchase_requests ADD COLUMN IF NOT EXISTS reviewed_at TIMESTAMP;
 
     ALTER TABLE sales_invoices ADD COLUMN IF NOT EXISTS reviewed_by INTEGER;
     ALTER TABLE sales_invoices ADD COLUMN IF NOT EXISTS reviewed_at TIMESTAMP;

@@ -1,6 +1,12 @@
 import express from 'express';
 import { allow, isUnscoped, ROLE_SETS } from '../middleware/auth.js';
 import { normalizeProductName, productNameConflict, productNameTaken } from '../lib/productName.js';
+import {
+  deleteProductImage,
+  detectProductImage,
+  productImageUrl,
+  saveProductImage,
+} from '../lib/productImages.js';
 
 const router = express.Router();
 router.use(allow(ROLE_SETS.catalogRead, ROLE_SETS.catalogWrite));
@@ -227,6 +233,82 @@ router.get('/:id', async (req, res) => {
   }
 });
 
+function readProductImageBody(req, res, next) {
+  express.raw({ type: () => true, limit: '2mb' })(req, res, (error) => {
+    if (!error) return next();
+    if (error.status === 413 || error.type === 'entity.too.large') {
+      return res.status(413).json({ success: false, message: 'Image must be 2 MB or smaller.' });
+    }
+    return next(error);
+  });
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// POST /api/products/:id/image  — Replace the product photo
+// DELETE /api/products/:id/image — Remove the product photo
+// ──────────────────────────────────────────────────────────────────────────────
+router.post('/:id/image', readProductImageBody, async (req, res) => {
+  try {
+    const pool = req.app.locals.pool;
+    const productId = Number(req.params.id);
+    if (!Number.isInteger(productId) || productId <= 0) {
+      return res.status(400).json({ success: false, message: 'Invalid product id.' });
+    }
+    const detected = detectProductImage(req.body);
+    if (!detected) {
+      return res.status(400).json({
+        success: false,
+        message: 'Choose a JPG, PNG, or WebP image up to 2 MB.',
+      });
+    }
+    const existing = await pool.query(`SELECT id FROM products WHERE id = $1`, [productId]);
+    if (!existing.rows.length) {
+      return res.status(404).json({ success: false, message: 'Product not found.' });
+    }
+    await saveProductImage(productId, req.body, detected.ext);
+    const imageUrl = productImageUrl(productId);
+    await pool.query(
+      `UPDATE products SET image_url = $1, updated_at = NOW() WHERE id = $2`,
+      [imageUrl, productId]
+    );
+    return res.status(200).json({
+      success: true,
+      message: 'Product image saved.',
+      data: { product_id: productId, image_url: imageUrl },
+    });
+  } catch (err) {
+    console.error('[Products] POST /:id/image error:', err.message);
+    return res.status(500).json({ success: false, message: 'Failed to save product image.' });
+  }
+});
+
+router.delete('/:id/image', async (req, res) => {
+  try {
+    const pool = req.app.locals.pool;
+    const productId = Number(req.params.id);
+    if (!Number.isInteger(productId) || productId <= 0) {
+      return res.status(400).json({ success: false, message: 'Invalid product id.' });
+    }
+    const existing = await pool.query(`SELECT id FROM products WHERE id = $1`, [productId]);
+    if (!existing.rows.length) {
+      return res.status(404).json({ success: false, message: 'Product not found.' });
+    }
+    await deleteProductImage(productId);
+    await pool.query(
+      `UPDATE products SET image_url = NULL, updated_at = NOW() WHERE id = $1`,
+      [productId]
+    );
+    return res.status(200).json({
+      success: true,
+      message: 'Product image removed.',
+      data: { product_id: productId, image_url: null },
+    });
+  } catch (err) {
+    console.error('[Products] DELETE /:id/image error:', err.message);
+    return res.status(500).json({ success: false, message: 'Failed to remove product image.' });
+  }
+});
+
 // ──────────────────────────────────────────────────────────────────────────────
 // POST /api/products  — Create product
 // ──────────────────────────────────────────────────────────────────────────────
@@ -382,6 +464,7 @@ router.delete('/:id', async (req, res) => {
         });
       }
 
+      await deleteProductImage(productId);
       await pool.query(`DELETE FROM products WHERE id = $1`, [productId]);
       return res.status(200).json({
         success: true,

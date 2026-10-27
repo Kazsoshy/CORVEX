@@ -65,7 +65,7 @@ export const operatingManagerRole = {
         { label: 'Audit Logs', to: '/operating-manager/admin/audit-logs' },
         { label: 'Alerts & Exceptions', to: '/operating-manager/operations/alerts' },
         { label: 'Notifications', to: '/operating-manager/notifications' },
-        { label: 'System Configuration', to: '/operating-manager/operations/settings' },
+        { label: 'Settings', to: '/operating-manager/operations/settings' },
       ],
     },
     {
@@ -102,7 +102,7 @@ export const operatingManagerRole = {
     { label: 'Audit Logs', to: '/operating-manager/admin/audit-logs' },
     { label: 'Alerts & Exceptions', to: '/operating-manager/operations/alerts' },
     { label: 'Notifications', to: '/operating-manager/notifications' },
-    { label: 'System Configuration', to: '/operating-manager/operations/settings' },
+    { label: 'Settings', to: '/operating-manager/operations/settings' },
     { label: 'Profile', to: '/operating-manager/profile' },
   ],
   routes: {},

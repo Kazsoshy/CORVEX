@@ -207,7 +207,7 @@ export function resolveWarehousePage(pathname, search = '') {
 export function isWarehouseNavActive(fullPath, navTo) {
   const pathname = fullPath.split('?')[0];
   if (navTo === '/warehouse/dashboard') {
-    return pathname === '/warehouse/dashboard' || pathname === '/warehouse/settings' || pathname === '/warehouse/audit-log' || pathname === '/warehouse/reports';
+    return pathname === '/warehouse/dashboard' || pathname === '/warehouse/audit-log' || pathname === '/warehouse/reports';
   }
   if (navTo === '/warehouse/branch-inventory') {
     return pathname === '/warehouse/branch-inventory' || pathname === '/warehouse/inventory';
@@ -231,5 +231,6 @@ export function isWarehouseNavActive(fullPath, navTo) {
   if (navTo === '/warehouse/credit-history') return pathname.startsWith('/warehouse/credit-history');
   if (navTo === '/warehouse/notifications') return pathname === '/warehouse/notifications';
   if (navTo === '/warehouse/profile') return pathname === '/warehouse/profile';
+  if (navTo === '/warehouse/settings') return pathname === '/warehouse/settings';
   return pathname === navTo;
 }

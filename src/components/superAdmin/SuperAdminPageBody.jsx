@@ -21,6 +21,7 @@ import { LoadingState } from '../shared/LoadingState';
 import { NavIcon } from '../../navIcons';
 import { StatusBadge } from '../StatusBadge';
 import { formatDisplayDateTime } from '../../utils/formatters.js';
+import { UserSettingsPanel } from '../shared/UserSettingsPanel';
 function btn(v) {
   if (v === 'secondary') return 'button secondary';
   if (v === 'ghost') return 'button ghost';
@@ -698,6 +699,7 @@ function SettingsPage({
     [k]: v
   }));
   const [confirmReset, setConfirmReset] = useState(false);
+  const [settingsArea, setSettingsArea] = useState('company');
   useEffect(() => {
     let active = true;
     async function load() {
@@ -737,7 +739,13 @@ function SettingsPage({
   };
   if (loading) return <LoadingState message="Loading settings..." />;
   if (!settings) return <EmptyState title="Settings unavailable" description="Company settings could not be loaded." />;
-  return <div className="page">
+  return <div className="page settings-system">
+      <div className="settings-tabs" role="tablist" aria-label="System settings">
+        <button className={settingsArea === 'company' ? 'settings-tab active' : 'settings-tab'} type="button" role="tab" aria-selected={settingsArea === 'company'} onClick={() => setSettingsArea('company')}>Company</button>
+        <button className={settingsArea === 'preferences' ? 'settings-tab active' : 'settings-tab'} type="button" role="tab" aria-selected={settingsArea === 'preferences'} onClick={() => setSettingsArea('preferences')}>Accessibility & display</button>
+      </div>
+      {settingsArea === 'preferences' ? <UserSettingsPanel role="personal" showToast={showToast} /> : null}
+      {settingsArea === 'company' ? <>
       <section className="panel form-panel content-panel">
         <div className="flex flex-col md:flex-row justify-between gap-4 items-start md:items-center mb-4"><h3>Company Information</h3></div>
         <div className="grid two-up">
@@ -757,13 +765,10 @@ function SettingsPage({
 
       <section className="panel form-panel content-panel">
         <div className="flex flex-col md:flex-row justify-between gap-4 items-start md:items-center mb-4"><h3>Notification Settings</h3></div>
-        <div style={{
-        display: 'flex',
-        gap: 24
-      }}>
-          <label className="toggle-label"><input type="checkbox" checked={asBool(settings.notificationsEmail)} onChange={e => set('notificationsEmail', String(e.target.checked))} />Email Notifications</label>
-          <label className="toggle-label"><input type="checkbox" checked={asBool(settings.notificationsSms)} onChange={e => set('notificationsSms', String(e.target.checked))} />SMS Notifications</label>
-          <label className="toggle-label"><input type="checkbox" checked={asBool(settings.smsEnabled)} onChange={e => set('smsEnabled', String(e.target.checked))} />SMS / OTP Enabled</label>
+        <div className="settings-system-toggles">
+          <label className="settings-switch"><span><strong>Email Notifications</strong></span><span className="settings-switch-control"><input type="checkbox" checked={asBool(settings.notificationsEmail)} onChange={e => set('notificationsEmail', String(e.target.checked))} /><span className="settings-switch-track" aria-hidden="true" /></span></label>
+          <label className="settings-switch"><span><strong>SMS Notifications</strong></span><span className="settings-switch-control"><input type="checkbox" checked={asBool(settings.notificationsSms)} onChange={e => set('notificationsSms', String(e.target.checked))} /><span className="settings-switch-track" aria-hidden="true" /></span></label>
+          <label className="settings-switch"><span><strong>SMS / OTP Enabled</strong></span><span className="settings-switch-control"><input type="checkbox" checked={asBool(settings.smsEnabled)} onChange={e => set('smsEnabled', String(e.target.checked))} /><span className="settings-switch-track" aria-hidden="true" /></span></label>
         </div>
       </section>
 
@@ -789,10 +794,11 @@ function SettingsPage({
           </div>
         </section>}
 
-      <div className="flex justify-end gap-2 mt-2">
+      <div className="settings-system-footer">
         <button className="button secondary" type="button" onClick={() => setConfirmReset(true)}>Restore Defaults</button>
         <button className="button" type="button" onClick={save} disabled={saving}>{saving ? 'Saving…' : 'Save Settings'}</button>
       </div>
+      </> : null}
     </div>;
 }
 
@@ -1012,8 +1018,9 @@ function ProfilePage({
 }) {
   return <AccountProfilePanel
     showToast={showToast}
-    title="Super Admin Profile"
-    subtitle="View your personal details and update your account password."
+    title="Super admin profile"
+    subtitle="Your name, contact details, and sign-in for this CORVEX account."
+    settingsPath="/super-admin/settings"
   />;
 }
 
@@ -1148,10 +1155,10 @@ function UsersPage({
               <tr><th>Name</th><th>Middle Name</th><th>Email / Username</th><th>Role</th><th>Branch</th><th>Last Login</th><th>Status</th><th>Actions</th></tr>
             </thead>
             <tbody>
-              {loading ? <tr><td colSpan="7" style={{
+              {loading ? <tr><td colSpan="8" style={{
                   textAlign: 'center',
                   padding: '20px'
-                }}>Loading...</td></tr> : users.length === 0 ? <tr><td colSpan="7" style={{
+                }}>Loading...</td></tr> : users.length === 0 ? <tr><td colSpan="8" style={{
                   textAlign: 'center',
                   padding: '20px'
                 }}>No users found.</td></tr> : paginated_users.map(u => <tr key={u.id}>
@@ -1275,7 +1282,7 @@ function UsersPage({
                 branch_id: e.target.value
               })}>
                     <option value="">No Branch (Head Office)</option>
-                    {branches.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
+                    {branches.map(b => <option key={b.id} value={b.id}>{b.branch_name || b.name}</option>)}
                   </select>
                 </div>
                 <div className="form-group"><label>Employee ID</label><input value={formData.employee_id} onChange={e => setFormData({
@@ -1294,7 +1301,6 @@ function UsersPage({
               })}>
                     <option value="Active">Active</option>
                     <option value="Inactive">Inactive</option>
-                    <option value="Suspended">Suspended</option>
                   </select>
                 </div>
               </div>

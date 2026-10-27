@@ -69,6 +69,7 @@ const MIGRATIONS = [
   { file: '045_product_name_unique.sql',              label: '045_product_name_unique.sql' },
   { file: '046_collection_review.sql',                label: '046_collection_review.sql' },
   { file: '047_performance_targets.sql',             label: '047_performance_targets.sql' },
+  { file: '050_purchase_request_review.sql',         label: '050_purchase_request_review.sql' },
 ];
 
 async function ensureMigrationsTable() {

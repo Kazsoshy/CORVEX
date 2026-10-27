@@ -6,6 +6,7 @@ const ROUTE_DEFINITIONS = [
   { pattern: /^\/sales\/field-reports$/, pageType: 'fieldActivityReports' },
   { pattern: /^\/sales\/customers$/, pageType: 'customers' },
   { pattern: /^\/sales\/customers\/new$/, pageType: 'customerForm' },
+  { pattern: /^\/sales\/purchase-requests\/(\d+)$/, pageType: 'purchaseRequestDetail', params: ['requestId'] },
   { pattern: /^\/sales\/purchase-requests$/, pageType: 'purchaseRequests' },
   { pattern: /^\/sales\/customer-detail\/([^/]+)$/, pageType: 'customerDetail', params: ['customerId'] },
   { pattern: /^\/sales\/visit-log\/(\d+)$/, pageType: 'visitLog', params: ['visitId'] },
@@ -108,6 +109,13 @@ export function buildSalesBreadcrumbs(pageType, params = {}, parentContext = 'cu
     case 'purchaseRequests':
       return [...crumbs, { label: 'Purchase Requests', to: '/sales/purchase-requests' }];
 
+    case 'purchaseRequestDetail':
+      return [
+        ...crumbs,
+        { label: 'Purchase Requests', to: '/sales/purchase-requests' },
+        { label: `Request #${params.requestId}`, to: `/sales/purchase-requests/${params.requestId}` },
+      ];
+
     case 'ciSubmissions':
       return [...crumbs, { label: 'Credit Investigations', to: '/sales/credit-investigations' }];
 
@@ -184,6 +192,7 @@ export function resolveSalesPage(pathname, search = '') {
     customers: 'Customers',
     customerForm: 'Add Customer',
     purchaseRequests: 'Purchase Requests',
+    purchaseRequestDetail: 'Review Purchase Request',
     customerDetail: 'Customer Detail',
     visitLog: 'Field Visit Log',
     logSale: 'Log a Sale',
@@ -218,7 +227,7 @@ export function resolveSalesPage(pathname, search = '') {
 
 export function isSalesNavActive(fullPath, navTo) {
   const pathname = fullPath.split('?')[0];
-  if (navTo === '/sales/dashboard') return pathname === '/sales/dashboard' || pathname === '/sales/settings' || pathname === '/sales/route-tracking' || pathname === '/sales/audit-log';
+  if (navTo === '/sales/dashboard') return pathname === '/sales/dashboard' || pathname === '/sales/route-tracking' || pathname === '/sales/audit-log';
   if (navTo === '/sales/log-sale') return pathname.startsWith('/sales/log-sale');
   if (navTo === '/sales/schedule') return pathname.startsWith('/sales/schedule') || pathname.startsWith('/sales/visit-log') || fullPath.includes('from=schedule');
   if (navTo === '/sales/field-reports') return pathname === '/sales/field-reports';
@@ -235,5 +244,6 @@ export function isSalesNavActive(fullPath, navTo) {
     return pathname.startsWith('/sales/credit-investigations') || pathname.startsWith('/sales/ci-form');
   }
   if (navTo === '/sales/profile') return pathname === '/sales/profile';
+  if (navTo === '/sales/settings') return pathname === '/sales/settings';
   return pathname === navTo || pathname.startsWith(`${navTo}/`);
 }

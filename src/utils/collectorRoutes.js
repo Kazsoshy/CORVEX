@@ -199,7 +199,7 @@ export function resolveCollectorPage(pathname, search = '') {
 
 export function isCollectorNavActive(fullPath, navTo) {
   const pathname = fullPath.split('?')[0];
-  if (navTo === '/collector/dashboard') return pathname === '/collector/dashboard' || pathname === '/collector/settings';
+  if (navTo === '/collector/dashboard') return pathname === '/collector/dashboard';
   if (navTo === '/collector/route') return pathname.startsWith('/collector/route') || fullPath.includes('from=route');
   if (navTo === '/collector/field-reports') return pathname === '/collector/field-reports';
   if (navTo === '/collector/accounts') {
@@ -212,5 +212,6 @@ export function isCollectorNavActive(fullPath, navTo) {
   if (navTo === '/collector/receipts') return pathname.startsWith('/collector/receipts') || pathname.startsWith('/collector/receipt/');
   if (navTo === '/collector/notifications') return pathname === '/collector/notifications';
   if (navTo === '/collector/profile') return pathname === '/collector/profile';
+  if (navTo === '/collector/settings') return pathname === '/collector/settings';
   return pathname === navTo || pathname.startsWith(`${navTo}/`);
 }

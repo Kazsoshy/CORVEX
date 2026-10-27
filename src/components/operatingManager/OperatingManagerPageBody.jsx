@@ -1480,8 +1480,9 @@ function ProfilePage({
 }) {
   return <AccountProfilePanel
     showToast={showToast}
-    title="Operating Manager Profile"
-    subtitle="View your personal details and update your account password."
+    title="Operating manager profile"
+    subtitle="Your name, contact details, and sign-in for this CORVEX account."
+    settingsPath="/operating-manager/operations/settings"
   />;
 }
 const ANALYTIC_RANGE_OPTIONS = [{

@@ -32,6 +32,13 @@ export function endSessionForInactivity() {
   window.dispatchEvent(new Event('session-ended'));
 }
 
+/** Milliseconds left before this sign-in ends for inactivity, or null if the session has no activity stamp. */
+export function getSessionIdleRemainingMs() {
+  const last = readLastActivity(localStorage.getItem('corvex_token'));
+  if (last == null) return null;
+  return Math.max(0, IDLE_TIMEOUT_MS - (Date.now() - last));
+}
+
 export function startIdleSessionWatch() {
   let lastActivity = Date.now();
   let lastTouch = 0;

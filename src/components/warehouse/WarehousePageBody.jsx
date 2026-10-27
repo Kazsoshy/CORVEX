@@ -7,6 +7,8 @@ import {
   createInventoryTransfer,
   createRestock,
   createWarehouseProduct,
+  deleteProductImage,
+  uploadProductImage,
   fetchBranchInventory,
   fetchInventoryBranches,
   fetchInventoryTransferById,
@@ -23,6 +25,8 @@ import {
 import { fetchNotifications } from '../../api/notificationService.js';
 import { getCurrentUser } from '../../api/authService.js';
 import { AccountProfilePanel } from '../shared/AccountProfilePanel';
+import { isWarehouseBarcodeEnabled, isWarehouseLowStockEnabled } from '../../settings/preferences.js';
+import { UserSettingsPanel } from '../shared/UserSettingsPanel';
 
 function transferWorkflowStepIndex(status) {
   if (status === 'Rejected') return -1;
@@ -47,6 +51,7 @@ import { StatusBadge } from '../StatusBadge';
 import { CreditHistoryListPage, CreditHistoryDetailPage } from '../shared/CreditHistoryPages';
 import { formatCurrency, formatDisplayDate, formatDisplayDateTime } from '../../utils/formatters.js';
 import { CentralInventoryPanel } from '../inventory/CentralInventoryPanel';
+import { ProductImagePicker } from '../shared/ProductImagePicker';
 const PAGE_SIZE = 10;
 function DashboardPage({
   navigate,
@@ -124,7 +129,7 @@ function DashboardPage({
           { label: "Today's Stock Movements", value: String(summary.movementsToday ?? 0) },
         ]} />
 
-        {recentNotifications.length ? (
+        {isWarehouseLowStockEnabled() && recentNotifications.length ? (
           <section className="panel content-panel relative overflow-hidden" style={{ marginTop: 14 }}>
             <div className="list-section-header">
               <h3 style={{ margin: 0 }}>Stock threshold alerts</h3>
@@ -439,6 +444,30 @@ function InventoryPage({
             setSearch(e.target.value);
             setPage(1);
           }} />
+            {isWarehouseBarcodeEnabled() ? (
+              <input
+                className="filter-input search"
+                type="text"
+                autoComplete="off"
+                aria-label="Barcode or SKU"
+                placeholder="Scan barcode or SKU, then Enter"
+                onKeyDown={(event) => {
+                  if (event.key !== 'Enter') return;
+                  const code = event.currentTarget.value.trim().toLowerCase();
+                  if (!code) return;
+                  const match = products.find((product) => {
+                    const sku = String(product.sku || '').trim().toLowerCase();
+                    const barcode = String(product.barcode || '').trim().toLowerCase();
+                    return sku === code || barcode === code;
+                  });
+                  if (!match) {
+                    showToast('No product matches that barcode.', 'error');
+                    return;
+                  }
+                  navigate(`/warehouse/product/${match.product_id}`);
+                }}
+              />
+            ) : null}
             <select className="filter-select" value={category} onChange={e => {
             setCategory(e.target.value);
             setPage(1);
@@ -729,6 +758,9 @@ function EditProductPage({
   const [submitting, setSubmitting] = useState(false);
   const [categories, setCategories] = useState([]);
   const [suppliers, setSuppliers] = useState([]);
+  const [imageUrl, setImageUrl] = useState('');
+  const [imageFile, setImageFile] = useState(null);
+  const [imageRemoved, setImageRemoved] = useState(false);
   const [form, setForm] = useState({
     productName: '',
     sku: '',
@@ -755,6 +787,9 @@ function EditProductPage({
         if (supRes.data?.success) setSuppliers(supRes.data.data || []);
         if (prodRes.data?.success) {
           const p = prodRes.data.data;
+          setImageUrl(p.image_url || '');
+          setImageFile(null);
+          setImageRemoved(false);
           setForm({
             productName: p.product_name || '',
             sku: p.sku || '',
@@ -802,6 +837,19 @@ function EditProductPage({
         showToast(res.data?.message || 'Update failed.', 'error');
         return;
       }
+      if (imageFile) {
+        const uploaded = await uploadProductImage(productId, imageFile);
+        if (!uploaded.success) {
+          showToast(uploaded.message || 'Product saved, but the image could not be updated.', 'error');
+          return;
+        }
+      } else if (imageRemoved) {
+        const removed = await deleteProductImage(productId);
+        if (!removed.success) {
+          showToast(removed.message || 'Product saved, but the image could not be removed.', 'error');
+          return;
+        }
+      }
       showToast('Product updated.', 'success');
       navigate(`/warehouse/product/${productId}`);
     } catch (err) {
@@ -816,6 +864,20 @@ function EditProductPage({
   return <div className="page">
       <section className="panel form-panel content-panel">
         <div className="flex flex-col md:flex-row justify-between gap-4 items-start md:items-center mb-4"><h3>Edit Product</h3></div>
+        <ProductImagePicker
+          currentUrl={imageUrl}
+          file={imageFile}
+          removed={imageRemoved}
+          showToast={showToast}
+          onFile={(next) => {
+            setImageFile(next);
+            setImageRemoved(false);
+          }}
+          onRemove={() => {
+            setImageFile(null);
+            setImageRemoved(true);
+          }}
+        />
         <div className="form-group">
           <label>SKU</label>
           <p className="field-preview"><span style={{ fontFamily: 'monospace' }}>{form.sku || '—'}</span></p>
@@ -878,6 +940,8 @@ function AddProductPage({
   const [categories, setCategories] = useState([]);
   const [submitting, setSubmitting] = useState(false);
   const [suppliers, setSuppliers] = useState([]);
+  const [imageFile, setImageFile] = useState(null);
+  const [imageRemoved, setImageRemoved] = useState(false);
   const [form, setForm] = useState({
     productName: '',
     sku: '',
@@ -935,6 +999,15 @@ function AddProductPage({
         showToast(result.message || 'Failed to create product.', 'error');
         return;
       }
+      const createdId = result.data?.product_id;
+      if (imageFile && createdId) {
+        const uploaded = await uploadProductImage(createdId, imageFile);
+        if (!uploaded.success) {
+          showToast(uploaded.message || 'Product was created, but the image could not be saved.', 'error');
+          navigate(`/warehouse/product/${createdId}/edit`);
+          return;
+        }
+      }
       showToast('Product record created successfully.', 'success');
       navigate('/warehouse/products');
     } catch (err) {
@@ -946,6 +1019,19 @@ function AddProductPage({
   return <div className="page">
       <section className="panel form-panel content-panel">
         <div className="flex flex-col md:flex-row justify-between gap-4 items-start md:items-center mb-4"><h3>Add New Product</h3></div>
+        <ProductImagePicker
+          file={imageFile}
+          removed={imageRemoved}
+          showToast={showToast}
+          onFile={(next) => {
+            setImageFile(next);
+            setImageRemoved(false);
+          }}
+          onRemove={() => {
+            setImageFile(null);
+            setImageRemoved(true);
+          }}
+        />
         {[{
         name: 'productName',
         label: 'Product Name',
@@ -1989,10 +2075,11 @@ function ProfilePage({
 }) {
   return <AccountProfilePanel
     showToast={showToast}
-    title="Warehouse Profile"
-    subtitle="View your personal details and update your account password."
+    title="Warehouse profile"
+    subtitle="Your name, contact details, and sign-in for this CORVEX account."
+    settingsPath="/warehouse/settings"
     extraActions={<>
-      <button className="button ghost" type="button" onClick={() => navigate('/warehouse/audit-log')}>Audit Log</button>
+      <button className="button ghost" type="button" onClick={() => navigate('/warehouse/audit-log')}>Audit log</button>
       <button className="button ghost" type="button" onClick={() => navigate('/warehouse/reports')}>Reports</button>
     </>}
   />;
@@ -2079,28 +2166,9 @@ function ReportsPage({
     </div>;
 }
 function SettingsPage({
-  navigate
+  showToast
 }) {
-  const [prefs, setPrefs] = useState(() => ({
-    barcode: localStorage.getItem('corvex_warehouse_barcode') !== '0',
-    lowStock: localStorage.getItem('corvex_warehouse_low_stock') !== '0',
-  }));
-  const save = (next) => {
-    setPrefs(next);
-    localStorage.setItem('corvex_warehouse_barcode', next.barcode ? '1' : '0');
-    localStorage.setItem('corvex_warehouse_low_stock', next.lowStock ? '1' : '0');
-  };
-  return <div className="page">
-      <section className="panel form-panel content-panel">
-        <div className="flex flex-col md:flex-row justify-between gap-4 items-start md:items-center mb-4"><h3>Settings</h3></div>
-        <p className="text-ink/70">These preferences are saved on this device.</p>
-        <div className="form-group"><label className="toggle-label"><input type="checkbox" checked={prefs.barcode} onChange={(e) => save({ ...prefs, barcode: e.target.checked })} />Enable barcode scanning</label></div>
-        <div className="form-group"><label className="toggle-label"><input type="checkbox" checked={prefs.lowStock} onChange={(e) => save({ ...prefs, lowStock: e.target.checked })} />Low stock alert notifications</label></div>
-      </section>
-      <div className="flex justify-end mt-4">
-        <button className="button ghost" type="button" onClick={() => navigate('/warehouse/dashboard')}>Back to Dashboard</button>
-      </div>
-    </div>;
+  return <UserSettingsPanel role="warehouse" showToast={showToast} />;
 }
 function SuppliersPage({
   navigate,

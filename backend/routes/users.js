@@ -83,6 +83,32 @@ async function assertCanDisableUser(pool, actor, userId) {
   return null;
 }
 
+const USER_SELECT = `
+  SELECT
+    u.id AS user_id,
+    u.branch_id,
+    u.role_id,
+    u.first_name,
+    u.middle_name,
+    u.last_name,
+    u.email,
+    u.username,
+    u.phone,
+    u.contact_number,
+    u.employee_id,
+    u.avatar_initials,
+    u.status,
+    u.created_at,
+    u.updated_at,
+    u.last_login,
+    r.role_name,
+    r.slug AS role_slug,
+    b.name AS branch_name
+  FROM users u
+  JOIN roles r ON r.role_id = u.role_id
+  LEFT JOIN branches b ON b.id = u.branch_id
+`;
+
 // ──────────────────────────────────────────────────────────────────────────────
 // GET /api/users
 // Query params: role (slug), status, branch_id, search, page, limit
@@ -133,23 +159,7 @@ router.get('/', async (req, res) => {
     const total = Number(countResult.rows[0].count);
 
     const result = await pool.query(
-      `SELECT
-         u.id AS user_id,
-         u.branch_id,
-         u.role_id,
-         u.first_name,
-         u.middle_name,
-         u.last_name,
-         u.email,
-         u.status,
-         u.created_at,
-         u.updated_at,
-         r.role_name,
-         r.slug AS role_slug,
-         b.name AS branch_name
-       FROM users u
-       JOIN roles r ON r.role_id = u.role_id
-       LEFT JOIN branches b ON b.id = u.branch_id
+      `${USER_SELECT}
        ${where}
        ORDER BY u.created_at DESC
        LIMIT $${pIdx++} OFFSET $${pIdx++}`,
@@ -179,25 +189,7 @@ router.get('/:id', async (req, res) => {
   try {
     const pool = req.app.locals.pool;
     const result = await pool.query(
-      `SELECT
-         u.id AS user_id,
-         u.branch_id,
-         u.role_id,
-         u.first_name,
-         u.middle_name,
-         u.last_name,
-         u.email,
-         u.phone,
-         u.status,
-         u.created_at,
-         u.updated_at,
-         r.role_name,
-         r.slug AS role_slug,
-         b.name AS branch_name
-       FROM users u
-       JOIN roles r ON r.role_id = u.role_id
-       LEFT JOIN branches b ON b.id = u.branch_id
-       WHERE u.id = $1`,
+      `${USER_SELECT} WHERE u.id = $1`,
       [req.params.id]
     );
     if (result.rows.length === 0) {
@@ -217,8 +209,8 @@ router.post('/', async (req, res) => {
   try {
     const pool = req.app.locals.pool;
     const {
-      first_name, middle_name, last_name, email, password, role_id,
-      branch_id, status = 'Active',
+      first_name, middle_name, last_name, email, username, password, role_id,
+      branch_id, status = 'Active', phone, contact_number, employee_id,
     } = req.body;
 
     // Validate required fields
@@ -264,8 +256,9 @@ router.post('/', async (req, res) => {
 
     const result = await pool.query(
       `INSERT INTO users
-         (first_name, middle_name, last_name, full_name, email, password_hash, role_id, branch_id, status)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+         (first_name, middle_name, last_name, full_name, email, username, password_hash,
+          role_id, branch_id, status, phone, contact_number, employee_id)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
        RETURNING id AS user_id`,
       [
         first_name.trim(),
@@ -273,32 +266,19 @@ router.post('/', async (req, res) => {
         last_name.trim(),
         fullName,
         email.toLowerCase().trim(),
+        username ? String(username).trim() : null,
         passwordHash,
         Number(role_id),
         branch_id ? Number(branch_id) : null,
         status,
+        (phone || contact_number) ? String(phone || contact_number).trim() : null,
+        contact_number ? String(contact_number).trim() : null,
+        employee_id ? String(employee_id).trim() : null,
       ]
     );
 
     const newUser = await pool.query(
-      `SELECT
-         u.id AS user_id,
-         u.branch_id,
-         u.role_id,
-         u.first_name,
-         u.middle_name,
-         u.last_name,
-         u.email,
-         u.status,
-         u.created_at,
-         u.updated_at,
-         r.role_name,
-         r.slug AS role_slug,
-         b.name AS branch_name
-       FROM users u
-       JOIN roles r ON r.role_id = u.role_id
-       LEFT JOIN branches b ON b.id = u.branch_id
-       WHERE u.id = $1`,
+      `${USER_SELECT} WHERE u.id = $1`,
       [result.rows[0].user_id]
     );
 
@@ -308,6 +288,9 @@ router.post('/', async (req, res) => {
       data: formatUser(newUser.rows[0]),
     });
   } catch (err) {
+    if (err.code === '23505') {
+      return res.status(409).json({ success: false, message: 'Email or username is already in use.' });
+    }
     console.error('[Users] POST / error:', err.message);
     return res.status(500).json({ success: false, message: 'Failed to create user.' });
   }
@@ -321,8 +304,8 @@ router.put('/:id', async (req, res) => {
     const pool = req.app.locals.pool;
     const userId = Number(req.params.id);
     const {
-      first_name, middle_name, last_name, email, phone, password, role_id,
-      branch_id, status,
+      first_name, middle_name, last_name, email, username, phone, contact_number,
+      employee_id, password, role_id, branch_id, status,
     } = req.body;
 
     // Check user exists
@@ -370,9 +353,22 @@ router.put('/:id', async (req, res) => {
     if (middle_name !== undefined) { updates.push(`middle_name = $${pIdx++}`); params.push(middle_name ? middle_name.trim() : null); }
     if (last_name)        { updates.push(`last_name = $${pIdx++}`);        params.push(last_name.trim()); }
     if (email)           { updates.push(`email = $${pIdx++}`);           params.push(email.toLowerCase().trim()); }
-    if (phone !== undefined) {
+    if (username !== undefined) {
+      updates.push(`username = $${pIdx++}`);
+      params.push(username ? String(username).trim() : null);
+    }
+    if (phone !== undefined || contact_number !== undefined) {
+      const nextPhone = phone !== undefined ? phone : contact_number;
       updates.push(`phone = $${pIdx++}`);
-      params.push(phone ? String(phone).trim() : null);
+      params.push(nextPhone ? String(nextPhone).trim() : null);
+    }
+    if (contact_number !== undefined) {
+      updates.push(`contact_number = $${pIdx++}`);
+      params.push(contact_number ? String(contact_number).trim() : null);
+    }
+    if (employee_id !== undefined) {
+      updates.push(`employee_id = $${pIdx++}`);
+      params.push(employee_id ? String(employee_id).trim() : null);
     }
     if (role_id)         { updates.push(`role_id = $${pIdx++}`);         params.push(Number(role_id)); }
     if (branch_id !== undefined) { updates.push(`branch_id = $${pIdx++}`); params.push(branch_id ? Number(branch_id) : null); }
@@ -403,28 +399,7 @@ router.put('/:id', async (req, res) => {
       [userId]
     );
 
-    const updated = await pool.query(
-      `SELECT
-         u.id AS user_id,
-         u.branch_id,
-         u.role_id,
-         u.first_name,
-         u.middle_name,
-         u.last_name,
-         u.email,
-         u.phone,
-         u.status,
-         u.created_at,
-         u.updated_at,
-         r.role_name,
-         r.slug AS role_slug,
-         b.name AS branch_name
-       FROM users u
-       JOIN roles r ON r.role_id = u.role_id
-       LEFT JOIN branches b ON b.id = u.branch_id
-       WHERE u.id = $1`,
-      [userId]
-    );
+    const updated = await pool.query(`${USER_SELECT} WHERE u.id = $1`, [userId]);
 
     return res.status(200).json({
       success: true,
@@ -432,6 +407,9 @@ router.put('/:id', async (req, res) => {
       data: formatUser(updated.rows[0]),
     });
   } catch (err) {
+    if (err.code === '23505') {
+      return res.status(409).json({ success: false, message: 'Email or username is already in use.' });
+    }
     console.error('[Users] PUT /:id error:', err.message);
     return res.status(500).json({ success: false, message: 'Failed to update user.' });
   }
@@ -473,7 +451,9 @@ router.delete('/:id', async (req, res) => {
 // Helper: format user row for response (strip password)
 // ──────────────────────────────────────────────────────────────────────────────
 function formatUser(row) {
+  const contact = row.contact_number || row.phone || null;
   return {
+    id:            row.user_id,
     user_id:       row.user_id,
     branch_id:     row.branch_id,
     role_id:       row.role_id,
@@ -481,10 +461,17 @@ function formatUser(row) {
     middle_name:   row.middle_name || null,
     last_name:     row.last_name,
     email:         row.email,
-    phone:         row.phone || null,
+    username:      row.username || null,
+    phone:         row.phone || contact,
+    contact_number: contact,
+    employee_id:   row.employee_id || null,
+    employeeId:    row.employee_id || null,
+    avatarInitials: row.avatar_initials || null,
     status:        row.status,
     created_at:    row.created_at,
     updated_at:    row.updated_at,
+    last_login:    row.last_login || null,
+    lastLogin:     row.last_login || null,
     role: {
       id:   row.role_id,
       name: row.role_name,

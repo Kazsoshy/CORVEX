@@ -176,6 +176,42 @@ export async function createInventoryTransfer(body) {
   }
 }
 
+export async function uploadProductImage(productId, file) {
+  try {
+    const token = localStorage.getItem('corvex_token');
+    const response = await fetch(`${apiClient.defaults.baseURL}/products/${productId}/image`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': file.type || 'application/octet-stream',
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+      body: file,
+    });
+    const data = await response.json().catch(() => ({}));
+    const nextToken = response.headers.get('x-session-token');
+    if (nextToken) localStorage.setItem('corvex_token', nextToken);
+    if (response.status === 401) {
+      localStorage.removeItem('corvex_user');
+      localStorage.removeItem('corvex_token');
+    }
+    if (!response.ok) {
+      return { success: false, message: data.message || 'Could not save the product image.' };
+    }
+    return data;
+  } catch {
+    return { success: false, message: 'Could not save the product image.' };
+  }
+}
+
+export async function deleteProductImage(productId) {
+  try {
+    const response = await apiClient.delete(`/products/${productId}/image`);
+    return response.data;
+  } catch (err) {
+    return { success: false, message: err.response?.data?.message || 'Could not remove the product image.' };
+  }
+}
+
 export async function createWarehouseProduct(body) {
   try {
     const response = await apiClient.post('/inventory/products', body);

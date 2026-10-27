@@ -2,9 +2,12 @@ import express from 'express';
 import { requireRole, isUnscoped } from '../middleware/auth.js';
 import {
   purchaseRequestListFilter,
-  purchaseRequestAccessSql,
   userCanManagePurchaseRequest,
   assignSalesAgentToCustomer,
+  getPurchaseRequestDetail,
+  purchaseRequestStatusMove,
+  confirmBlockReason,
+  notifyPurchaseRequestCustomer,
 } from '../lib/purchaseRequests.js';
 import {
   CREDIT_INVESTIGATION_FROM,
@@ -1136,7 +1139,7 @@ router.get('/purchase-requests', async (req, res) => {
     const { whereSql, params } = purchaseRequestListFilter(user);
 
     const result = await pool.query(
-      `SELECT pr.request_id, pr.status, pr.notes, pr.created_at, pr.updated_at,
+      `SELECT pr.request_id, pr.status, pr.notes, pr.agent_reply, pr.created_at, pr.updated_at,
               pr.sales_invoices_id,
               c.customer_id, c.customer_code,
               c.first_name || ' ' || c.last_name AS customer_name
@@ -1153,7 +1156,7 @@ router.get('/purchase-requests', async (req, res) => {
     if (ids.length) {
       const items = await pool.query(
         `SELECT pri.request_id, pri.item_id, pri.product_id, pri.quantity, pri.notes,
-                p.name AS product_name, p.sku
+                p.name AS product_name, p.sku, p.unit_price, p.image_url
          FROM purchase_request_items pri
          JOIN products p ON p.id = pri.product_id
          WHERE pri.request_id = ANY($1::int[])`,
@@ -1161,14 +1164,22 @@ router.get('/purchase-requests', async (req, res) => {
       );
       itemsByRequest = items.rows.reduce((acc, row) => {
         if (!acc[row.request_id]) acc[row.request_id] = [];
-        acc[row.request_id].push(row);
+        acc[row.request_id].push({
+          ...row,
+          unit_price: Number(row.unit_price) || 0,
+          quantity: Number(row.quantity),
+        });
         return acc;
       }, {});
     }
 
     return res.status(200).json({
       success: true,
-      data: result.rows.map((row) => ({ ...row, items: itemsByRequest[row.request_id] || [] })),
+      data: result.rows.map((row) => {
+        const items = itemsByRequest[row.request_id] || [];
+        const estimated_total = items.reduce((sum, item) => sum + item.unit_price * item.quantity, 0);
+        return { ...row, items, estimated_total };
+      }),
     });
   } catch (err) {
     console.error('[Sales] GET /purchase-requests error:', err.message);
@@ -1179,56 +1190,41 @@ router.get('/purchase-requests', async (req, res) => {
 router.get('/purchase-requests/:id', async (req, res) => {
   const pool = req.app.locals.pool;
   const requestId = Number(req.params.id);
-  const user = req.currentUser;
-  const access = purchaseRequestAccessSql(user, 2);
-
   try {
-    const result = await pool.query(
-      `SELECT pr.request_id, pr.status, pr.notes, pr.created_at, pr.updated_at, pr.sales_invoices_id,
-              pr.branch_id, pr.sales_agent_id,
-              c.customer_id, c.customer_code, c.assigned_sales_agent_id,
-              c.first_name || ' ' || c.last_name AS customer_name
-       FROM purchase_requests pr
-       JOIN customers c ON c.customer_id = pr.customer_id
-       WHERE pr.request_id = $1
-         AND ${access.sql}`,
-      [requestId, ...access.extraParams]
-    );
-    if (!result.rows.length) {
+    const data = await getPurchaseRequestDetail(pool, req.currentUser, requestId);
+    if (!data) {
       return res.status(404).json({ success: false, message: 'Purchase request not found.' });
     }
-
-    const items = await pool.query(
-      `SELECT pri.item_id, pri.product_id, pri.quantity, pri.notes,
-              p.name AS product_name, p.sku, p.unit_price
-       FROM purchase_request_items pri
-       JOIN products p ON p.id = pri.product_id
-       WHERE pri.request_id = $1`,
-      [requestId]
-    );
-
-    return res.status(200).json({
-      success: true,
-      data: { ...result.rows[0], items: items.rows },
-    });
+    return res.status(200).json({ success: true, data });
   } catch (err) {
     console.error('[Sales] GET /purchase-requests/:id error:', err.message);
     return res.status(500).json({ success: false, message: 'Failed to fetch purchase request.' });
   }
 });
 
-router.patch('/purchase-requests/:id', async (req, res) => {
+router.put('/purchase-requests/:id/items', async (req, res) => {
   const pool = req.app.locals.pool;
   const requestId = Number(req.params.id);
-  const { status } = req.body;
-  const allowed = new Set(['In Review', 'Confirmed', 'Rejected']);
-  if (!allowed.has(status)) {
-    return res.status(400).json({ success: false, message: 'Invalid status.' });
+  const items = Array.isArray(req.body?.items) ? req.body.items : null;
+  if (!items?.length) {
+    return res.status(400).json({ success: false, message: 'Keep at least one product line.' });
+  }
+  const normalized = items.map((item) => ({
+    product_id: Number(item.product_id),
+    quantity: Number(item.quantity),
+  }));
+  if (normalized.some((item) => !Number.isInteger(item.product_id) || item.product_id <= 0
+    || !Number.isInteger(item.quantity) || item.quantity <= 0)) {
+    return res.status(400).json({ success: false, message: 'Each line needs an active product and a whole quantity.' });
+  }
+  if (new Set(normalized.map((item) => item.product_id)).size !== normalized.length) {
+    return res.status(400).json({ success: false, message: 'Each product can appear once. Change the quantity instead.' });
   }
 
+  const client = await pool.connect();
   try {
-    const existing = await pool.query(
-      `SELECT pr.request_id, pr.sales_agent_id, pr.customer_id, pr.branch_id, c.assigned_sales_agent_id
+    const existing = await client.query(
+      `SELECT pr.request_id, pr.status, pr.sales_agent_id, pr.customer_id, c.assigned_sales_agent_id
        FROM purchase_requests pr
        JOIN customers c ON c.customer_id = pr.customer_id
        WHERE pr.request_id = $1`,
@@ -1241,29 +1237,120 @@ router.patch('/purchase-requests/:id', async (req, res) => {
     if (!userCanManagePurchaseRequest(req.currentUser, row)) {
       return res.status(403).json({ success: false, message: 'You are not assigned to this request.' });
     }
-
-    const updated = await pool.query(
-      `UPDATE purchase_requests SET status = $1, updated_at = CURRENT_TIMESTAMP
-       WHERE request_id = $2
-       RETURNING request_id, status, updated_at`,
-      [status, requestId]
-    );
-
-    const items = await pool.query(
-      `SELECT pri.product_id, pri.quantity, pri.notes, p.name AS product_name
-       FROM purchase_request_items pri
-       JOIN products p ON p.id = pri.product_id
-       WHERE pri.request_id = $1`,
+    if (!['Pending', 'In Review', 'Confirmed'].includes(row.status)) {
+      return res.status(400).json({ success: false, message: 'Quantities can be adjusted before the request is invoiced, rejected, or cancelled.' });
+    }
+    const current = await client.query(
+      `SELECT product_id FROM purchase_request_items WHERE request_id = $1 ORDER BY product_id`,
       [requestId]
     );
+    const currentIds = current.rows.map((item) => Number(item.product_id));
+    const nextIds = normalized.map((item) => item.product_id).sort((a, b) => a - b);
+    if (currentIds.length !== nextIds.length || currentIds.some((id, index) => id !== nextIds[index])) {
+      return res.status(400).json({
+        success: false,
+        message: 'The customer chose these products. Adjust a quantity, or reject the request.',
+      });
+    }
+
+    await client.query('BEGIN');
+    for (const item of normalized) {
+      await client.query(
+        `UPDATE purchase_request_items SET quantity = $1 WHERE request_id = $2 AND product_id = $3`,
+        [item.quantity, requestId, item.product_id]
+      );
+    }
+    await client.query(
+      `UPDATE purchase_requests SET updated_at = CURRENT_TIMESTAMP WHERE request_id = $1`,
+      [requestId]
+    );
+    await client.query('COMMIT');
+
+    const data = await getPurchaseRequestDetail(pool, req.currentUser, requestId);
+    return res.status(200).json({
+      success: true,
+      message: 'Quantities updated. The customer’s products are unchanged.',
+      data,
+    });
+  } catch (err) {
+    try { await client.query('ROLLBACK'); } catch { /* transaction already finished */ }
+    console.error('[Sales] PUT /purchase-requests/:id/items error:', err.message);
+    return res.status(500).json({ success: false, message: 'Failed to update request lines.' });
+  } finally {
+    client.release();
+  }
+});
+
+router.patch('/purchase-requests/:id', async (req, res) => {
+  const pool = req.app.locals.pool;
+  const requestId = Number(req.params.id);
+  const { status, reply, reopen } = req.body || {};
+  const allowed = new Set(['In Review', 'Confirmed', 'Rejected', 'Cancelled']);
+  if (!allowed.has(status)) {
+    return res.status(400).json({ success: false, message: 'Invalid status.' });
+  }
+  const replyText = typeof reply === 'string' ? reply.trim() : '';
+  if ((status === 'Rejected' || status === 'Cancelled') && !replyText) {
+    return res.status(400).json({ success: false, message: 'A reason is required. The customer will see it.' });
+  }
+  if (replyText.length > 1000) {
+    return res.status(400).json({ success: false, message: 'Keep the reply under 1000 characters.' });
+  }
+
+  try {
+    const existing = await pool.query(
+      `SELECT pr.request_id, pr.status, pr.agent_reply, pr.sales_agent_id, pr.customer_id,
+              pr.branch_id, c.assigned_sales_agent_id
+       FROM purchase_requests pr
+       JOIN customers c ON c.customer_id = pr.customer_id
+       WHERE pr.request_id = $1`,
+      [requestId]
+    );
+    if (!existing.rows.length) {
+      return res.status(404).json({ success: false, message: 'Purchase request not found.' });
+    }
+    const row = existing.rows[0];
+    if (!userCanManagePurchaseRequest(req.currentUser, row)) {
+      return res.status(403).json({ success: false, message: 'You are not assigned to this request.' });
+    }
+    const moveError = purchaseRequestStatusMove(row.status, status);
+    if (moveError) {
+      return res.status(400).json({ success: false, message: moveError });
+    }
+    if (status === 'Confirmed') {
+      const block = await confirmBlockReason(pool, requestId, row.branch_id);
+      if (block) return res.status(400).json({ success: false, message: block });
+    }
+
+    const nextReply = replyText || (status === 'In Review' ? row.agent_reply : null);
+    const updated = await pool.query(
+      `UPDATE purchase_requests
+       SET status = $1,
+           agent_reply = $2,
+           reviewed_by = $3,
+           reviewed_at = CURRENT_TIMESTAMP,
+           updated_at = CURRENT_TIMESTAMP
+       WHERE request_id = $4
+       RETURNING request_id, status, agent_reply, reviewed_at`,
+      [status, nextReply, req.currentUser.id, requestId]
+    );
+
+    await notifyPurchaseRequestCustomer(pool, {
+      customerId: row.customer_id,
+      requestId,
+      status,
+      reply: nextReply,
+      reopened: Boolean(reopen) && status === 'In Review',
+    });
 
     return res.status(200).json({
       success: true,
-      message: `Purchase request marked as ${status}.`,
+      message: status === 'Rejected' || status === 'Cancelled'
+        ? `Purchase request ${status.toLowerCase()}. The customer was notified.`
+        : `Purchase request marked as ${status}. The customer was notified.`,
       data: {
         ...updated.rows[0],
         customer_id: row.customer_id,
-        items: items.rows,
       },
     });
   } catch (err) {

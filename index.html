@@ -10,6 +10,31 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="" />
+    <script>
+      (function () {
+        try {
+          var raw = localStorage.getItem('corvex_user_preferences');
+          var p = raw ? JSON.parse(raw) : {};
+          var root = document.documentElement;
+          var theme = p.theme || 'light';
+          var dark = theme === 'dark' || (theme === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches);
+          root.dataset.theme = dark ? 'dark' : 'light';
+          root.dataset.textScale = String(p.textScale || 100);
+          root.dataset.line = p.lineSpacing || 'default';
+          root.dataset.tracking = p.letterSpacing || 'default';
+          root.dataset.density = p.density || 'comfortable';
+          root.dataset.readableFont = p.readableFont ? '1' : '0';
+          root.dataset.contrast = p.highContrast ? 'high' : 'default';
+          root.dataset.underlineLinks = p.underlineLinks ? '1' : '0';
+          root.dataset.strongFocus = p.strongFocus ? '1' : '0';
+          root.dataset.largeTargets = p.largeTargets ? '1' : '0';
+          var reduce = p.reduceMotion === 'on' || (p.reduceMotion !== 'off' && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
+          root.dataset.reduceMotion = reduce ? '1' : '0';
+          root.dataset.palette = p.colorPalette === 'colorblind' ? 'colorblind' : 'default';
+          root.style.colorScheme = root.dataset.contrast === 'high' ? 'light' : root.dataset.theme;
+        } catch (e) {}
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>

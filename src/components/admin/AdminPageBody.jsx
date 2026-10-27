@@ -17,6 +17,8 @@ import { NotificationsInbox } from '../shared/NotificationsInbox';
 import { AccountProfilePanel } from '../shared/AccountProfilePanel';
 import { StatusBadge } from '../StatusBadge';
 import { CentralInventoryPanel } from '../inventory/CentralInventoryPanel';
+import { ProductImagePicker } from '../shared/ProductImagePicker';
+import { deleteProductImage, uploadProductImage } from '../../api/inventoryService';
 import { DetailRowsTable } from '../shared/DetailRowsTable';
 
 function formatUserDisplayName(user) {
@@ -1315,6 +1317,9 @@ function InventoryPage({
     unit_price: '',
     status: 'Active'
   });
+  const [imageUrl, setImageUrl] = useState('');
+  const [imageFile, setImageFile] = useState(null);
+  const [imageRemoved, setImageRemoved] = useState(false);
   const loadProducts = useCallback(async () => {
     setLoadingTab(true);
     try {
@@ -1355,6 +1360,9 @@ function InventoryPage({
   const openCreateProduct = () => {
     setEditingProductId(null);
     setProductForm({ name: '', sku: '', category_id: '', unit_price: '', status: 'Active' });
+    setImageUrl('');
+    setImageFile(null);
+    setImageRemoved(false);
     setShowProductForm(true);
   };
   const openEditProduct = (p) => {
@@ -1366,7 +1374,26 @@ function InventoryPage({
       unit_price: p.unit_price != null ? String(p.unit_price) : '',
       status: p.status || 'Active',
     });
+    setImageUrl(p.image_url || '');
+    setImageFile(null);
+    setImageRemoved(false);
     setShowProductForm(true);
+  };
+  const saveProductImage = async (productId) => {
+    if (imageFile) {
+      const uploaded = await uploadProductImage(productId, imageFile);
+      if (!uploaded.success) {
+        showToast(uploaded.message || 'Product saved, but the image could not be updated.', 'error');
+        return false;
+      }
+    } else if (imageRemoved) {
+      const removed = await deleteProductImage(productId);
+      if (!removed.success) {
+        showToast(removed.message || 'Product saved, but the image could not be removed.', 'error');
+        return false;
+      }
+    }
+    return true;
   };
   const handleProductSubmit = async e => {
     e.preventDefault();
@@ -1381,9 +1408,21 @@ function InventoryPage({
       };
       if (editingProductId) {
         await apiClient.put(`/products/${editingProductId}`, payload);
+        const imageSaved = await saveProductImage(editingProductId);
+        if (!imageSaved) return;
         showToast('Product updated.', 'success');
       } else {
-        await apiClient.post('/products', payload);
+        const created = await apiClient.post('/products', payload);
+        const createdId = created.data?.data?.product_id;
+        if (imageFile && createdId) {
+          const imageSaved = await saveProductImage(createdId);
+          if (!imageSaved) {
+            setEditingProductId(createdId);
+            setImageUrl('');
+            loadProducts();
+            return;
+          }
+        }
         showToast('Product created.', 'success');
       }
       setShowProductForm(false);
@@ -1456,7 +1495,12 @@ function InventoryPage({
                 <thead><tr><th>Product</th><th>SKU</th><th>Category</th><th>Unit Price</th><th>Stock</th><th>Status</th><th>Actions</th></tr></thead>
                 <tbody>
                   {!paginated_products.length ? <tr><td colSpan={7}><EmptyState title="No products" /></td></tr> : paginated_products.map(p => <tr key={p.product_id}>
-                      <td><strong>{p.product_name}</strong></td><td>{p.sku}</td><td>{p.category_name || '—'}</td>
+                      <td>
+                        <div className="product-name-with-image">
+                          {p.image_url ? <img src={p.image_url} alt="" width={40} height={40} /> : null}
+                          <strong>{p.product_name}</strong>
+                        </div>
+                      </td><td>{p.sku}</td><td>{p.category_name || '—'}</td>
                       <td>{p.unit_price != null ? Number(p.unit_price).toFixed(2) : '—'}</td>
                       <td>{p.total_quantity ?? p.quantity ?? '—'}</td>
                       <td><StatusPill status={p.status || p.stock_status} /></td>
@@ -1506,6 +1550,20 @@ function InventoryPage({
         }}>
                 <h3>{editingProductId ? 'Edit Product' : 'Add Product'}</h3>
                 <form onSubmit={handleProductSubmit}>
+                  <ProductImagePicker
+                    currentUrl={imageUrl}
+                    file={imageFile}
+                    removed={imageRemoved}
+                    showToast={showToast}
+                    onFile={(next) => {
+                      setImageFile(next);
+                      setImageRemoved(false);
+                    }}
+                    onRemove={() => {
+                      setImageFile(null);
+                      setImageRemoved(true);
+                    }}
+                  />
                   <div className="form-group">
                     <label>Product Name <span className="required">*</span></label>
                     <input type="text" value={productForm.name} onChange={e => setProductForm(p => ({
@@ -1877,8 +1935,8 @@ function ProfilePage({
 }) {
   return <AccountProfilePanel
     showToast={showToast}
-    title="Admin Profile"
-    subtitle="View your personal details and update your account password."
+    title="Admin profile"
+    subtitle="Your name, contact details, and sign-in for this CORVEX account."
   />;
 }
 

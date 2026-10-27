@@ -161,7 +161,7 @@ export function resolveBranchManagerPage(pathname) {
 export function isBranchManagerNavActive(fullPath, navTo) {
   const pathname = fullPath.split('?')[0];
   if (navTo === '/branch-manager/dashboard') {
-    return pathname === '/branch-manager/dashboard' || pathname === '/branch-manager/settings' || pathname === '/branch-manager/audit-log' || pathname === '/branch-manager/approval-center';
+    return pathname === '/branch-manager/dashboard' || pathname === '/branch-manager/audit-log' || pathname === '/branch-manager/approval-center';
   }
   if (navTo === '/branch-manager/customers') return pathname.startsWith('/branch-manager/customers');
   if (navTo === '/branch-manager/field-operations') return pathname.startsWith('/branch-manager/field-operations');
@@ -175,5 +175,6 @@ export function isBranchManagerNavActive(fullPath, navTo) {
   if (navTo === '/branch-manager/alerts') return pathname === '/branch-manager/alerts';
   if (navTo === '/branch-manager/notifications') return pathname === '/branch-manager/notifications';
   if (navTo === '/branch-manager/profile') return pathname === '/branch-manager/profile';
+  if (navTo === '/branch-manager/settings') return pathname === '/branch-manager/settings';
   return pathname === navTo;
 }

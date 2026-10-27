@@ -17,6 +17,7 @@ export const warehouseRole = {
     { label: 'Product Categories',      to: '/warehouse/product-categories' },
     { label: 'Customer Credit History', to: '/warehouse/credit-history' },
     { label: 'Notifications',           to: '/warehouse/notifications' },
+    { label: 'Settings',                to: '/warehouse/settings' },
     { label: 'Profile',                 to: '/warehouse/profile' },
   ],
   routes: {},

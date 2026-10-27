@@ -26,6 +26,7 @@ export async function login(email, password) {
 export function logout() {
   localStorage.removeItem('corvex_user');
   localStorage.removeItem('corvex_token');
+  window.dispatchEvent(new Event('corvex-signed-out'));
 }
 
 /**
@@ -59,6 +60,7 @@ export function persistCurrentUserFromProfile(profile) {
     phone: profile.phone ?? prev.phone,
     role: profile.role ?? prev.role,
     branch: profile.branch ?? prev.branch,
+    hasAvatar: profile.has_avatar ?? prev.hasAvatar,
   };
   localStorage.setItem('corvex_user', JSON.stringify(next));
 }

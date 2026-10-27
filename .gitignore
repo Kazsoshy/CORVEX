@@ -4,3 +4,7 @@ dist
 .env
 backend/__pycache__
 backend/data/backups
+backend/uploads/avatars/*
+!backend/uploads/avatars/.gitkeep
+backend/uploads/products/*
+!backend/uploads/products/.gitkeep

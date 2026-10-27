@@ -17,6 +17,7 @@ export const salesRole = {
     { label: 'Sales History', to: '/sales/history' },
     { label: 'Inventory', to: '/sales/inventory' },
     { label: 'Notifications', to: '/sales/notifications' },
+    { label: 'Settings', to: '/sales/settings' },
     { label: 'Profile', to: '/sales/profile' },
   ],
   routes: {},
