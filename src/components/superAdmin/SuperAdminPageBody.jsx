@@ -1021,7 +1021,7 @@ function ProfilePage({
     showToast={showToast}
     title="Super admin profile"
     subtitle="Your name, contact details, and sign-in for this CORVEX account."
-    settingsPath="/super-admin/settings"
+    settingsRole="personal"
   />;
 }
 

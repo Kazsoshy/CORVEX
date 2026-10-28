@@ -12,6 +12,7 @@ import { getEntryPathForRole, logout, getCurrentUser, getUserAssignedLocation } 
 import { startIdleSessionWatch } from './api/sessionActivity.js';
 import logo from './assets/corvex-logo.png';
 import { LoginPage } from './components/auth/LoginPage';
+import { LandingPage } from './components/landing/LandingPage';
 import { ActivatePortalPage } from './components/auth/ActivatePortalPage';
 import { NavIcon } from './navIcons';
 import { StatusBadge } from './components/StatusBadge';
@@ -40,15 +41,16 @@ const ROLES = [collectorRole, salesRole, warehouseRole, operatingManagerRole, br
 const ROLE_BY_KEY = Object.fromEntries(ROLES.map((role) => [role.key, role]));
 const ROUTE_REGISTRY = Object.assign({}, ...ROLES.map((role) => role.routes));
 
-/** Profile is opened from the sidebar footer, not the main nav list. */
-function isStandaloneProfileNavLink(link) {
+/** Profile and Settings stay with the account row, not the main navigation. */
+function isSidebarUtilityNavLink(link) {
   if (!link) return false;
-  if (String(link.label || '').trim().toLowerCase() === 'profile') return true;
+  const label = String(link.label || '').trim().toLowerCase();
+  if (label === 'profile' || label === 'settings') return true;
   return /\/profile\/?$/i.test(String(link.to || ''));
 }
 
 function withoutStandaloneProfileNav(links = []) {
-  return links.filter((link) => !isStandaloneProfileNavLink(link));
+  return links.filter((link) => !isSidebarUtilityNavLink(link));
 }
 
 function sidebarSectionsWithoutProfile(sections = []) {
@@ -69,7 +71,7 @@ function profilePathForRole(role) {
 function App() {
   return (
     <Routes>
-      <Route path="/" element={<Navigate to="/login" replace />} />
+      <Route path="/" element={<LandingPage />} />
       <Route path="/login" element={<LoginPage />} />
       <Route path="/activate-account" element={<ActivatePortalPage />} />
       <Route path="/collector" element={<Navigate to={collectorRole.entryPath} replace />} />
@@ -431,36 +433,36 @@ function PrototypeShell() {
           <div className="sidebar-footer">
             <div
               className={`sidebar-profile${isProfileActive ? ' active' : ''}`}
-              onClick={() => {
-                if (!profilePath) return;
-                closeMobileSidebar();
-                navigate(profilePath);
-              }}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter' || e.key === ' ') {
-                  e.preventDefault();
+                onClick={() => {
                   if (!profilePath) return;
                   closeMobileSidebar();
                   navigate(profilePath);
-                }
-              }}
-              role="button"
-              tabIndex={0}
-              aria-label="Open profile"
-              aria-current={isProfileActive ? 'page' : undefined}
-              title="Profile"
-            >
-              <div className="sidebar-profile-avatar">
-                {avatarSrc ? <img src={avatarSrc} alt="" /> : <NavIcon name="accounts" />}
-              </div>
-              <div className="sidebar-profile-info">
-                <div className="sidebar-profile-name">{currentUser?.fullName || currentUser?.name || 'User'}</div>
-                <div className="sidebar-profile-role">{currentRole.label}</div>
-                <div className="sidebar-profile-location" title={userAssignedLocation}>
-                  {userAssignedLocation}
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    if (!profilePath) return;
+                    closeMobileSidebar();
+                    navigate(profilePath);
+                  }
+                }}
+                role="button"
+                tabIndex={0}
+                aria-label="Open profile"
+                aria-current={isProfileActive ? 'page' : undefined}
+                title="Profile"
+              >
+                <div className="sidebar-profile-avatar">
+                  {avatarSrc ? <img src={avatarSrc} alt="" /> : <NavIcon name="accounts" />}
+                </div>
+                <div className="sidebar-profile-info">
+                  <div className="sidebar-profile-name">{currentUser?.fullName || currentUser?.name || 'User'}</div>
+                  <div className="sidebar-profile-role">{currentRole.label}</div>
+                  <div className="sidebar-profile-location" title={userAssignedLocation}>
+                    {userAssignedLocation}
+                  </div>
                 </div>
               </div>
-            </div>
             <button
               className="button sidebar-logout"
               type="button"

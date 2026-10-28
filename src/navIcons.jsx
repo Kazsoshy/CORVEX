@@ -440,6 +440,14 @@ const ICONS = {
       <path d="M9 8h6M9 12h6M9 16h4" />
     </>
   ),
+  settings: (
+    <>
+      <path d="M4 6h16M4 12h16M4 18h16" />
+      <circle cx="9" cy="6" r="2" fill="currentColor" stroke="none" />
+      <circle cx="15" cy="12" r="2" fill="currentColor" stroke="none" />
+      <circle cx="11" cy="18" r="2" fill="currentColor" stroke="none" />
+    </>
+  ),
   alert: (
     <>
       <path d="M12 4 4 18h16L12 4Z" />
@@ -688,7 +696,7 @@ const LABEL_ICON_KEY = {
   'System Reports': 'reports',
   'Audit Logs': 'log',
   'Approval Center': 'queue',
-  Settings: 'form',
+  Settings: 'settings',
   'System Configuration': 'form',
   'Role & Permissions': 'accounts',
   'System Settings': 'form',

@@ -135,6 +135,7 @@ export function UserSettingsPanel({
   role = 'personal',
   showToast,
   children,
+  embedded = false,
 }) {
   const { prefs, update, resetGroup } = usePreferences();
   const fields = WORKSPACE_FIELDS[role] || [];
@@ -186,20 +187,7 @@ export function UserSettingsPanel({
     showToast?.('Desktop notifications are on.', 'success');
   };
 
-  return (
-    <div className="page settings-page">
-      <header className="settings-hero">
-        <div>
-          <p className="settings-kicker">Preferences</p>
-          <h2>Settings</h2>
-          <p className="muted">Saved on this device and applied immediately, including the next time you open CORVEX.</p>
-        </div>
-        <div className="settings-hero-meta">
-          <span className="settings-pill">On this device</span>
-          <span className="settings-pill">Applies immediately</span>
-        </div>
-      </header>
-
+  const shell = (
       <div className="settings-shell">
         <div className="settings-nav" role="tablist" aria-label="Settings sections" aria-orientation="vertical" onKeyDown={onTabKeyDown}>
           {tabs.map((tab) => {
@@ -495,6 +483,24 @@ export function UserSettingsPanel({
           ) : null}
         </div>
       </div>
+  );
+
+  if (embedded) return shell;
+
+  return (
+    <div className="page settings-page">
+      <header className="settings-hero">
+        <div>
+          <p className="settings-kicker">Preferences</p>
+          <h2>Settings</h2>
+          <p className="muted">Saved on this device and applied immediately, including the next time you open CORVEX.</p>
+        </div>
+        <div className="settings-hero-meta">
+          <span className="settings-pill">On this device</span>
+          <span className="settings-pill">Applies immediately</span>
+        </div>
+      </header>
+      {shell}
     </div>
   );
 }

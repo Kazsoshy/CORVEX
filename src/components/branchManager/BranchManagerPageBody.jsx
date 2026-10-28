@@ -2277,11 +2277,11 @@ function ProfilePage({
     showToast={showToast}
     title="Branch profile"
     subtitle="Your name, contact details, and sign-in for this CORVEX account."
-    settingsPath={`${opsBase}/settings`}
     extraActions={<>
       <button className="button ghost" type="button" onClick={() => navigate(`${opsBase}/audit-log`)}>Audit log</button>
       <button className="button ghost" type="button" onClick={() => navigate(`${opsBase}/approval-center`)}>Approval center</button>
     </>}
+    settings={<SettingsPage embedded navigate={navigate} opsBase={opsBase} />}
   />;
 }
 function ApprovalCenterPage({
@@ -2772,10 +2772,11 @@ function AuditLogPage({
 
 function SettingsPage({
   navigate,
-  opsBase
+  opsBase,
+  embedded = false,
 }) {
   return (
-    <UserSettingsPanel role="branch">
+    <UserSettingsPanel embedded={embedded} role="branch">
       <p className="muted">Profile, approvals, audit history, and notifications for this branch.</p>
       <div className="settings-link-row">
         <button className="button" type="button" onClick={() => navigate(`${opsBase}/profile`)}>Profile</button>
