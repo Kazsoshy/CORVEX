@@ -2633,8 +2633,8 @@ function ProfilePage({
         showToast={showToast}
         title="Sales profile"
         subtitle="Your name, contact details, and sign-in for this CORVEX account."
-        settingsPath="/sales/settings"
         extraActions={<button className="button ghost" type="button" onClick={() => navigate('/sales/audit-log')}>Audit log</button>}
+        settings={<SettingsPage embedded showToast={showToast} />}
       />
     </>;
 }
@@ -2755,7 +2755,8 @@ function AuditLogPage({
     </div>;
 }
 function SettingsPage({
-  showToast
+  showToast,
+  embedded = false,
 }) {
   const [pendingCount, setPendingCount] = useState(0);
   const [syncing, setSyncing] = useState(false);
@@ -2798,7 +2799,7 @@ function SettingsPage({
     );
   };
   return (
-    <UserSettingsPanel role="sales" showToast={showToast}>
+    <UserSettingsPanel embedded={embedded} role="sales" showToast={showToast}>
       <p className="muted">{pendingCount} record{pendingCount === 1 ? '' : 's'} waiting on this device.</p>
       <div className="settings-link-row">
         <button className="button" type="button" onClick={syncNow} disabled={syncing}>{syncing ? 'Syncing…' : 'Sync now'}</button>

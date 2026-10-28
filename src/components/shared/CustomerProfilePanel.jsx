@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Lock, MonitorSmartphone, UserRound } from 'lucide-react';
+import { Lock, MonitorSmartphone, Settings, UserRound } from 'lucide-react';
 import { fetchMyProfile } from '../../api/profileService';
 import { fetchCustomerPortalMe, updateCustomerPortalContact } from '../../api/customerPortalService';
 import { requestLogout } from '../../api/authService';
@@ -9,6 +9,7 @@ import { LoadingState } from './LoadingState';
 import { EmptyState } from './EmptyState';
 import { StatusBadge } from '../StatusBadge';
 import { ProfilePhotoEditor } from './ProfilePhoto';
+import { UserSettingsPanel } from './UserSettingsPanel';
 import {
   ProfileFact,
   ProfilePasswordForm,
@@ -24,6 +25,7 @@ const TABS = [
   { id: 'account', label: 'Account', detail: 'Name, contact, and address', icon: UserRound },
   { id: 'security', label: 'Security', detail: 'Replace your password', icon: Lock },
   { id: 'activity', label: 'Activity', detail: 'Balances and this sign-in', icon: MonitorSmartphone },
+  { id: 'settings', label: 'Settings', detail: 'Display, reading, and alerts', icon: Settings },
 ];
 
 function customerName(account) {
@@ -283,11 +285,14 @@ export function CustomerProfilePanel({ showToast }) {
                   </div>
                 </div>
                 <div className="settings-card-footer">
-                  <button className="button secondary" type="button" onClick={() => navigate('/customer/settings')}>Settings</button>
                   <button className="button ghost" type="button" onClick={() => requestLogout()}>Sign out</button>
                 </div>
               </section>
             </>
+          ) : null}
+
+          {section === 'settings' ? (
+            <UserSettingsPanel embedded role="customer" showToast={showToast} />
           ) : null}
         </div>
       </div>

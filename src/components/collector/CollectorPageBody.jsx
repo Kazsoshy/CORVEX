@@ -2042,11 +2042,12 @@ function ProfilePage({
     showToast={showToast}
     title="Collector profile"
     subtitle="Your name, contact details, and sign-in for this CORVEX account."
-    settingsPath="/collector/settings"
+    settings={<SettingsPage embedded showToast={showToast} />}
   />;
 }
 function SettingsPage({
-  showToast
+  showToast,
+  embedded = false,
 }) {
   const [pendingCount, setPendingCount] = useState(0);
   const [syncing, setSyncing] = useState(false);
@@ -2079,7 +2080,7 @@ function SettingsPage({
     );
   };
   return (
-    <UserSettingsPanel role="collector" showToast={showToast}>
+    <UserSettingsPanel embedded={embedded} role="collector" showToast={showToast}>
       <p className="muted">{pendingCount} record{pendingCount === 1 ? '' : 's'} waiting on this device.</p>
       <div className="settings-link-row">
         <button className="button" type="button" onClick={syncNow} disabled={syncing}>{syncing ? 'Syncing…' : 'Sync now'}</button>

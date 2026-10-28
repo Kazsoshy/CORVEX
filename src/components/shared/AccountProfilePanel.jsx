@@ -1,12 +1,12 @@
 import { useCallback, useEffect, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { Lock, MonitorSmartphone, UserRound } from 'lucide-react';
+import { Lock, MonitorSmartphone, Settings, UserRound } from 'lucide-react';
 import { persistCurrentUserFromProfile, requestLogout } from '../../api/authService';
 import { fetchMyProfile, updateMyProfile } from '../../api/profileService';
 import { formatDisplayDate, formatDisplayDateTime } from '../../utils/formatters';
 import { LoadingState } from './LoadingState';
 import { StatusBadge } from '../StatusBadge';
 import { ProfilePhotoEditor } from './ProfilePhoto';
+import { UserSettingsPanel } from './UserSettingsPanel';
 import {
   ProfileFact,
   ProfilePasswordForm,
@@ -22,6 +22,7 @@ const TABS = [
   { id: 'account', label: 'Account', detail: 'Name, contact, and role', icon: UserRound },
   { id: 'security', label: 'Security', detail: 'Replace your password', icon: Lock },
   { id: 'session', label: 'Session', detail: 'This sign-in and sign out', icon: MonitorSmartphone },
+  { id: 'settings', label: 'Settings', detail: 'Display, reading, and alerts', icon: Settings },
 ];
 
 function buildDraft(profile) {
@@ -46,10 +47,10 @@ export function AccountProfilePanel({
   showToast,
   title = 'Profile',
   subtitle = 'Your name, contact details, and sign-in for this CORVEX account.',
-  settingsPath = '',
   extraActions = null,
+  settingsRole = 'personal',
+  settings = null,
 }) {
-  const navigate = useNavigate();
   const [profile, setProfile] = useState(null);
   const [draft, setDraft] = useState(null);
   const [editing, setEditing] = useState(false);
@@ -308,12 +309,13 @@ export function AccountProfilePanel({
               </div>
               <div className="settings-card-footer">
                 {extraActions}
-                {settingsPath ? (
-                  <button className="button secondary" type="button" onClick={() => navigate(settingsPath)}>Settings</button>
-                ) : null}
                 <button className="button ghost" type="button" onClick={() => requestLogout()}>Sign out</button>
               </div>
             </section>
+          ) : null}
+
+          {section === 'settings' ? (
+            settings || <UserSettingsPanel embedded role={settingsRole} showToast={showToast} />
           ) : null}
         </div>
       </div>

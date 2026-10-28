@@ -1415,7 +1415,7 @@ function ProfilePage({
     showToast={showToast}
     title="Operating manager profile"
     subtitle="Your name, contact details, and sign-in for this CORVEX account."
-    settingsPath="/operating-manager/operations/settings"
+    settingsRole="personal"
   />;
 }
 const ANALYTIC_RANGE_OPTIONS = [{

@@ -2056,7 +2056,7 @@ function ProfilePage({
     showToast={showToast}
     title="Warehouse profile"
     subtitle="Your name, contact details, and sign-in for this CORVEX account."
-    settingsPath="/warehouse/settings"
+    settingsRole="warehouse"
     extraActions={<>
       <button className="button ghost" type="button" onClick={() => navigate('/warehouse/audit-log')}>Audit log</button>
       <button className="button ghost" type="button" onClick={() => navigate('/warehouse/reports')}>Reports</button>
