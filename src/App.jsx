@@ -243,6 +243,36 @@ function PrototypeShell() {
   const profilePath = useMemo(() => profilePathForRole(currentRole), [currentRole]);
   const isProfileActive = Boolean(profilePath && location.pathname === profilePath);
 
+  const isNavItemActive = useCallback((to) => {
+    if (!to) return false;
+    if (!isRoleModule) return location.pathname === to;
+    if (isCollector) return isCollectorNavActive(fullPath, to);
+    if (isSales) return isSalesNavActive(fullPath, to);
+    if (isWarehouse) return isWarehouseNavActive(fullPath, to);
+    if (isOperatingManager) return isOperatingManagerNavActive(fullPath, to);
+    if (isBranchManager) return isBranchManagerNavActive(fullPath, to);
+    if (isSuperAdmin) return isSuperAdminNavActive(fullPath, to);
+    return isCustomerNavActive(fullPath, to);
+  }, [
+    fullPath,
+    isBranchManager,
+    isCollector,
+    isOperatingManager,
+    isRoleModule,
+    isSales,
+    isSuperAdmin,
+    isWarehouse,
+    location.pathname,
+  ]);
+
+  const mobileTabItems = useMemo(() => {
+    if (!currentRole || isAuthPath(location.pathname) || isCustomerLogin) return [];
+    const flatLinks = sidebarSections.length
+      ? sidebarSections.flatMap((section) => section.items || [])
+      : topLinks;
+    return flatLinks.slice(0, 4);
+  }, [currentRole, isCustomerLogin, location.pathname, sidebarSections, topLinks]);
+
   const pageTitle = page?.title ?? (currentRole ? currentRole.label : 'CORVEX');
 
   useEffect(() => {
@@ -449,22 +479,25 @@ function PrototypeShell() {
         <div className="content-ambient" aria-hidden="true" />
 
         <header className="mobile-app-bar">
-          <button
-            className="mobile-menu-btn"
-            type="button"
-            onClick={openMobileSidebar}
-            aria-label="Open navigation menu"
-            aria-expanded={isMobileSidebarOpen}
-            aria-controls="corvex-sidebar"
-          >
-            <NavIcon name="menu" />
-          </button>
           <div className="mobile-app-bar-copy">
-            <span className="mobile-app-bar-brand">CORVEX</span>
+            <span className="mobile-app-bar-brand">{currentRole?.label || 'CORVEX'}</span>
             {pageTitle && pageTitle !== 'CORVEX' ? (
               <span className="mobile-app-bar-page">{pageTitle}</span>
-            ) : null}
+            ) : (
+              <span className="mobile-app-bar-page">CORVEX</span>
+            )}
           </div>
+          {profilePath ? (
+            <button
+              className="mobile-app-bar-avatar"
+              type="button"
+              onClick={() => navigate(profilePath)}
+              aria-label="Open profile"
+              title="Profile"
+            >
+              {avatarSrc ? <img src={avatarSrc} alt="" /> : <NavIcon name="accounts" />}
+            </button>
+          ) : null}
         </header>
 
         <Routes>
@@ -521,6 +554,39 @@ function PrototypeShell() {
             }
           />
         </Routes>
+
+        {mobileTabItems.length ? (
+          <nav className="mobile-bottom-nav" aria-label="Primary mobile navigation">
+            {mobileTabItems.map((link) => {
+              const active = isNavItemActive(link.to);
+              return (
+                <Link
+                  key={link.to}
+                  to={link.to}
+                  className={active ? 'mobile-bottom-nav__item active' : 'mobile-bottom-nav__item'}
+                  aria-current={active ? 'page' : undefined}
+                >
+                  <span className="mobile-bottom-nav__icon" aria-hidden="true">
+                    <NavIcon label={link.label} />
+                  </span>
+                  <span className="mobile-bottom-nav__label">{link.label}</span>
+                </Link>
+              );
+            })}
+            <button
+              type="button"
+              className={isMobileSidebarOpen ? 'mobile-bottom-nav__item active' : 'mobile-bottom-nav__item'}
+              onClick={openMobileSidebar}
+              aria-label="More navigation options"
+              aria-expanded={isMobileSidebarOpen}
+            >
+              <span className="mobile-bottom-nav__icon" aria-hidden="true">
+                <NavIcon name="menu" />
+              </span>
+              <span className="mobile-bottom-nav__label">More</span>
+            </button>
+          </nav>
+        ) : null}
       </main>
     </div>
   );

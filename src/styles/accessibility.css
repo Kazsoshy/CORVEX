@@ -1336,20 +1336,22 @@ html[data-contrast="high"] .reading-guide {
   display: flex;
   gap: 10px;
   align-items: center;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
 }
 
 .pos-search {
   display: flex;
   align-items: center;
   gap: 8px;
-  flex: 1;
+  flex: 1 1 auto;
   min-width: 180px;
+  height: 44px;
   padding: 0 12px;
   border: 1px solid var(--border);
   border-radius: 12px;
   background: var(--surface-2);
   color: var(--text-secondary);
+  box-sizing: border-box;
 }
 
 .pos-search input {
@@ -1361,12 +1363,35 @@ html[data-contrast="high"] .reading-guide {
   outline: none;
 }
 
+.pos-toolbar > .pos-category-select {
+  flex: 0 1 200px !important;
+  width: auto !important;
+  min-width: 150px !important;
+  max-width: 240px !important;
+  height: 44px !important;
+  min-height: 44px !important;
+  border-radius: 12px !important;
+  box-sizing: border-box !important;
+}
+
 .pos-view {
   display: inline-flex;
+  flex: 0 0 auto;
   gap: 4px;
   padding: 4px;
   border-radius: 12px;
   background: var(--surface-2);
+}
+
+@media (max-width: 640px) {
+  .pos-toolbar {
+    flex-wrap: wrap;
+  }
+
+  .pos-toolbar > .pos-category-select {
+    flex: 1 1 auto !important;
+    max-width: none !important;
+  }
 }
 
 .pos-view button {

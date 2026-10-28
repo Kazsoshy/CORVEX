@@ -185,6 +185,18 @@ export function CustomerPurchaseDesk({ showToast }) {
                 placeholder="Search name or SKU"
               />
             </label>
+            <select
+              className="filter-select pos-category-select"
+              value={category}
+              onChange={(event) => setCategory(event.target.value)}
+              aria-label="Filter by category"
+            >
+              {categories.map((name) => (
+                <option key={name} value={name}>
+                  {name === 'All' ? 'All Categories' : name}
+                </option>
+              ))}
+            </select>
             <div className="pos-view" role="group" aria-label="Catalog layout">
               <button type="button" aria-pressed={view === 'cards'} onClick={() => setCatalogView('cards')}>
                 <LayoutGrid size={16} aria-hidden="true" />
@@ -195,20 +207,6 @@ export function CustomerPurchaseDesk({ showToast }) {
                 Table
               </button>
             </div>
-          </div>
-
-          <div className="pos-chips" role="group" aria-label="Categories">
-            {categories.map((name) => (
-              <button
-                key={name}
-                type="button"
-                className={category === name ? 'pos-chip active' : 'pos-chip'}
-                aria-pressed={category === name}
-                onClick={() => setCategory(name)}
-              >
-                {name}
-              </button>
-            ))}
           </div>
 
           {!filtered.length ? (
