@@ -165,6 +165,26 @@
   color: inherit;
 }
 
+.cvx-wordmark-mark {
+  width: 28px;
+  height: 28px;
+  object-fit: contain;
+  flex-shrink: 0;
+  display: block;
+}
+
+.cvx-wordmark-mark--dark {
+  display: none;
+}
+
+.cvx-nav.is-solid .cvx-wordmark-mark--light {
+  display: none;
+}
+
+.cvx-nav.is-solid .cvx-wordmark-mark--dark {
+  display: block;
+}
+
 .cvx-wordmark-bar {
   width: 2px;
   height: 16px;

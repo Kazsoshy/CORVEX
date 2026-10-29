@@ -6,11 +6,14 @@ import {
   submitCustomerPurchaseRequest,
 } from '../../api/customerPortalService.js';
 import { formatCurrency, formatDisplayDateTime } from '../../utils/formatters.js';
+import { usePagination } from '../../hooks/usePagination';
 import { EmptyState } from '../shared/EmptyState';
 import { LoadingState } from '../shared/LoadingState';
+import { Pagination } from '../shared/Pagination';
 import { StatusBadge } from '../StatusBadge';
 
 const VIEW_KEY = 'corvex_customer_catalog_view';
+const CATALOG_PAGE_SIZE = 12;
 
 function ProductPhoto({ src, name, size = 'card' }) {
   const [failed, setFailed] = useState(false);
@@ -75,6 +78,12 @@ export function CustomerPurchaseDesk({ showToast }) {
         .some((value) => String(value || '').toLowerCase().includes(needle));
     });
   }, [products, query, category]);
+
+  const catalogPagination = usePagination(filtered, {
+    pageSize: CATALOG_PAGE_SIZE,
+    resetKey: `${query}|${category}`,
+  });
+  const pageProducts = catalogPagination.paginatedData;
 
   const cartCount = cart.reduce((sum, line) => sum + line.quantity, 0);
   const cartTotal = cart.reduce((sum, line) => sum + (Number(line.unit_price) || 0) * line.quantity, 0);
@@ -212,72 +221,78 @@ export function CustomerPurchaseDesk({ showToast }) {
           {!filtered.length ? (
             <EmptyState title="No products match" description="Try another category or clear the search." />
           ) : view === 'cards' ? (
-            <div className="pos-grid">
-              {filtered.map((product) => {
-                const inCart = cart.find((line) => line.product_id === product.product_id);
-                const stock = Number(product.available_stock) || 0;
-                return (
-                  <button
-                    key={product.product_id}
-                    type="button"
-                    className={inCart ? 'pos-card in-cart' : 'pos-card'}
-                    onClick={() => addProduct(product)}
-                    aria-label={`Add ${product.product_name}`}
-                  >
-                    <ProductPhoto src={product.image_url} name={product.product_name} />
-                    {inCart ? <span className="pos-badge">{inCart.quantity}</span> : null}
-                    <span className="pos-card-body">
-                      <strong>{product.product_name}</strong>
-                      <small>{product.sku || product.category_name || 'Product'}</small>
-                      <span className="pos-card-meta">
-                        <b>{formatCurrency(Number(product.unit_price || 0))}</b>
-                        <em>{stock > 0 ? `${stock} in branch` : 'Ask branch'}</em>
+            <>
+              <div className="pos-grid">
+                {pageProducts.map((product) => {
+                  const inCart = cart.find((line) => line.product_id === product.product_id);
+                  const stock = Number(product.available_stock) || 0;
+                  return (
+                    <button
+                      key={product.product_id}
+                      type="button"
+                      className={inCart ? 'pos-card in-cart' : 'pos-card'}
+                      onClick={() => addProduct(product)}
+                      aria-label={`Add ${product.product_name}`}
+                    >
+                      <ProductPhoto src={product.image_url} name={product.product_name} />
+                      {inCart ? <span className="pos-badge">{inCart.quantity}</span> : null}
+                      <span className="pos-card-body">
+                        <strong>{product.product_name}</strong>
+                        <small>{product.sku || product.category_name || 'Product'}</small>
+                        <span className="pos-card-meta">
+                          <b>{formatCurrency(Number(product.unit_price || 0))}</b>
+                          <em>{stock > 0 ? `${stock} in branch` : 'Ask branch'}</em>
+                        </span>
                       </span>
-                    </span>
-                  </button>
-                );
-              })}
-            </div>
+                    </button>
+                  );
+                })}
+              </div>
+              <Pagination {...catalogPagination} />
+            </>
           ) : (
-            <div className="corvex-table-wrapper">
-              <table className="corvex-table pos-table">
-                <thead>
-                  <tr>
-                    <th>Product</th>
-                    <th>SKU</th>
-                    <th>Category</th>
-                    <th>Price</th>
-                    <th>In branch</th>
-                    <th />
-                  </tr>
-                </thead>
-                <tbody>
-                  {filtered.map((product) => {
-                    const inCart = cart.find((line) => line.product_id === product.product_id);
-                    const stock = Number(product.available_stock) || 0;
-                    return (
-                      <tr key={product.product_id}>
-                        <td>
-                          <span className="pos-table-product">
-                            <ProductPhoto src={product.image_url} name={product.product_name} size="row" />
-                            <strong>{product.product_name}</strong>
-                          </span>
-                        </td>
-                        <td>{product.sku || '—'}</td>
-                        <td>{product.category_name || '—'}</td>
-                        <td>{formatCurrency(Number(product.unit_price || 0))}</td>
-                        <td>{stock > 0 ? stock : 'Ask branch'}</td>
-                        <td>
-                          <button className="button secondary" type="button" onClick={() => addProduct(product)}>
-                            {inCart ? `Add (${inCart.quantity})` : 'Add'}
-                          </button>
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
+            <>
+              <div className="corvex-table-wrapper">
+                <table className="corvex-table pos-table">
+                  <thead>
+                    <tr>
+                      <th>Product</th>
+                      <th>SKU</th>
+                      <th>Category</th>
+                      <th>Price</th>
+                      <th>In branch</th>
+                      <th />
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {pageProducts.map((product) => {
+                      const inCart = cart.find((line) => line.product_id === product.product_id);
+                      const stock = Number(product.available_stock) || 0;
+                      return (
+                        <tr key={product.product_id}>
+                          <td>
+                            <span className="pos-table-product">
+                              <ProductPhoto src={product.image_url} name={product.product_name} size="row" />
+                              <strong>{product.product_name}</strong>
+                            </span>
+                          </td>
+                          <td>{product.sku || '—'}</td>
+                          <td>{product.category_name || '—'}</td>
+                          <td>{formatCurrency(Number(product.unit_price || 0))}</td>
+                          <td>{stock > 0 ? stock : 'Ask branch'}</td>
+                          <td>
+                            <button className="button secondary" type="button" onClick={() => addProduct(product)}>
+                              {inCart ? `Add (${inCart.quantity})` : 'Add'}
+                            </button>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+              <Pagination {...catalogPagination} />
+            </>
           )}
         </section>
 

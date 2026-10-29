@@ -1,10 +1,10 @@
 import React, { useState, useCallback, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Mail, Lock, Eye, EyeOff, AlertCircle } from 'lucide-react';
+import { Mail, Lock, Eye, EyeOff, AlertCircle, ArrowRight } from 'lucide-react';
 import { login as apiLogin, getEntryPathForRole } from '../../api/authService.js';
 import { consumeAuthNotice } from '../../api/sessionActivity.js';
-import logo from '../../assets/corvex-logo.png';
+import whiteLogo from '../../assets/corvex-white-logo.png';
 import bgImage from '../../assets/corvex-bg.png';
 import './LoginPage.css';
 
@@ -68,31 +68,36 @@ export function LoginPage() {
   }, [email, password, navigate]);
 
   return (
-    <div className="login-page">
-      <div className="login-page-backdrop" aria-hidden="true">
-        <img src={bgImage} alt="" className="login-page-backdrop-image" />
-        <div className="login-page-backdrop-overlay" />
-      </div>
-      <motion.div
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.55, ease: [0.16, 1, 0.3, 1] }}
-        className="login-shell"
-      >
-        <aside className="login-visual" aria-hidden="true">
+    <div className="login-page login-page--split">
+      <div className="login-shell login-shell--split">
+        <aside className="login-visual" aria-label="CORVEX branding">
           <img src={bgImage} alt="" className="login-visual-image" />
-          <div className="login-visual-overlay" />
+          <div className="login-visual-overlay" aria-hidden="true" />
+
           <div className="login-visual-brand">
-            <img src={logo} alt="Corvex" className="login-visual-logo" />
+            <img src={whiteLogo} alt="" className="login-visual-logo" />
             <span>CORVEX</span>
+          </div>
+
+          <div className="login-visual-copy">
+            <h2 className="login-visual-headline">
+              Smarter Operations.
+              <br />
+              Stronger Supply Chains.
+            </h2>
+            <p className="login-visual-sub">
+              CORVEX helps you manage inventory, track field operations, and keep your business moving forward.
+            </p>
           </div>
         </aside>
 
         <div className="login-form-panel">
-          <div className="login-form-inner">
-            <div className="login-brand-row">
-              </div>
-
+          <motion.div
+            className="login-form-inner"
+            initial={{ opacity: 0, y: 16 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.45, ease: [0.16, 1, 0.3, 1] }}
+          >
             <h1 className="login-heading">Welcome back</h1>
             <p className="login-subtitle">
               Sign in to continue to your Corvex account.
@@ -105,6 +110,7 @@ export function LoginPage() {
                   animate={{ opacity: 1, height: 'auto', marginBottom: 20 }}
                   exit={{ opacity: 0, height: 0, marginBottom: 0 }}
                   className="login-api-error-box"
+                  role="alert"
                 >
                   <AlertCircle size={18} className="shrink-0 mt-0.5" />
                   <span className="leading-relaxed">{apiError}</span>
@@ -124,7 +130,7 @@ export function LoginPage() {
                     type="email"
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}
-                    placeholder="Enter your email"
+                    placeholder="Enter your email address"
                     className={`login-input ${errors.email ? 'has-error' : ''}`}
                     autoComplete="username"
                     disabled={loading}
@@ -173,12 +179,24 @@ export function LoginPage() {
                 className="login-submit-button"
                 disabled={loading}
               >
-                {loading ? <span className="login-spinner" aria-hidden="true" /> : 'Sign In'}
+                {loading ? (
+                  <span className="login-spinner" aria-hidden="true" />
+                ) : (
+                  <>
+                    Sign In
+                    <ArrowRight size={18} strokeWidth={2} aria-hidden="true" />
+                  </>
+                )}
               </button>
             </form>
-          </div>
+
+            <p className="login-secure-note">
+              <Lock size={13} strokeWidth={2} aria-hidden="true" />
+              Your account is secure and protected.
+            </p>
+          </motion.div>
         </div>
-      </motion.div>
+      </div>
     </div>
   );
 }

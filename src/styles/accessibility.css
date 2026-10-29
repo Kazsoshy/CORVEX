@@ -1440,8 +1440,12 @@ html[data-contrast="high"] .reading-guide {
 
 .pos-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(168px, 1fr));
+  /* auto-fill keeps empty tracks so sparse pages do not stretch cards */
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
   gap: 12px;
+  width: 100%;
+  justify-content: start;
+  align-items: start;
 }
 
 .pos-card {
@@ -1449,6 +1453,10 @@ html[data-contrast="high"] .reading-guide {
   display: flex;
   flex-direction: column;
   align-items: stretch;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  height: auto;
   padding: 0;
   border: 1px solid var(--border);
   border-radius: 16px;
@@ -1457,6 +1465,7 @@ html[data-contrast="high"] .reading-guide {
   text-align: left;
   overflow: hidden;
   cursor: pointer;
+  box-sizing: border-box;
 }
 
 .pos-card:hover,
@@ -1478,9 +1487,12 @@ html[data-contrast="high"] .reading-guide {
 .pos-photo-card {
   width: 100%;
   height: 148px;
+  min-height: 148px;
+  max-height: 148px;
   object-fit: contain;
   padding: 16px;
   box-sizing: border-box;
+  flex: none;
 }
 
 .pos-photo-row {
@@ -1510,6 +1522,8 @@ html[data-contrast="high"] .reading-guide {
   display: grid;
   gap: 3px;
   padding: 12px;
+  flex: 1 1 auto;
+  min-width: 0;
 }
 
 .pos-card-body strong,
@@ -1519,11 +1533,27 @@ html[data-contrast="high"] .reading-guide {
   line-height: 1.3;
 }
 
+.pos-card-body strong {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  overflow: hidden;
+  min-height: calc(1.3em * 2);
+}
+
 .pos-card-body small,
 .pos-lines small,
 .pos-history p {
   color: var(--text-secondary);
   font-size: 0.78rem;
+}
+
+.pos-card-body small {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .pos-card-meta {
@@ -1532,6 +1562,7 @@ html[data-contrast="high"] .reading-guide {
   gap: 8px;
   align-items: baseline;
   margin-top: 6px;
+  min-width: 0;
 }
 
 .pos-card-meta b {
