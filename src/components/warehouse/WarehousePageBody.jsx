@@ -60,7 +60,6 @@ import { LoadingState } from '../shared/LoadingState';
 import { DetailRowsTable } from '../shared/DetailRowsTable';
 import { NavIcon } from '../../navIcons';
 import { StatusBadge } from '../StatusBadge';
-import { CreditHistoryListPage, CreditHistoryDetailPage } from '../shared/CreditHistoryPages';
 import { formatCurrency, formatDisplayDate, formatDisplayDateTime, formatPhone } from '../../utils/formatters.js';
 import { CentralInventoryPanel } from '../inventory/CentralInventoryPanel';
 import { ProductImagePicker } from '../shared/ProductImagePicker';
@@ -2581,10 +2580,6 @@ export function WarehousePageBody({
       return <RestockHistoryPage {...props} />;
     case 'restockDetail':
       return <RestockDetailPage {...props} />;
-    case 'creditHistory':
-      return <CreditHistoryListPage {...props} />;
-    case 'creditDetail':
-      return <CreditHistoryDetailPage {...props} />;
     case 'notifications':
       return <NotificationsPage {...props} />;
     case 'profile':

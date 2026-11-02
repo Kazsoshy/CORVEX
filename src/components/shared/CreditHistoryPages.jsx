@@ -66,7 +66,7 @@ function downloadCreditHistoryPdf(record, showToast) {
 // ─────────────────────────────────────────────────────────────────────────────
 export function CreditHistoryListPage({
   navigate,
-  basePath = '/warehouse/credit-history',
+  basePath = '/branch-manager/credit-history',
   showToast,
   userBranch
 }) {
@@ -233,7 +233,7 @@ export function CreditHistoryListPage({
 export function CreditHistoryDetailPage({
   creditId,
   navigate,
-  basePath = '/warehouse/credit-history',
+  basePath = '/branch-manager/credit-history',
   showToast
 }) {
   const [record, setRecord] = useState(null);

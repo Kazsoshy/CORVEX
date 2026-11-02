@@ -4,7 +4,7 @@ export const warehouseRole = {
   homePath: '/warehouse',
   entryPath: '/warehouse/dashboard',
   loginPath: '/warehouse',
-  accent: 'Stock counts, restocks, transfers, and credit history',
+  accent: 'Stock counts, restocks, and transfers',
   navPages: [
     { label: 'Dashboard',               to: '/warehouse/dashboard' },
     { label: 'Inventory Management',    to: '/warehouse/central-inventory' },
@@ -14,7 +14,6 @@ export const warehouseRole = {
     { label: 'Restock History',         to: '/warehouse/restock-history' },
     { label: 'Suppliers',               to: '/warehouse/suppliers' },
     { label: 'Product Categories',      to: '/warehouse/product-categories' },
-    { label: 'Customer Credit History', to: '/warehouse/credit-history' },
     { label: 'Notifications',           to: '/warehouse/notifications' },
     { label: 'Settings',                to: '/warehouse/settings' },
     { label: 'Profile',                 to: '/warehouse/profile' },

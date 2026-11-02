@@ -16,8 +16,6 @@ const ROUTE_DEFINITIONS = [
   { pattern: /^\/warehouse\/transfers\/([^/]+)$/, pageType: 'transferDetail', params: ['transferId'] },
   { pattern: /^\/warehouse\/restock-history$/, pageType: 'restockHistory' },
   { pattern: /^\/warehouse\/restock-history\/([^/]+)$/, pageType: 'restockDetail', params: ['restockId'] },
-  { pattern: /^\/warehouse\/credit-history$/, pageType: 'creditHistory' },
-  { pattern: /^\/warehouse\/credit-history\/([^/]+)$/, pageType: 'creditDetail', params: ['creditId'] },
   { pattern: /^\/warehouse\/notifications$/, pageType: 'notifications' },
   { pattern: /^\/warehouse\/profile$/, pageType: 'profile' },
   { pattern: /^\/warehouse\/audit-log$/, pageType: 'auditLog' },
@@ -33,9 +31,21 @@ function normalizeWarehousePathname(pathname) {
   if (pathname === '/warehouse/branch-inventory' || pathname === '/warehouse/inventory') {
     return '/warehouse/central-inventory';
   }
+  // Credit history is not part of the warehouse role — send old bookmarks to dashboard.
+  if (pathname === '/warehouse/credit-history' || pathname.startsWith('/warehouse/credit-history/')) {
+    return '/warehouse/dashboard';
+  }
   const legacy = pathname.match(/^\/warehouse\/transfer-requests\/([^/]+)$/);
   if (legacy) return `/warehouse/transfers/${legacy[1]}`;
   return pathname;
+}
+
+/** Old warehouse URLs that should be replaced in the browser address bar. */
+export function getWarehouseLegacyRedirect(pathname) {
+  if (pathname === '/warehouse/credit-history' || pathname.startsWith('/warehouse/credit-history/')) {
+    return '/warehouse/dashboard';
+  }
+  return null;
 }
 
 export function matchWarehouseRoute(pathname) {
@@ -124,10 +134,6 @@ export function buildWarehouseBreadcrumbs(pageType, params = {}) {
         { label: 'Restock History', to: '/warehouse/restock-history' },
         { label: params.restockId ? `Restock #${params.restockId}` : 'Restock Detail', to: `/warehouse/restock-history/${params.restockId}` },
       ];
-    case 'creditHistory':
-      return [...crumbs, { label: 'Customer Credit History', to: '/warehouse/credit-history' }];
-    case 'creditDetail':
-      return [...crumbs, { label: 'Customer Credit History', to: '/warehouse/credit-history' }, { label: 'Credit Record', to: `/warehouse/credit-history/${params.creditId}` }];
     case 'notifications':
       return [...crumbs, { label: 'Notifications', to: '/warehouse/notifications' }];
     case 'profile':
@@ -182,8 +188,6 @@ export function resolveWarehousePage(pathname, search = '') {
     transferDetail: 'Transfer Detail',
     restockHistory: 'Restock History',
     restockDetail: 'Restock Detail',
-    creditHistory: 'Customer Credit History',
-    creditDetail: 'Credit Record',
     notifications: 'Notifications',
     profile: 'Profile',
     auditLog: 'Audit Log',
@@ -227,7 +231,6 @@ export function isWarehouseNavActive(fullPath, navTo) {
   if (navTo === '/warehouse/restock-history') return pathname.startsWith('/warehouse/restock-history');
   if (navTo === '/warehouse/suppliers') return pathname.startsWith('/warehouse/suppliers');
   if (navTo === '/warehouse/product-categories') return pathname.startsWith('/warehouse/product-categories');
-  if (navTo === '/warehouse/credit-history') return pathname.startsWith('/warehouse/credit-history');
   if (navTo === '/warehouse/notifications') return pathname === '/warehouse/notifications';
   if (navTo === '/warehouse/profile') return pathname === '/warehouse/profile';
   if (navTo === '/warehouse/settings') return pathname === '/warehouse/settings';
