@@ -70,6 +70,9 @@ const MIGRATIONS = [
   { file: '046_collection_review.sql',                label: '046_collection_review.sql' },
   { file: '047_performance_targets.sql',             label: '047_performance_targets.sql' },
   { file: '050_purchase_request_review.sql',         label: '050_purchase_request_review.sql' },
+  { file: '051_security_monitoring.sql',             label: '051_security_monitoring.sql' },
+  { file: '052_audit_logs_enrichment.sql',           label: '052_audit_logs_enrichment.sql' },
+  { file: '053_user_permissions_catalog.sql',        label: '053_user_permissions_catalog.sql' },
 ];
 
 async function ensureMigrationsTable() {

@@ -8,7 +8,12 @@ import { BranchManagerPageBody } from './components/branchManager/BranchManagerP
 import { CustomerPageBody } from './components/customer/CustomerPageBody';
 import { SuperAdminPageBody } from './components/superAdmin/SuperAdminPageBody';
 import { Toast, useToast } from './components/shared/Toast';
-import { getEntryPathForRole, logout, getCurrentUser, getUserAssignedLocation } from './api/authService.js';
+import { getEntryPathForRole, logout, getCurrentUser, getUserAssignedLocation, refreshSessionPermissions } from './api/authService.js';
+import {
+  canAccessSuperAdminPage,
+  filterNavByPermissions,
+  firstAllowedSuperAdminPath,
+} from './utils/permissions.js';
 import { startIdleSessionWatch } from './api/sessionActivity.js';
 import logo from './assets/corvex-logo.png';
 import { LoginPage } from './components/auth/LoginPage';
@@ -19,6 +24,7 @@ import { StatusBadge } from './components/StatusBadge';
 import { StatsGrid } from './components/shared/StatsGrid';
 import LeafletMap from './components/common/LeafletMap';
 import { LogoutConfirmDialog } from './components/LogoutConfirmDialog';
+import { InactivityWarningModal } from './components/InactivityWarningModal';
 import { collectorRole } from './rolePages/collector';
 import { isCollectorNavActive, resolveCollectorPage } from './utils/collectorRoutes';
 import { isSalesNavActive, resolveSalesPage } from './utils/salesRoutes';
@@ -207,6 +213,44 @@ function PrototypeShell() {
     if (!onOwnArea) navigate(home, { replace: true });
   }, [location.pathname, navigate, currentRole]);
 
+  // Keep session permissions fresh so Super Admin grant changes take effect after refresh.
+  useEffect(() => {
+    const token = localStorage.getItem('corvex_token');
+    if (!token || !getCurrentUser()) return undefined;
+    let active = true;
+    refreshSessionPermissions().then(() => {
+      if (active) window.dispatchEvent(new Event('corvex-permissions-updated'));
+    });
+    const onFocus = () => {
+      refreshSessionPermissions().then(() => {
+        window.dispatchEvent(new Event('corvex-permissions-updated'));
+      });
+    };
+    window.addEventListener('focus', onFocus);
+    return () => {
+      active = false;
+      window.removeEventListener('focus', onFocus);
+    };
+  }, []);
+
+  const [permVersion, setPermVersion] = useState(0);
+  useEffect(() => {
+    const bump = () => setPermVersion((v) => v + 1);
+    window.addEventListener('corvex-permissions-updated', bump);
+    window.addEventListener('corvex-session-ready', bump);
+    return () => {
+      window.removeEventListener('corvex-permissions-updated', bump);
+      window.removeEventListener('corvex-session-ready', bump);
+    };
+  }, []);
+
+  // Block direct URL access to Super Admin pages without the matching View permission.
+  useEffect(() => {
+    if (!isSuperAdmin || !page?.pageType) return;
+    if (canAccessSuperAdminPage(page.pageType)) return;
+    navigate(firstAllowedSuperAdminPath(), { replace: true });
+  }, [isSuperAdmin, page?.pageType, navigate, permVersion, location.pathname]);
+
   useEffect(() => {
     const handleRequestLogout = () => setShowLogoutConfirm(true);
     const handleSessionEnded = () => navigate('/login', { replace: true });
@@ -234,8 +278,12 @@ function PrototypeShell() {
       ];
     }
 
-    return withoutStandaloneProfileNav(currentRole.navPages || []);
-  }, [currentRole, location.pathname]);
+    const links = withoutStandaloneProfileNav(currentRole.navPages || []);
+    if (currentRole.key === 'superAdmin') {
+      return filterNavByPermissions(links);
+    }
+    return links;
+  }, [currentRole, location.pathname, permVersion]);
 
   const sidebarSections = useMemo(
     () => sidebarSectionsWithoutProfile(currentRole?.navSections || []),
@@ -292,6 +340,7 @@ function PrototypeShell() {
         onConfirm={handleLogoutConfirm}
         onCancel={() => setShowLogoutConfirm(false)}
       />
+      <InactivityWarningModal />
       {isMobileSidebarOpen && (
         <div className="sidebar-overlay" onClick={closeMobileSidebar} aria-hidden="true" />
       )}

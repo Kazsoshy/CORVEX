@@ -1,5 +1,6 @@
 import express from 'express';
 import { allow, isUnscoped, ROLE_SETS } from '../middleware/auth.js';
+import { AUDIT_STATUS, writeAuditFromReq } from '../lib/auditLog.js';
 
 const router = express.Router();
 router.use(allow(ROLE_SETS.territoryRead, ROLE_SETS.territoryWrite));
@@ -192,6 +193,15 @@ router.post('/', async (req, res) => {
       
       await client.query('COMMIT');
 
+      await writeAuditFromReq(pool, req, {
+        module: 'Territories',
+        activity: 'Create Territory',
+        action: 'Create Territory',
+        description: `Created territory ${territory_name.trim()}.`,
+        status: AUDIT_STATUS.CREATED,
+        affectedRecord: `territory:${result.rows[0].territory_id}`,
+      });
+
       return res.status(201).json({
         success: true,
         message: 'Territory created successfully.',
@@ -273,6 +283,15 @@ router.put('/:id', async (req, res) => {
       }
       
       await client.query('COMMIT');
+
+      await writeAuditFromReq(pool, req, {
+        module: 'Territories',
+        activity: 'Edit Territory',
+        action: 'Edit Territory',
+        description: `Edited territory #${req.params.id}${territory_name ? ` (${String(territory_name).trim()})` : ''}.`,
+        status: AUDIT_STATUS.UPDATED,
+        affectedRecord: `territory:${req.params.id}`,
+      });
       
       return res.status(200).json({
         success: true,
@@ -320,6 +339,15 @@ router.delete('/:id', async (req, res) => {
       `UPDATE territories SET status = 'Inactive' WHERE territory_id = $1`,
       [territoryId]
     );
+
+    await writeAuditFromReq(pool, req, {
+      module: 'Territories',
+      activity: 'Archive Territory',
+      action: 'Archive Territory',
+      description: `Archived territory #${territoryId}. Record preserved.`,
+      status: AUDIT_STATUS.ARCHIVED,
+      affectedRecord: `territory:${territoryId}`,
+    });
 
     return res.status(200).json({
       success: true,

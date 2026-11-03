@@ -695,6 +695,7 @@ const LABEL_ICON_KEY = {
   'Inventory Management': 'inventory',
   'System Reports': 'reports',
   'Audit Logs': 'log',
+  'Security Monitoring': 'shield-check',
   'Approval Center': 'queue',
   Settings: 'settings',
   'System Configuration': 'form',

@@ -2885,3 +2885,348 @@ input[type="search"]::-webkit-search-results-decoration {
     font-size: 1.2rem !important;
   }
 }
+
+/* Security Event Log — title + filters on one horizontal row */
+.sec-event-log-toolbar {
+  display: flex !important;
+  flex-wrap: nowrap !important;
+  align-items: center !important;
+  justify-content: space-between !important;
+  gap: 12px !important;
+  margin-bottom: 10px !important;
+}
+
+.sec-event-log-title {
+  margin: 0 !important;
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
+.sec-event-log-filters {
+  display: flex !important;
+  flex-wrap: nowrap !important;
+  align-items: center !important;
+  justify-content: flex-end !important;
+  gap: 8px !important;
+  flex: 0 1 auto !important;
+  width: auto !important;
+  min-width: 0 !important;
+}
+
+.sec-event-log-filters > .filter-select {
+  flex: 0 0 auto !important;
+  width: 160px !important;
+  min-width: 140px !important;
+  max-width: 180px !important;
+}
+
+@media (max-width: 700px) {
+  .sec-event-log-toolbar {
+    flex-wrap: wrap !important;
+  }
+
+  .sec-event-log-filters {
+    width: 100% !important;
+  }
+
+  .sec-event-log-filters > .filter-select {
+    flex: 1 1 0 !important;
+    width: auto !important;
+    min-width: 0 !important;
+    max-width: none !important;
+  }
+}
+
+/* -- Role & Permissions Matrix (user selection) ----------------------------- */
+.rp-matrix-panel {
+  padding: 18px 20px 22px !important;
+}
+
+.rp-matrix-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: center;
+  margin-bottom: 18px;
+}
+
+.rp-matrix-search {
+  flex: 1 1 220px;
+  min-width: 180px;
+  max-width: 360px;
+}
+
+.rp-matrix-select {
+  flex: 0 1 200px;
+  min-width: 160px;
+}
+
+.rp-matrix-permissions h3 {
+  margin: 0 0 12px;
+  font-size: 1.05rem;
+}
+
+.rp-matrix-empty {
+  border: 1px solid var(--border, #d5dde5);
+  border-radius: 10px;
+  min-height: 280px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 28px 20px;
+  background: var(--surface, #fff);
+  color: var(--text-secondary, #5f7385);
+  text-align: center;
+}
+
+.rp-matrix-empty p {
+  margin: 0;
+  max-width: 420px;
+  line-height: 1.5;
+}
+
+.rp-matrix-selected-meta {
+  margin: 0 0 14px;
+  color: var(--text-secondary, #5f7385);
+  font-size: 0.9rem;
+}
+
+.rp-matrix-perm-list {
+  border: 1px solid var(--border, #d5dde5);
+  border-radius: 10px;
+  padding: 14px 16px 8px;
+  background: var(--surface, #fff);
+  max-height: min(62vh, 560px);
+  overflow: auto;
+}
+
+.rp-matrix-perm-items {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.rp-matrix-perm-item {
+  border: 1px solid var(--border, #e2e8f0);
+  border-radius: 8px;
+  padding: 12px 14px;
+  background: #fff;
+}
+
+.rp-matrix-perm-item-main {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 4px;
+}
+
+.rp-matrix-perm-desc {
+  display: block;
+  color: var(--text-secondary, #5f7385);
+  font-size: 0.86rem;
+  line-height: 1.4;
+}
+
+.rp-role-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--border, #d5dde5);
+  font-size: 0.78rem;
+  color: var(--palette-navy, #0f2744);
+  background: transparent;
+  white-space: nowrap;
+}
+
+@media (max-width: 700px) {
+  .rp-matrix-search,
+  .rp-matrix-select {
+    flex: 1 1 100%;
+    max-width: none;
+  }
+}
+
+/* Roles & Permissions — per-user access management */
+.rp-users-panel .list-section-header {
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.rp-user-row:hover {
+  background: rgba(37, 99, 235, 0.04);
+}
+
+.rp-user-row.selected,
+.rp-user-info.selected {
+  outline: 2px solid rgba(37, 99, 235, 0.35);
+  outline-offset: -2px;
+  background: rgba(37, 99, 235, 0.05);
+}
+
+.rp-user-perm-header,
+.rp-user-perm-footer {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 16px;
+}
+
+.rp-user-perm-footer {
+  margin-top: 18px;
+  margin-bottom: 0;
+  justify-content: flex-end;
+  border-top: 1px solid var(--border, #d5dde5);
+  padding-top: 16px;
+}
+
+.rp-user-perm-actions {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.rp-user-info {
+  border: 1px solid var(--border, #d5dde5);
+  border-radius: 10px;
+  padding: 16px 18px;
+  margin-bottom: 18px;
+  background: #fff;
+}
+
+.rp-user-info-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 14px 18px;
+}
+
+.rp-user-info-label {
+  display: block;
+  font-size: 0.78rem;
+  color: var(--text-secondary, #5f7385);
+  margin-bottom: 4px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-weight: 700;
+}
+
+.rp-user-perm-note {
+  margin: 14px 0 0;
+  font-size: 0.88rem;
+  color: #b45309;
+}
+
+.rp-perm-modules h3 {
+  margin: 0 0 4px;
+}
+
+.rp-perm-module {
+  border: 1px solid var(--border, #d5dde5);
+  border-radius: 10px;
+  margin-bottom: 12px;
+  background: #fff;
+  overflow: hidden;
+}
+
+.rp-perm-module-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 14px;
+  background: #f7fafc;
+  border-bottom: 1px solid var(--border, #e8eef3);
+}
+
+.rp-perm-module-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+  padding: 0;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+}
+
+.rp-perm-caret {
+  display: inline-flex;
+  width: 1rem;
+  color: #2563eb;
+  font-weight: 700;
+}
+
+.rp-perm-count {
+  font-size: 0.8rem;
+  color: var(--text-secondary, #5f7385);
+  font-weight: 600;
+}
+
+.rp-perm-module-all {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.86rem;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.rp-perm-action-list {
+  list-style: none;
+  margin: 0;
+  padding: 8px 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.rp-perm-action-item {
+  border: 1px solid transparent;
+  border-radius: 8px;
+  padding: 8px 10px;
+}
+
+.rp-perm-action-item:hover {
+  background: rgba(37, 99, 235, 0.04);
+}
+
+.rp-perm-action-label {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  cursor: pointer;
+}
+
+.rp-perm-action-label input {
+  margin-top: 3px;
+}
+
+.rp-perm-action-label .rp-matrix-perm-desc {
+  display: block;
+  margin-top: 2px;
+}
+
+@media (max-width: 900px) {
+  .rp-user-info-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 600px) {
+  .rp-user-info-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .rp-perm-module-header {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+}

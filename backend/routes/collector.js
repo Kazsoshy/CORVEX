@@ -11,6 +11,7 @@ import { osrmDrivingRoute, osrmDrivingTrip } from '../lib/osrm.js';
 import { nearestNeighborOrder, sortStopsBySaw } from '../lib/routeOrder.js';
 import { manilaDateString } from '../lib/sawCollection.js';
 import { applyCollectionPayment, assertCollectorCustomerAccess, manilaNow } from '../lib/collectionPayment.js';
+import { AUDIT_STATUS, writeAuditFromReq } from '../lib/auditLog.js';
 
 const router = express.Router();
 
@@ -872,6 +873,15 @@ router.post('/credit-investigations', async (req, res) => {
       submitterName,
     });
 
+    await writeAuditFromReq(pool, req, {
+      module: 'Collections',
+      activity: 'Submit Credit Investigation',
+      action: 'Submit Credit Investigation',
+      description: `Submitted credit investigation for ${customerName}.`,
+      status: AUDIT_STATUS.CREATED,
+      affectedRecord: `credit_investigation:${ciId}`,
+    });
+
     return res.status(201).json({
       success: true,
       message: 'Credit investigation submitted for branch approval.',
@@ -930,6 +940,15 @@ router.post('/incidents', async (req, res) => {
        RETURNING alert_id, title, status, created_at`,
       [branchId, mapIncidentSeverity(severity), title, messageParts.join('\n')]
     );
+
+    await writeAuditFromReq(pool, req, {
+      module: 'Collections',
+      activity: 'Report Incident',
+      action: 'Report Incident',
+      description: `Reported field incident: ${String(incidentType).trim()}.`,
+      status: AUDIT_STATUS.CREATED,
+      affectedRecord: `alert:${result.rows[0].alert_id}`,
+    });
 
     return res.status(201).json({
       success: true,

@@ -6,6 +6,7 @@ import {
   dispatchPortalActivationEmail,
 } from '../lib/customerPortal.js';
 import { isMailConfigured } from '../lib/mail.js';
+import { AUDIT_STATUS, writeAuditFromReq } from '../lib/auditLog.js';
 
 function salesAgentDisplayName(user) {
   if (!user) return 'Sales Agent';
@@ -456,6 +457,15 @@ router.post('/', async (req, res) => {
       }
     }
 
+    await writeAuditFromReq(req.app.locals.pool, req, {
+      module: 'Customer Management',
+      activity: 'Create Customer',
+      action: 'Create Customer',
+      description: `Created customer ${first_name} ${last_name}.`,
+      status: AUDIT_STATUS.CREATED,
+      affectedRecord: `customer:${customerId}`,
+    });
+
     return res.status(201).json({
       success: true,
       message: createMessage,
@@ -600,7 +610,18 @@ router.put('/:id', async (req, res) => {
     );
 
     if (result.rows.length === 0) return res.status(404).json({ success: false, message: 'Customer not found.' });
-    return res.status(200).json({ success: true, message: 'Customer updated.', data: result.rows[0] });
+
+    const row = result.rows[0];
+    await writeAuditFromReq(pool, req, {
+      module: 'Customer Management',
+      activity: 'Update Customer',
+      action: 'Update Customer',
+      description: `Updated customer ${row.first_name || ''} ${row.last_name || ''}`.trim(),
+      status: AUDIT_STATUS.UPDATED,
+      affectedRecord: `customer:${row.customer_id}`,
+    });
+
+    return res.status(200).json({ success: true, message: 'Customer updated.', data: row });
   } catch (err) {
     console.error('[Customers] PUT /:id error:', err.message);
     return res.status(500).json({ success: false, message: 'Failed to update customer.' });

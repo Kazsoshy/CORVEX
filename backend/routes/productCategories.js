@@ -1,5 +1,6 @@
 import express from 'express';
 import { allow, ROLE_SETS } from '../middleware/auth.js';
+import { AUDIT_STATUS, writeAuditFromReq } from '../lib/auditLog.js';
 
 const router = express.Router();
 router.use(allow(ROLE_SETS.categoriesRead, ROLE_SETS.categoriesWrite));
@@ -94,6 +95,15 @@ router.post('/', async (req, res) => {
       [category_name.trim()]
     );
 
+    await writeAuditFromReq(pool, req, {
+      module: 'Product Categories',
+      activity: 'Create Category',
+      action: 'Create Category',
+      description: `Created product category ${category_name.trim()}.`,
+      status: AUDIT_STATUS.CREATED,
+      affectedRecord: `category:${result.rows[0].category_id}`,
+    });
+
     return res.status(201).json({ success: true, message: 'Product category created.', data: result.rows[0] });
   } catch (err) {
     console.error('[ProductCategories] POST / error:', err.message);
@@ -139,6 +149,15 @@ router.put('/:id', async (req, res) => {
       params
     );
 
+    await writeAuditFromReq(pool, req, {
+      module: 'Product Categories',
+      activity: 'Edit Category',
+      action: 'Edit Category',
+      description: `Edited product category #${catId}${category_name ? ` to ${String(category_name).trim()}` : ''}.`,
+      status: AUDIT_STATUS.UPDATED,
+      affectedRecord: `category:${catId}`,
+    });
+
     return res.status(200).json({ success: true, message: 'Product category updated.', data: result.rows[0] });
   } catch (err) {
     console.error('[ProductCategories] PUT /:id error:', err.message);
@@ -165,6 +184,15 @@ router.delete('/:id', async (req, res) => {
       `UPDATE product_categories SET status = 'Inactive', updated_at = CURRENT_TIMESTAMP WHERE category_id = $1`,
       [catId]
     );
+
+    await writeAuditFromReq(pool, req, {
+      module: 'Product Categories',
+      activity: 'Archive Category',
+      action: 'Archive Category',
+      description: `Archived product category #${catId}.`,
+      status: AUDIT_STATUS.ARCHIVED,
+      affectedRecord: `category:${catId}`,
+    });
 
     return res.status(200).json({ success: true, message: 'Product category archived successfully.' });
   } catch (err) {

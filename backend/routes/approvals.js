@@ -14,6 +14,7 @@ import {
   rejectCollectionPayment,
   reverseCollectionPayment,
 } from '../lib/collectionPayment.js';
+import { AUDIT_STATUS, writeAuditFromReq } from '../lib/auditLog.js';
 
 const router = express.Router();
 const APPROVAL_ROLES = [...new Set([...ROLE_SETS.branchOps, 'operating_manager', 'super_admin'])];
@@ -142,6 +143,15 @@ router.patch('/credit-investigations/:id', async (req, res) => {
       );
     }
 
+    await writeAuditFromReq(pool, req, {
+      module: 'Credit Approvals',
+      activity: `Credit ${status}`,
+      action: `Credit ${status}`,
+      description: `${status} credit investigation #${ciId}${meta?.customer_name ? ` for ${meta.customer_name}` : ''}${status === 'Rejected' && rejectionReason ? `. Reason: ${rejectionReason}` : ''}.`,
+      status: status === 'Rejected' ? AUDIT_STATUS.FAILED : AUDIT_STATUS.UPDATED,
+      affectedRecord: `credit_investigation:${ciId}`,
+    });
+
     return res.status(200).json({ success: true, message: `CI ${status.toLowerCase()}.`, data: result.rows[0] });
   } catch (err) {
     console.error('[Approvals] PATCH /credit-investigations/:id error:', err.message);
@@ -203,6 +213,16 @@ router.patch('/special-collections/:id', async (req, res) => {
     if (!result.rows.length) {
       return res.status(404).json({ success: false, message: 'Request not found.' });
     }
+
+    await writeAuditFromReq(pool, req, {
+      module: 'Approvals',
+      activity: `Special Collection ${status}`,
+      action: `Special Collection ${status}`,
+      description: `${status} special collection request #${requestId}.`,
+      status: status === 'Approved' ? AUDIT_STATUS.APPROVED : AUDIT_STATUS.REJECTED,
+      affectedRecord: `special_collection:${requestId}`,
+    });
+
     return res.status(200).json({ success: true, message: `Request ${status.toLowerCase()}.`, data: result.rows[0] });
   } catch (err) {
     console.error('[Approvals] PATCH /special-collections/:id error:', err.message);
@@ -363,6 +383,17 @@ router.patch('/sales-invoices/:id', async (req, res) => {
       status,
       reviewNote,
       reopenedRequest,
+    });
+
+    await writeAuditFromReq(pool, req, {
+      module: 'Approvals',
+      activity: status === 'Confirmed' ? 'Approve Invoice' : 'Reject Invoice',
+      action: status === 'Confirmed' ? 'Approve Invoice' : 'Reject Invoice',
+      description: status === 'Confirmed'
+        ? `Approved sales invoice ${invoice.invoice_number}.`
+        : `Rejected sales invoice ${invoice.invoice_number}${reviewNote ? `. Reason: ${reviewNote}` : ''}.`,
+      status: status === 'Confirmed' ? AUDIT_STATUS.APPROVED : AUDIT_STATUS.REJECTED,
+      affectedRecord: `invoice:${invoiceId}`,
     });
 
     return res.status(200).json({

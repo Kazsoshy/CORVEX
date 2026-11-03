@@ -1,3 +1,5 @@
+import { AUDIT_STATUS, writeAuditLog } from './auditLog.js';
+
 export function deriveStockStatus(availableStock, reorderLevel) {
   const available = Number(availableStock) || 0;
   const reorder = Number(reorderLevel) || 0;
@@ -108,13 +110,31 @@ export async function insertStockMovement(client, {
 
 export async function logWarehouseAudit(pool, userId, action, detail, ipAddress = '127.0.0.1') {
   const userRow = await pool.query(
-    `SELECT COALESCE(NULLIF(TRIM(full_name), ''), email, 'User') AS name FROM users WHERE id = $1`,
+    `SELECT COALESCE(NULLIF(TRIM(full_name), ''), email, 'User') AS name,
+            (SELECT role_name FROM roles r WHERE r.role_id = users.role_id) AS role_name
+     FROM users WHERE id = $1`,
     [userId]
   );
   const userName = userRow.rows[0]?.name || 'User';
-  await pool.query(
-    `INSERT INTO audit_logs (user_id, user_name, action, ip_address, status_details)
-     VALUES ($1, $2, $3, $4, $5)`,
-    [userId, userName, action, ipAddress, detail.slice(0, 150)]
-  );
+  const roleName = userRow.rows[0]?.role_name || null;
+  const actionText = String(action || 'Inventory Activity');
+  const lower = actionText.toLowerCase();
+  let status = AUDIT_STATUS.SUCCESS;
+  if (lower.includes('create') || lower.includes('restock') || lower.includes('transfer')) status = AUDIT_STATUS.CREATED;
+  else if (lower.includes('update') || lower.includes('adjust')) status = AUDIT_STATUS.UPDATED;
+  else if (lower.includes('delete')) status = AUDIT_STATUS.DELETED;
+  else if (lower.includes('archive')) status = AUDIT_STATUS.ARCHIVED;
+  else if (lower.includes('restore')) status = AUDIT_STATUS.RESTORED;
+
+  await writeAuditLog(pool, {
+    userId,
+    userName,
+    roleName,
+    module: 'Inventory Management',
+    activity: actionText,
+    action: actionText,
+    description: String(detail || ''),
+    status,
+    ipAddress,
+  });
 }

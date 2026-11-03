@@ -21,6 +21,7 @@ import {
   notifyScheduleAssigned,
   publishStockAlerts,
 } from '../lib/operationalNotifications.js';
+import { AUDIT_STATUS, writeAuditFromReq } from '../lib/auditLog.js';
 
 const router = express.Router();
 
@@ -393,6 +394,15 @@ router.post('/credit-investigations', salesStaffOnly, async (req, res) => {
       submitterName,
     });
 
+    await writeAuditFromReq(pool, req, {
+      module: 'Sales',
+      activity: 'Submit Credit Investigation',
+      action: 'Submit Credit Investigation',
+      description: `Submitted credit investigation for ${customerName}.`,
+      status: AUDIT_STATUS.CREATED,
+      affectedRecord: `credit_investigation:${ciId}`,
+    });
+
     return res.status(201).json({
       success: true,
       message: 'Credit investigation submitted for branch approval.',
@@ -743,6 +753,15 @@ router.post('/invoices', async (req, res) => {
       agentId: user.id,
     });
 
+    await writeAuditFromReq(pool, req, {
+      module: 'Sales',
+      activity: 'Create Sales Invoice',
+      action: 'Create Sales Invoice',
+      description: `Logged sales invoice ${invoiceNumber}.`,
+      status: AUDIT_STATUS.CREATED,
+      affectedRecord: `invoice:${applied.invoiceId}`,
+    });
+
     try {
       const invoice = await getInvoice(invoiceNumber, { ...user, pool });
       return res.status(201).json({
@@ -951,6 +970,15 @@ router.post('/visits', async (req, res) => {
 
     const visit = await getVisit.call({ pool }, result.rows[0].visit_id, req.currentUser.id);
 
+    await writeAuditFromReq(pool, req, {
+      module: 'Sales',
+      activity: 'Create Field Visit',
+      action: 'Create Field Visit',
+      description: `Created ${visitType} visit for customer #${customerId} on ${scheduledDate}.`,
+      status: AUDIT_STATUS.CREATED,
+      affectedRecord: `visit:${result.rows[0].visit_id}`,
+    });
+
     return res.status(201).json({
       success: true,
       data: visit,
@@ -1064,6 +1092,15 @@ router.put('/visits/:id', async (req, res) => {
     if (effectiveStatus === 'Completed' && effectiveType === 'Sales' && req.currentUser.roleSlug === 'sales_staff') {
       await assignSalesAgentToCustomer(pool, visit.customer_id, req.currentUser.id);
     }
+
+    await writeAuditFromReq(pool, req, {
+      module: 'Sales',
+      activity: 'Edit Field Visit',
+      action: 'Edit Field Visit',
+      description: `Updated field visit #${visitId} (status: ${effectiveStatus}).`,
+      status: AUDIT_STATUS.UPDATED,
+      affectedRecord: `visit:${visitId}`,
+    });
 
     return res.status(200).json({
       success: true,
@@ -1343,6 +1380,15 @@ router.patch('/purchase-requests/:id', async (req, res) => {
       reopened: Boolean(reopen) && status === 'In Review',
     });
 
+    await writeAuditFromReq(pool, req, {
+      module: 'Sales',
+      activity: 'Update Purchase Request',
+      action: 'Update Purchase Request',
+      description: `Updated purchase request #${requestId} to status ${status}.`,
+      status: AUDIT_STATUS.UPDATED,
+      affectedRecord: `purchase_request:${requestId}`,
+    });
+
     return res.status(200).json({
       success: true,
       message: status === 'Rejected' || status === 'Cancelled'
@@ -1433,6 +1479,15 @@ router.post('/field-reports', async (req, res) => {
        RETURNING report_id, visit_id, activity_type, remarks, photo, sync_status, created_at`,
       [Number(visit_id), userId, String(activity_type).trim(), String(remarks).trim(), photoValue]
     );
+
+    await writeAuditFromReq(pool, req, {
+      module: 'Sales',
+      activity: 'Submit Field Report',
+      action: 'Submit Field Report',
+      description: `Submitted field activity report (${String(activity_type).trim()}) for visit #${visit_id}.`,
+      status: AUDIT_STATUS.CREATED,
+      affectedRecord: `field_report:${result.rows[0].report_id}`,
+    });
 
     return res.status(201).json({
       success: true,

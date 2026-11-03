@@ -7,6 +7,7 @@ import {
   productImageUrl,
   saveProductImage,
 } from '../lib/productImages.js';
+import { AUDIT_STATUS, writeAuditFromReq } from '../lib/auditLog.js';
 
 const router = express.Router();
 router.use(allow(ROLE_SETS.catalogRead, ROLE_SETS.catalogWrite));
@@ -352,6 +353,15 @@ router.post('/', async (req, res) => {
       ]
     );
 
+    await writeAuditFromReq(pool, req, {
+      module: 'Products',
+      activity: 'Create Product',
+      action: 'Create Product',
+      description: `Created product ${productName} (SKU ${sku.toUpperCase().trim()}).`,
+      status: AUDIT_STATUS.CREATED,
+      affectedRecord: `product:${result.rows[0].product_id}`,
+    });
+
     return res.status(201).json({ success: true, message: 'Product created.', data: result.rows[0] });
   } catch (err) {
     const nameConflict = productNameConflict(err);
@@ -415,6 +425,16 @@ router.put('/:id', async (req, res) => {
     );
 
     if (result.rows.length === 0) return res.status(404).json({ success: false, message: 'Product not found.' });
+
+    await writeAuditFromReq(pool, req, {
+      module: 'Products',
+      activity: 'Edit Product',
+      action: 'Edit Product',
+      description: `Edited product #${productId}${productName ? ` (${productName})` : ''}.`,
+      status: AUDIT_STATUS.UPDATED,
+      affectedRecord: `product:${productId}`,
+    });
+
     return res.status(200).json({ success: true, message: 'Product updated.', data: result.rows[0] });
   } catch (err) {
     const nameConflict = productNameConflict(err);
@@ -481,6 +501,14 @@ router.delete('/:id', async (req, res) => {
 
       await deleteProductImage(productId);
       await pool.query(`DELETE FROM products WHERE id = $1`, [productId]);
+      await writeAuditFromReq(pool, req, {
+        module: 'Products',
+        activity: 'Delete Product',
+        action: 'Delete Product',
+        description: `Permanently deleted product ${existing.rows[0].name} (${existing.rows[0].sku}).`,
+        status: AUDIT_STATUS.DELETED,
+        affectedRecord: `product:${productId}`,
+      });
       return res.status(200).json({
         success: true,
         message: 'Product permanently deleted.',
@@ -501,6 +529,15 @@ router.delete('/:id', async (req, res) => {
       `UPDATE products SET status = 'Inactive', updated_at = CURRENT_TIMESTAMP WHERE id = $1`,
       [productId]
     );
+
+    await writeAuditFromReq(pool, req, {
+      module: 'Products',
+      activity: 'Archive Product',
+      action: 'Archive Product',
+      description: `Archived product ${existing.rows[0].name} (${existing.rows[0].sku}).`,
+      status: AUDIT_STATUS.ARCHIVED,
+      affectedRecord: `product:${productId}`,
+    });
 
     return res.status(200).json({
       success: true,

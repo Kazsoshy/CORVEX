@@ -5,6 +5,7 @@ const ROUTES = [
   { pattern: /^\/super-admin\/settings$/,    pageType: 'settings' },
   { pattern: /^\/super-admin\/backup$/,      pageType: 'backup' },
   { pattern: /^\/super-admin\/monitoring$/,  pageType: 'monitoring' },
+  { pattern: /^\/super-admin\/security$/,    pageType: 'security' },
   { pattern: /^\/super-admin\/audit-logs$/,  pageType: 'auditLogs' },
   { pattern: /^\/super-admin\/notifications$/,pageType: 'notifications' },
   { pattern: /^\/super-admin\/profile$/,     pageType: 'profile' },
@@ -17,6 +18,7 @@ const TITLES = {
   settings:      'System Settings',
   backup:        'Backup & Restore',
   monitoring:    'Database & Server Monitoring',
+  security:      'Security Monitoring',
   auditLogs:     'Audit Logs',
   notifications: 'Notifications',
   profile:       'Profile',
@@ -32,6 +34,7 @@ export function resolveSuperAdminPage(pathname) {
       params: {},
       title: TITLES[pageType] ?? 'Super Admin',
       breadcrumbs: [{ label: 'Dashboard', to: '/super-admin/dashboard' }, ...(pageType !== 'dashboard' ? [{ label: TITLES[pageType], to: `/super-admin/${pageType === 'auditLogs' ? 'audit-logs' : pageType}` }] : [])],
+
     };
   }
   return null;

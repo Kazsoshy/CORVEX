@@ -1,5 +1,6 @@
 import express from 'express';
 import { allow, ROLE_SETS } from '../middleware/auth.js';
+import { AUDIT_STATUS, writeAuditFromReq } from '../lib/auditLog.js';
 
 const router = express.Router();
 router.use(allow(ROLE_SETS.suppliers));
@@ -132,6 +133,15 @@ router.post('/', async (req, res) => {
       ]
     );
 
+    await writeAuditFromReq(pool, req, {
+      module: 'Suppliers',
+      activity: 'Create Supplier',
+      action: 'Create Supplier',
+      description: `Created supplier ${result.rows[0].supplier_name}.`,
+      status: AUDIT_STATUS.CREATED,
+      affectedRecord: `supplier:${result.rows[0].suppliers_id}`,
+    });
+
     return res.status(201).json({
       success: true,
       message: 'Supplier created successfully.',
@@ -176,6 +186,15 @@ router.put('/:id', async (req, res) => {
       params
     );
 
+    await writeAuditFromReq(pool, req, {
+      module: 'Suppliers',
+      activity: 'Edit Supplier',
+      action: 'Edit Supplier',
+      description: `Edited supplier ${result.rows[0].supplier_name}.`,
+      status: AUDIT_STATUS.UPDATED,
+      affectedRecord: `supplier:${result.rows[0].suppliers_id}`,
+    });
+
     return res.status(200).json({
       success: true,
       message: 'Supplier updated successfully.',
@@ -210,6 +229,15 @@ router.delete('/:id', async (req, res) => {
       `UPDATE suppliers SET status = 'Inactive', updated_at = NOW() WHERE suppliers_id = $1`,
       [supplierId]
     );
+
+    await writeAuditFromReq(pool, req, {
+      module: 'Suppliers',
+      activity: 'Archive Supplier',
+      action: 'Archive Supplier',
+      description: `Archived supplier #${supplierId}. Record preserved.`,
+      status: AUDIT_STATUS.ARCHIVED,
+      affectedRecord: `supplier:${supplierId}`,
+    });
 
     return res.status(200).json({
       success: true,

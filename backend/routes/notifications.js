@@ -1,9 +1,24 @@
 import express from 'express';
+import { requirePermission } from '../middleware/auth.js';
 
 const router = express.Router();
 
+/**
+ * Personal inbox for operational roles stays open to any authenticated user.
+ * Super Admin / Operating Manager catalog permissions gate the SA Notifications module.
+ */
+function requireSaNotificationPermission(...codes) {
+  return (req, res, next) => {
+    const slug = req.currentUser?.roleSlug;
+    if (slug !== 'super_admin' && slug !== 'operating_manager') {
+      return next();
+    }
+    return requirePermission(...codes)(req, res, next);
+  };
+}
+
 // GET /api/notifications — current user's notifications
-router.get('/', async (req, res) => {
+router.get('/', requireSaNotificationPermission('notifications.view', 'notifications.manage'), async (req, res) => {
   try {
     const pool = req.app.locals.pool;
     const userId = req.currentUser?.id;
@@ -39,7 +54,7 @@ router.get('/', async (req, res) => {
 });
 
 // PATCH /api/notifications/read-all
-router.patch('/read-all', async (req, res) => {
+router.patch('/read-all', requireSaNotificationPermission('notifications.manage'), async (req, res) => {
   try {
     const pool = req.app.locals.pool;
     const userId = req.currentUser?.id;
@@ -58,7 +73,7 @@ router.patch('/read-all', async (req, res) => {
 });
 
 // PATCH /api/notifications/:id/read
-router.patch('/:id/read', async (req, res) => {
+router.patch('/:id/read', requireSaNotificationPermission('notifications.manage'), async (req, res) => {
   try {
     const pool = req.app.locals.pool;
     const userId = req.currentUser?.id;
