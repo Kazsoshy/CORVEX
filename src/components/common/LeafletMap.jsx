@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { MapContainer, TileLayer, Marker, Popup, Polyline, Circle, Polygon, useMap } from 'react-leaflet';
+import { MapContainer, TileLayer, Marker, Popup, Polyline, Circle, Polygon, useMap, useMapEvents } from 'react-leaflet';
 import L from 'leaflet';
 import { brand } from '../../theme/palette.js';
 import { NavIcon } from '../../navIcons';
@@ -14,6 +14,19 @@ function FitBounds({ bounds, padding = [36, 36] }) {
       /* ignore invalid bounds */
     }
   }, [bounds, map, padding]);
+  return null;
+}
+
+function MapClickHandler({ onMapClick }) {
+  useMapEvents({
+    click(event) {
+      if (typeof onMapClick !== 'function') return;
+      onMapClick({
+        lat: event.latlng.lat,
+        lng: event.latlng.lng,
+      });
+    },
+  });
   return null;
 }
 
@@ -107,6 +120,7 @@ export default function LeafletMap({
   height = 560,
   fitBounds = null,
   showFullscreen = true,
+  onMapClick = null,
 }) {
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [sizeRevision, setSizeRevision] = useState(0);
@@ -166,6 +180,7 @@ export default function LeafletMap({
             url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
           />
           <InvalidateSize revision={sizeRevision} />
+          {typeof onMapClick === 'function' ? <MapClickHandler onMapClick={onMapClick} /> : null}
           {fitBounds?.length ? <FitBounds bounds={fitBounds} /> : null}
 
           {polygons.map((polygon) => (
@@ -206,6 +221,13 @@ export default function LeafletMap({
             <Marker
               key={marker.id}
               position={marker.position}
+              draggable={Boolean(marker.draggable)}
+              eventHandlers={typeof marker.onDragEnd === 'function' ? {
+                dragend: (event) => {
+                  const next = event.target.getLatLng();
+                  marker.onDragEnd({ lat: next.lat, lng: next.lng });
+                },
+              } : undefined}
               icon={marker.icon || (marker.color ? createCustomIcon(marker.color, marker.label) : new L.Icon.Default())}
             >
               {(marker.popupContent || marker.popup) && (

@@ -2,7 +2,6 @@
 const ROUTE_DEFINITIONS = [
   { pattern: /^\/customer\/login$/, pageType: 'login' },
   { pattern: /^\/customer\/home$/, pageType: 'home' },
-  { pattern: /^\/customer\/purchase-requests$/, pageType: 'purchaseRequests' },
   { pattern: /^\/customer\/account-details$/, pageType: 'accountDetails' },
   { pattern: /^\/customer\/payment-history$/, pageType: 'paymentHistory' },
   { pattern: /^\/customer\/receipts$/, pageType: 'receipts' },
@@ -36,8 +35,6 @@ export function buildCustomerBreadcrumbs(pageType, params = {}) {
       return [{ label: 'Login', to: '/customer/login' }];
     case 'home':
       return [{ label: 'Home', to: '/customer/home' }];
-    case 'purchaseRequests':
-      return [...crumbs, { label: 'Purchase Products', to: '/customer/purchase-requests' }];
     case 'accountDetails':
       return [...crumbs, { label: 'Account Details', to: '/customer/account-details' }];
     case 'paymentHistory':
@@ -68,7 +65,6 @@ export function resolveCustomerPage(pathname) {
   const titles = {
     login: 'Customer Login',
     home: 'Home',
-    purchaseRequests: 'Purchase Products',
     accountDetails: 'Account Details',
     paymentHistory: 'Payment History',
     receipts: 'Digital Receipts',

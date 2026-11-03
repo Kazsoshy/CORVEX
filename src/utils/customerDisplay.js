@@ -4,12 +4,27 @@ export function formatMiddleNameDisplay(value) {
   return trimmed || 'N/A';
 }
 
-/** UI label: plain sequential customer_id (display only; does not change stored data). */
+/** UI label: customer_code when available; never invents a fake code from raw DB id alone. */
 export function formatCustomerDisplayId(customer) {
   if (!customer) return '—';
-  const id = customer.customer_id ?? customer.id;
-  if (id === undefined || id === null || id === '') return '—';
-  return String(id);
+  const code = String(customer.customer_code || '').trim();
+  if (code) return code;
+  return '—';
+}
+
+/** Build a single address line from structured PH address parts. */
+export function composeCustomerAddress(parts = {}) {
+  return [
+    parts.address_street,
+    parts.address_barangay,
+    parts.address_city,
+    parts.address_province,
+    parts.address_region,
+    parts.address_zip,
+  ]
+    .map((part) => String(part || '').trim())
+    .filter(Boolean)
+    .join(', ');
 }
 
 export function formatPurchaseVolumeUnits(value) {
@@ -59,4 +74,14 @@ export const CONTACT_RELATIONSHIP_OPTIONS = [
   'Colleague',
   'Neighbor',
   'Other',
+];
+
+/** Civil / marital status options for customer identity. */
+export const CIVIL_STATUS_OPTIONS = [
+  'Single',
+  'Married',
+  'Widowed',
+  'Separated',
+  'Annulled',
+  'Divorced',
 ];

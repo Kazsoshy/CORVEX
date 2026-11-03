@@ -69,10 +69,24 @@ const MIGRATIONS = [
   { file: '045_product_name_unique.sql',              label: '045_product_name_unique.sql' },
   { file: '046_collection_review.sql',                label: '046_collection_review.sql' },
   { file: '047_performance_targets.sql',             label: '047_performance_targets.sql' },
+  { file: '048_user_avatar.sql',                     label: '048_user_avatar.sql' },
+  { file: '049_role_permission_status.sql',          label: '049_role_permission_status.sql' },
   { file: '050_purchase_request_review.sql',         label: '050_purchase_request_review.sql' },
+<<<<<<< HEAD
   { file: '051_security_monitoring.sql',             label: '051_security_monitoring.sql' },
   { file: '052_audit_logs_enrichment.sql',           label: '052_audit_logs_enrichment.sql' },
   { file: '053_user_permissions_catalog.sql',        label: '053_user_permissions_catalog.sql' },
+=======
+  { file: '051_inventory_document_lines.sql',        label: '051_inventory_document_lines.sql' },
+  { file: '052_stock_count_sessions.sql',            label: '052_stock_count_sessions.sql' },
+  { file: '053_sales_area_assignments.sql',          label: '053_sales_area_assignments.sql' },
+  { file: '054_far_area_assignments.sql',            label: '054_far_area_assignments.sql' },
+  { file: '055_sales_invoice_pay_terms.sql',         label: '055_sales_invoice_pay_terms.sql' },
+  { file: '056_customer_identity_location.sql',      label: '056_customer_identity_location.sql' },
+  { file: '057_customer_address_parts.sql',          label: '057_customer_address_parts.sql' },
+  { file: '058_customer_civil_status_maiden.sql',    label: '058_customer_civil_status_maiden.sql' },
+  { file: '059_credit_reviews.sql',                  label: '059_credit_reviews.sql' },
+>>>>>>> c35bff3831df8285b9be2ba8522d80fdaec138a6
 ];
 
 async function ensureMigrationsTable() {

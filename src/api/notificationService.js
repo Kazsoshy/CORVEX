@@ -55,7 +55,7 @@ export function mapNotificationRow(row, { opsBase = '/branch-manager', orgBase =
     relatedTo = isSales ? `${opsBase}/credit-investigations` : `${opsBase}/ci-approvals`;
   } else if (cat.includes('inventory') || cat.includes('stock')) {
     relatedTo = isWarehouse
-      ? `${opsBase}/central-inventory`
+      ? `${opsBase}/branch-stock`
       : isSales
         ? `${opsBase}/inventory`
         : `${opsBase}/approval-center`;
@@ -68,7 +68,7 @@ export function mapNotificationRow(row, { opsBase = '/branch-manager', orgBase =
         ? `${opsBase}/schedule`
         : `${opsBase}/field-operations`;
   } else if (cat.includes('sales')) {
-    relatedTo = isSales ? `${opsBase}/purchase-requests` : `${opsBase}/field-operations`;
+    relatedTo = isSales ? `${opsBase}/history` : `${opsBase}/field-operations`;
   } else if (cat.includes('transfer')) {
     relatedTo = isWarehouse ? `${opsBase}/transfers` : `${opsBase}/approval-center`;
   }

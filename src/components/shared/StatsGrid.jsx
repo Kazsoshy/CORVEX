@@ -11,8 +11,8 @@ export function resolveStatIcon(label = '', explicitIcon) {
   if (/(movement|sales|sold|invoice|order|cart)/.test(text)) return 'shopping-cart';
   if (/(collection|collected|payment|paid|receipt|amount|balance|revenue|₱|php|peso|credit)/.test(text)) return 'philippine-peso';
   if (/(customer|account|user|staff|agent|collector)/.test(text)) return 'users';
-  if (/(alert|critical|low|warning|overdue|risk)/.test(text)) return 'alert-triangle';
-  if (/(pending|await|queue|today|schedule|visit|clock)/.test(text)) return 'clock';
+  if (/(alert|critical|low|warning|overdue|risk|needs restock)/.test(text)) return 'alert-triangle';
+  if (/(pending|await|queue|today|schedule|visit|clock|ready to ship|incoming)/.test(text)) return 'clock';
   if (/(branch|location|territory)/.test(text)) return 'building-2';
   if (/(route|map|distance)/.test(text)) return 'route';
   if (/(performance|score|rank|growth|efficiency)/.test(text)) return 'trending-up';
@@ -26,7 +26,10 @@ export function resolveStatIcon(label = '', explicitIcon) {
  * Shared CORVEX KPI / summary cards.
  * Layout: label (top-left) · value (right, vertically centered) · icon (bottom-left)
  *
- * @param {{ stats: Array<{ label: string, value: any, icon?: string }>, className?: string }} props
+ * @param {{
+ *   stats: Array<{ label: string, value: any, icon?: string, title?: string, onClick?: () => void }>,
+ *   className?: string
+ * }} props
  */
 export function StatsGrid({ stats, className = '' }) {
   if (!stats?.length) return null;
@@ -35,17 +38,27 @@ export function StatsGrid({ stats, className = '' }) {
     <section className={`stats-grid ${className}`.trim()}>
       {stats.map((stat, index) => {
         const icon = resolveStatIcon(stat.label, stat.icon);
+        const clickable = typeof stat.onClick === 'function';
         return (
           <article
             key={`${stat.label}-${index}`}
-            className="stat-card"
+            className={`stat-card${clickable ? ' is-clickable' : ''}`}
             style={{ '--stat-index': index }}
-            title={stat.title || undefined}
+            title={stat.title || (clickable ? `Open ${stat.label}` : undefined)}
+            role={clickable ? 'button' : undefined}
+            tabIndex={clickable ? 0 : undefined}
+            onClick={clickable ? stat.onClick : undefined}
+            onKeyDown={clickable ? (e) => {
+              if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault();
+                stat.onClick();
+              }
+            } : undefined}
           >
             <div className="stat-card-icon" aria-hidden="true">
               <NavIcon name={icon} />
             </div>
-            <strong className="stat-value">{stat.value}</strong>
+            <strong className="stat-value">{stat.value ?? '0'}</strong>
             <span className="stat-label">{stat.label}</span>
           </article>
         );

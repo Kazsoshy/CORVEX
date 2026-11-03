@@ -24,7 +24,11 @@ export const ROLE_SETS = {
   roleAdmin: ['super_admin'],
   catalogRead: ['super_admin', 'operating_manager', 'branch_manager', 'inventory_staff', 'sales_staff'],
   catalogWrite: ['super_admin', 'operating_manager', 'inventory_staff'],
-  suppliers: ['super_admin', 'operating_manager', 'inventory_staff'],
+  /** Warehouse may read the company supplier directory; only OM/admin may mutate it. */
+  suppliersRead: ['super_admin', 'operating_manager', 'inventory_staff', 'branch_manager'],
+  suppliersWrite: ['super_admin', 'operating_manager'],
+  /** @deprecated use suppliersRead / suppliersWrite */
+  suppliers: ['super_admin', 'operating_manager', 'inventory_staff', 'branch_manager'],
   categoriesRead: ['super_admin', 'operating_manager', 'inventory_staff', 'branch_manager', 'sales_staff'],
   categoriesWrite: ['super_admin', 'operating_manager'],
   customerRead: ['super_admin', 'operating_manager', 'branch_manager', 'sales_staff', 'collector'],

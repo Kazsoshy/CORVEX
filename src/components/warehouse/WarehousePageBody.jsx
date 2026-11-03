@@ -14,17 +14,16 @@ import {
   fetchInventoryTransfers,
   fetchRestockById,
   fetchRestocks,
+  fetchStockCountById,
+  fetchStockCounts,
   fetchStockMovementById,
   fetchStockMovements,
   fetchWarehouseAuditLogs,
   fetchWarehouseDashboard,
   patchInventoryTransfer,
-  submitStockCount,
 } from '../../api/inventoryService';
-import { fetchNotifications } from '../../api/notificationService.js';
 import { getCurrentUser } from '../../api/authService.js';
 import { AccountProfilePanel } from '../shared/AccountProfilePanel';
-import { isWarehouseBarcodeEnabled, isWarehouseLowStockEnabled } from '../../settings/preferences.js';
 import { UserSettingsPanel } from '../shared/UserSettingsPanel';
 import { QuantityStepper } from '../shared/QuantityStepper.jsx';
 
@@ -60,138 +59,137 @@ import { LoadingState } from '../shared/LoadingState';
 import { DetailRowsTable } from '../shared/DetailRowsTable';
 import { NavIcon } from '../../navIcons';
 import { StatusBadge } from '../StatusBadge';
-import { CreditHistoryListPage, CreditHistoryDetailPage } from '../shared/CreditHistoryPages';
-import { formatCurrency, formatDisplayDate, formatDisplayDateTime, formatPhone } from '../../utils/formatters.js';
-import { CentralInventoryPanel } from '../inventory/CentralInventoryPanel';
+import { formatCurrency, formatDisplayDate, formatDisplayDateTime, formatDocumentRef, formatPhone } from '../../utils/formatters.js';
+import { BranchInventoryViewPage } from '../inventory/BranchInventoryViewPage.jsx';
 import { ProductImagePicker } from '../shared/ProductImagePicker';
+import { TransferDocumentForm } from './TransferDocumentForm.jsx';
+import { RestockDocumentForm } from './RestockDocumentForm.jsx';
+import { StockCountDocumentForm } from './StockCountDocumentForm.jsx';
 const PAGE_SIZE = 10;
 function DashboardPage({
   navigate,
   showToast
 }) {
+  const user = getCurrentUser();
+  const branchName = user?.branch?.name || 'your branch';
   const [dashboard, setDashboard] = useState(null);
-  const [recentNotifications, setRecentNotifications] = useState([]);
   const [loading, setLoading] = useState(true);
+
   useEffect(() => {
     async function load() {
       setLoading(true);
-      const [dashRes, notifRes] = await Promise.all([fetchWarehouseDashboard(), fetchNotifications()]);
+      const dashRes = await fetchWarehouseDashboard();
       if (dashRes.success) setDashboard(dashRes.data);
       else if (showToast) showToast(dashRes.message || 'Failed to load dashboard.', 'error');
-      if (notifRes.success) {
-        const rows = notifRes.data || [];
-        setRecentNotifications(rows.filter((n) => String(n.category || '').toLowerCase().includes('stock')).slice(0, 5));
-      }
       setLoading(false);
     }
     load();
   }, [showToast]);
 
   const summary = dashboard?.summary || {};
-  const quickId = dashboard?.quickProductId;
   const transfers = dashboard?.recentTransfers || [];
   const restocks = dashboard?.recentRestocks || [];
-  const topMoving = dashboard?.topMovingProducts || [];
-  const criticalProducts = dashboard?.criticalProducts || [];
+  const lowStockSignal = dashboard?.lowStockSignal || [];
+
+  const openTransferQueue = (segment) => {
+    navigate(`/warehouse/transfers?tab=requests&segment=${encodeURIComponent(segment)}`);
+  };
 
   if (loading) return <LoadingState message="Loading dashboard..." />;
 
   return (
     <div className="warehouse-dashboard relative z-10 grid gap-5 w-full">
-      {/* Overview */}
       <section className="dashboard-section" aria-labelledby="wh-overview-heading">
         <div className="dashboard-section-header">
           <h3 id="wh-overview-heading" className="dashboard-section-title">Overview</h3>
-          <p className="dashboard-section-sub">Key inventory metrics for your branch</p>
+          <p className="dashboard-section-sub">Action queues for {branchName}</p>
         </div>
 
         <StatsGrid stats={[
-          { label: 'Total Products Tracked', value: String(summary.totalProducts ?? 0) },
-          { label: 'Low Stock Alerts', value: String(summary.lowStockAlerts ?? 0) },
-          { label: 'Pending Transfers', value: String(summary.pendingTransfers ?? 0) },
-          { label: "Today's Stock Movements", value: String(summary.movementsToday ?? 0) },
+          {
+            label: 'Ready to Ship',
+            value: String(summary.readyToShip ?? 0),
+            title: 'Approved outbound transfers waiting for you to complete',
+            onClick: () => openTransferQueue('Action required'),
+          },
+          {
+            label: 'Awaiting Approval',
+            value: String(summary.awaitingApproval ?? 0),
+            title: 'Your outbound transfer requests still pending approval',
+            onClick: () => openTransferQueue('Awaiting approval'),
+          },
+          {
+            label: 'Incoming',
+            value: String(summary.incoming ?? 0),
+            title: 'Approved transfers headed to your branch',
+            onClick: () => openTransferQueue('Incoming'),
+          },
+          {
+            label: 'Needs Restock',
+            value: String(summary.needsRestock ?? 0),
+            title: 'Out of stock, critical, or low at your branch',
+            onClick: () => navigate('/warehouse/branch-stock?stock=Attention'),
+          },
         ]} />
 
-        {isWarehouseLowStockEnabled() && recentNotifications.length ? (
-          <section className="panel dashboard-panel-compact alert-panel" style={{ marginTop: 14 }}>
-            <div className="dashboard-panel-heading">
-              <h4>Stock Threshold Alerts</h4>
-              <button className="button secondary" type="button" onClick={() => navigate('/warehouse/notifications')}>
-                View all
-              </button>
-            </div>
-            <div className="wh-threshold-alerts">
-              {recentNotifications.map((n) => (
-                <article
-                  key={n.notification_id}
-                  className={`wh-threshold-alert${n.status === 'Read' ? '' : ' unread'}`}
-                >
-                  <div className="wh-threshold-alert-copy">
-                    <strong>{n.title}</strong>
-                    <p className="muted">{n.message}</p>
-                  </div>
-                  {n.created_at ? (
-                    <span className="wh-threshold-alert-time muted">
-                      {formatDisplayDateTime(n.created_at)}
-                    </span>
-                  ) : null}
-                </article>
-              ))}
-            </div>
-          </section>
-        ) : null}
+        <div className="dashboard-actions" style={{ marginTop: 14 }}>
+          <button className="button ghost" type="button" onClick={() => navigate('/warehouse/transfers/new')}>
+            New Transfer
+          </button>
+          <button className="button ghost" type="button" onClick={() => navigate('/warehouse/restock-history/new')}>
+            Record Restock
+          </button>
+          <button className="button ghost" type="button" onClick={() => navigate('/warehouse/stock-counts/new')}>
+            New Stock Count
+          </button>
+        </div>
 
-        {quickId ? (
-          <div className="dashboard-actions">
-            <button className="button ghost" type="button" onClick={() => navigate(`/warehouse/product/${quickId}/transfer`)}>
-              Transfer Stock
-            </button>
-            <button className="button ghost" type="button" onClick={() => navigate(`/warehouse/product/${quickId}/restock`)}>
-              Record Restock
-            </button>
-            <button className="button ghost" type="button" onClick={() => navigate(`/warehouse/product/${quickId}/stock-count`)}>
-              Log Stock Count
+        <section className="panel dashboard-panel-compact alert-panel" style={{ marginTop: 14 }}>
+          <div className="dashboard-panel-heading">
+            <h4>Low-Stock Signal</h4>
+            <button
+              className="button secondary"
+              type="button"
+              onClick={() => navigate('/warehouse/branch-stock?stock=Attention')}
+            >
+              View all
             </button>
           </div>
-        ) : null}
-
-        {criticalProducts.length ? (
-          <section className="panel dashboard-panel-compact alert-panel">
-            <div className="dashboard-panel-heading">
-              <h4>Stock Alerts</h4>
-              <span className="muted">{criticalProducts.length} item{criticalProducts.length === 1 ? '' : 's'}</span>
-            </div>
+          {lowStockSignal.length ? (
             <div className="corvex-table-wrapper dashboard-table-wrap">
               <table className="corvex-table">
                 <thead>
                   <tr>
                     <th>Product</th>
                     <th>SKU</th>
-                    <th>Branch</th>
+                    <th className="text-right">On hand</th>
+                    <th className="text-right">Reorder</th>
                     <th>Status</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {criticalProducts.map((p) => (
+                  {lowStockSignal.map((p) => (
                     <tr
                       key={p.product_id}
                       className="clickable-row"
                       onClick={() => navigate(`/warehouse/product/${p.product_id}`)}
                     >
-                      <td>{p.product_name}</td>
-                      <td>{p.sku || '—'}</td>
-                      <td>{p.branch_name || '—'}</td>
+                      <td><strong>{p.product_name}</strong></td>
+                      <td><span className="mono-cell">{p.sku || '—'}</span></td>
+                      <td className="text-right">{p.available_stock ?? 0}</td>
+                      <td className="text-right">{p.reorder_level ?? '—'}</td>
                       <td><StatusBadge status={p.stock_status} /></td>
                     </tr>
                   ))}
                 </tbody>
               </table>
             </div>
-          </section>
-        ) : null}
+          ) : (
+            <p className="dashboard-empty muted">No low, critical, or out-of-stock items at this branch.</p>
+          )}
+        </section>
       </section>
 
-      {/* Recent Activity */}
       <section className="dashboard-section" aria-labelledby="wh-activity-heading">
         <div className="dashboard-section-header">
           <h3 id="wh-activity-heading" className="dashboard-section-title">Recent Activity</h3>
@@ -202,14 +200,18 @@ function DashboardPage({
           <section className="panel dashboard-panel-compact">
             <div className="dashboard-panel-heading">
               <h4>Recent Transfers</h4>
+              <button className="button secondary" type="button" onClick={() => navigate('/warehouse/transfers?tab=requests')}>
+                View all
+              </button>
             </div>
             {transfers.length ? (
               <div className="corvex-table-wrapper dashboard-table-wrap">
                 <table className="corvex-table">
                   <thead>
                     <tr>
-                      <th>Transfer ID</th>
-                      <th>Product</th>
+                      <th>Ref</th>
+                      <th>From / To</th>
+                      <th className="text-right">Qty</th>
                       <th>Status</th>
                     </tr>
                   </thead>
@@ -218,11 +220,23 @@ function DashboardPage({
                       <tr
                         key={t.transfer_id}
                         className="clickable-row"
-                        onClick={() => navigate(`/warehouse/transfers/${t.transfer_id}`)}
+                        onClick={() => navigate(`/warehouse/transfers/${t.transfer_id}?from=requests`)}
                       >
-                        <td><span className="mono-cell">{t.transfer_ref}</span></td>
-                        <td>{t.product_name}</td>
-                        <td><StatusBadge status={t.status} /></td>
+                        <td>
+                          <span className="mono-cell">{formatDocumentRef(t.transfer_ref)}</span>
+                          {t.product_name ? (
+                            <span className="text-ink/70" style={{ display: 'block', fontSize: '0.75rem' }}>
+                              {t.product_name}
+                            </span>
+                          ) : null}
+                        </td>
+                        <td style={{ fontSize: '0.85rem' }}>
+                          {(t.source_branch || t.source_branch_name || '—')}
+                          {' → '}
+                          {(t.destination_branch || t.destination_branch_name || '—')}
+                        </td>
+                        <td className="text-right">{Number(t.total_quantity ?? t.quantity ?? 0)}</td>
+                        <td>{t.status ? <StatusBadge status={t.status} /> : '—'}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -236,23 +250,39 @@ function DashboardPage({
           <section className="panel dashboard-panel-compact">
             <div className="dashboard-panel-heading">
               <h4>Recent Restocks</h4>
+              <button className="button secondary" type="button" onClick={() => navigate('/warehouse/restock-history')}>
+                View all
+              </button>
             </div>
             {restocks.length ? (
               <div className="corvex-table-wrapper dashboard-table-wrap">
                 <table className="corvex-table">
                   <thead>
                     <tr>
-                      <th>Product</th>
+                      <th>Delivery ref</th>
+                      <th>Supplier</th>
                       <th>Date</th>
-                      <th className="text-right">Quantity</th>
+                      <th className="text-right">Qty</th>
                     </tr>
                   </thead>
                   <tbody>
                     {restocks.map((r) => (
-                      <tr key={r.restock_id}>
-                        <td>{r.product_name}</td>
+                      <tr
+                        key={r.restock_id}
+                        className="clickable-row"
+                        onClick={() => navigate(`/warehouse/restock-history/${r.restock_id}`)}
+                      >
+                        <td>
+                          <span className="mono-cell">{formatDocumentRef(r.delivery_ref || r.restock_ref)}</span>
+                          {r.product_name ? (
+                            <span className="text-ink/70" style={{ display: 'block', fontSize: '0.75rem' }}>
+                              {r.product_name}
+                            </span>
+                          ) : null}
+                        </td>
+                        <td>{r.supplier_name || r.supplier || '—'}</td>
                         <td>{formatDisplayDate(r.received_date)}</td>
-                        <td className="text-right qty-positive">+{r.quantity}</td>
+                        <td className="text-right qty-positive">+{Number(r.quantity ?? 0)}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -264,72 +294,86 @@ function DashboardPage({
           </section>
         </div>
       </section>
-
-      {/* Product Activity */}
-      <section className="dashboard-section" aria-labelledby="wh-product-heading">
-        <div className="dashboard-section-header">
-          <h3 id="wh-product-heading" className="dashboard-section-title">Product Activity</h3>
-          <p className="dashboard-section-sub">Movement trends over the last 30 days</p>
-        </div>
-
-        <section className="panel dashboard-panel-compact">
-          <div className="dashboard-panel-heading">
-            <h4>Top Moving Products</h4>
-            <span className="muted">Last 30 days</span>
-          </div>
-          {topMoving.length ? (
-            <div className="corvex-table-wrapper dashboard-table-wrap">
-              <table className="corvex-table">
-                <thead>
-                  <tr>
-                    <th>Product</th>
-                    <th className="text-right">Movements</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {topMoving.map((p) => {
-                    const count = Number(p.movements) || 0;
-                    return (
-                      <tr key={p.name}>
-                        <td>{p.name}</td>
-                        <td className="text-right" title={`${count} movement${count === 1 ? '' : 's'}`}>
-                          {count}
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-          ) : (
-            <p className="dashboard-empty muted">No movement data (30 days).</p>
-          )}
-        </section>
-      </section>
     </div>
   );
 }
+function warehouseStockStatusLabel(product) {
+  if (!product?.has_stock_record && product?.stock_status == null) return 'Never Stocked';
+  const raw = String(product?.stock_status || '');
+  if (raw === 'Out of Stock') return 'Out';
+  if (raw === 'Low Stock' || raw === 'Critical Stock') return 'Low';
+  if (raw === 'Sufficient') return 'Sufficient';
+  return raw || 'Never Stocked';
+}
+
 function InventoryPage({
   navigate,
   showToast
 }) {
+  const user = getCurrentUser();
+  const branchName = user?.branch?.name || 'your branch';
+  const initialCategory = new URLSearchParams(window.location.search).get('category') || 'All';
+  const [searchInput, setSearchInput] = useState('');
   const [search, setSearch] = useState('');
-  const [branch, setBranch] = useState('All');
-  const [category, setCategory] = useState('All');
+  const [category, setCategory] = useState(initialCategory);
+  const [stockFilter, setStockFilter] = useState('All');
   const [sortBy, setSortBy] = useState('Product Name');
   const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(true);
   const [products, setProducts] = useState([]);
   const [categories, setCategories] = useState([]);
+  const applyProductSearch = () => {
+    setSearch(searchInput.trim());
+    setPage(1);
+  };
   useEffect(() => {
     async function loadProducts() {
       setLoading(true);
       try {
-        // Archived products are hidden from warehouse (OM-only).
-        const res = await apiClient.get('/products', { params: { product_status: 'Active' } });
-        if (res.data.success) {
-          setProducts(res.data.data);
-          setCategories(res.data.categories || []);
+        // Catalog from /products; on-hand always merged from branch-inventory so it matches Branch Stock.
+        const branchId = user?.branch?.id;
+        const [prodRes, invRes] = await Promise.all([
+          apiClient.get('/products', {
+            params: {
+              product_status: 'Active',
+              limit: 500,
+              ...(branchId != null ? { branch_id: branchId } : {}),
+            },
+          }),
+          fetchBranchInventory(),
+        ]);
+        const catalog = prodRes.data?.success ? (prodRes.data.data || []) : [];
+        const stockByProduct = new Map();
+        if (invRes.success) {
+          for (const row of invRes.data || []) {
+            stockByProduct.set(Number(row.product_id), row);
+          }
+        }
+        const merged = catalog.map((p) => {
+          const stock = stockByProduct.get(Number(p.product_id));
+          if (!stock) {
+            return {
+              ...p,
+              has_stock_record: false,
+              available_stock: 0,
+              quantity: 0,
+              stock_status: null,
+              reorder_level: null,
+            };
+          }
+          return {
+            ...p,
+            has_stock_record: true,
+            available_stock: Number(stock.available_stock ?? stock.quantity ?? 0),
+            quantity: Number(stock.available_stock ?? stock.quantity ?? 0),
+            stock_status: stock.stock_status || null,
+            reorder_level: stock.reorder_level ?? null,
+            last_updated: stock.updated_at || stock.last_updated || p.last_updated,
+          };
+        });
+        if (prodRes.data?.success) {
+          setProducts(merged);
+          setCategories(prodRes.data.categories || []);
         }
       } catch (err) {
         console.error('[Inventory] load error:', err.message);
@@ -338,7 +382,7 @@ function InventoryPage({
       setLoading(false);
     }
     loadProducts();
-  }, [showToast]);
+  }, [showToast, user?.branch?.id]);
   const filtered = useMemo(() => {
     let results = [...products];
     const query = search.trim().toLowerCase();
@@ -350,359 +394,426 @@ function InventoryPage({
         return name.includes(query) || cat.includes(query) || sku.includes(query);
       });
     }
-    if (category !== 'All') results = results.filter(p => p.category_id === Number(category));
-    if (sortBy === 'Product Name') results.sort((a, b) => a.product_name.localeCompare(b.product_name));else if (sortBy === 'Unit Price') results.sort((a, b) => a.unit_price - b.unit_price);
+    if (category !== 'All') {
+      results = results.filter((p) => Number(p.category_id) === Number(category));
+    }
+    if (stockFilter !== 'All') {
+      results = results.filter((p) => warehouseStockStatusLabel(p) === stockFilter);
+    }
+    if (sortBy === 'Product Name') results.sort((a, b) => String(a.product_name || '').localeCompare(String(b.product_name || '')));
+    else if (sortBy === 'Unit Price') results.sort((a, b) => Number(a.unit_price) - Number(b.unit_price));
+    else if (sortBy === 'On Hand') results.sort((a, b) => Number(a.available_stock ?? 0) - Number(b.available_stock ?? 0));
     return results;
-  }, [products, search, category, sortBy]);
-  const totalPages = Math.ceil(filtered.length / PAGE_SIZE);
+  }, [products, search, category, stockFilter, sortBy]);
+  const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
   const paginated = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
-  if (loading) return <LoadingState message="Loading inventory..." />;
-  return <div className="page">
+  if (loading) return <LoadingState message="Loading products…" />;
+  return (
+    <div className="page">
       <section className="panel content-panel relative overflow-hidden">
         <div className="list-section-header">
-          <h3>Product List</h3>
+          <div>
+            <h3 style={{ margin: 0 }}>Products</h3>
+            <p className="text-ink/70" style={{ margin: '4px 0 0', fontSize: '0.88rem' }}>
+              Active products available for your branch stock work
+              {user?.branch?.name ? ` · ${branchName}` : ''}.
+            </p>
+          </div>
         </div>
-        <div className="list-section-toolbar suppliers-toolbar audit-logs-toolbar">
-          <div className="list-section-controls audit-logs-filters">
-            <input
-              className="filter-input search"
-              type="search"
-              placeholder="Search by name, SKU, or category"
-              value={search}
-              onChange={e => {
-                setSearch(e.target.value);
-                setPage(1);
+        <div className="list-section-toolbar">
+          <div className="list-section-controls">
+            <form
+              className="search-bar"
+              role="search"
+              onSubmit={(e) => {
+                e.preventDefault();
+                applyProductSearch();
               }}
-              aria-label="Search products"
-            />
-            {isWarehouseBarcodeEnabled() ? (
+            >
+              <button
+                className="search-bar-action"
+                type="submit"
+                title="Search"
+                aria-label="Search products"
+              >
+                <NavIcon name="search" />
+              </button>
               <input
-                className="filter-input search"
-                type="text"
-                autoComplete="off"
-                aria-label="Barcode or SKU"
-                placeholder="Scan barcode or SKU, then Enter"
-                onKeyDown={(event) => {
-                  if (event.key !== 'Enter') return;
-                  const code = event.currentTarget.value.trim().toLowerCase();
-                  if (!code) return;
-                  const match = products.find((product) => {
-                    const sku = String(product.sku || '').trim().toLowerCase();
-                    const barcode = String(product.barcode || '').trim().toLowerCase();
-                    return sku === code || barcode === code;
-                  });
-                  if (!match) {
-                    showToast('No product matches that barcode.', 'error');
-                    return;
-                  }
-                  navigate(`/warehouse/product/${match.product_id}`);
-                }}
+                className="search-input"
+                type="search"
+                placeholder="Search by name, SKU, or category"
+                value={searchInput}
+                onChange={(e) => setSearchInput(e.target.value)}
+                aria-label="Search products"
               />
-            ) : null}
+            </form>
             <select
               className="filter-select"
               value={category}
-              onChange={e => {
+              onChange={(e) => {
                 setCategory(e.target.value);
                 setPage(1);
               }}
               aria-label="Filter by category"
             >
               <option value="All">All Categories</option>
-              {categories.map(c => <option key={c.category_id} value={c.category_id}>{c.category_name}</option>)}
+              {categories.map((c) => (
+                <option key={c.category_id} value={c.category_id}>{c.category_name}</option>
+              ))}
+            </select>
+            <select
+              className="filter-select"
+              value={stockFilter}
+              onChange={(e) => {
+                setStockFilter(e.target.value);
+                setPage(1);
+              }}
+              aria-label="Filter by stock status"
+            >
+              {['All', 'Sufficient', 'Low', 'Out', 'Never Stocked'].map((s) => (
+                <option key={s} value={s}>{s === 'All' ? 'All stock statuses' : s}</option>
+              ))}
             </select>
             <select
               className="filter-select"
               value={sortBy}
-              onChange={e => setSortBy(e.target.value)}
+              onChange={(e) => setSortBy(e.target.value)}
               aria-label="Sort products"
             >
-              {['Product Name', 'Unit Price'].map(s => <option key={s} value={s}>Sort: {s}</option>)}
+              {['Product Name', 'Unit Price', 'On Hand'].map((s) => (
+                <option key={s} value={s}>Sort: {s}</option>
+              ))}
             </select>
           </div>
-          <div className="list-section-actions suppliers-toolbar-actions">
-            <button
-              className="button secondary whitespace-nowrap"
-              type="button"
-              onClick={() => {
-                const rows = filtered.map(p => ({
-                  sku: p.sku,
-                  name: p.product_name,
-                  category: p.category_name,
-                  unit_price: p.unit_price,
-                  status: p.status,
-                }));
-                if (downloadPdf(rows, { filename: 'warehouse-products.pdf', title: 'Warehouse Products' })) showToast('Products exported as PDF.', 'success');
-                else showToast('Nothing to export.', 'error');
-              }}
-            >
-              Export PDF
-            </button>
-            <button className="button whitespace-nowrap" type="button" onClick={() => navigate('/warehouse/add-product')}>
-              + Add Product
-            </button>
-          </div>
         </div>
-        {paginated.length ? <><div className="corvex-table-wrapper">
-            <table className="corvex-table corvex-table-products">
-              <colgroup>
-                <col style={{ width: 52 }} />
-                <col style={{ width: 72 }} />
-                <col style={{ width: 96 }} />
-                <col style={{ width: '26%' }} />
-                <col style={{ width: '16%' }} />
-                <col style={{ width: 96 }} />
-                <col style={{ width: 88 }} />
-                <col style={{ width: 88 }} />
-              </colgroup>
-              <thead>
-                <tr>
-                  <th className="cell-image">Image</th>
-                  <th>Product ID</th>
-                  <th>SKU</th>
-                  <th>Product Name</th>
-                  <th>Category</th>
-                  <th className="cell-price">Unit Price</th>
-                  <th>Status</th>
-                  <th className="cell-actions">Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {paginated.map(product => <tr key={product.product_id}>
-                    <td className="cell-image">
-                      <ProductThumb src={product.image_url} alt={product.product_name || ''} />
-                    </td>
-                    <td>{product.product_id}</td>
-                    <td><span className="mono-cell">{product.sku || '—'}</span></td>
-                    <td className="cell-name">{product.product_name}</td>
-                    <td>{product.category_name || product.category_id}</td>
-                    <td className="cell-price">{formatCurrency(product.unit_price)}</td>
-                    <td><StatusBadge status={product.status} /></td>
-                    <td className="cell-actions" onClick={e => e.stopPropagation()}>
-                      <div className="table-actions">
-                        <button className="icon-action-button" type="button" title="View" onClick={() => navigate(`/warehouse/product/${product.product_id}`)}><NavIcon name="view" /></button>
-                        <button className="icon-action-button" type="button" title="Edit" onClick={() => navigate(`/warehouse/product/${product.product_id}/edit`)}><NavIcon name="edit" /></button>
-                      </div>
-                    </td>
-                  </tr>)}
-              </tbody>
-            </table>
+        {paginated.length ? (
+          <>
+            <div className="corvex-table-wrapper">
+              <table className="corvex-table corvex-table-products">
+                <thead>
+                  <tr>
+                    <th className="cell-image">Image</th>
+                    <th>SKU</th>
+                    <th>Name</th>
+                    <th>Category</th>
+                    <th className="cell-price">Unit Price</th>
+                    <th>On Hand</th>
+                    <th>Stock Status</th>
+                    <th className="cell-actions">Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {paginated.map((product) => {
+                    const neverStocked = !product.has_stock_record && product.stock_status == null;
+                    const onHand = neverStocked ? null : Number(product.available_stock ?? 0);
+                    const statusLabel = warehouseStockStatusLabel(product);
+                    return (
+                      <tr
+                        key={product.product_id}
+                        className="clickable-row"
+                        onClick={() => navigate(`/warehouse/product/${product.product_id}`)}
+                      >
+                        <td className="cell-image">
+                          <ProductThumb src={product.image_url} alt={product.product_name || ''} />
+                        </td>
+                        <td><span className="mono-cell">{product.sku || '—'}</span></td>
+                        <td className="cell-name"><strong>{product.product_name}</strong></td>
+                        <td>{product.category_name || '—'}</td>
+                        <td className="cell-price">{formatCurrency(product.unit_price)}</td>
+                        <td style={{ fontWeight: 600 }}>
+                          {neverStocked ? (
+                            <span title="Never stocked at your branch">—</span>
+                          ) : onHand}
+                        </td>
+                        <td><StatusBadge status={statusLabel} /></td>
+                        <td className="cell-actions" onClick={(e) => e.stopPropagation()}>
+                          <div className="table-actions">
+                            <button
+                              className="icon-action-button"
+                              type="button"
+                              title="View"
+                              onClick={() => navigate(`/warehouse/product/${product.product_id}`)}
+                            >
+                              <NavIcon name="view" />
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
             </div>
-            <Pagination currentPage={page} totalPages={Math.max(1, totalPages)} totalRecords={filtered.length} pageSize={PAGE_SIZE} startRecord={filtered.length ? (page - 1) * PAGE_SIZE + 1 : 0} endRecord={Math.min(page * PAGE_SIZE, filtered.length)} prevPage={() => setPage((p) => Math.max(1, p - 1))} nextPage={() => setPage((p) => Math.min(Math.max(1, totalPages), p + 1))} goToPage={setPage} /></>
-        : <EmptyState title="No products found" description="Adjust your search or filters." actionLabel="Clear filters" onAction={() => {
-      setSearch('');
-      setCategory('All');
-      setStatusFilter('All');
-      setPage(1);
-    }} />}
+            <Pagination
+              currentPage={page}
+              totalPages={totalPages}
+              totalRecords={filtered.length}
+              pageSize={PAGE_SIZE}
+              startRecord={filtered.length ? (page - 1) * PAGE_SIZE + 1 : 0}
+              endRecord={Math.min(page * PAGE_SIZE, filtered.length)}
+              prevPage={() => setPage((p) => Math.max(1, p - 1))}
+              nextPage={() => setPage((p) => Math.min(totalPages, p + 1))}
+              goToPage={setPage}
+            />
+          </>
+        ) : (
+          <EmptyState
+            title="No products found"
+            description="Adjust your search or filters. Catalog products are managed by Operating Manager."
+            actionLabel="Clear filters"
+            onAction={() => {
+              setSearchInput('');
+              setSearch('');
+              setCategory('All');
+              setStockFilter('All');
+              setPage(1);
+            }}
+          />
+        )}
       </section>
-    </div>;
+    </div>
+  );
 }
 function ProductDetailPage({
   productId,
   navigate,
   showToast
 }) {
+  const user = getCurrentUser();
+  const branchName = user?.branch?.name || 'your branch';
+  const branchId = user?.branch?.id;
   const [productData, setProductData] = useState(null);
   const [loadError, setLoadError] = useState('');
   const [loading, setLoading] = useState(true);
-  useEffect(() => {
-    async function load() {
-      setLoading(true);
-      setLoadError('');
-      try {
-        const res = await apiClient.get(`/products/${productId}`);
-        if (res.data.success) setProductData(res.data.data);
-        else setLoadError(res.data.message || 'Product not found.');
-      } catch (err) {
-        console.error('[ProductDetail] load error:', err.message);
-        setLoadError(err.response?.data?.message || 'Failed to load product.');
-      }
-      setLoading(false);
+
+  const reload = async () => {
+    setLoading(true);
+    setLoadError('');
+    try {
+      const res = await apiClient.get(`/products/${productId}`);
+      if (res.data.success) setProductData(res.data.data);
+      else setLoadError(res.data.message || 'Product not found.');
+    } catch (err) {
+      console.error('[ProductDetail] load error:', err.message);
+      setLoadError(err.response?.data?.message || 'Failed to load product.');
     }
-    load();
+    setLoading(false);
+  };
+
+  useEffect(() => {
+    reload();
   }, [productId]);
+
   const inventory = productData?.inventory || [];
   const movements = productData?.movements || [];
-  const pagination_inventory = usePagination(inventory);
-  const paginated_inventory = pagination_inventory.paginatedData;
+  const branchStock = useMemo(() => {
+    if (!inventory.length) return null;
+    if (branchId != null) {
+      return inventory.find((row) => Number(row.branch_id) === Number(branchId)) || null;
+    }
+    return inventory[0] || null;
+  }, [inventory, branchId]);
+
   const pagination_movements = usePagination(movements);
   const paginated_movements = pagination_movements.paginatedData;
-  if (loading) return <LoadingState message="Loading product..." />;
+
+  if (loading) return <LoadingState message="Loading product…" />;
   const product = productData;
   if (!product) {
-    return <EmptyState
-      title={loadError || 'Product not found'}
-      description={loadError && loadError !== 'Product not found.' ? 'Check that the API is running and try again.' : 'This product ID may not exist in the catalog.'}
-      actionLabel="Back to Products"
-      onAction={() => navigate('/warehouse/products')}
-    />;
+    return (
+      <EmptyState
+        title={loadError || 'Product not found'}
+        description="This product may not exist in the company catalog."
+        actionLabel="Back to Products"
+        onAction={() => navigate('/warehouse/products')}
+      />
+    );
   }
-  const product_id = product.product_id || product.id || '—';
-  const product_name = product.product_name || product.name || '—';
-  const sku = product.sku || '—';
-  const category_id = product.category_id || '—';
-  const category_name = product.category_name || product.category || '—';
-  const unit_price = product.unit_price != null ? product.unit_price : product.unitPrice || 0;
-  const status = product.status || '—';
-  const totalStock = inventory.reduce((sum, b) => sum + Number(b.quantity || b.available_stock || 0), 0);
-  const multiBranchStock = inventory.length > 1;
-  return <div className="page">
-      <StatsGrid stats={[{
-      label: 'Product ID',
-      value: String(product_id)
-    }, {
-      label: 'Unit Price',
-      value: formatCurrency(unit_price)
-    }, {
-      label: 'Status',
-      value: status
-    }, {
-      label: multiBranchStock ? 'Total Stock (All Branches)' : 'Branch Stock',
-      value: `${totalStock} units`
-    }]} />
 
+  const productName = product.product_name || product.name || '—';
+  const sku = product.sku || '—';
+  const categoryName = product.category_name || product.category || '—';
+  const unitPrice = product.unit_price != null ? product.unit_price : product.unitPrice || 0;
+  const neverStocked = !branchStock;
+  const onHand = neverStocked ? 0 : Number(branchStock.available_stock ?? 0);
+  const pendingOutbound = neverStocked ? 0 : Number(branchStock.pending_outbound ?? 0);
+  const availableToTransfer = neverStocked
+    ? 0
+    : Number(branchStock.available_to_transfer ?? Math.max(0, onHand - pendingOutbound));
+  const stockStatusLabel = neverStocked
+    ? 'Never Stocked'
+    : warehouseStockStatusLabel({ has_stock_record: true, stock_status: branchStock.stock_status });
+  const lastUpdated = branchStock?.last_updated || branchStock?.updated_at || null;
+  const canTransfer = availableToTransfer > 0;
+  const showAlertBadge = ['Low Stock', 'Critical Stock', 'Out of Stock', 'Never Stocked'].includes(stockStatusLabel);
+
+  return (
+    <div className="page">
       <section className="panel content-panel relative overflow-hidden">
-        <div className="flex flex-col md:flex-row justify-between gap-4 items-start md:items-center mb-4">
+        <div className="grid gap-5 md:grid-cols-2 items-start">
           <div className="flex gap-4 items-start">
-            <ProductThumb src={product.image_url} alt={product_name} size={96} />
-            <div>
-              <h3 style={{
-              margin: 0
-            }}>{product_name}</h3>
-              <p className="text-ink/70" style={{
-              margin: '4px 0 0'
-            }}>Product ID: {product_id}</p>
+            <ProductThumb src={product.image_url} alt={productName} size={96} />
+            <div style={{ minWidth: 0 }}>
+              <h3 style={{ margin: 0 }}>{productName}</h3>
+              <p className="text-ink/70" style={{ margin: '8px 0 0', fontSize: '0.9rem' }}>
+                <span className="mono-cell">{sku}</span>
+              </p>
+              <p className="text-ink/70" style={{ margin: '6px 0 0', fontSize: '0.88rem' }}>
+                {categoryName}
+                {' · '}{formatCurrency(unitPrice)}
+                {product.unit_type ? ` · ${product.unit_type}` : ''}
+              </p>
+              {product.supplier_name ? (
+                <p className="text-ink/70" style={{ margin: '6px 0 0', fontSize: '0.85rem' }}>
+                  Supplier: {product.supplier_name}
+                </p>
+              ) : null}
+              {product.description ? (
+                <p style={{ margin: '10px 0 0', fontSize: '0.9rem', lineHeight: 1.45 }}>
+                  {product.description}
+                </p>
+              ) : null}
+            </div>
+          </div>
+
+          <div style={{
+            border: '1px solid rgba(15, 23, 42, 0.08)',
+            borderRadius: 12,
+            padding: '16px 18px',
+            background: 'rgba(15, 23, 42, 0.02)',
+          }}>
+            <div className="flex justify-between items-start gap-3 mb-3">
+              <div>
+                <p className="text-ink/70" style={{ margin: 0, fontSize: '0.78rem' }}>On Hand</p>
+                <p style={{ margin: '4px 0 0', fontSize: '2.2rem', fontWeight: 700, lineHeight: 1 }}>{onHand}</p>
+              </div>
+              {showAlertBadge ? <StatusBadge status={stockStatusLabel} /> : null}
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px 16px' }}>
+              <div>
+                <p className="text-ink/70" style={{ margin: 0, fontSize: '0.75rem' }}>Reorder level</p>
+                <p style={{ margin: '2px 0 0', fontWeight: 600 }}>{neverStocked ? '—' : (branchStock.reorder_level ?? '—')}</p>
+              </div>
+              <div>
+                <p className="text-ink/70" style={{ margin: 0, fontSize: '0.75rem' }}>Pending outbound</p>
+                <p style={{ margin: '2px 0 0', fontWeight: 600 }}>{pendingOutbound}</p>
+              </div>
+              <div>
+                <p className="text-ink/70" style={{ margin: 0, fontSize: '0.75rem' }}>Available to transfer</p>
+                <p style={{ margin: '2px 0 0', fontWeight: 600 }}>{availableToTransfer}</p>
+              </div>
+              <div>
+                <p className="text-ink/70" style={{ margin: 0, fontSize: '0.75rem' }}>Last updated</p>
+                <p style={{ margin: '2px 0 0', fontWeight: 500, fontSize: '0.88rem' }}>
+                  {lastUpdated ? formatDisplayDateTime(lastUpdated) : '—'}
+                </p>
+              </div>
+            </div>
+            {neverStocked ? (
+              <p className="text-ink/70" style={{ margin: '12px 0 0', fontSize: '0.85rem' }}>
+                No stock record yet — restock to start tracking at this branch.
+              </p>
+            ) : null}
+            <div className="flex flex-wrap gap-2 mt-4">
+              <button
+                className="button"
+                type="button"
+                onClick={() => navigate(`/warehouse/restock-history/new?product=${productId}`)}
+              >
+                Restock
+              </button>
+              <button
+                className="button secondary"
+                type="button"
+                onClick={() => navigate(`/warehouse/stock-counts/new?product=${productId}`)}
+              >
+                Stock Count
+              </button>
+              <button
+                className="button secondary"
+                type="button"
+                disabled={!canTransfer}
+                title={canTransfer ? 'Transfer stock' : 'No units available to transfer'}
+                onClick={() => navigate(`/warehouse/transfers/new?product=${productId}`)}
+              >
+                Transfer
+              </button>
             </div>
           </div>
         </div>
-        <DetailRowsTable rows={[
-          { label: 'Product ID', value: product_id },
-          { label: 'SKU', value: <span style={{ fontFamily: 'monospace' }}>{sku}</span> },
-          { label: 'Product Name', value: product_name },
-          { label: 'Category ID', value: category_id },
-          { label: 'Category Name', value: category_name },
-          { label: 'Unit Price', value: formatCurrency(unit_price) },
-          { label: 'Status', value: <StatusBadge status={status} /> },
-          ...(product.description ? [{ label: 'Description', value: product.description }] : []),
-          ...(product.unit_type ? [{ label: 'Unit Type', value: product.unit_type }] : []),
-          ...(product.reorder_point != null ? [{ label: 'Reorder Point', value: product.reorder_point }] : []),
-        ]} />
       </section>
 
-      {/* Inventory per branch — from branch_inventory (scoped to caller’s branch for non-OM roles) */}
-      {inventory.length > 0 && <section className="panel content-panel relative overflow-hidden">
-          <div className="flex flex-col md:flex-row justify-between gap-4 items-start md:items-center mb-4">
-            <h3>{multiBranchStock ? 'Stock by Branch' : 'Branch Stock'}</h3>
-            <p className="text-ink/70" style={{
-          margin: 0,
-          fontSize: '0.82rem'
-        }}>Source: branch_inventory table</p>
-          </div>
-          <><div className="corvex-table-wrapper">
-            <table className="corvex-table">
-              <thead>
-                <tr>
-                  <th>Inventory ID</th>
-                  <th>Branch ID</th>
-                  <th>Branch</th>
-                  <th>Product ID</th>
-                  <th>Available Stock</th>
-                  <th>Reorder Level</th>
-                  <th>Status</th>
-                  <th>Created At</th>
-                  <th>Updated At</th>
-                </tr>
-              </thead>
-              <tbody>
-                {paginated_inventory.map(b => <tr key={b.branch_inventory_id ?? b.branch_id}>
-                    <td><span style={{
-                    fontFamily: 'monospace',
-                    fontSize: '0.82rem'
-                  }}>{b.branch_inventory_id ?? '—'}</span></td>
-                    <td><span style={{
-                    fontFamily: 'monospace',
-                    fontSize: '0.82rem'
-                  }}>{b.branch_id}</span></td>
-                    <td>{b.branch_name}</td>
-                    <td><span style={{
-                    fontFamily: 'monospace',
-                    fontSize: '0.82rem'
-                  }}>{b.product_id ?? '—'}</span></td>
-                    <td style={{
-                  fontWeight: 600
-                }}>{b.available_stock ?? b.quantity ?? '—'}</td>
-                    <td>{b.reorder_level ?? '—'}</td>
-                    <td>
-                      <StatusBadge status={b.stock_status || '—'} />
-                    </td>
-                    <td style={{
-                  fontFamily: 'monospace',
-                  fontSize: '0.78rem'
-                }}>{formatDisplayDateTime(b.created_at)}</td>
-                    <td style={{
-                  fontFamily: 'monospace',
-                  fontSize: '0.78rem'
-                }}>{formatDisplayDateTime(b.updated_at)}</td>
-                  </tr>)}
-              </tbody>
-            </table>
-          </div><Pagination {...pagination_inventory} /></>
-        </section>}
-
-      {/* Stock movements — from stock_movements table with movement_ref */}
       <section className="panel content-panel relative overflow-hidden">
         <div className="flex flex-col md:flex-row justify-between gap-4 items-start md:items-center mb-4">
-          <h3>Stock Movement History</h3>
-          <p className="text-ink/70" style={{
-          margin: 0,
-          fontSize: '0.82rem'
-        }}>Source: stock_movements table — type, quantity, movement_ref, branch, performed_by</p>
+          <div>
+            <h3 style={{ margin: 0 }}>Recent stock movements</h3>
+            <p className="text-ink/70" style={{ margin: '4px 0 0', fontSize: '0.82rem' }}>
+              Latest movements at {branchName}
+            </p>
+          </div>
+          <button
+            className="button ghost"
+            type="button"
+            onClick={() => navigate(`/warehouse/movements?product=${productId}`)}
+          >
+            View all
+          </button>
         </div>
-        {movements.length ? <><div className="corvex-table-wrapper">
-            <table className="corvex-table">
-              <thead>
-                <tr>
-                  <th>Date</th>
-                  <th>Type</th>
-                  <th>Qty</th>
-                  <th>Reference</th>
-                  <th>Branch</th>
-                  <th>Performed By</th>
-                </tr>
-              </thead>
-              <tbody>
-                {paginated_movements.map((m, i) => <tr key={m.id || m.stock_movements_id || i}>
-                    <td>{m.movement_date ? formatDisplayDate(m.movement_date) : m.date ? formatDisplayDate(m.date) : '—'}</td>
-                    <td>
-                      <StatusBadge status={m.type} />
-                    </td>
-                    <td style={{
-                  fontWeight: 600,
-                  color: (m.quantity || 0) > 0 ? '#2A9B6A' : '#dc2626'
-                }}>
-                      {(m.quantity || 0) > 0 ? `+${m.quantity}` : m.quantity}
-                    </td>
-                    <td><span style={{
-                    fontFamily: 'monospace',
-                    fontSize: '0.82rem'
-                  }}>{m.movement_ref || m.reason || '—'}</span></td>
-                    <td>{m.branch_name || '—'}</td>
-                    <td>{m.performed_by_name || '—'}</td>
-                  </tr>)}
-              </tbody>
-            </table>
-          </div><Pagination {...pagination_movements} /></> : <EmptyState title="No movement history" description="Stock movements for this product will appear here." />}
+        {movements.length ? (
+          <>
+            <div className="corvex-table-wrapper">
+              <table className="corvex-table">
+                <thead>
+                  <tr>
+                    <th>Date</th>
+                    <th>Type</th>
+                    <th>Qty</th>
+                    <th>Reference</th>
+                    <th>By</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {paginated_movements.map((m, i) => (
+                    <tr key={m.id || m.stock_movements_id || m.movement_id || i}>
+                      <td>{m.movement_date ? formatDisplayDate(m.movement_date) : m.date ? formatDisplayDate(m.date) : '—'}</td>
+                      <td><StatusBadge status={m.type} /></td>
+                      <td style={{
+                        fontWeight: 600,
+                        color: (m.quantity || 0) > 0 ? '#2A9B6A' : '#dc2626',
+                      }}>
+                        {(m.quantity || 0) > 0 ? `+${m.quantity}` : m.quantity}
+                      </td>
+                      <td>
+                        <span className="mono-cell" style={{ fontSize: '0.82rem' }}>
+                          {m.movement_ref ? formatDocumentRef(m.movement_ref) : (m.reason || '—')}
+                        </span>
+                      </td>
+                      <td>{m.performed_by_name || '—'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <Pagination {...pagination_movements} />
+          </>
+        ) : (
+          <EmptyState
+            title="No movements at your branch yet"
+            description="Restock, stock count, or completed transfers will appear here."
+          />
+        )}
       </section>
 
       <div className="flex flex-wrap justify-end gap-2 mt-4">
-        <button className="button ghost" type="button" onClick={() => navigate('/warehouse/products')}>Back to Products</button>
-        <button className="button secondary" type="button" onClick={() => navigate(`/warehouse/product/${productId}/edit`)}>Edit Product</button>
-        <button className="button secondary" type="button" onClick={() => navigate(`/warehouse/product/${productId}/transfer`)}>Transfer Stock</button>
-        <button className="button secondary" type="button" onClick={() => navigate(`/warehouse/product/${productId}/restock`)}>Record Restock</button>
-        <button className="button" type="button" onClick={() => navigate(`/warehouse/product/${productId}/stock-count`)}>Log Stock Count</button>
+        <button className="button ghost" type="button" onClick={() => navigate('/warehouse/branch-stock')}>
+          Back to Branch Stock
+        </button>
+        <button className="button secondary" type="button" onClick={() => navigate('/warehouse/products')}>
+          Back to Products
+        </button>
       </div>
-    </div>;
+    </div>
+  );
 }
 function EditProductPage({
   productId,
@@ -967,7 +1078,7 @@ function AddProductPage({
         const uploaded = await uploadProductImage(createdId, imageFile);
         if (!uploaded.success) {
           showToast(uploaded.message || 'Product was created, but the image could not be saved.', 'error');
-          navigate(`/warehouse/product/${createdId}/edit`);
+          navigate(`/warehouse/product/${createdId}`);
           return;
         }
       }
@@ -1076,289 +1187,336 @@ function AddProductPage({
       </div>
     </div>;
 }
-function useWarehouseProductContext(productId) {
-  const user = getCurrentUser();
-  const [product, setProduct] = useState(null);
-  const [branchStock, setBranchStock] = useState(null);
-  const [loading, setLoading] = useState(true);
-  useEffect(() => {
-    async function load() {
-      setLoading(true);
-      const res = await apiClient.get(`/products/${productId}`);
-      if (res.data?.success) {
-        setProduct(res.data.data);
-        const branchId = user?.branch?.id;
-        const inv = res.data.data?.inventory || [];
-        setBranchStock(branchId ? inv.find((r) => r.branch_id === branchId) : inv[0]);
-      }
-      setLoading(false);
-    }
-    load();
-  }, [productId, user?.branch?.id]);
-  return { product, branchStock, loading, systemQty: Number(branchStock?.available_stock ?? 0) };
+function StockCountPage({ productId, navigate, showToast }) {
+  return (
+    <StockCountDocumentForm
+      navigate={navigate}
+      showToast={showToast}
+      initialProductId={productId || ''}
+      cancelTo={productId ? `/warehouse/product/${productId}` : '/warehouse/stock-counts'}
+    />
+  );
 }
 
-function StockCountPage({
-  productId,
-  navigate,
-  showToast
-}) {
-  const { product, loading, systemQty } = useWarehouseProductContext(productId);
-  const [physical, setPhysical] = useState('');
-  const [notes, setNotes] = useState('');
-  const [errors, setErrors] = useState({});
-  const [submitting, setSubmitting] = useState(false);
-  if (loading) return <LoadingState message="Loading product..." />;
-  if (!product) return <EmptyState title="Product not found" actionLabel="Back" onAction={() => navigate('/warehouse/products')} />;
-  const variance = physical !== '' ? Number(physical) - systemQty : null;
-  const hasVariance = variance !== null && variance !== 0;
-  const handleSubmit = async () => {
-    const nextErrors = {};
-    if (physical === '') nextErrors.physical = 'Physical count is required.';
-    if (hasVariance && !notes.trim()) nextErrors.notes = 'Notes required when variance exists.';
-    setErrors(nextErrors);
-    if (Object.keys(nextErrors).length) {
-      showToast('Please fix the errors.', 'error');
-      return;
-    }
-    setSubmitting(true);
-    const result = await submitStockCount({
-      product_id: Number(productId),
-      physical_count: Number(physical),
-      notes: notes.trim(),
-    });
-    setSubmitting(false);
-    if (!result.success) {
-      showToast(result.message || 'Submit failed.', 'error');
-      return;
-    }
-    showToast(result.message || 'Stock count saved.', 'success');
-    navigate(`/warehouse/product/${productId}`);
-  };
-  const productName = product.product_name || product.name;
-  return <div className="page">
-      <section className="panel form-panel content-panel">
-        <div className="flex flex-col md:flex-row justify-between gap-4 items-start md:items-center mb-4"><h3>Stock Count — {productName}</h3></div>
-        <div className="form-group"><label>System Quantity</label><p className="field-preview">{systemQty} units</p></div>
-        <div className="form-group">
-          <label>Physical Quantity<span className="required">*</span></label>
-          <QuantityStepper value={physical} min={0} onChange={setPhysical} aria-label="Physical quantity" />
-          {errors.physical ? <p className="form-error">{errors.physical}</p> : null}
-        </div>
-        {variance !== null ? <div className={`form-group variance-display${hasVariance ? ' variance-alert' : ''}`}>
-            <label>Variance</label>
-            <p className="field-preview">{variance > 0 ? `+${variance}` : variance} units</p>
-          </div> : null}
-        <div className="form-group">
-          <label>Discrepancy Notes{hasVariance ? <span className="required">*</span> : null}</label>
-          <textarea value={notes} onChange={e => setNotes(e.target.value)} placeholder="Explain variance if any..." />
-          {errors.notes ? <p className="form-error">{errors.notes}</p> : null}
-        </div>
-      </section>
-      <div className="flex justify-end gap-2 mt-4">
-        <button className="button secondary" type="button" onClick={() => navigate(`/warehouse/product/${productId}`)}>Cancel</button>
-        <button className="button" type="button" onClick={handleSubmit} disabled={submitting}>{submitting ? 'Saving…' : 'Submit Stock Count'}</button>
-      </div>
-    </div>;
+function StockCountNewPage({ navigate, showToast }) {
+  const params = new URLSearchParams(window.location.search);
+  return (
+    <StockCountDocumentForm
+      navigate={navigate}
+      showToast={showToast}
+      initialProductId={params.get('product') || ''}
+      cancelTo="/warehouse/stock-counts"
+    />
+  );
 }
-function RestockPage({
-  productId,
-  navigate,
-  showToast
-}) {
-  const { product, loading } = useWarehouseProductContext(productId);
-  const [suppliers, setSuppliers] = useState([]);
-  const [form, setForm] = useState({
-    quantity: '',
-    supplierId: '',
-    deliveryRef: '',
-    dateReceived: new Date().toISOString().slice(0, 10)
-  });
-  const [errors, setErrors] = useState({});
-  const [submitting, setSubmitting] = useState(false);
+
+function StockCountHistoryPage({ navigate }) {
+  const user = getCurrentUser();
+  const branchName = user?.branch?.name || 'your branch';
+  const [rows, setRows] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [reloadTick, setReloadTick] = useState(0);
+
   useEffect(() => {
-    async function loadSuppliers() {
-      try {
-        const res = await apiClient.get('/suppliers', { params: { status: 'Active', limit: 200 } });
-        if (res.data?.success) setSuppliers(res.data.data || []);
-      } catch {
-        setSuppliers([]);
+    let cancelled = false;
+    async function load() {
+      setLoading(true);
+      const result = await fetchStockCounts();
+      if (!cancelled) {
+        setRows(result.success ? (result.data || []) : []);
+        setLoading(false);
       }
     }
-    loadSuppliers();
-  }, []);
-  if (loading) return <LoadingState message="Loading product..." />;
-  if (!product) return <EmptyState title="Product not found" actionLabel="Back" onAction={() => navigate('/warehouse/products')} />;
-  const handleSubmit = async () => {
-    const nextErrors = {};
-    if (!form.quantity || Number(form.quantity) <= 0) nextErrors.quantity = 'Quantity must be positive.';
-    if (!form.supplierId) nextErrors.supplierId = 'Supplier is required.';
-    if (!form.deliveryRef.trim()) nextErrors.deliveryRef = 'Delivery reference is required.';
-    setErrors(nextErrors);
-    if (Object.keys(nextErrors).length) {
-      showToast('Please fix the errors.', 'error');
-      return;
-    }
-    setSubmitting(true);
-    const result = await createRestock({
-      product_id: Number(productId),
-      supplier_id: Number(form.supplierId),
-      quantity: Number(form.quantity),
-      delivery_ref: form.deliveryRef.trim(),
-      received_date: form.dateReceived,
-    });
-    setSubmitting(false);
-    if (!result.success) {
-      showToast(result.message || 'Restock failed.', 'error');
-      return;
-    }
-    showToast(result.message || 'Restock recorded.', 'success');
-    navigate(`/warehouse/product/${productId}`);
-  };
-  const productName = product.product_name || product.name;
-  return <div className="page">
-      <section className="panel form-panel content-panel">
-        <div className="flex flex-col md:flex-row justify-between gap-4 items-start md:items-center mb-4"><h3>Record Restock — {productName}</h3></div>
-        <div className="form-group"><label>Product Name</label><p className="field-preview">{productName}</p></div>
-        <div className="form-group">
-          <label>Quantity Restocked<span className="required">*</span></label>
-          <QuantityStepper
-            value={form.quantity}
-            min={1}
-            onChange={(next) => setForm((p) => ({ ...p, quantity: next }))}
-            aria-label="Quantity restocked"
-          />
-          {errors.quantity ? <p className="form-error">{errors.quantity}</p> : null}
-        </div>
-        <div className="form-group">
-          <label>Supplier<span className="required">*</span></label>
-          <select className="filter-select" value={form.supplierId} onChange={e => setForm(p => ({ ...p, supplierId: e.target.value }))}>
-            <option value="">Select supplier</option>
-            {suppliers.map(s => <option key={s.suppliers_id} value={s.suppliers_id}>{s.supplier_name}</option>)}
-          </select>
-          {errors.supplierId ? <p className="form-error">{errors.supplierId}</p> : null}
-        </div>
-        <div className="form-group">
-          <label>Delivery Reference Number<span className="required">*</span></label>
-          <input type="text" value={form.deliveryRef} onChange={e => setForm(p => ({
-          ...p,
-          deliveryRef: e.target.value
-        }))} />
-          {errors.deliveryRef ? <p className="form-error">{errors.deliveryRef}</p> : null}
-        </div>
-        <div className="form-group"><label>Date Received</label><input className="filter-input" type="date" value={form.dateReceived} onChange={e => setForm(p => ({
-          ...p,
-          dateReceived: e.target.value
-        }))} /></div>
-      </section>
-      <div className="flex justify-end gap-2 mt-4">
-        <button className="button secondary" type="button" onClick={() => navigate(`/warehouse/product/${productId}`)}>Cancel</button>
-        <button className="button" type="button" onClick={handleSubmit} disabled={submitting}>{submitting ? 'Saving…' : 'Create Restock Transaction'}</button>
-      </div>
-    </div>;
-}
-function TransferPage({
-  productId,
-  navigate,
-  showToast
-}) {
-  const user = getCurrentUser();
-  const { product, loading, systemQty } = useWarehouseProductContext(productId);
-  const [branches, setBranches] = useState([]);
-  const [form, setForm] = useState({
-    destination: '',
-    quantity: '',
-    notes: ''
-  });
-  const [errors, setErrors] = useState({});
-  const [submitting, setSubmitting] = useState(false);
+    load();
+    return () => { cancelled = true; };
+  }, [reloadTick]);
+
   useEffect(() => {
+    const onFocus = () => setReloadTick((n) => n + 1);
+    window.addEventListener('focus', onFocus);
+    return () => window.removeEventListener('focus', onFocus);
+  }, []);
+
+  const pagination = usePagination(rows, { pageSize: PAGE_SIZE });
+
+  if (loading && !rows.length) return <LoadingState message="Loading stock counts…" />;
+
+  return (
+    <div className="page">
+      <section className="panel content-panel relative overflow-hidden">
+        <div className="list-section-header">
+          <div>
+            <h3 style={{ margin: 0 }}>Stock Counts</h3>
+            <p className="text-ink/70" style={{ margin: '4px 0 0', fontSize: '0.88rem' }}>
+              Physical inventory verification sessions · {branchName}
+            </p>
+          </div>
+          <button className="button whitespace-nowrap" type="button" onClick={() => navigate('/warehouse/stock-counts/new')}>
+            + New Stock Count
+          </button>
+        </div>
+
+        {loading ? (
+          <LoadingState message="Refreshing stock counts…" />
+        ) : rows.length ? (
+          <>
+            <div className="corvex-table-wrapper">
+              <table className="corvex-table">
+                <thead>
+                  <tr>
+                    <th>Reference</th>
+                    <th>Date</th>
+                    <th>Products counted</th>
+                    <th>Discrepancies</th>
+                    <th>Status</th>
+                    <th>Counted by</th>
+                    <th className="cell-actions">Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {pagination.paginatedData.map((row) => (
+                    <tr
+                      key={row.count_id}
+                      className="clickable-row"
+                      onClick={() => navigate(`/warehouse/stock-counts/${row.count_id}`)}
+                    >
+                      <td><span className="mono-cell">{formatDocumentRef(row.count_ref)}</span></td>
+                      <td>{row.created_at ? formatDisplayDateTime(row.created_at) : '—'}</td>
+                      <td style={{ fontWeight: 600 }}>{row.line_count ?? 0}</td>
+                      <td style={{
+                        fontWeight: 600,
+                        color: Number(row.discrepancy_count) > 0 ? '#dc2626' : undefined,
+                      }}>
+                        {row.discrepancy_count ?? 0}
+                      </td>
+                      <td><StatusBadge status={row.status || 'Completed'} /></td>
+                      <td>{row.counted_by_name || '—'}</td>
+                      <td className="cell-actions" onClick={(e) => e.stopPropagation()}>
+                        <button
+                          className="icon-action-button"
+                          type="button"
+                          title="View"
+                          onClick={() => navigate(`/warehouse/stock-counts/${row.count_id}`)}
+                        >
+                          <NavIcon name="view" />
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <Pagination {...pagination} />
+          </>
+        ) : (
+          <EmptyState
+            title="No stock counts yet"
+            description="Start a session to verify physical quantities for one or more products."
+            actionLabel="New Stock Count"
+            onAction={() => navigate('/warehouse/stock-counts/new')}
+          />
+        )}
+      </section>
+    </div>
+  );
+}
+
+function StockCountDetailPage({ countId, navigate }) {
+  const [detail, setDetail] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    let cancelled = false;
     async function load() {
-      const res = await fetchInventoryBranches();
-      if (res.success) setBranches(res.data || []);
+      setLoading(true);
+      setError('');
+      const result = await fetchStockCountById(countId);
+      if (!cancelled) {
+        if (result.success) setDetail(result.data);
+        else {
+          setDetail(null);
+          setError(result.message || 'Stock count not found.');
+        }
+        setLoading(false);
+      }
     }
     load();
-  }, []);
-  if (loading) return <LoadingState message="Loading product..." />;
-  if (!product) return <EmptyState title="Product not found" actionLabel="Back" onAction={() => navigate('/warehouse/products')} />;
-  const sourceBranchId = user?.branch?.id;
-  const handleSubmit = async () => {
-    const qty = Number(form.quantity);
-    const nextErrors = {};
-    if (!form.destination) nextErrors.destination = 'Destination branch is required.';
-    if (!qty || qty <= 0) nextErrors.quantity = 'Quantity must be positive.';
-    if (qty > systemQty) nextErrors.quantity = `Cannot transfer more than available stock (${systemQty} units).`;
-    setErrors(nextErrors);
-    if (Object.keys(nextErrors).length) {
-      showToast('Please fix the errors.', 'error');
-      return;
-    }
-    setSubmitting(true);
-    const result = await createInventoryTransfer({
-      product_id: Number(productId),
-      destination_branch_id: Number(form.destination),
-      quantity: qty,
-      notes: form.notes.trim(),
-    });
-    setSubmitting(false);
-    if (!result.success) {
-      showToast(result.message || 'Transfer failed.', 'error');
-      return;
-    }
-    showToast(result.message || 'Transfer submitted for manager approval.', 'success');
-    navigate('/warehouse/transfers?tab=requests');
-  };
-  const productName = product.product_name || product.name;
-  return <div className="page">
-      <section className="panel form-panel content-panel">
-        <div className="flex flex-col md:flex-row justify-between gap-4 items-start md:items-center mb-4"><h3>Transfer Stock — {productName}</h3></div>
-        <div className="form-group"><label>Product Name</label><p className="field-preview">{productName}</p></div>
-        <div className="form-group"><label>Source Branch</label><p className="field-preview">{user?.branch?.name || '—'}</p></div>
-        <div className="form-group">
-          <label>Destination Branch<span className="required">*</span></label>
-          <select className="filter-select" value={form.destination} onChange={e => setForm(p => ({
-          ...p,
-          destination: e.target.value
-        }))}>
-            <option value="">Select destination</option>
-            {branches.filter(b => b.branch_id !== sourceBranchId).map(b => <option key={b.branch_id} value={b.branch_id}>{b.branch_name}</option>)}
-          </select>
-          {errors.destination ? <p className="form-error">{errors.destination}</p> : null}
+    return () => { cancelled = true; };
+  }, [countId]);
+
+  if (loading) return <LoadingState message="Loading stock count…" />;
+  if (!detail) {
+    return (
+      <EmptyState
+        title={error || 'Stock count not found'}
+        actionLabel="Back to Stock Counts"
+        onAction={() => navigate('/warehouse/stock-counts')}
+      />
+    );
+  }
+
+  const lines = detail.lines || [];
+  const movementSearch = detail.count_ref || '';
+
+  return (
+    <div className="page">
+      <section className="panel content-panel relative overflow-hidden">
+        <div className="list-section-header">
+          <div>
+            <h3 style={{ margin: 0 }}>{detail.count_ref ? formatDocumentRef(detail.count_ref) : `Count #${detail.count_id}`}</h3>
+            <p className="text-ink/70" style={{ margin: '4px 0 0', fontSize: '0.88rem' }}>
+              {detail.created_at ? formatDisplayDateTime(detail.created_at) : '—'}
+              {' · '}{detail.counted_by_name || '—'}
+              {' · '}<StatusBadge status={detail.status || 'Completed'} />
+            </p>
+          </div>
         </div>
-        <div className="form-group">
-          <label>Quantity<span className="required">*</span></label>
-          <QuantityStepper
-            value={form.quantity}
-            min={1}
-            max={systemQty || undefined}
-            onChange={(next) => setForm((p) => ({ ...p, quantity: next }))}
-            aria-label="Transfer quantity"
-          />
-          {errors.quantity ? <p className="form-error">{errors.quantity}</p> : null}
+        <div className="saw-stat-grid" style={{ marginTop: 12 }}>
+          <div className="saw-stat">
+            <span>Products counted</span>
+            <strong>{detail.line_count ?? lines.length}</strong>
+          </div>
+          <div className="saw-stat">
+            <span>Discrepancies</span>
+            <strong>{detail.discrepancy_count ?? 0}</strong>
+          </div>
         </div>
-        <div className="form-group"><label>Notes</label><textarea value={form.notes} onChange={e => setForm(p => ({
-          ...p,
-          notes: e.target.value
-        }))} /></div>
+        {detail.notes ? (
+          <p style={{ margin: '12px 0 0', fontSize: '0.9rem' }}>
+            <span className="text-ink/70">Notes: </span>{detail.notes}
+          </p>
+        ) : null}
       </section>
-      <div className="flex justify-end gap-2 mt-4">
-        <button className="button secondary" type="button" onClick={() => navigate(`/warehouse/product/${productId}`)}>Cancel</button>
-        <button className="button" type="button" onClick={handleSubmit} disabled={submitting}>{submitting ? 'Submitting…' : 'Create Transfer Transaction'}</button>
+
+      <section className="panel content-panel relative overflow-hidden">
+        <h3 style={{ marginTop: 0 }}>Counted products</h3>
+        {lines.length ? (
+          <div className="corvex-table-wrapper">
+            <table className="corvex-table">
+              <thead>
+                <tr>
+                  <th>Product</th>
+                  <th>SKU</th>
+                  <th>System qty</th>
+                  <th>Physical</th>
+                  <th>Variance</th>
+                  <th>Notes</th>
+                </tr>
+              </thead>
+              <tbody>
+                {lines.map((line) => {
+                  const v = Number(line.variance) || 0;
+                  return (
+                    <tr key={line.line_id || line.product_id}>
+                      <td>
+                        <button
+                          className="button ghost"
+                          type="button"
+                          style={{ padding: 0 }}
+                          onClick={() => navigate(`/warehouse/product/${line.product_id}`)}
+                        >
+                          {line.product_name || '—'}
+                        </button>
+                      </td>
+                      <td><span className="mono-cell">{line.sku || '—'}</span></td>
+                      <td>{line.system_quantity}</td>
+                      <td>{line.physical_quantity}</td>
+                      <td style={{
+                        fontWeight: 600,
+                        color: v !== 0 ? (v > 0 ? '#2A9B6A' : '#dc2626') : undefined,
+                      }}>
+                        {v > 0 ? `+${v}` : v}
+                      </td>
+                      <td>{line.notes || '—'}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        ) : (
+          <EmptyState title="No lines" description="This stock count has no product lines." />
+        )}
+      </section>
+
+      <div className="flex flex-wrap justify-end gap-2 mt-4">
+        <button className="button ghost" type="button" onClick={() => navigate('/warehouse/stock-counts')}>
+          Back to Stock Counts
+        </button>
+        {movementSearch ? (
+          <button
+            className="button secondary"
+            type="button"
+            onClick={() => navigate(`/warehouse/movements?search=${encodeURIComponent(movementSearch)}`)}
+          >
+            Related stock movements
+          </button>
+        ) : null}
       </div>
-    </div>;
+    </div>
+  );
 }
+const KNOWN_MOVEMENT_TYPES = [
+  'All',
+  'Restock',
+  'Transfer In',
+  'Transfer Out',
+  'Stock Count Adjustment',
+  'Sale Deduction',
+];
+
+function defaultMovementDateRange() {
+  const to = new Date();
+  const from = new Date();
+  from.setDate(from.getDate() - 30);
+  const iso = (d) => d.toISOString().slice(0, 10);
+  return { dateFrom: iso(from), dateTo: iso(to) };
+}
+
+function formatSignedQty(qty) {
+  const n = Number(qty) || 0;
+  return n > 0 ? `+${n}` : String(n);
+}
+
+function movementTotalLabel(txn) {
+  if (!txn) return '—';
+  if (txn.mixed_units) {
+    return `${txn.product_count || 0} lines · mixed units`;
+  }
+  const total = formatSignedQty(txn.total_quantity);
+  return txn.unit_type ? `${total} ${txn.unit_type}` : total;
+}
+
 function MovementsPage({
   navigate
 }) {
-  const [dateFrom, setDateFrom] = useState('');
-  const [dateTo, setDateTo] = useState('');
-  const [productFilter, setProductFilter] = useState('All');
-  const [branchFilter, setBranchFilter] = useState('All');
+  const user = getCurrentUser();
+  const branchName = user?.branch?.name || 'your branch';
+  const urlParams = new URLSearchParams(window.location.search);
+  const urlProductId = urlParams.get('product') || '';
+  const urlSearch = urlParams.get('search') || '';
+  const [defaults] = useState(() => defaultMovementDateRange());
+  const [dateFrom, setDateFrom] = useState(defaults.dateFrom);
+  const [dateTo, setDateTo] = useState(defaults.dateTo);
+  const [productSearchInput, setProductSearchInput] = useState(urlSearch);
+  const [productSearch, setProductSearch] = useState(urlSearch);
+  const [productIdFilter, setProductIdFilter] = useState(urlProductId);
   const [typeFilter, setTypeFilter] = useState('All');
   const [loading, setLoading] = useState(true);
-  const [movements, setMovements] = useState([]);
+  const [transactions, setTransactions] = useState([]);
   const [error, setError] = useState('');
+  const [hasLoadedOnce, setHasLoadedOnce] = useState(false);
+  const [reloadTick, setReloadTick] = useState(0);
+
+  const applyMovementSearch = () => {
+    const next = productSearchInput.trim();
+    setProductSearch(next);
+    if (next && productIdFilter) setProductIdFilter('');
+  };
+
   useEffect(() => {
+    let cancelled = false;
     async function load() {
       setLoading(true);
       setError('');
@@ -1366,504 +1524,935 @@ function MovementsPage({
       if (typeFilter !== 'All') params.type = typeFilter;
       if (dateFrom) params.date_from = dateFrom;
       if (dateTo) params.date_to = dateTo;
+      if (productIdFilter) params.product_id = productIdFilter;
+      if (productSearch) params.search = productSearch;
       const result = await fetchStockMovements(params);
+      if (cancelled) return;
       if (result.success) {
-        setMovements(result.data || []);
+        setTransactions(result.data || []);
       } else {
-        setMovements([]);
-        setError('Failed to load stock movements.');
+        setTransactions([]);
+        setError(result.message || 'Failed to load stock movements.');
       }
+      setHasLoadedOnce(true);
       setLoading(false);
     }
     load();
-  }, [typeFilter, dateFrom, dateTo]);
-  const productOptions = useMemo(() => {
-    const map = new Map();
-    movements.forEach(m => {
-      if (m.product_id != null) map.set(String(m.product_id), m.product_name);
-    });
-    return [...map.entries()].sort((a, b) => a[1].localeCompare(b[1]));
-  }, [movements]);
-  const branchOptions = useMemo(() => {
-    return [...new Set(movements.map(m => m.branch_name).filter(Boolean))].sort();
-  }, [movements]);
-  const movementTypes = useMemo(() => {
-    const types = [...new Set(movements.map(m => m.type).filter(Boolean))].sort();
-    return ['All', ...types];
-  }, [movements]);
-  const filtered = useMemo(() => movements.filter(m => {
-    const matchProduct = productFilter === 'All' || String(m.product_id) === productFilter;
-    const matchBranch = branchFilter === 'All' || m.branch_name === branchFilter;
-    return matchProduct && matchBranch;
-  }), [movements, productFilter, branchFilter]);
-  const pagination_filtered = usePagination(filtered);
-  const paginated_filtered = pagination_filtered.paginatedData;
-  if (loading) return <LoadingState message="Loading stock movements..." />;
-  return <div className="page">
-      <section className="panel content-panel relative overflow-hidden">
-        <div className="flex flex-col md:flex-row justify-between gap-4 items-start md:items-center mb-4">
-          <h3>Movement History</h3>
-          <p className="text-ink/70" style={{
-          margin: 0,
-          fontSize: '0.82rem'
-        }}>{movements.length} record{movements.length !== 1 ? 's' : ''} from database</p>
-        </div>
-        {error ? <p className="form-error">{error}</p> : null}
-        <div className="list-section-controls" style={{ marginBottom: 12 }}>
-          <select className="filter-select" value={productFilter} onChange={e => setProductFilter(e.target.value)}>
-            <option value="All">All Products</option>
-            {productOptions.map(([id, name]) => <option key={id} value={id}>{name}</option>)}
-          </select>
-          <select className="filter-select" value={branchFilter} onChange={e => setBranchFilter(e.target.value)}>
-            <option value="All">All Branches</option>
-            {branchOptions.map(b => <option key={b} value={b}>{b}</option>)}
-          </select>
-          <select className="filter-select" value={typeFilter} onChange={e => setTypeFilter(e.target.value)}>
-            {movementTypes.map(t => <option key={t} value={t}>{t === 'All' ? 'All Types' : t}</option>)}
-          </select>
-          <input className="filter-input" type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)} aria-label="From date" />
-          <input className="filter-input" type="date" value={dateTo} onChange={e => setDateTo(e.target.value)} aria-label="To date" />
-        </div>
-        {filtered.length ? <><div className="corvex-table-wrapper">
-            <table className="corvex-table">
-              <thead>
-                <tr>
-                  <th>Movement ID</th>
-                  <th>Reference</th>
-                  <th>Product</th>
-                  <th>Quantity</th>
-                  <th>Type</th>
-                  <th>Branch</th>
-                  <th>Date</th>
-                </tr>
-              </thead>
-              <tbody>
-                {paginated_filtered.map(m => <tr key={m.movement_id} className="clickable-row" onClick={() => navigate(`/warehouse/movements/${m.movement_id}`)}>
-                    <td><span style={{
-                    fontFamily: 'monospace',
-                    fontSize: '0.82rem'
-                  }}>{m.movement_id}</span></td>
-                    <td><span style={{
-                    fontFamily: 'monospace',
-                    fontSize: '0.82rem'
-                  }}>{m.movement_ref || '—'}</span></td>
-                    <td>{m.product_name}{m.sku ? <><br /><span className="text-ink/70" style={{
-                      fontSize: '0.75rem'
-                    }}>{m.sku}</span></> : null}</td>
-                    <td style={{
-                  fontWeight: 600,
-                  color: m.quantity > 0 ? '#2A9B6A' : '#dc2626'
-                }}>
-                      {m.quantity > 0 ? `+${m.quantity}` : m.quantity}
-                    </td>
-                    <td><StatusBadge status={m.type} /></td>
-                    <td>{m.branch_name || '—'}</td>
-                    <td style={{
-                  fontSize: '0.82rem'
-                }}>{formatDisplayDate(m.movement_date)}</td>
-                  </tr>)}
-              </tbody>
-            </table>
-          </div><Pagination {...pagination_filtered} /></>
-        : <EmptyState title="No movements found" description="Adjust your filters or record stock activity to populate this list." />}
-      </section>
-    </div>;
-}
-function MovementDetailPage({
-  movementId,
-  navigate
-}) {
-  const [movement, setMovement] = useState(null);
-  const [loading, setLoading] = useState(true);
-  useEffect(() => {
-    async function load() {
-      setLoading(true);
-      const result = await fetchStockMovementById(movementId);
-      if (result.success) setMovement(result.data);
-      setLoading(false);
-    }
-    load();
-  }, [movementId]);
-  if (loading) return <LoadingState message="Loading movement..." />;
-  if (!movement) return <EmptyState title="Movement not found" actionLabel="Back" onAction={() => navigate('/warehouse/movements')} />;
-  return <div className="page">
-      <StatsGrid stats={[{
-      label: 'Movement ID',
-      value: String(movement.movement_id)
-    }, {
-      label: 'Quantity',
-      value: movement.quantity > 0 ? `+${movement.quantity}` : String(movement.quantity)
-    }, {
-      label: 'Type',
-      value: movement.type
-    }]} />
-      <section className="panel content-panel relative overflow-hidden">
-        <DetailRowsTable rows={[
-          { label: 'Reference', value: <span style={{ fontFamily: 'monospace' }}>{movement.movement_ref || '—'}</span> },
-          { label: 'Product', value: `${movement.product_name}${movement.sku ? ` (${movement.sku})` : ''}` },
-          { label: 'Branch', value: movement.branch_name || '—' },
-          { label: 'Movement Date', value: formatDisplayDate(movement.movement_date) },
-          { label: 'Performed By', value: movement.performed_by_name || '—' },
-          { label: 'Recorded At', value: formatDisplayDateTime(movement.created_at) },
-        ]} />
-      </section>
-      <div className="flex justify-end mt-4">
-        <button className="button ghost" type="button" onClick={() => navigate('/warehouse/movements')}>Back to Movements</button>
-      </div>
-    </div>;
-}
-function TransferRequestNewPage({
-  navigate,
-  showToast
-}) {
-  const user = getCurrentUser();
-  const sourceBranchId = user?.branch?.id;
-  const [branchStock, setBranchStock] = useState([]);
-  const [branches, setBranches] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [form, setForm] = useState({ productId: '', destination: '', quantity: '', notes: '' });
-  const [errors, setErrors] = useState({});
-  const [submitting, setSubmitting] = useState(false);
+    return () => { cancelled = true; };
+  }, [typeFilter, dateFrom, dateTo, productIdFilter, productSearch, reloadTick]);
 
   useEffect(() => {
-    async function load() {
-      setLoading(true);
-      const [invRes, branchRes] = await Promise.all([
-        fetchBranchInventory(),
-        fetchInventoryBranches(),
-      ]);
-      if (invRes.success) setBranchStock(invRes.data || []);
-      if (branchRes.success) setBranches(branchRes.data || []);
-      setLoading(false);
-    }
-    load();
+    const onFocus = () => setReloadTick((n) => n + 1);
+    window.addEventListener('focus', onFocus);
+    return () => window.removeEventListener('focus', onFocus);
   }, []);
 
-  const selectedRow = branchStock.find(r => String(r.product_id) === String(form.productId));
-  const availableQty = Number(selectedRow?.available_stock ?? selectedRow?.quantity ?? 0);
+  const typeOptions = useMemo(() => {
+    const fromData = transactions.map((m) => m.type).filter(Boolean);
+    return [...new Set([...KNOWN_MOVEMENT_TYPES, ...fromData])];
+  }, [transactions]);
 
-  const handleSubmit = async () => {
-    const qty = Number(form.quantity);
-    const nextErrors = {};
-    if (!form.productId) nextErrors.productId = 'Select a product.';
-    if (!form.destination) nextErrors.destination = 'Select destination branch.';
-    if (!qty || qty <= 0) nextErrors.quantity = 'Enter a positive quantity.';
-    if (form.productId && qty > availableQty) nextErrors.quantity = `Max available at your branch: ${availableQty}.`;
-    setErrors(nextErrors);
-    if (Object.keys(nextErrors).length) {
-      showToast('Please fix the errors.', 'error');
-      return;
-    }
-    setSubmitting(true);
-    const result = await createInventoryTransfer({
-      product_id: Number(form.productId),
-      destination_branch_id: Number(form.destination),
-      quantity: qty,
-      notes: form.notes.trim(),
-    });
-    setSubmitting(false);
-    if (!result.success) {
-      showToast(result.message || 'Request failed.', 'error');
-      return;
-    }
-    showToast(result.message || 'Transfer request submitted.', 'success');
-    navigate('/warehouse/transfers?tab=requests');
+  const filtersAtDefault = typeFilter === 'All'
+    && dateFrom === defaults.dateFrom
+    && dateTo === defaults.dateTo
+    && !productSearch.trim()
+    && !productIdFilter;
+
+  const clearFilters = () => {
+    setTypeFilter('All');
+    setDateFrom(defaults.dateFrom);
+    setDateTo(defaults.dateTo);
+    setProductSearchInput('');
+    setProductSearch('');
+    setProductIdFilter('');
   };
 
-  if (loading) return <LoadingState message="Loading branch stock..." />;
+  const pagination = usePagination(transactions, {
+    pageSize: PAGE_SIZE,
+    resetKey: `${typeFilter}|${dateFrom}|${dateTo}|${productSearch}|${productIdFilter}`,
+  });
 
-  const stockOptions = branchStock.filter(r => Number(r.available_stock ?? r.quantity ?? 0) > 0);
+  if (loading && !hasLoadedOnce) return <LoadingState message="Loading stock movements…" />;
 
-  return <div className="page">
-      <section className="panel form-panel content-panel">
-        <h3>New transfer request</h3>
-        <p className="text-ink/70" style={{ marginTop: 0 }}>From <strong>{user?.branch?.name || 'your branch'}</strong>. Request goes to branch / operating manager for approval.</p>
-        <div className="form-group">
-          <label>Product<span className="required">*</span></label>
-          <select className="filter-select" value={form.productId} onChange={e => setForm(p => ({ ...p, productId: e.target.value, quantity: '' }))}>
-            <option value="">Select product with stock</option>
-            {stockOptions.map(r => <option key={r.product_id} value={r.product_id}>
-                {r.product_name} ({r.sku}) — {r.available_stock ?? r.quantity} on hand
-              </option>)}
-          </select>
-          {errors.productId ? <p className="form-error">{errors.productId}</p> : null}
-        </div>
-        <div className="form-group">
-          <label>Destination branch<span className="required">*</span></label>
-          <select className="filter-select" value={form.destination} onChange={e => setForm(p => ({ ...p, destination: e.target.value }))}>
-            <option value="">Select destination</option>
-            {branches.filter(b => b.branch_id !== sourceBranchId).map(b => <option key={b.branch_id} value={b.branch_id}>{b.branch_name}</option>)}
-          </select>
-          {errors.destination ? <p className="form-error">{errors.destination}</p> : null}
-        </div>
-        <div className="form-group">
-          <label>Quantity<span className="required">*</span></label>
-          <QuantityStepper
-            value={form.quantity}
-            min={1}
-            max={availableQty || undefined}
-            onChange={(next) => setForm((p) => ({ ...p, quantity: next }))}
-            aria-label="Transfer quantity"
-          />
-          {selectedRow ? <p className="text-ink/60" style={{ fontSize: '0.82rem', margin: '4px 0 0' }}>Available: {availableQty}</p> : null}
-          {errors.quantity ? <p className="form-error">{errors.quantity}</p> : null}
-        </div>
-        <div className="form-group">
-          <label>Notes</label>
-          <textarea value={form.notes} onChange={e => setForm(p => ({ ...p, notes: e.target.value }))} />
-        </div>
-      </section>
-      <div className="flex justify-end gap-2 mt-4">
-        <button className="button secondary" type="button" onClick={() => navigate('/warehouse/transfers?tab=requests')}>Cancel</button>
-        <button className="button" type="button" onClick={handleSubmit} disabled={submitting || !stockOptions.length}>
-          {submitting ? 'Submitting…' : 'Submit request'}
-        </button>
-      </div>
-      {!stockOptions.length ? <p className="form-error">No products with stock at your branch. Restock or pick a product from Products first.</p> : null}
-    </div>;
-}
-
-function TransfersPage({
-  navigate,
-  transferTab: transferTabProp = 'requests',
-}) {
-  const user = getCurrentUser();
-  const branchId = user?.branch?.id;
-  const mainTab = transferTabProp === 'history' ? 'history' : 'requests';
-  const [requestSegment, setRequestSegment] = useState('Action required');
-  const [statusFilter, setStatusFilter] = useState('All');
-  const [transfers, setTransfers] = useState([]);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    async function load() {
-      setLoading(true);
-      const result = await fetchInventoryTransfers();
-      if (result.success) setTransfers(result.data || []);
-      setLoading(false);
-    }
-    load();
-  }, []);
-
-  const setMainTab = (tab) => {
-    navigate(tab === 'history' ? '/warehouse/transfers?tab=history' : '/warehouse/transfers?tab=requests');
-  };
-
-  const counts = useMemo(() => {
-    const awaiting = transfers.filter(t => isTransferPendingApproval(t.status)
-      && Number(t.source_branch_id) === Number(branchId)).length;
-    const readyToShip = transfers.filter(t => t.status === 'Approved'
-      && Number(t.source_branch_id) === Number(branchId)).length;
-    const incoming = transfers.filter(t => (t.status === 'Approved' || isTransferPendingApproval(t.status))
-      && Number(t.destination_branch_id) === Number(branchId)
-      && Number(t.source_branch_id) !== Number(branchId)).length;
-    return { awaiting, readyToShip, incoming };
-  }, [transfers, branchId]);
-
-  const requestsFiltered = useMemo(() => {
-    if (requestSegment === 'Action required') {
-      return transfers.filter(t => t.status === 'Approved'
-        && Number(t.source_branch_id) === Number(branchId));
-    }
-    if (requestSegment === 'Awaiting approval') {
-      return transfers.filter(t => isTransferPendingApproval(t.status)
-        && Number(t.source_branch_id) === Number(branchId));
-    }
-    if (requestSegment === 'Incoming') {
-      return transfers.filter(t => (t.status === 'Approved' || isTransferPendingApproval(t.status))
-        && Number(t.destination_branch_id) === Number(branchId)
-        && Number(t.source_branch_id) !== Number(branchId));
-    }
-    return transfers;
-  }, [requestSegment, transfers, branchId]);
-
-  const historyFiltered = useMemo(() => {
-    if (statusFilter === 'All') return transfers;
-    if (statusFilter === 'Pending Transfers') return transfers.filter(t => t.status.includes('Pending') || t.status === 'Submitted');
-    if (statusFilter === 'Approved Transfers') return transfers.filter(t => t.status === 'Approved');
-    if (statusFilter === 'Completed Transfers') return transfers.filter(t => t.status === 'Completed');
-    if (statusFilter === 'Cancelled Transfers') return transfers.filter(t => t.status === 'Rejected');
-    return transfers;
-  }, [statusFilter, transfers]);
-
-  const pagination_requests = usePagination(requestsFiltered);
-  const paginated_requests = pagination_requests.paginatedData;
-  const pagination_history = usePagination(historyFiltered);
-  const paginated_history = pagination_history.paginatedData;
-
-  if (loading) return <LoadingState message="Loading transfers..." />;
-
-  return <div className="page">
-      {mainTab === 'requests' ? <StatsGrid stats={[{
-      label: 'Ready to ship',
-      value: String(counts.readyToShip)
-    }, {
-      label: 'Awaiting manager approval',
-      value: String(counts.awaiting)
-    }, {
-      label: 'Incoming to your branch',
-      value: String(counts.incoming)
-    }]} /> : null}
-
-      <div className="transfers-toolbar" style={{ marginBottom: 16 }}>
-        <div className="segmented-control">
-          <button className={mainTab === 'requests' ? 'segment active' : 'segment'} type="button" onClick={() => setMainTab('requests')}>
-            Transfer requests
-          </button>
-          <button className={mainTab === 'history' ? 'segment active' : 'segment'} type="button" onClick={() => setMainTab('history')}>
-            History
-          </button>
-        </div>
-        <button className="button whitespace-nowrap" type="button" onClick={() => navigate('/warehouse/transfers/new')}>
-          New Transfer Request
-        </button>
-      </div>
-
+  return (
+    <div className="page">
       <section className="panel content-panel relative overflow-hidden">
         <div className="list-section-header">
           <div>
-            <h3>Transfers</h3>
-            <p className="text-ink/70" style={{ margin: '6px 0 0', fontSize: '0.88rem' }}>
-              Submit requests from your branch, track approval, and view full history.
+            <h3 style={{ margin: 0 }}>Stock Movements</h3>
+            <p className="text-ink/70" style={{ margin: '4px 0 0', fontSize: '0.88rem' }}>
+              Inventory transactions for your branch · {branchName}
             </p>
           </div>
         </div>
 
-        {mainTab === 'requests' ? <>
-            <div className="transfers-filter-bar" style={{ marginBottom: 12 }}>
-              <div className="segmented-control">
-                {['Action required', 'Awaiting approval', 'Incoming', 'All'].map(s => <button key={s} className={requestSegment === s ? 'segment active' : 'segment'} type="button" onClick={() => setRequestSegment(s)}>
-                    {s}
-                  </button>)}
-              </div>
+        <div className="list-section-toolbar">
+          <div className="list-section-controls">
+            <form
+              className="search-bar"
+              role="search"
+              onSubmit={(e) => {
+                e.preventDefault();
+                applyMovementSearch();
+              }}
+            >
+              <button
+                className="search-bar-action"
+                type="submit"
+                title="Search"
+                aria-label="Search movements"
+              >
+                <NavIcon name="search" />
+              </button>
+              <input
+                className="search-input"
+                type="search"
+                placeholder="Search product, SKU, or reference"
+                value={productSearchInput}
+                onChange={(e) => setProductSearchInput(e.target.value)}
+                aria-label="Search movements by product, SKU, or reference"
+              />
+            </form>
+            <select
+              className="filter-select"
+              value={typeFilter}
+              onChange={(e) => setTypeFilter(e.target.value)}
+              aria-label="Filter by movement type"
+            >
+              {typeOptions.map((t) => (
+                <option key={t} value={t}>{t === 'All' ? 'All types' : t}</option>
+              ))}
+            </select>
+            <input
+              className="filter-input"
+              type="date"
+              value={dateFrom}
+              onChange={(e) => setDateFrom(e.target.value)}
+              aria-label="From date"
+            />
+            <input
+              className="filter-input"
+              type="date"
+              value={dateTo}
+              onChange={(e) => setDateTo(e.target.value)}
+              aria-label="To date"
+            />
+            <button className="button ghost" type="button" onClick={clearFilters}>
+              Clear filters
+            </button>
+          </div>
+        </div>
+
+        {productIdFilter ? (
+          <p className="text-ink/70" style={{ marginTop: 0, fontSize: '0.85rem' }}>
+            Showing transactions that include one product.{' '}
+            <button className="button ghost" type="button" style={{ padding: 0 }} onClick={() => setProductIdFilter('')}>
+              Clear product filter
+            </button>
+          </p>
+        ) : null}
+
+        {error ? (
+          <EmptyState
+            title="Could not load movements"
+            description={error}
+            actionLabel="Retry"
+            onAction={() => setReloadTick((n) => n + 1)}
+          />
+        ) : loading ? (
+          <LoadingState message="Refreshing movements…" />
+        ) : transactions.length ? (
+          <>
+            <div className="corvex-table-wrapper">
+              <table className="corvex-table">
+                <thead>
+                  <tr>
+                    <th>Reference</th>
+                    <th>Date</th>
+                    <th>Type</th>
+                    <th>Products</th>
+                    <th>Total quantity</th>
+                    <th>Performed by</th>
+                    <th className="cell-actions">Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {pagination.paginatedData.map((txn) => {
+                    const detailId = txn.representative_movement_id || txn.movement_id;
+                    const preview = (txn.product_preview || []).filter(Boolean);
+                    const reference = formatDocumentRef(txn.document_ref || txn.movement_ref);
+                    return (
+                      <tr
+                        key={txn.group_key || detailId}
+                        className="clickable-row"
+                        onClick={() => detailId && navigate(`/warehouse/movements/${detailId}`)}
+                      >
+                        <td>
+                          <span className="mono-cell">{reference}</span>
+                        </td>
+                        <td style={{ fontSize: '0.82rem' }}>{formatDisplayDate(txn.movement_date)}</td>
+                        <td><StatusBadge status={txn.type} /></td>
+                        <td>
+                          <strong>{txn.product_count ?? 0}</strong>
+                          {preview.length ? (
+                            <span className="text-ink/70" style={{ display: 'block', fontSize: '0.75rem' }}>
+                              {preview.join(', ')}
+                              {Number(txn.product_count) > preview.length ? '…' : ''}
+                            </span>
+                          ) : null}
+                        </td>
+                        <td style={{
+                          fontWeight: 600,
+                          color: txn.mixed_units
+                            ? undefined
+                            : (Number(txn.total_quantity) > 0 ? '#2A9B6A' : Number(txn.total_quantity) < 0 ? '#dc2626' : undefined),
+                        }}>
+                          {movementTotalLabel(txn)}
+                        </td>
+                        <td>{txn.performed_by_name || '—'}</td>
+                        <td className="cell-actions" onClick={(e) => e.stopPropagation()}>
+                          <div className="table-actions">
+                            <button
+                              className="icon-action-button"
+                              type="button"
+                              title="View"
+                              disabled={!detailId}
+                              onClick={() => detailId && navigate(`/warehouse/movements/${detailId}`)}
+                            >
+                              <NavIcon name="view" />
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
             </div>
-            {requestsFiltered.length ? <><div className="corvex-table-wrapper">
-                <table className="corvex-table corvex-table-transfers">
-                  <thead>
-                    <tr>
-                      <th>Ref</th>
-                      <th>Product</th>
-                      <th>Qty</th>
-                      <th>From</th>
-                      <th>To</th>
-                      <th>Submitted</th>
-                      <th>Status</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {paginated_requests.map(t => <tr key={t.transfer_id} className="clickable-row" onClick={() => navigate(`/warehouse/transfers/${t.transfer_id}`)}>
-                        <td><span className="mono-cell">{t.transfer_ref}</span></td>
-                        <td>{t.product_name}<br /><span className="text-ink/70" style={{ fontSize: '0.75rem' }}>{t.sku}</span></td>
-                        <td>{t.quantity}</td>
-                        <td>{t.source_branch || '—'}</td>
-                        <td>{t.destination_branch || '—'}</td>
-                        <td style={{ fontSize: '0.82rem' }}>{formatDisplayDate(t.submitted_date)}</td>
-                        <td><StatusBadge status={t.status} /></td>
-                      </tr>)}
-                  </tbody>
-                </table>
-              </div><Pagination {...pagination_requests} /></>
-            : <EmptyState
-                title="No requests in this view"
-                description={requestSegment === 'Action required'
-                  ? 'Approved transfers ready for shipment will appear here.'
-                  : 'Create a new request or check another filter.'}
-                actionLabel="New Transfer Request"
-                onAction={() => navigate('/warehouse/transfers/new')}
-              />}
-          </> : <>
-            <div className="transfers-filter-bar" style={{ marginBottom: 12 }}>
-              <div className="segmented-control">
-                {['All', 'Pending Transfers', 'Approved Transfers', 'Completed Transfers', 'Cancelled Transfers'].map(s => <button key={s} className={statusFilter === s ? 'segment active' : 'segment'} type="button" onClick={() => setStatusFilter(s)}>
-                    {s.replace(' Transfers', '')}
-                  </button>)}
-              </div>
-            </div>
-            {historyFiltered.length ? <><div className="corvex-table-wrapper">
-                <table className="corvex-table corvex-table-transfers">
-                  <thead>
-                    <tr>
-                      <th>Ref</th>
-                      <th>Product</th>
-                      <th>Qty</th>
-                      <th>From</th>
-                      <th>To</th>
-                      <th>Submitted</th>
-                      <th>Status</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {paginated_history.map(t => <tr key={t.transfer_id} className="clickable-row" onClick={() => navigate(`/warehouse/transfers/${t.transfer_id}`)}>
-                        <td><span className="mono-cell">{t.transfer_ref}</span></td>
-                        <td>{t.product_name}<br /><span className="text-ink/70" style={{ fontSize: '0.75rem' }}>{t.sku}</span></td>
-                        <td>{t.quantity}</td>
-                        <td>{t.source_branch || '—'}</td>
-                        <td>{t.destination_branch || '—'}</td>
-                        <td style={{ fontSize: '0.82rem' }}>{formatDisplayDate(t.submitted_date)}</td>
-                        <td><StatusBadge status={t.status} /></td>
-                      </tr>)}
-                  </tbody>
-                </table>
-              </div><Pagination {...pagination_history} /></>
-            : <EmptyState title="No transfers found" description="Adjust your filters." />}
-          </>}
+            <Pagination {...pagination} />
+          </>
+        ) : (
+          <EmptyState
+            title={filtersAtDefault ? 'No movements yet' : 'No movements match these filters'}
+            description={
+              filtersAtDefault
+                ? 'Restocks, transfers, stock counts, and sales at your branch will appear here as transactions.'
+                : 'Try a wider date range or clear filters.'
+            }
+            actionLabel={filtersAtDefault ? undefined : 'Clear filters'}
+            onAction={filtersAtDefault ? undefined : clearFilters}
+          />
+        )}
       </section>
-    </div>;
+    </div>
+  );
 }
+
+function MovementDetailPage({
+  movementId,
+  navigate
+}) {
+  const [txn, setTxn] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState('');
+
+  useEffect(() => {
+    async function load() {
+      setLoading(true);
+      setLoadError('');
+      const result = await fetchStockMovementById(movementId);
+      if (result.success) setTxn(result.data);
+      else {
+        setTxn(null);
+        setLoadError(result.message || 'Movement not found.');
+      }
+      setLoading(false);
+    }
+    load();
+  }, [movementId]);
+
+  if (loading) return <LoadingState message="Loading transaction…" />;
+  if (!txn) {
+    return (
+      <EmptyState
+        title={loadError || 'Transaction not found'}
+        actionLabel="Back to Movements"
+        onAction={() => navigate('/warehouse/movements')}
+      />
+    );
+  }
+
+  const related = txn.related_document;
+  const lines = Array.isArray(txn.lines) && txn.lines.length
+    ? txn.lines
+    : [{
+      movement_id: txn.movement_id,
+      product_id: txn.product_id,
+      product_name: txn.product_name,
+      sku: txn.sku,
+      unit_type: txn.unit_type,
+      quantity: txn.quantity,
+      type: txn.type,
+      movement_ref: txn.movement_ref,
+    }];
+
+  const infoRows = [
+    { label: 'Reference', value: <span className="mono-cell">{formatDocumentRef(txn.document_ref || txn.movement_ref)}</span> },
+    { label: 'Type', value: <StatusBadge status={txn.type} /> },
+    { label: 'Date', value: formatDisplayDate(txn.movement_date) },
+    { label: 'Recorded at', value: formatDisplayDateTime(txn.created_at) },
+    { label: 'Performed by', value: txn.performed_by_name || '—' },
+    { label: 'Branch', value: txn.branch_name || '—' },
+    { label: 'Products', value: String(txn.product_count ?? lines.length) },
+    { label: 'Total quantity', value: movementTotalLabel(txn) },
+  ];
+
+  if (related?.status) {
+    infoRows.splice(2, 0, { label: 'Status', value: <StatusBadge status={related.status} /> });
+  }
+
+  return (
+    <div className="page">
+      <section className="panel content-panel relative overflow-hidden">
+        <div className="list-section-header">
+          <div>
+            <h3 style={{ margin: 0 }}>Movement transaction</h3>
+            <p className="text-ink/70" style={{ margin: '4px 0 0', fontSize: '0.88rem' }}>
+              <span className="mono-cell">{formatDocumentRef(txn.document_ref || txn.movement_ref)}</span>
+              {' · '}{txn.type || '—'}
+            </p>
+          </div>
+          <StatusBadge status={txn.type} />
+        </div>
+        <DetailRowsTable rows={infoRows} />
+      </section>
+
+      <section className="panel content-panel relative overflow-hidden">
+        <h3 style={{ marginTop: 0 }}>Product details</h3>
+        <div className="corvex-table-wrapper">
+          <table className="corvex-table">
+            <thead>
+              <tr>
+                <th>Product</th>
+                <th>SKU</th>
+                <th>Quantity</th>
+                <th>Unit</th>
+                <th>Movement</th>
+              </tr>
+            </thead>
+            <tbody>
+              {lines.map((line) => (
+                <tr key={line.movement_id || `${line.product_id}-${line.quantity}`}>
+                  <td>
+                    {line.product_id ? (
+                      <button
+                        className="button ghost"
+                        type="button"
+                        style={{ padding: 0 }}
+                        onClick={() => navigate(`/warehouse/product/${line.product_id}`)}
+                      >
+                        {line.product_name || '—'}
+                      </button>
+                    ) : (line.product_name || '—')}
+                  </td>
+                  <td><span className="mono-cell">{line.sku || '—'}</span></td>
+                  <td style={{
+                    fontWeight: 600,
+                    color: Number(line.quantity) > 0 ? '#2A9B6A' : Number(line.quantity) < 0 ? '#dc2626' : undefined,
+                  }}>
+                    {formatSignedQty(line.quantity)}
+                  </td>
+                  <td>{line.unit_type || 'Unit'}</td>
+                  <td><StatusBadge status={line.type || txn.type} /></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      {related?.kind === 'restock' ? (
+        <section className="panel content-panel relative overflow-hidden">
+          <h3 style={{ marginTop: 0 }}>Restock details</h3>
+          <DetailRowsTable rows={[
+            { label: 'Restock ref', value: <span className="mono-cell">{formatDocumentRef(related.ref)}</span> },
+            { label: 'Delivery ref', value: <span className="mono-cell">{formatDocumentRef(related.delivery_ref)}</span> },
+            { label: 'Supplier', value: related.supplier_name || '—' },
+            { label: 'Received date', value: related.received_date ? formatDisplayDate(related.received_date) : '—' },
+            { label: 'Recorded by', value: related.recorded_by_name || '—' },
+            ...(related.notes ? [{ label: 'Notes', value: related.notes }] : []),
+          ]} />
+        </section>
+      ) : null}
+
+      {related?.kind === 'transfer' ? (
+        <section className="panel content-panel relative overflow-hidden">
+          <h3 style={{ marginTop: 0 }}>Transfer details</h3>
+          <DetailRowsTable rows={[
+            { label: 'Transfer ref', value: <span className="mono-cell">{formatDocumentRef(related.ref)}</span> },
+            { label: 'Status', value: related.status ? <StatusBadge status={related.status} /> : '—' },
+            { label: 'Source branch', value: related.source_branch || '—' },
+            { label: 'Destination branch', value: related.destination_branch || '—' },
+            { label: 'Submitted by', value: related.submitted_by_name || '—' },
+            { label: 'Approved by', value: related.approved_by_name || '—' },
+            { label: 'Completed', value: related.completed_date ? formatDisplayDate(related.completed_date) : '—' },
+            ...(related.notes ? [{ label: 'Notes', value: related.notes }] : []),
+          ]} />
+        </section>
+      ) : null}
+
+      {related?.kind === 'stock_count' ? (
+        <section className="panel content-panel relative overflow-hidden">
+          <h3 style={{ marginTop: 0 }}>Stock count details</h3>
+          <DetailRowsTable rows={[
+            { label: 'Count ref', value: <span className="mono-cell">{formatDocumentRef(related.ref)}</span> },
+            { label: 'Status', value: related.status ? <StatusBadge status={related.status} /> : '—' },
+            { label: 'Counted by', value: related.counted_by_name || '—' },
+            { label: 'Counted at', value: related.created_at ? formatDisplayDateTime(related.created_at) : '—' },
+            ...(related.notes ? [{ label: 'Session notes', value: related.notes }] : []),
+          ]} />
+          {Array.isArray(related.lines) && related.lines.length ? (
+            <div className="corvex-table-wrapper" style={{ marginTop: 12 }}>
+              <table className="corvex-table">
+                <thead>
+                  <tr>
+                    <th>Product</th>
+                    <th>System qty</th>
+                    <th>Physical</th>
+                    <th>Variance</th>
+                    <th>Notes</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {related.lines.map((line) => {
+                    const v = Number(line.variance) || 0;
+                    return (
+                      <tr key={line.line_id || line.product_id}>
+                        <td>
+                          <strong>{line.product_name || '—'}</strong>
+                          <span className="text-ink/70" style={{ display: 'block', fontSize: '0.75rem' }}>
+                            {line.sku || '—'}
+                          </span>
+                        </td>
+                        <td>{line.system_quantity}</td>
+                        <td>{line.physical_quantity}</td>
+                        <td style={{
+                          fontWeight: 600,
+                          color: v !== 0 ? (v > 0 ? '#2A9B6A' : '#dc2626') : undefined,
+                        }}>
+                          {formatSignedQty(v)}
+                        </td>
+                        <td>{line.notes || '—'}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          ) : null}
+        </section>
+      ) : null}
+
+      {(related?.kind === 'sale_ref' || related?.kind === 'sale_reversal') ? (
+        <section className="panel content-panel relative overflow-hidden">
+          <h3 style={{ marginTop: 0 }}>Sale reference</h3>
+          <DetailRowsTable rows={[
+            { label: 'Reference', value: <span className="mono-cell">{formatDocumentRef(related.ref)}</span> },
+          ]} />
+        </section>
+      ) : null}
+
+      <div className="flex flex-wrap justify-end gap-2 mt-4">
+        <button className="button ghost" type="button" onClick={() => navigate('/warehouse/movements')}>
+          Back to Movements
+        </button>
+        {related?.kind === 'restock' && related.id ? (
+          <button
+            className="button secondary"
+            type="button"
+            onClick={() => navigate(`/warehouse/restock-history/${related.id}`)}
+          >
+            Open restock
+          </button>
+        ) : null}
+        {related?.kind === 'transfer' && related.id ? (
+          <button
+            className="button secondary"
+            type="button"
+            onClick={() => navigate(`/warehouse/transfers/${related.id}`)}
+          >
+            Open transfer
+          </button>
+        ) : null}
+        {related?.kind === 'stock_count' && related.id ? (
+          <button
+            className="button secondary"
+            type="button"
+            onClick={() => navigate(`/warehouse/stock-counts/${related.id}`)}
+          >
+            Open stock count
+          </button>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+function TransferRequestNewPage({ navigate, showToast }) {
+  const params = new URLSearchParams(window.location.search);
+  return (
+    <TransferDocumentForm
+      navigate={navigate}
+      showToast={showToast}
+      initialProductId={params.get('product') || ''}
+    />
+  );
+}
+
+function transferTouchesBranch(t, branchId) {
+  return Number(t.source_branch_id) === Number(branchId)
+    || Number(t.destination_branch_id) === Number(branchId);
+}
+
+function transferIsOpen(t) {
+  return isTransferPendingApproval(t.status) || t.status === 'Approved';
+}
+
+const TRANSFER_REQUEST_SEGMENTS = ['Action required', 'Awaiting approval', 'Incoming', 'All'];
+
+function TransfersPage({
+  navigate,
+  transferTab: transferTabProp = 'requests',
+  transferSegment: transferSegmentProp = 'Action required',
+}) {
+  const user = getCurrentUser();
+  const branchId = user?.branch?.id;
+  const branchName = user?.branch?.name || 'your branch';
+  const mainTab = transferTabProp === 'history' ? 'history' : 'requests';
+  const [requestSegment, setRequestSegment] = useState(
+    TRANSFER_REQUEST_SEGMENTS.includes(transferSegmentProp)
+      ? transferSegmentProp
+      : 'Action required'
+  );
+
+  useEffect(() => {
+    if (TRANSFER_REQUEST_SEGMENTS.includes(transferSegmentProp)) {
+      setRequestSegment(transferSegmentProp);
+    }
+  }, [transferSegmentProp]);
+  const [statusFilter, setStatusFilter] = useState('Closed');
+  const [search, setSearch] = useState('');
+  const [destinationFilter, setDestinationFilter] = useState('All');
+  const [transfers, setTransfers] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [reloadTick, setReloadTick] = useState(0);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function load() {
+      setLoading(true);
+      const result = await fetchInventoryTransfers();
+      if (!cancelled && result.success) setTransfers(result.data || []);
+      if (!cancelled) setLoading(false);
+    }
+    load();
+    return () => { cancelled = true; };
+  }, [reloadTick]);
+
+  useEffect(() => {
+    const onFocus = () => setReloadTick((n) => n + 1);
+    window.addEventListener('focus', onFocus);
+    return () => window.removeEventListener('focus', onFocus);
+  }, []);
+
+  const setMainTab = (tab) => {
+    if (tab === 'history') {
+      navigate('/warehouse/transfers?tab=history');
+      return;
+    }
+    navigate(`/warehouse/transfers?tab=requests&segment=${encodeURIComponent(requestSegment)}`);
+  };
+
+  const setRequestSegmentAndUrl = (segment) => {
+    setRequestSegment(segment);
+    navigate(`/warehouse/transfers?tab=requests&segment=${encodeURIComponent(segment)}`);
+  };
+
+  const counts = useMemo(() => {
+    const awaiting = transfers.filter((t) => isTransferPendingApproval(t.status)
+      && Number(t.source_branch_id) === Number(branchId)).length;
+    const readyToShip = transfers.filter((t) => t.status === 'Approved'
+      && Number(t.source_branch_id) === Number(branchId)).length;
+    // Incoming = approved inbound only (waiting for source to ship). Not pending approval.
+    const incoming = transfers.filter((t) => t.status === 'Approved'
+      && Number(t.destination_branch_id) === Number(branchId)
+      && Number(t.source_branch_id) !== Number(branchId)).length;
+    const openAll = transfers.filter((t) => transferTouchesBranch(t, branchId) && transferIsOpen(t)).length;
+    return { awaiting, readyToShip, incoming, openAll };
+  }, [transfers, branchId]);
+
+  const destinationOptions = useMemo(() => {
+    const names = [...new Set(transfers.map((t) => t.destination_branch).filter(Boolean))].sort();
+    return names;
+  }, [transfers]);
+
+  const requestsFiltered = useMemo(() => {
+    let list = [];
+    if (requestSegment === 'Action required') {
+      list = transfers.filter((t) => t.status === 'Approved'
+        && Number(t.source_branch_id) === Number(branchId));
+    } else if (requestSegment === 'Awaiting approval') {
+      list = transfers.filter((t) => isTransferPendingApproval(t.status)
+        && Number(t.source_branch_id) === Number(branchId));
+    } else if (requestSegment === 'Incoming') {
+      list = transfers.filter((t) => t.status === 'Approved'
+        && Number(t.destination_branch_id) === Number(branchId)
+        && Number(t.source_branch_id) !== Number(branchId));
+    } else {
+      // All open transfers that touch this branch (outbound + inbound).
+      list = transfers.filter((t) => transferTouchesBranch(t, branchId) && transferIsOpen(t));
+    }
+    const q = search.trim().toLowerCase();
+    if (q) {
+      list = list.filter((t) => String(t.transfer_ref || '').toLowerCase().includes(q)
+        || String(t.product_name || '').toLowerCase().includes(q)
+        || String(t.destination_branch || '').toLowerCase().includes(q));
+    }
+    if (destinationFilter !== 'All') {
+      list = list.filter((t) => t.destination_branch === destinationFilter);
+    }
+    return list;
+  }, [requestSegment, transfers, branchId, search, destinationFilter]);
+
+  const historyFiltered = useMemo(() => {
+    let list = transfers.filter((t) => transferTouchesBranch(t, branchId));
+    if (statusFilter === 'Closed') {
+      list = list.filter((t) => t.status === 'Completed' || t.status === 'Rejected');
+    } else if (statusFilter === 'Pending') {
+      list = list.filter((t) => isTransferPendingApproval(t.status));
+    } else if (statusFilter === 'Approved') {
+      list = list.filter((t) => t.status === 'Approved');
+    } else if (statusFilter === 'Completed') {
+      list = list.filter((t) => t.status === 'Completed');
+    } else if (statusFilter === 'Rejected') {
+      list = list.filter((t) => t.status === 'Rejected');
+    }
+    const q = search.trim().toLowerCase();
+    if (q) {
+      list = list.filter((t) => String(t.transfer_ref || '').toLowerCase().includes(q)
+        || String(t.product_name || '').toLowerCase().includes(q)
+        || String(t.destination_branch || '').toLowerCase().includes(q));
+    }
+    if (destinationFilter !== 'All') {
+      list = list.filter((t) => t.destination_branch === destinationFilter);
+    }
+    return list;
+  }, [statusFilter, transfers, branchId, search, destinationFilter]);
+
+  const activeList = mainTab === 'history' ? historyFiltered : requestsFiltered;
+  const pagination = usePagination(activeList, {
+    pageSize: PAGE_SIZE,
+    resetKey: `${mainTab}|${requestSegment}|${statusFilter}|${search}|${destinationFilter}`,
+  });
+
+  const emptyCopy = (() => {
+    if (mainTab === 'history') {
+      return {
+        title: 'No transfers match',
+        description: 'Adjust filters to see completed or rejected transfers.',
+        actionLabel: undefined,
+      };
+    }
+    if (requestSegment === 'Action required') {
+      return {
+        title: 'No approved transfers waiting to ship',
+        description: 'When a manager approves your outbound request, confirm shipment here.',
+        actionLabel: undefined,
+      };
+    }
+    if (requestSegment === 'Awaiting approval') {
+      return {
+        title: 'No requests waiting on a manager',
+        description: 'Submitted transfers stay here until Branch Head or OM approves in Approval Center.',
+        actionLabel: 'New Transfer',
+      };
+    }
+    if (requestSegment === 'Incoming') {
+      return {
+        title: 'No inbound transfers right now',
+        description: 'Approved transfers coming to your branch appear here. You cannot approve—wait for the source warehouse to ship.',
+        actionLabel: undefined,
+      };
+    }
+    return {
+      title: 'No open transfers',
+      description: 'Open outbound and inbound transfers for your branch will appear here.',
+      actionLabel: 'New Transfer',
+    };
+  })();
+
+  const openDetail = (id) => {
+    const from = mainTab === 'history' ? 'history' : 'requests';
+    navigate(`/warehouse/transfers/${id}?from=${from}`);
+  };
+
+  if (loading && !transfers.length) return <LoadingState message="Loading transfers…" />;
+
+  return (
+    <div className="page">
+      <section className="panel content-panel relative overflow-hidden">
+        <div className="list-section-header">
+          <div>
+            <h3 style={{ margin: 0 }}>Transfers</h3>
+            <p className="text-ink/70" style={{ margin: '4px 0 0', fontSize: '0.88rem' }}>
+              Request stock moves from your branch, track approval, and confirm shipment.
+              {' · '}From: <strong>{branchName}</strong>
+            </p>
+          </div>
+          <button className="button whitespace-nowrap" type="button" onClick={() => navigate('/warehouse/transfers/new')}>
+            + New Transfer
+          </button>
+        </div>
+
+        <div className="transfers-toolbar" style={{ marginBottom: 12 }}>
+          <div className="segmented-control">
+            <button className={mainTab === 'requests' ? 'segment active' : 'segment'} type="button" onClick={() => setMainTab('requests')}>
+              Active
+            </button>
+            <button className={mainTab === 'history' ? 'segment active' : 'segment'} type="button" onClick={() => setMainTab('history')}>
+              History
+            </button>
+          </div>
+        </div>
+
+        {mainTab === 'requests' ? (
+          <div className="transfers-filter-bar" style={{ marginBottom: 12 }}>
+            <div className="segmented-control">
+              {[
+                { key: 'Action required', label: `Action required (${counts.readyToShip})` },
+                { key: 'Awaiting approval', label: `Awaiting approval (${counts.awaiting})` },
+                { key: 'Incoming', label: `Incoming (${counts.incoming})` },
+                { key: 'All', label: `All (${counts.openAll})` },
+              ].map((s) => (
+                <button
+                  key={s.key}
+                  className={requestSegment === s.key ? 'segment active' : 'segment'}
+                  type="button"
+                  onClick={() => setRequestSegmentAndUrl(s.key)}
+                >
+                  {s.label}
+                </button>
+              ))}
+            </div>
+          </div>
+        ) : null}
+
+        <div className="list-section-controls" style={{ marginBottom: 12 }}>
+          <input
+            className="filter-input search"
+            type="search"
+            placeholder="Search by transfer ref or product"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            aria-label="Search transfers"
+          />
+          {mainTab === 'history' ? (
+            <select
+              className="filter-select"
+              value={statusFilter}
+              onChange={(e) => setStatusFilter(e.target.value)}
+              aria-label="Filter by status"
+            >
+              {['Closed', 'All', 'Pending', 'Approved', 'Completed', 'Rejected'].map((s) => (
+                <option key={s} value={s}>{s === 'All' ? 'All statuses' : s}</option>
+              ))}
+            </select>
+          ) : null}
+          <select
+            className="filter-select"
+            value={destinationFilter}
+            onChange={(e) => setDestinationFilter(e.target.value)}
+            aria-label="Filter by destination"
+          >
+            <option value="All">All destinations</option>
+            {destinationOptions.map((name) => (
+              <option key={name} value={name}>{name}</option>
+            ))}
+          </select>
+        </div>
+
+        {activeList.length ? (
+          <>
+            <div className="corvex-table-wrapper">
+              <table className="corvex-table corvex-table-transfers">
+                <thead>
+                  <tr>
+                    <th>Ref</th>
+                    <th>Route</th>
+                    <th>Products</th>
+                    <th>Total units</th>
+                    <th>Submitted</th>
+                    <th>By</th>
+                    <th>Status</th>
+                    <th className="cell-actions">Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {pagination.paginatedData.map((t) => {
+                    const lineCount = Number(t.line_count) || 0;
+                    return (
+                      <tr
+                        key={t.transfer_id}
+                        className="clickable-row"
+                        onClick={() => openDetail(t.transfer_id)}
+                      >
+                        <td>
+                          <span className="mono-cell">{formatDocumentRef(t.transfer_ref)}</span>
+                          {lineCount > 1 ? (
+                            <span className="text-ink/70" style={{ display: 'block', fontSize: '0.75rem' }}>
+                              {t.product_name || 'Multiple products'}
+                            </span>
+                          ) : null}
+                        </td>
+                        <td style={{ fontSize: '0.85rem' }}>
+                          {t.source_branch || '—'} → {t.destination_branch || '—'}
+                        </td>
+                        <td>{lineCount}</td>
+                        <td>{t.total_quantity ?? t.quantity ?? 0}</td>
+                        <td style={{ fontSize: '0.82rem' }}>{formatDisplayDate(t.submitted_date)}</td>
+                        <td>{t.submitted_by_name || '—'}</td>
+                        <td><StatusBadge status={t.status} /></td>
+                        <td className="cell-actions" onClick={(e) => e.stopPropagation()}>
+                          <div className="table-actions">
+                            <button
+                              className="icon-action-button"
+                              type="button"
+                              title="View"
+                              onClick={() => openDetail(t.transfer_id)}
+                            >
+                              <NavIcon name="view" />
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+            <Pagination {...pagination} />
+          </>
+        ) : (
+          <EmptyState
+            title={emptyCopy.title}
+            description={emptyCopy.description}
+            actionLabel={emptyCopy.actionLabel}
+            onAction={emptyCopy.actionLabel ? () => navigate('/warehouse/transfers/new') : undefined}
+          />
+        )}
+      </section>
+    </div>
+  );
+}
+
 function TransferDetailPage({
   transferId,
   navigate,
   showToast,
-  backPath = '/warehouse/transfers?tab=requests',
-  backLabel = 'Back to Transfers',
 }) {
   const currentUser = getCurrentUser();
+  const fromTab = new URLSearchParams(window.location.search).get('from');
+  const backPath = fromTab === 'history'
+    ? '/warehouse/transfers?tab=history'
+    : '/warehouse/transfers?tab=requests';
   const [transfer, setTransfer] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [completing, setCompleting] = useState(false);
+
   const reload = async () => {
     setLoading(true);
     const result = await fetchInventoryTransferById(transferId);
     if (result.success) setTransfer(result.data);
+    else setTransfer(null);
     setLoading(false);
   };
+
   useEffect(() => {
     reload();
   }, [transferId]);
-  if (loading) return <LoadingState message="Loading transfer..." />;
-  if (!transfer) return <EmptyState title="Transfer not found" actionLabel="Back" onAction={() => navigate(backPath)} />;
+
+  if (loading) return <LoadingState message="Loading transfer…" />;
+  if (!transfer) {
+    return <EmptyState title="Transfer not found" actionLabel="Back" onAction={() => navigate(backPath)} />;
+  }
+
   const workflowSteps = ['Submitted', 'Manager approval', 'Approved', 'Completed'];
   const activeStep = transferWorkflowStepIndex(transfer.status);
   const isSourceBranch = currentUser?.branch?.id != null
     && Number(transfer.source_branch_id) === Number(currentUser.branch.id);
-  return <div className="page">
-      <StatsGrid stats={[{
-      label: 'Transfer Ref',
-      value: transfer.transfer_ref
-    }, {
-      label: 'Product',
-      value: transfer.product_name
-    }, {
-      label: 'Quantity',
-      value: String(transfer.quantity)
-    }, {
-      label: 'Status',
-      value: transfer.status
-    }]} />
+  const isDestinationBranch = currentUser?.branch?.id != null
+    && Number(transfer.destination_branch_id) === Number(currentUser.branch.id);
+  const lines = transfer.lines || [];
+  const lineCount = Number(transfer.line_count ?? lines.length) || 0;
+  const totalQty = Number(
+    lines.length
+      ? (transfer.total_quantity ?? transfer.quantity ?? 0)
+      : (transfer.total_quantity || transfer.quantity || transfer.header_quantity || 0)
+  );
+  const isRejected = transfer.status === 'Rejected';
+  const isPending = isTransferPendingApproval(transfer.status);
+  const canComplete = transfer.status === 'Approved' && isSourceBranch && lines.length > 0;
+
+  const confirmComplete = async () => {
+    if (!lines.length) {
+      showToast('This transfer has no product lines to ship. Contact support to repair the document.', 'error');
+      return;
+    }
+    const linePreview = lines.slice(0, 8).map((l) => `• ${l.product_name}: ${l.quantity}`).join('\n');
+    const more = lines.length > 8 ? `\n…and ${lines.length - 8} more` : '';
+    const ok = window.confirm(
+      `Confirm shipment for ${transfer.transfer_ref}?\n\n`
+      + `This will deduct stock at ${transfer.source_branch} and add at ${transfer.destination_branch}.\n\n`
+      + `${lineCount} product(s), ${totalQty} total units:\n${linePreview}${more}`
+    );
+    if (!ok) return;
+    setCompleting(true);
+    const result = await patchInventoryTransfer(transferId, { status: 'Completed' });
+    setCompleting(false);
+    if (result.success) {
+      showToast(result.message || 'Transfer completed.', 'success');
+      reload();
+    } else {
+      showToast(result.message || 'Complete failed.', 'error');
+    }
+  };
+
+  return (
+    <div className="page">
       <section className="panel content-panel relative overflow-hidden">
-        <DetailRowsTable rows={[
-          { label: 'Product', value: <>{transfer.product_name} <span className="text-ink/70" style={{ fontSize: '0.78rem' }}>({transfer.sku})</span></> },
-          { label: 'Source Branch', value: transfer.source_branch },
-          { label: 'Destination Branch', value: transfer.destination_branch },
-          { label: 'Submitted By', value: transfer.submitted_by_name || '—' },
-          { label: 'Submitted Date', value: formatDisplayDate(transfer.submitted_date) },
-          { label: 'Created At', value: formatDisplayDateTime(transfer.created_at) },
-          { label: 'Updated At', value: formatDisplayDateTime(transfer.updated_at) },
-          ...(transfer.approved_by_name ? [{ label: 'Approved By', value: transfer.approved_by_name }] : []),
-          ...(transfer.completed_date ? [{ label: 'Completed Date', value: formatDisplayDate(transfer.completed_date) }] : []),
-          ...(transfer.approval_info ? [{ label: 'Approval Info', value: transfer.approval_info }] : []),
-        ]} />
-        {transfer.status !== 'Rejected' ? <div className="approval-workflow">
-            <h4 className="subsection-title">Approval Workflow</h4>
+        <div className="flex flex-col md:flex-row justify-between gap-3 items-start md:items-center mb-3">
+          <div>
+            <h3 style={{ margin: 0 }}>
+              <span className="mono-cell">{formatDocumentRef(transfer.transfer_ref)}</span>
+            </h3>
+            <p style={{ margin: '6px 0 0' }}>
+              {transfer.source_branch} → {transfer.destination_branch}
+              {' · '}{lineCount} product{(lineCount === 1) ? '' : 's'}
+              {' · '}{totalQty} units
+            </p>
+          </div>
+          <StatusBadge status={transfer.status} />
+        </div>
+
+        {isRejected ? (
+          <div className="panel content-panel" style={{ marginBottom: 12, borderColor: '#dc2626' }}>
+            <p style={{ margin: 0, fontWeight: 600, color: '#dc2626' }}>Rejected</p>
+            <p className="muted" style={{ margin: '4px 0 0' }}>
+              {transfer.approval_info || 'No rejection reason was provided.'}
+            </p>
+          </div>
+        ) : (
+          <div className="approval-workflow">
+            <h4 className="subsection-title">Workflow</h4>
             <div className="workflow-steps">
               {workflowSteps.map((step, index) => (
                 <span
@@ -1874,118 +2463,333 @@ function TransferDetailPage({
                 </span>
               ))}
             </div>
-          </div> : null}
+          </div>
+        )}
+
+        <DetailRowsTable rows={[
+          { label: 'Submitted by', value: transfer.submitted_by_name || '—' },
+          { label: 'Submitted', value: formatDisplayDate(transfer.submitted_date) },
+          ...(transfer.notes ? [{ label: 'Notes', value: transfer.notes }] : []),
+          ...(transfer.approved_by_name ? [{ label: 'Approved by', value: transfer.approved_by_name }] : []),
+          ...(transfer.completed_date ? [{ label: 'Completed', value: formatDisplayDate(transfer.completed_date) }] : []),
+          ...(transfer.approval_info && !isRejected ? [{ label: 'Approval note', value: transfer.approval_info }] : []),
+        ]} />
       </section>
-      {(transfer.status === 'Pending Approval' || transfer.status === 'Submitted') ? (
-        <section className="panel content-panel">
-          <p className="muted">
-            This request is waiting for <strong>branch manager</strong> or <strong>operating manager</strong> approval
-            (Approval Center). Warehouse staff cannot approve their own transfers — that separation prevents stock
-            leaving the branch without oversight.
-          </p>
-        </section>
-      ) : null}
-      {transfer.status === 'Approved' && isSourceBranch ? (
-        <section className="panel content-panel">
-          <p className="muted">Managers approved this transfer. Confirm physical shipment to deduct source stock and add destination stock.</p>
-        </section>
-      ) : null}
-      <div className="flex justify-end gap-2 mt-4">
-        <button className="button ghost" type="button" onClick={() => navigate(backPath)}>{backLabel}</button>
-        {transfer.status === 'Approved' && isSourceBranch ? (
-          <button className="button" type="button" onClick={async () => {
-            const result = await patchInventoryTransfer(transferId, { status: 'Completed' });
-            if (result.success) {
-              showToast(result.message || 'Transfer completed.', 'success');
-              reload();
-            } else showToast(result.message || 'Complete failed.', 'error');
-          }}
-          >
-            Confirm shipment & complete
-          </button>
-        ) : null}
-      </div>
-    </div>;
-}
-function RestockHistoryPage({
-  navigate
-}) {
-  const [supplier, setSupplier] = useState('All');
-  const [productFilter, setProductFilter] = useState('All');
-  const [dateFrom, setDateFrom] = useState('');
-  const [dateTo, setDateTo] = useState('');
-  const [restocks, setRestocks] = useState([]);
-  const [loading, setLoading] = useState(true);
-  useEffect(() => {
-    async function load() {
-      setLoading(true);
-      const result = await fetchRestocks();
-      if (result.success) setRestocks(result.data);
-      setLoading(false);
-    }
-    load();
-  }, []);
-  const suppliers = ['All', ...new Set(restocks.map(r => r.supplier_name))];
-  const productNames = ['All', ...new Set(restocks.map(r => r.product_name))];
-  const filtered = useMemo(() => restocks.filter(r => {
-    const matchSupplier = supplier === 'All' || r.supplier_name === supplier;
-    const matchProduct = productFilter === 'All' || r.product_name === productFilter;
-    const matchFrom = !dateFrom || r.received_date >= dateFrom;
-    const matchTo = !dateTo || r.received_date <= dateTo;
-    return matchSupplier && matchProduct && matchFrom && matchTo;
-  }), [supplier, productFilter, dateFrom, dateTo, restocks]);
-  const pagination_filtered = usePagination(filtered);
-  const paginated_filtered = pagination_filtered.paginatedData;
-  if (loading) return <LoadingState message="Loading restock history..." />;
-  return <div className="page">
+
       <section className="panel content-panel relative overflow-hidden">
-        <div className="flex flex-col md:flex-row justify-between gap-4 items-start md:items-center mb-4"><h3>Restock Records</h3></div>
-        <div className="list-section-controls" style={{ marginBottom: 12 }}>
-          <select className="filter-select" value={supplier} onChange={e => setSupplier(e.target.value)}>
-            {suppliers.map(s => <option key={s} value={s}>{s === 'All' ? 'All Suppliers' : s}</option>)}
-          </select>
-          <select className="filter-select" value={productFilter} onChange={e => setProductFilter(e.target.value)}>
-            {productNames.map(p => <option key={p} value={p}>{p === 'All' ? 'All Products' : p}</option>)}
-          </select>
-          <input className="filter-input" type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)} aria-label="From date" />
-          <input className="filter-input" type="date" value={dateTo} onChange={e => setDateTo(e.target.value)} aria-label="To date" />
+        <div className="list-section-header">
+          <h3 style={{ margin: 0 }}>Transfer lines</h3>
         </div>
-        {filtered.length ? <><div className="corvex-table-wrapper">
+        {lines.length ? (
+          <div className="corvex-table-wrapper">
             <table className="corvex-table">
               <thead>
                 <tr>
-                  <th>Delivery Ref</th>
+                  <th>SKU</th>
                   <th>Product</th>
-                  <th>Supplier</th>
-                  <th>Quantity</th>
-                  <th>Date Received</th>
+                  <th>Qty</th>
                 </tr>
               </thead>
               <tbody>
-                {paginated_filtered.map(r => <tr key={r.restock_id} className="clickable-row" onClick={() => navigate(`/warehouse/restock-history/${r.restock_id}`)}>
-                    <td><span style={{
-                    fontFamily: 'monospace',
-                    fontSize: '0.82rem'
-                  }}>{r.delivery_ref}</span></td>
-                    <td>{r.product_name}</td>
-                    <td>{r.supplier_name}</td>
-                    <td style={{
-                  color: '#2A9B6A',
-                  fontWeight: 600
-                }}>+{r.quantity}</td>
-                    <td>{formatDisplayDate(r.received_date)}</td>
-                  </tr>)}
+                {lines.map((line) => (
+                  <tr key={line.line_id || line.product_id}>
+                    <td><span className="mono-cell">{line.sku || '—'}</span></td>
+                    <td><strong>{line.product_name}</strong></td>
+                    <td>{line.quantity}</td>
+                  </tr>
+                ))}
               </tbody>
             </table>
-          </div><Pagination {...pagination_filtered} /></>
-        : <EmptyState title="No restock records found" description="Adjust your filters." />}
+          </div>
+        ) : (
+          <EmptyState title="No lines" description="This transfer has no product lines." />
+        )}
       </section>
-    </div>;
+
+      {isPending ? (
+        <section className="panel content-panel">
+          <p className="muted" style={{ margin: 0 }}>
+            Waiting for <strong>Branch Head</strong> or <strong>Operating Manager</strong> approval in Approval Center.
+            Warehouse staff cannot approve transfers.
+          </p>
+        </section>
+      ) : null}
+
+      {transfer.status === 'Approved' && isSourceBranch && lines.length > 0 ? (
+        <section className="panel content-panel">
+          <p className="muted" style={{ margin: 0 }}>
+            Approved. Confirm shipment to move stock for all lines from {transfer.source_branch} to {transfer.destination_branch}.
+          </p>
+        </section>
+      ) : null}
+
+      {transfer.status === 'Approved' && isSourceBranch && lines.length === 0 ? (
+        <section className="panel content-panel">
+          <p className="muted" style={{ margin: 0 }}>
+            This approved transfer has no product lines, so shipment cannot be completed.
+            Open the document again after repair, or create a new multi-line transfer.
+          </p>
+        </section>
+      ) : null}
+
+      {transfer.status === 'Approved' && isDestinationBranch && !isSourceBranch ? (
+        <section className="panel content-panel">
+          <p className="muted" style={{ margin: 0 }}>
+            Waiting for <strong>{transfer.source_branch}</strong> to ship. You cannot complete this transfer from the destination branch.
+          </p>
+        </section>
+      ) : null}
+
+      <div className="flex flex-wrap justify-end gap-2 mt-4">
+        <button className="button ghost" type="button" onClick={() => navigate(backPath)}>
+          Back to Transfers
+        </button>
+        {transfer.status === 'Completed' ? (
+          <button
+            className="button secondary"
+            type="button"
+            onClick={() => navigate(`/warehouse/movements?search=${encodeURIComponent(transfer.transfer_ref || '')}`)}
+          >
+            View related stock movements
+          </button>
+        ) : null}
+        {canComplete ? (
+          <button className="button" type="button" disabled={completing} onClick={confirmComplete}>
+            {completing ? 'Completing…' : 'Confirm shipment & complete'}
+          </button>
+        ) : null}
+      </div>
+    </div>
+  );
 }
-function RestockDetailPage({
-  restockId,
-  navigate
-}) {
+function defaultRestockDateRange() {
+  const to = new Date();
+  const from = new Date();
+  from.setDate(from.getDate() - 90);
+  const iso = (d) => d.toISOString().slice(0, 10);
+  return { dateFrom: iso(from), dateTo: iso(to) };
+}
+
+function RestockHistoryPage({ navigate }) {
+  const user = getCurrentUser();
+  const branchName = user?.branch?.name || 'your branch';
+  const urlProductId = new URLSearchParams(window.location.search).get('product') || '';
+  const [defaults] = useState(() => defaultRestockDateRange());
+  const [supplier, setSupplier] = useState('All');
+  const [dateFrom, setDateFrom] = useState(defaults.dateFrom);
+  const [dateTo, setDateTo] = useState(defaults.dateTo);
+  const [searchInput, setSearchInput] = useState('');
+  const [search, setSearch] = useState('');
+  const [productFilter, setProductFilter] = useState(urlProductId);
+  const [restocks, setRestocks] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [reloadTick, setReloadTick] = useState(0);
+
+  useEffect(() => {
+    const timer = setTimeout(() => setSearch(searchInput.trim()), 300);
+    return () => clearTimeout(timer);
+  }, [searchInput]);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function load() {
+      setLoading(true);
+      const params = {};
+      if (dateFrom) params.date_from = dateFrom;
+      if (dateTo) params.date_to = dateTo;
+      if (search) params.search = search;
+      if (productFilter) params.product_id = productFilter;
+      const result = await fetchRestocks(params);
+      if (!cancelled) {
+        setRestocks(result.success ? (result.data || []) : []);
+        setLoading(false);
+      }
+    }
+    load();
+    return () => { cancelled = true; };
+  }, [dateFrom, dateTo, search, productFilter, reloadTick]);
+
+  useEffect(() => {
+    const onFocus = () => setReloadTick((n) => n + 1);
+    window.addEventListener('focus', onFocus);
+    return () => window.removeEventListener('focus', onFocus);
+  }, []);
+
+  const suppliers = useMemo(
+    () => ['All', ...new Set(restocks.map((r) => r.supplier_name).filter(Boolean)).values()],
+    [restocks]
+  );
+
+  const filtered = useMemo(() => {
+    if (supplier === 'All') return restocks;
+    return restocks.filter((r) => r.supplier_name === supplier);
+  }, [restocks, supplier]);
+
+  const filtersAtDefault = supplier === 'All'
+    && dateFrom === defaults.dateFrom
+    && dateTo === defaults.dateTo
+    && !search
+    && !productFilter;
+
+  const clearFilters = () => {
+    setSupplier('All');
+    setDateFrom(defaults.dateFrom);
+    setDateTo(defaults.dateTo);
+    setSearchInput('');
+    setSearch('');
+    setProductFilter('');
+  };
+
+  const pagination = usePagination(filtered, {
+    pageSize: PAGE_SIZE,
+    resetKey: `${supplier}|${dateFrom}|${dateTo}|${search}|${productFilter}`,
+  });
+
+  if (loading && !restocks.length) return <LoadingState message="Loading restocks…" />;
+
+  return (
+    <div className="page">
+      <section className="panel content-panel relative overflow-hidden">
+        <div className="list-section-header">
+          <div>
+            <h3 style={{ margin: 0 }}>Restock</h3>
+            <p className="text-ink/70" style={{ margin: '4px 0 0', fontSize: '0.88rem' }}>
+              Deliveries recorded for your branch · {branchName}
+            </p>
+            <p className="text-ink/70" style={{ margin: '4px 0 0', fontSize: '0.82rem' }}>
+              Record a goods receipt to increase stock immediately. No manager approval required.
+            </p>
+          </div>
+          <button className="button whitespace-nowrap" type="button" onClick={() => navigate('/warehouse/restock-history/new')}>
+            + New Restock
+          </button>
+        </div>
+
+        <div className="list-section-controls" style={{ marginBottom: 12 }}>
+          <input
+            className="filter-input search"
+            type="search"
+            placeholder="Search delivery ref or restock ref"
+            value={searchInput}
+            onChange={(e) => setSearchInput(e.target.value)}
+            aria-label="Search restocks"
+          />
+          <select className="filter-select" value={supplier} onChange={(e) => setSupplier(e.target.value)} aria-label="Filter by supplier">
+            {suppliers.map((s) => <option key={s} value={s}>{s === 'All' ? 'All suppliers' : s}</option>)}
+          </select>
+          <input className="filter-input" type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} aria-label="From date" />
+          <input className="filter-input" type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} aria-label="To date" />
+          <button className="button ghost" type="button" onClick={clearFilters}>Clear filters</button>
+        </div>
+
+        {productFilter ? (
+          <p className="text-ink/70" style={{ marginTop: 0, fontSize: '0.85rem' }}>
+            Showing receipts that include one product.{' '}
+            <button className="button ghost" type="button" style={{ padding: 0 }} onClick={() => setProductFilter('')}>
+              Clear product filter
+            </button>
+          </p>
+        ) : null}
+
+        {loading ? (
+          <LoadingState message="Refreshing restocks…" />
+        ) : filtered.length ? (
+          <>
+            <div className="corvex-table-wrapper">
+              <table className="corvex-table">
+                <thead>
+                  <tr>
+                    <th>Delivery ref</th>
+                    <th>Supplier</th>
+                    <th>Products</th>
+                    <th>Total qty</th>
+                    <th>Date received</th>
+                    <th>Recorded by</th>
+                    <th className="cell-actions">Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {pagination.paginatedData.map((r) => {
+                    const lineCount = Number(r.line_count) || 0;
+                    return (
+                      <tr
+                        key={r.restock_id}
+                        className="clickable-row"
+                        onClick={() => navigate(`/warehouse/restock-history/${r.restock_id}`)}
+                      >
+                        <td>
+                          <span className="mono-cell">{formatDocumentRef(r.delivery_ref || r.restock_ref)}</span>
+                          {r.restock_ref ? (
+                            <span className="text-ink/70" style={{ display: 'block', fontSize: '0.75rem' }}>
+                              {formatDocumentRef(r.restock_ref)}
+                              {lineCount > 1 ? ` · ${lineCount} products` : ''}
+                            </span>
+                          ) : null}
+                        </td>
+                        <td>{r.supplier_name || '—'}</td>
+                        <td>
+                          {lineCount || '—'}
+                          {lineCount > 1 && r.product_name ? (
+                            <span className="text-ink/70" style={{ display: 'block', fontSize: '0.75rem' }}>
+                              {r.product_name}
+                            </span>
+                          ) : null}
+                        </td>
+                        <td style={{ color: '#2A9B6A', fontWeight: 600 }}>+{r.total_quantity ?? r.quantity ?? 0}</td>
+                        <td>{formatDisplayDate(r.received_date)}</td>
+                        <td>{r.recorded_by_name || '—'}</td>
+                        <td className="cell-actions" onClick={(e) => e.stopPropagation()}>
+                          <div className="table-actions">
+                            <button
+                              className="icon-action-button"
+                              type="button"
+                              title="View"
+                              onClick={() => navigate(`/warehouse/restock-history/${r.restock_id}`)}
+                            >
+                              <NavIcon name="view" />
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+            <Pagination {...pagination} />
+          </>
+        ) : (
+          <EmptyState
+            title={filtersAtDefault ? 'No receipts yet' : 'No receipts match these filters'}
+            description={
+              filtersAtDefault
+                ? 'Record a delivery to increase branch stock.'
+                : 'Try a wider date range or clear filters.'
+            }
+            actionLabel={filtersAtDefault ? 'New Restock' : 'Clear filters'}
+            onAction={filtersAtDefault ? () => navigate('/warehouse/restock-history/new') : clearFilters}
+          />
+        )}
+      </section>
+    </div>
+  );
+}
+
+function RestockNewPage({ navigate, showToast }) {
+  const params = new URLSearchParams(window.location.search);
+  const supplierId = params.get('supplier') || '';
+  return (
+    <RestockDocumentForm
+      navigate={navigate}
+      showToast={showToast}
+      initialProductId={params.get('product') || ''}
+      initialSupplierId={supplierId}
+      cancelTo={supplierId ? `/warehouse/suppliers/${supplierId}` : '/warehouse/restock-history'}
+    />
+  );
+}
+
+function RestockDetailPage({ restockId, navigate }) {
   const [restock, setRestock] = useState(null);
   const [loading, setLoading] = useState(true);
   useEffect(() => {
@@ -1993,36 +2797,113 @@ function RestockDetailPage({
       setLoading(true);
       const res = await fetchRestockById(restockId);
       if (res.success) setRestock(res.data);
+      else setRestock(null);
       setLoading(false);
     }
     load();
   }, [restockId]);
-  if (loading) return <LoadingState message="Loading restock..." />;
-  if (!restock) return <EmptyState title="Restock not found" actionLabel="Back" onAction={() => navigate('/warehouse/restock-history')} />;
-  return <div className="page">
-      <StatsGrid stats={[{
-        label: 'Delivery ref',
-        value: restock.delivery_ref
-      }, {
-        label: 'Quantity',
-        value: `+${restock.quantity}`
-      }, {
-        label: 'Received',
-        value: formatDisplayDate(restock.received_date)
-      }]} />
-      <section className="panel content-panel">
+  if (loading) return <LoadingState message="Loading restock…" />;
+  if (!restock) {
+    return (
+      <EmptyState
+        title="Restock not found"
+        actionLabel="Back to Restock"
+        onAction={() => navigate('/warehouse/restock-history')}
+      />
+    );
+  }
+  const lines = restock.lines || [];
+  const lineCount = restock.line_count ?? lines.length;
+  const totalQty = restock.total_quantity ?? restock.quantity ?? 0;
+  const movementSearch = restock.restock_ref || restock.delivery_ref || '';
+
+  return (
+    <div className="page">
+      <section className="panel content-panel relative overflow-hidden">
+        <div className="flex flex-col md:flex-row justify-between gap-3 items-start md:items-center mb-3">
+          <div>
+            <h3 style={{ margin: 0 }}>
+              <span className="mono-cell">{formatDocumentRef(restock.delivery_ref || restock.restock_ref)}</span>
+            </h3>
+            <p style={{ margin: '6px 0 0' }}>
+              {restock.supplier_name || '—'}
+              {' · '}{lineCount} product{lineCount === 1 ? '' : 's'}
+              {' · '}<span style={{ color: '#2A9B6A', fontWeight: 600 }}>+{totalQty}</span> units
+            </p>
+            {restock.restock_ref ? (
+              <p className="text-ink/70" style={{ margin: '4px 0 0', fontSize: '0.82rem' }}>
+                Document {formatDocumentRef(restock.restock_ref)}
+              </p>
+            ) : null}
+          </div>
+        </div>
         <DetailRowsTable rows={[
-          { label: 'Product', value: restock.product_name },
-          { label: 'SKU', value: restock.sku },
-          { label: 'Supplier', value: restock.supplier_name },
-          { label: 'Branch', value: restock.branch_name },
+          { label: 'Branch', value: restock.branch_name || '—' },
+          { label: 'Date received', value: formatDisplayDate(restock.received_date) },
+          { label: 'Recorded by', value: restock.recorded_by_name || '—' },
+          ...(restock.notes ? [{ label: 'Notes', value: restock.notes }] : []),
         ]} />
       </section>
-      <div className="flex justify-end mt-4">
-        <button className="button ghost" type="button" onClick={() => navigate('/warehouse/restock-history')}>Back</button>
-        <button className="button secondary" type="button" onClick={() => navigate(`/warehouse/product/${restock.product_id}`)}>View product</button>
+
+      <section className="panel content-panel relative overflow-hidden">
+        <div className="list-section-header">
+          <h3 style={{ margin: 0 }}>Lines</h3>
+        </div>
+        {lines.length ? (
+          <div className="corvex-table-wrapper">
+            <table className="corvex-table">
+              <thead>
+                <tr>
+                  <th>SKU</th>
+                  <th>Product</th>
+                  <th>Qty</th>
+                  <th className="cell-actions">Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {lines.map((line) => (
+                  <tr key={line.line_id || line.product_id}>
+                    <td><span className="mono-cell">{line.sku || '—'}</span></td>
+                    <td><strong>{line.product_name}</strong></td>
+                    <td style={{ color: '#2A9B6A', fontWeight: 600 }}>+{line.quantity}</td>
+                    <td className="cell-actions">
+                      <div className="table-actions">
+                        <button
+                          className="icon-action-button"
+                          type="button"
+                          title="View product"
+                          onClick={() => navigate(`/warehouse/product/${line.product_id}`)}
+                        >
+                          <NavIcon name="view" />
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : (
+          <EmptyState title="No lines" description="This restock has no product lines." />
+        )}
+      </section>
+
+      <div className="flex flex-wrap justify-end gap-2 mt-4">
+        <button className="button ghost" type="button" onClick={() => navigate('/warehouse/restock-history')}>
+          Back to Restock
+        </button>
+        {movementSearch ? (
+          <button
+            className="button secondary"
+            type="button"
+            onClick={() => navigate(`/warehouse/movements?search=${encodeURIComponent(movementSearch)}`)}
+          >
+            Related stock movements
+          </button>
+        ) : null}
       </div>
-    </div>;
+    </div>
+  );
 }
 function NotificationsPage({
   navigate,
@@ -2035,10 +2916,13 @@ function NotificationsPage({
       resolveRelatedPath={(item) => {
         const category = String(item.category || '').toLowerCase();
         if (category.includes('inventory') || category.includes('stock')) {
-          return '/warehouse/central-inventory';
+          return '/warehouse/branch-stock';
         }
         if (category.includes('restock')) {
           return '/warehouse/restock-history';
+        }
+        if (category.includes('stock count') || category.includes('stock-count')) {
+          return '/warehouse/stock-counts';
         }
         if (category.includes('transfer')) {
           return '/warehouse/transfers';
@@ -2149,386 +3033,479 @@ function SettingsPage({
 }) {
   return <UserSettingsPanel role="warehouse" showToast={showToast} />;
 }
+function truncateText(value, max = 48) {
+  const text = String(value || '').trim();
+  if (!text) return '—';
+  if (text.length <= max) return text;
+  return `${text.slice(0, max - 1)}…`;
+}
+
+function suppliersListPath({ status = 'Active', search = '' } = {}) {
+  const params = new URLSearchParams();
+  if (status && status !== 'Active') params.set('status', status);
+  if (search) params.set('search', search);
+  const q = params.toString();
+  return q ? `/warehouse/suppliers?${q}` : '/warehouse/suppliers';
+}
+
 function SuppliersPage({
   navigate,
   showToast
 }) {
-  const [search, setSearch] = useState('');
-  const [statusFilter, setStatusFilter] = useState('All');
+  const urlParams = new URLSearchParams(window.location.search);
+  const [searchInput, setSearchInput] = useState(urlParams.get('search') || '');
+  const [search, setSearch] = useState(urlParams.get('search') || '');
+  const [statusFilter, setStatusFilter] = useState(urlParams.get('status') || 'Active');
   const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
   const [suppliers, setSuppliers] = useState([]);
   const [total, setTotal] = useState(0);
-  const [showAddModal, setShowAddModal] = useState(false);
-  const [editingSupplier, setEditingSupplier] = useState(null);
-  const [form, setForm] = useState({
-    supplier_name: '',
-    contact: '',
-    email: '',
-    address: '',
-    status: 'Active'
-  });
-  const [errors, setErrors] = useState({});
-  const limit = 20;
+  const limit = PAGE_SIZE;
+
   useEffect(() => {
+    const timer = setTimeout(() => {
+      setSearch(searchInput.trim());
+      setPage(1);
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [searchInput]);
+
+  useEffect(() => {
+    const nextPath = suppliersListPath({ status: statusFilter, search });
+    if (`${window.location.pathname}${window.location.search}` !== nextPath) {
+      window.history.replaceState(null, '', nextPath);
+    }
+  }, [statusFilter, search]);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function loadSuppliers() {
+      setLoading(true);
+      setError('');
+      try {
+        const params = new URLSearchParams({
+          page: String(page),
+          limit: String(limit),
+        });
+        if (statusFilter !== 'All') params.append('status', statusFilter);
+        if (search) params.append('search', search);
+        const res = await apiClient.get(`/suppliers?${params.toString()}`);
+        if (cancelled) return;
+        if (res.data.success) {
+          setSuppliers(res.data.data || []);
+          setTotal(res.data.pagination?.total || 0);
+        } else {
+          setSuppliers([]);
+          setTotal(0);
+          setError(res.data.message || 'Failed to load suppliers.');
+        }
+      } catch (err) {
+        if (cancelled) return;
+        console.error('[Suppliers] load error:', err.message);
+        setSuppliers([]);
+        setTotal(0);
+        setError('Failed to load suppliers.');
+        showToast?.('Failed to load suppliers.', 'error');
+      }
+      if (!cancelled) setLoading(false);
+    }
     loadSuppliers();
-  }, [page, statusFilter, search]);
-  async function loadSuppliers() {
-    setLoading(true);
-    try {
-      const apiClient = (await import('../../api/apiClient.js')).default;
-      const params = new URLSearchParams({
-        page: String(page),
-        limit: String(limit)
-      });
-      if (statusFilter !== 'All') params.append('status', statusFilter);
-      if (search) params.append('search', search);
-      const res = await apiClient.get(`/suppliers?${params.toString()}`);
-      if (res.data.success) {
-        setSuppliers(res.data.data || []);
-        setTotal(res.data.pagination?.total || 0);
-      }
-    } catch (err) {
-      console.error('[Suppliers] load error:', err.message);
-      showToast('Failed to load suppliers.', 'error');
-    }
-    setLoading(false);
-  }
-  const handleAdd = () => {
-    setForm({
-      supplier_name: '',
-      contact: '',
-      email: '',
-      address: '',
-      status: 'Active'
-    });
-    setErrors({});
-    setShowAddModal(true);
+    return () => { cancelled = true; };
+  }, [page, statusFilter, search, showToast, limit]);
+
+  const totalPages = Math.max(1, Math.ceil(total / limit));
+  const filtersActive = statusFilter !== 'Active' || Boolean(search);
+  const openDetail = (id) => {
+    navigate(`/warehouse/suppliers/${id}?fromStatus=${encodeURIComponent(statusFilter)}&fromSearch=${encodeURIComponent(search)}`);
   };
-  const handleEdit = supplier => {
-    setForm({
-      supplier_name: supplier.supplier_name,
-      contact: supplier.contact || '',
-      email: supplier.email || '',
-      address: supplier.address || '',
-      status: supplier.status
-    });
-    setEditingSupplier(supplier);
-    setErrors({});
-    setShowAddModal(true);
-  };
-  const handleArchive = async supplierId => {
-    if (!confirm('Archive this supplier? The record is preserved and can be restored later.')) return;
-    try {
-      const apiClient = (await import('../../api/apiClient.js')).default;
-      await apiClient.delete(`/suppliers/${supplierId}`);
-      showToast('Supplier archived successfully.', 'success');
-      loadSuppliers();
-    } catch (err) {
-      console.error('[Suppliers] archive error:', err.message);
-      showToast(err.response?.data?.message || 'Failed to archive supplier.', 'error');
-    }
-  };
-  const handleSubmit = async e => {
-    e.preventDefault();
-    const newErrors = {};
-    if (!form.supplier_name.trim()) newErrors.supplier_name = 'Supplier name is required';
-    if (form.email && !/\S+@\S+\.\S+/.test(form.email)) newErrors.email = 'Invalid email format';
-    if (Object.keys(newErrors).length > 0) {
-      setErrors(newErrors);
-      return;
-    }
-    try {
-      const apiClient = (await import('../../api/apiClient.js')).default;
-      if (editingSupplier) {
-        await apiClient.put(`/suppliers/${editingSupplier.suppliers_id}`, form);
-        showToast('Supplier updated successfully.', 'success');
-      } else {
-        await apiClient.post('/suppliers', form);
-        showToast('Supplier created successfully.', 'success');
-      }
-      setShowAddModal(false);
-      setEditingSupplier(null);
-      loadSuppliers();
-    } catch (err) {
-      console.error('[Suppliers] submit error:', err.message);
-      showToast(err.response?.data?.message || 'Failed to save supplier.', 'error');
-    }
-  };
-  const totalPages = Math.ceil(total / limit);
-  if (loading) return <LoadingState message="Loading suppliers..." />;
-  return <div className="page">
+
+  if (loading && !suppliers.length && !error) return <LoadingState message="Loading suppliers…" />;
+
+  return (
+    <div className="page">
       <section className="panel content-panel relative overflow-hidden">
         <div className="list-section-header">
-          <h3>Suppliers</h3>
+          <div>
+            <h3 style={{ margin: 0 }}>Suppliers</h3>
+            <p className="text-ink/70" style={{ margin: '4px 0 0', fontSize: '0.88rem' }}>
+              Vendors used when recording restocks for your branch.
+            </p>
+          </div>
         </div>
-        <div className="list-section-toolbar suppliers-toolbar audit-logs-toolbar">
-          <div className="list-section-controls audit-logs-filters">
+        <div className="list-section-toolbar">
+          <div className="list-section-controls">
             <input
               className="filter-input search"
               type="search"
-              placeholder="Search by name, contact number, or email"
-              value={search}
-              onChange={e => {
-                setSearch(e.target.value);
-                setPage(1);
-              }}
+              placeholder="Search supplier name, contact, or email…"
+              value={searchInput}
+              onChange={(e) => setSearchInput(e.target.value)}
               aria-label="Search suppliers"
             />
             <select
               className="filter-select"
               value={statusFilter}
-              onChange={e => {
+              onChange={(e) => {
                 setStatusFilter(e.target.value);
                 setPage(1);
               }}
               aria-label="Filter by status"
             >
-              {['All', 'Active', 'Inactive'].map(s => <option key={s} value={s}>{s === 'All' ? 'All Statuses' : s}</option>)}
+              {['All', 'Active', 'Inactive'].map((s) => (
+                <option key={s} value={s}>{s === 'All' ? 'All statuses' : s}</option>
+              ))}
             </select>
           </div>
-          <div className="list-section-actions suppliers-toolbar-actions">
-            <button className="button whitespace-nowrap" type="button" onClick={handleAdd}>Add Supplier</button>
-          </div>
         </div>
-        {suppliers.length ? <><div className="corvex-table-wrapper">
-            <table className="corvex-table">
-              <thead>
-                <tr><th>Supplier ID</th><th>Supplier Name</th><th>Contact Number</th><th>Email</th><th>Address</th><th>Status</th><th>Actions</th></tr>
-              </thead>
-              <tbody>
-                {suppliers.map(supplier => <tr key={supplier.suppliers_id} className="clickable-row" onClick={() => navigate(`/warehouse/suppliers/${supplier.suppliers_id}`)}>
-                    <td><span style={{
-                    fontFamily: 'monospace',
-                    fontSize: '0.82rem'
-                  }}>{supplier.suppliers_id}</span></td>
-                    <td>{supplier.supplier_name}</td>
-                    <td>{formatPhone(supplier.contact_number || supplier.contact)}</td>
-                    <td>{supplier.email || '—'}</td>
-                    <td>{supplier.address || '—'}</td>
-                    <td><StatusBadge status={supplier.status} /></td>
-                    <td className="table-actions">
-                      <button className="icon-action-button" type="button" title="Edit" onClick={e => {
-                    e.stopPropagation();
-                    handleEdit(supplier);
-                  }}><NavIcon name="edit" /></button>
-                      {String(supplier.status || 'Active').toLowerCase() === 'inactive' ? (
-                        <button className="icon-action-button" type="button" title="Restore" onClick={async (e) => {
-                          e.stopPropagation();
-                          try {
-                            const apiClient = (await import('../../api/apiClient.js')).default;
-                            await apiClient.put(`/suppliers/${supplier.suppliers_id}`, { status: 'Active' });
-                            showToast('Supplier restored.', 'success');
-                            loadSuppliers();
-                          } catch (err) {
-                            showToast(err.response?.data?.message || 'Failed to restore supplier.', 'error');
-                          }
-                        }}><NavIcon name="reset" /></button>
-                      ) : (
-                        <button className="icon-action-button danger" type="button" title="Archive" onClick={e => {
-                          e.stopPropagation();
-                          handleArchive(supplier.suppliers_id);
-                        }}><NavIcon name="archive" /></button>
-                      )}
-                    </td>
-                  </tr>)}
-              </tbody>
-            </table>
+        {error ? (
+          <EmptyState title="Could not load suppliers" description={error} />
+        ) : loading ? (
+          <LoadingState message="Refreshing suppliers…" />
+        ) : suppliers.length ? (
+          <>
+            <div className="corvex-table-wrapper">
+              <table className="corvex-table">
+                <thead>
+                  <tr>
+                    <th>Name</th>
+                    <th>Contact</th>
+                    <th>Email</th>
+                    <th>Address</th>
+                    <th>Status</th>
+                    <th className="cell-actions">Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {suppliers.map((supplier) => (
+                    <tr
+                      key={supplier.suppliers_id}
+                      className="clickable-row"
+                      onClick={() => openDetail(supplier.suppliers_id)}
+                    >
+                      <td><strong>{supplier.supplier_name}</strong></td>
+                      <td>{formatPhone(supplier.contact_number || supplier.contact) || '—'}</td>
+                      <td>{supplier.email || '—'}</td>
+                      <td title={supplier.address || ''}>{truncateText(supplier.address)}</td>
+                      <td><StatusBadge status={supplier.status} /></td>
+                      <td className="cell-actions" onClick={(e) => e.stopPropagation()}>
+                        <div className="table-actions">
+                          <button
+                            className="icon-action-button"
+                            type="button"
+                            title="View"
+                            onClick={() => openDetail(supplier.suppliers_id)}
+                          >
+                            <NavIcon name="view" />
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             </div>
             <Pagination
               currentPage={page}
-              totalPages={Math.max(1, totalPages)}
+              totalPages={totalPages}
               totalRecords={total}
               pageSize={limit}
               startRecord={total ? (page - 1) * limit + 1 : 0}
               endRecord={Math.min(page * limit, total)}
               prevPage={() => setPage((p) => Math.max(1, p - 1))}
-              nextPage={() => setPage((p) => Math.min(Math.max(1, totalPages), p + 1))}
+              nextPage={() => setPage((p) => Math.min(totalPages, p + 1))}
               goToPage={setPage}
-            /></>
-        : <EmptyState title="No suppliers found" description="Adjust your search or filters." actionLabel="Add Supplier" onAction={handleAdd} />}
+            />
+          </>
+        ) : (
+          <EmptyState
+            title={filtersActive ? 'No suppliers match these filters' : 'No suppliers yet — contact Operating Manager.'}
+            description={filtersActive ? 'Try All statuses or clear your search.' : 'Warehouse staff select approved vendors when recording restocks.'}
+            actionLabel={filtersActive ? 'Show Active' : undefined}
+            onAction={filtersActive ? () => { setStatusFilter('Active'); setSearchInput(''); setSearch(''); setPage(1); } : undefined}
+          />
+        )}
       </section>
-
-      {showAddModal && <div className="modal-overlay" role="dialog" aria-modal="true" onClick={e => {
-      if (e.target === e.currentTarget) {
-        setShowAddModal(false);
-        setEditingSupplier(null);
-      }
-    }}>
-          <div className="modal-content">
-            <div className="modal-header">
-              <h3>{editingSupplier ? 'Edit Supplier' : 'Add Supplier'}</h3>
-              <button className="icon-action-button" type="button" title="Close" onClick={() => {
-            setShowAddModal(false);
-            setEditingSupplier(null);
-          }}><NavIcon name="close" /></button>
-            </div>
-            <form onSubmit={handleSubmit}>
-              <div className="form-group">
-                <label>Supplier Name *</label>
-                <input type="text" value={form.supplier_name} onChange={e => setForm({
-              ...form,
-              supplier_name: e.target.value
-            })} />
-                {errors.supplier_name && <p className="form-error">{errors.supplier_name}</p>}
-              </div>
-              <div className="form-group">
-                <label>Contact Number</label>
-                <input type="tel" value={form.contact} onChange={e => setForm({
-              ...form,
-              contact: e.target.value
-            })} placeholder="+63..." inputMode="tel" />
-              </div>
-              <div className="form-group">
-                <label>Email</label>
-                <input type="email" value={form.email} onChange={e => setForm({
-              ...form,
-              email: e.target.value
-            })} />
-                {errors.email && <p className="form-error">{errors.email}</p>}
-              </div>
-              <div className="form-group">
-                <label>Address</label>
-                <textarea value={form.address} onChange={e => setForm({
-              ...form,
-              address: e.target.value
-            })} rows={3} />
-              </div>
-              <div className="form-group">
-                <label>Status</label>
-                <select className="filter-select" value={form.status} onChange={e => setForm({
-              ...form,
-              status: e.target.value
-            })}>
-                  <option value="Active">Active</option>
-                  <option value="Inactive">Inactive</option>
-                </select>
-              </div>
-              <div className="modal-actions">
-                <button type="button" className="button secondary" onClick={() => {
-              setShowAddModal(false);
-              setEditingSupplier(null);
-            }}>Cancel</button>
-                <button type="submit" className="button">{editingSupplier ? 'Update' : 'Create'}</button>
-              </div>
-            </form>
-          </div>
-        </div>}
-    </div>;
+    </div>
+  );
 }
+
 function SupplierDetailPage({
   supplierId,
   navigate,
   showToast
 }) {
+  const backParams = new URLSearchParams(window.location.search);
+  const backTo = suppliersListPath({
+    status: backParams.get('fromStatus') || 'Active',
+    search: backParams.get('fromSearch') || '',
+  });
   const [supplier, setSupplier] = useState(null);
   const [loading, setLoading] = useState(true);
+
   useEffect(() => {
     async function load() {
       setLoading(true);
       try {
-        const apiClient = (await import('../../api/apiClient.js')).default;
         const res = await apiClient.get(`/suppliers/${supplierId}`);
-        if (res.data.success) setSupplier(res.data.data);else if (showToast) showToast('Supplier not found.', 'error');
+        if (res.data.success) setSupplier(res.data.data);
+        else {
+          setSupplier(null);
+          showToast?.('Supplier not found.', 'error');
+        }
       } catch (err) {
         console.error('[Suppliers] detail load error:', err.message);
-        if (showToast) showToast('Failed to load supplier.', 'error');
+        setSupplier(null);
+        showToast?.('Failed to load supplier.', 'error');
       }
       setLoading(false);
     }
     load();
   }, [supplierId, showToast]);
-  if (loading) return <LoadingState message="Loading supplier..." />;
+
+  if (loading) return <LoadingState message="Loading supplier…" />;
   if (!supplier) {
-    return <EmptyState title="Supplier not found" actionLabel="Back" onAction={() => navigate('/warehouse/suppliers')} />;
+    return <EmptyState title="Supplier not found" actionLabel="Back to Suppliers" onAction={() => navigate(backTo)} />;
   }
-  return <div className="page">
-      <StatsGrid stats={[{
-      label: 'Supplier ID',
-      value: String(supplier.suppliers_id)
-    }, {
-      label: 'Status',
-      value: supplier.status
-    }, {
-      label: 'Contact Number',
-      value: formatPhone(supplier.contact_number || supplier.contact)
-    }]} />
+
+  const isActive = String(supplier.status || '').toLowerCase() === 'active';
+  const recentRestocks = supplier.recent_restocks || [];
+
+  return (
+    <div className="page">
       <section className="panel content-panel relative overflow-hidden">
+        <div className="flex flex-col md:flex-row justify-between gap-3 items-start md:items-center mb-3">
+          <div>
+            <h3 style={{ margin: 0 }}>{supplier.supplier_name}</h3>
+            <p className="text-ink/70" style={{ margin: '6px 0 0', fontSize: '0.88rem' }}>
+              Company supplier directory · read-only for warehouse
+            </p>
+          </div>
+          <StatusBadge status={supplier.status} />
+        </div>
         <DetailRowsTable rows={[
-          { label: 'Supplier Name', value: supplier.supplier_name },
-          { label: 'Contact Number', value: formatPhone(supplier.contact_number || supplier.contact) },
+          { label: 'Contact Number', value: formatPhone(supplier.contact_number || supplier.contact) || '—' },
           { label: 'Email', value: supplier.email || '—' },
           { label: 'Address', value: supplier.address || '—' },
-          { label: 'Created At', value: formatDisplayDateTime(supplier.created_at) },
-          { label: 'Updated At', value: formatDisplayDateTime(supplier.updated_at) },
+          { label: 'Last Updated', value: formatDisplayDateTime(supplier.updated_at) },
         ]} />
       </section>
-      <div className="flex justify-end mt-4">
-        <button className="button ghost" type="button" onClick={() => navigate('/warehouse/suppliers')}>Back to Suppliers</button>
+      <section className="panel content-panel relative overflow-hidden">
+        <div className="list-section-header">
+          <h3 style={{ margin: 0 }}>Recent Restocks</h3>
+          <p className="text-ink/70" style={{ margin: '4px 0 0', fontSize: '0.82rem' }}>
+            Deliveries from this supplier at your branch
+          </p>
+        </div>
+        {recentRestocks.length ? (
+          <div className="corvex-table-wrapper">
+            <table className="corvex-table">
+              <thead>
+                <tr>
+                  <th>Date</th>
+                  <th>Reference</th>
+                  <th>Products</th>
+                  <th>Qty</th>
+                  <th>Recorded by</th>
+                  <th className="cell-actions">Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {recentRestocks.map((r) => (
+                  <tr
+                    key={r.restock_id}
+                    className="clickable-row"
+                    onClick={() => navigate(`/warehouse/restock-history/${r.restock_id}`)}
+                  >
+                    <td>{formatDisplayDate(r.received_date)}</td>
+                    <td><span className="mono-cell">{formatDocumentRef(r.delivery_ref || r.restock_ref)}</span></td>
+                    <td>{r.line_count ?? '—'}</td>
+                    <td style={{ color: '#2A9B6A', fontWeight: 600 }}>+{r.total_quantity ?? 0}</td>
+                    <td>{r.recorded_by_name || '—'}</td>
+                    <td className="cell-actions" onClick={(e) => e.stopPropagation()}>
+                      <button
+                        className="icon-action-button"
+                        type="button"
+                        title="View restock"
+                        onClick={() => navigate(`/warehouse/restock-history/${r.restock_id}`)}
+                      >
+                        <NavIcon name="view" />
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : (
+          <EmptyState
+            title="No restocks recorded for this supplier at your branch yet."
+            description={isActive ? 'You can record a delivery using this supplier.' : 'This supplier is inactive and cannot be used on new restocks.'}
+          />
+        )}
+      </section>
+      <div className="flex flex-wrap justify-end gap-2 mt-4">
+        <button className="button ghost" type="button" onClick={() => navigate(backTo)}>Back to Suppliers</button>
+        {isActive ? (
+          <button
+            className="button"
+            type="button"
+            onClick={() => navigate(`/warehouse/restock-history/new?supplier=${supplier.suppliers_id}`)}
+          >
+            New Restock
+          </button>
+        ) : (
+          <span className="text-ink/70" style={{ alignSelf: 'center', fontSize: '0.85rem' }}>
+            Inactive suppliers cannot be selected for new restocks.
+          </span>
+        )}
       </div>
-    </div>;
+    </div>
+  );
 }
-// ── Product Categories (View-Only for Warehouse) ──────────────────────────────
+
 function ProductCategoriesPage({
   navigate,
   showToast
 }) {
   const [categories, setCategories] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+  const [searchInput, setSearchInput] = useState('');
   const [search, setSearch] = useState('');
+  const [statusFilter, setStatusFilter] = useState('Active');
+
   useEffect(() => {
+    const timer = setTimeout(() => setSearch(searchInput.trim()), 300);
+    return () => clearTimeout(timer);
+  }, [searchInput]);
+
+  useEffect(() => {
+    let cancelled = false;
     async function loadData() {
       setLoading(true);
+      setError('');
       try {
-        const {
-          fetchProductCategories
-        } = await import('../../api/productCategoriesService');
-        const result = await fetchProductCategories(search ? {
-          search
-        } : {});
+        const { fetchProductCategories } = await import('../../api/productCategoriesService');
+        const params = {};
+        if (search) params.search = search;
+        if (statusFilter !== 'All') params.status = statusFilter;
+        const result = await fetchProductCategories(params);
+        if (cancelled) return;
         if (result.success) setCategories(result.data || []);
-      } catch (err) {
-        showToast('Failed to load product categories.', 'error');
+        else {
+          setCategories([]);
+          setError(result.message || 'Failed to load product categories.');
+        }
+      } catch {
+        if (cancelled) return;
+        setCategories([]);
+        setError('Failed to load product categories.');
+        showToast?.('Failed to load product categories.', 'error');
       }
-      setLoading(false);
+      if (!cancelled) setLoading(false);
     }
-    const t = setTimeout(loadData, 300);
-    return () => clearTimeout(t);
-  }, [search]);
-  const pagination_categories = usePagination(categories);
-  const paginated_categories = pagination_categories.paginatedData;
-  return <div className="page">
+    loadData();
+    return () => { cancelled = true; };
+  }, [search, statusFilter, showToast]);
+
+  const pagination_categories = usePagination(categories, {
+    resetKey: `${search}|${statusFilter}`,
+  });
+  const filtersActive = statusFilter !== 'Active' || Boolean(search);
+  const openProducts = (categoryId) => navigate(`/warehouse/products?category=${categoryId}`);
+
+  if (loading && !categories.length && !error) return <LoadingState message="Loading categories…" />;
+
+  return (
+    <div className="page">
       <section className="panel content-panel relative overflow-hidden">
         <div className="list-section-header">
-          <h3>Product Categories</h3>
-        </div>
-        <div className="list-section-toolbar">
-          <p className="list-section-subtitle">View product categories (read-only)</p>
-          <div className="search-bar">
-            <NavIcon name="search" />
-            <input className="search-input" type="search" placeholder="Search categories…" value={search} onChange={e => setSearch(e.target.value)} />
+          <div>
+            <h3 style={{ margin: 0 }}>Product Categories</h3>
+            <p className="text-ink/70" style={{ margin: '4px 0 0', fontSize: '0.88rem' }}>
+              How products are grouped in the catalog (managed by Operating Manager).
+            </p>
           </div>
         </div>
-        {loading ? <LoadingState message="Loading categories…" /> : categories.length === 0 ? <EmptyState title="No categories found" description="No product categories match your search." /> : <><div className="corvex-table-wrapper">
-            <table className="corvex-table">
-              <thead>
-                <tr><th>ID</th><th>Category Name</th><th>Status</th><th>Created At</th></tr>
-              </thead>
-              <tbody>
-                {paginated_categories.map(c => <tr key={c.category_id}>
-                    <td>{c.category_id}</td>
-                    <td>{c.category_name}</td>
-                    <td><StatusBadge status={c.status} /></td>
-                    <td style={{
-                  fontFamily: 'monospace',
-                  fontSize: '0.78rem'
-                }}>{formatDisplayDateTime(c.created_at)}</td>
-                  </tr>)}
-              </tbody>
-            </table>
-          </div><Pagination {...pagination_categories} /></>}
+        <div className="list-section-toolbar">
+          <div className="list-section-controls">
+            <input
+              className="filter-input search"
+              type="search"
+              placeholder="Search category name…"
+              value={searchInput}
+              onChange={(e) => setSearchInput(e.target.value)}
+              aria-label="Search categories"
+            />
+            <select
+              className="filter-select"
+              value={statusFilter}
+              onChange={(e) => setStatusFilter(e.target.value)}
+              aria-label="Filter by status"
+            >
+              <option value="All">All statuses</option>
+              <option value="Active">Active</option>
+              <option value="Inactive">Inactive</option>
+            </select>
+          </div>
+        </div>
+        {error ? (
+          <EmptyState title="Could not load categories" description={error} />
+        ) : loading ? (
+          <LoadingState message="Refreshing categories…" />
+        ) : categories.length ? (
+          <>
+            <div className="corvex-table-wrapper">
+              <table className="corvex-table">
+                <thead>
+                  <tr>
+                    <th>Category name</th>
+                    <th>Status</th>
+                    <th># Products</th>
+                    <th className="cell-actions">Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {pagination_categories.paginatedData.map((c) => (
+                    <tr
+                      key={c.category_id}
+                      className="clickable-row"
+                      onClick={() => openProducts(c.category_id)}
+                    >
+                      <td><strong>{c.category_name}</strong></td>
+                      <td><StatusBadge status={c.status} /></td>
+                      <td>{Number(c.product_count) || 0}</td>
+                      <td className="cell-actions" onClick={(e) => e.stopPropagation()}>
+                        <button
+                          className="icon-action-button"
+                          type="button"
+                          title="View products"
+                          onClick={() => openProducts(c.category_id)}
+                        >
+                          <NavIcon name="view" />
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <Pagination {...pagination_categories} />
+          </>
+        ) : (
+          <EmptyState
+            title={filtersActive ? 'No categories match these filters' : 'No categories yet — OM must create categories before products can be filed'}
+            description={filtersActive ? 'Try All statuses or clear your search.' : 'Warehouse staff use categories to find products. Catalog taxonomy is managed by Operating Manager.'}
+            actionLabel={filtersActive ? 'Show Active' : 'Back to Products'}
+            onAction={filtersActive
+              ? () => { setStatusFilter('Active'); setSearchInput(''); setSearch(''); }
+              : () => navigate('/warehouse/products')}
+          />
+        )}
       </section>
-    </div>;
+    </div>
+  );
 }
 export function WarehousePageBody({
   page,
@@ -2541,6 +3518,7 @@ export function WarehousePageBody({
     movementId: page.params?.movementId,
     transferId: page.params?.transferId,
     restockId: page.params?.restockId,
+    countId: page.params?.countId,
     creditId: page.params?.creditId,
     supplierId: page.params?.supplierId,
     navigate,
@@ -2552,21 +3530,63 @@ export function WarehousePageBody({
     case 'settings':
       return <SettingsPage {...props} />;
     case 'centralInventory':
-      return <CentralInventoryPanel />;
+      return (
+        <BranchInventoryViewPage
+          mode="warehouse"
+          navigate={navigate}
+          showToast={showToast}
+          branchName={getCurrentUser()?.branch?.name}
+          initialStockFilter={page.params?.stockFilter || 'All'}
+        />
+      );
     case 'products':
       return <InventoryPage {...props} />;
     case 'addProduct':
-      return <AddProductPage {...props} />;
+      return (
+        <EmptyState
+          title="Product creation is managed by Operating Manager"
+          description="There is no product-request approval workflow yet. Warehouse staff stock existing catalog SKUs via Restock and Stock Count."
+          actionLabel="Back to Products"
+          onAction={() => navigate('/warehouse/products')}
+        />
+      );
     case 'editProduct':
-      return <EditProductPage {...props} />;
+      return (
+        <EmptyState
+          title="Catalog editing is managed by Operating Manager"
+          description="Warehouse staff can view products and manage stock, but cannot edit master product data."
+          actionLabel="Back to product"
+          onAction={() => navigate(`/warehouse/product/${props.productId}`)}
+        />
+      );
     case 'productDetail':
       return <ProductDetailPage {...props} />;
     case 'stockCount':
       return <StockCountPage {...props} />;
+    case 'stockCountHistory':
+      return <StockCountHistoryPage {...props} />;
+    case 'stockCountNew':
+      return <StockCountNewPage {...props} />;
+    case 'stockCountDetail':
+      return <StockCountDetailPage {...props} />;
     case 'restock':
-      return <RestockPage {...props} />;
+      return (
+        <RestockDocumentForm
+          navigate={navigate}
+          showToast={showToast}
+          initialProductId={props.productId}
+          cancelTo={`/warehouse/product/${props.productId}`}
+        />
+      );
     case 'transfer':
-      return <TransferPage {...props} />;
+      return (
+        <TransferDocumentForm
+          navigate={navigate}
+          showToast={showToast}
+          initialProductId={props.productId}
+          cancelTo={`/warehouse/product/${props.productId}`}
+        />
+      );
     case 'movements':
       return <MovementsPage {...props} />;
     case 'movementDetail':
@@ -2574,17 +3594,21 @@ export function WarehousePageBody({
     case 'transferRequestNew':
       return <TransferRequestNewPage {...props} />;
     case 'transfers':
-      return <TransfersPage {...props} transferTab={page.params?.transferTab} />;
+      return (
+        <TransfersPage
+          {...props}
+          transferTab={page.params?.transferTab}
+          transferSegment={page.params?.transferSegment}
+        />
+      );
     case 'transferDetail':
       return <TransferDetailPage {...props} />;
     case 'restockHistory':
       return <RestockHistoryPage {...props} />;
+    case 'restockNew':
+      return <RestockNewPage {...props} />;
     case 'restockDetail':
       return <RestockDetailPage {...props} />;
-    case 'creditHistory':
-      return <CreditHistoryListPage {...props} />;
-    case 'creditDetail':
-      return <CreditHistoryDetailPage {...props} />;
     case 'notifications':
       return <NotificationsPage {...props} />;
     case 'profile':

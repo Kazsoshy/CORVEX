@@ -28,7 +28,7 @@ import { InactivityWarningModal } from './components/InactivityWarningModal';
 import { collectorRole } from './rolePages/collector';
 import { isCollectorNavActive, resolveCollectorPage } from './utils/collectorRoutes';
 import { isSalesNavActive, resolveSalesPage } from './utils/salesRoutes';
-import { isWarehouseNavActive, resolveWarehousePage } from './utils/warehouseRoutes';
+import { getWarehouseLegacyRedirect, isWarehouseNavActive, resolveWarehousePage } from './utils/warehouseRoutes';
 import { isOperatingManagerNavActive, resolveOperatingManagerPage } from './utils/operatingManagerRoutes';
 import { isCustomerAuthPath, isCustomerNavActive, resolveCustomerPage } from './utils/customerRoutes';
 import { salesRole } from './rolePages/sales';
@@ -204,6 +204,11 @@ function PrototypeShell() {
     const token = localStorage.getItem('corvex_token');
     if (!user?.role?.slug || !token) {
       navigate('/login', { replace: true });
+      return;
+    }
+    const warehouseRedirect = getWarehouseLegacyRedirect(location.pathname);
+    if (warehouseRedirect) {
+      navigate(warehouseRedirect, { replace: true });
       return;
     }
     const home = getEntryPathForRole(user.role.slug);

@@ -164,3 +164,33 @@ export async function getBranchSalesAgentDetail(agentId) {
     return { success: false, data: null };
   }
 }
+
+export async function getSalesAgentAreaAssignments(agentId) {
+  try {
+    const response = await apiClient.get(`/branch-manager/staff/sales/${agentId}/area-assignments`);
+    return response.data;
+  } catch (error) {
+    console.error('Failed to fetch sales area assignments:', error);
+    return {
+      success: false,
+      message: error.response?.data?.message || 'Failed to load area assignments.',
+      data: [],
+    };
+  }
+}
+
+export async function assignSalesAgentArea(agentId, body) {
+  try {
+    const response = await apiClient.post(
+      `/branch-manager/staff/sales/${agentId}/area-assignments`,
+      body
+    );
+    return response.data;
+  } catch (error) {
+    console.error('Failed to assign sales area:', error);
+    return {
+      success: false,
+      message: error.response?.data?.message || 'Failed to assign area.',
+    };
+  }
+}

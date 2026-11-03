@@ -79,6 +79,17 @@ export async function createCustomer(payload) {
   }
 }
 
+export async function updateCustomer(customerId, payload) {
+  try {
+    const response = await apiClient.put(`/customers/${customerId}`, payload);
+    return response.data;
+  } catch (error) {
+    const message = error?.response?.data?.message || error?.message || 'Failed to update customer';
+    console.error('Failed to update customer:', error);
+    return { success: false, message };
+  }
+}
+
 export async function fetchTerritories(params = {}) {
   try {
     const response = await apiClient.get('/territories', { params });
@@ -213,7 +224,8 @@ export async function submitSalesCreditInvestigation(payload) {
   } catch (error) {
     return {
       success: false,
-      message: error.response?.data?.message || 'Failed to submit credit investigation.',
+      message: error.response?.data?.message || 'Failed to submit credit review.',
+      data: error.response?.data?.data,
     };
   }
 }
@@ -248,6 +260,19 @@ export async function fetchSalesFieldReports() {
   }
 }
 
+export async function fetchSalesFieldReportById(id) {
+  try {
+    const response = await apiClient.get(`/sales/field-reports/${id}`);
+    return response.data;
+  } catch (error) {
+    return {
+      success: false,
+      message: error?.response?.data?.message || 'Failed to fetch field activity report.',
+      data: null,
+    };
+  }
+}
+
 export async function submitSalesFieldReport(payload) {
   try {
     const response = await apiClient.post('/sales/field-reports', payload);
@@ -271,5 +296,39 @@ export async function fetchSalesAuditLogs(params = {}) {
   } catch (error) {
     console.error('Failed to fetch sales audit logs:', error);
     return { success: false, data: [] };
+  }
+}
+
+export async function fetchSalesAreaAssignments(params = {}) {
+  try {
+    const response = await apiClient.get('/sales/area-assignments', { params });
+    return response.data;
+  } catch (error) {
+    const message = error?.response?.data?.message || error?.message || 'Failed to fetch area assignments';
+    console.error('Failed to fetch area assignments:', message);
+    return { success: false, data: [], count: 0, message, meta: null };
+  }
+}
+
+export async function fetchSalesAreaAssignmentById(id) {
+  try {
+    const response = await apiClient.get(`/sales/area-assignments/${id}`);
+    return response.data;
+  } catch (error) {
+    const message = error?.response?.data?.message || error?.message || 'Failed to fetch area assignment';
+    console.error('Failed to fetch area assignment:', message);
+    return { success: false, data: null, message };
+  }
+}
+
+export async function updateSalesAreaAssignmentStatus(id, status) {
+  try {
+    const response = await apiClient.patch(`/sales/area-assignments/${id}/status`, { status });
+    return response.data;
+  } catch (error) {
+    return {
+      success: false,
+      message: error?.response?.data?.message || 'Failed to update area assignment.',
+    };
   }
 }

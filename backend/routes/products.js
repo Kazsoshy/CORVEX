@@ -1,5 +1,7 @@
 import express from 'express';
-import { allow, isUnscoped, ROLE_SETS } from '../middleware/auth.js';
+import { allow, isUnscoped, requireRole, ROLE_SETS } from '../middleware/auth.js';
+
+const CATALOG_OWNER_ROLES = ['operating_manager', 'super_admin'];
 import { normalizeProductName, productNameConflict, productNameTaken } from '../lib/productName.js';
 import {
   deleteProductImage,
@@ -89,7 +91,22 @@ router.get('/', async (req, res) => {
           p.unit_price,
           p.status,
           p.image_url,
-          i.quantity, i.stock_status, i.last_updated,
+          (i.inventory_id IS NOT NULL) AS has_stock_record,
+          COALESCE(i.available_stock, i.quantity, 0)::int AS quantity,
+          COALESCE(i.available_stock, i.quantity, 0)::int AS available_stock,
+          i.reorder_level,
+          CASE
+            WHEN i.inventory_id IS NULL THEN NULL
+            WHEN COALESCE(i.available_stock, i.quantity, 0) <= 0 THEN 'Out of Stock'
+            WHEN COALESCE(i.reorder_level, 0) > 0
+              AND COALESCE(i.available_stock, i.quantity, 0) <= (COALESCE(i.reorder_level, 0) * 0.3)
+              THEN 'Critical Stock'
+            WHEN COALESCE(i.reorder_level, 0) > 0
+              AND COALESCE(i.available_stock, i.quantity, 0) <= COALESCE(i.reorder_level, 0)
+              THEN 'Low Stock'
+            ELSE 'Sufficient'
+          END AS stock_status,
+          i.last_updated,
           b.name AS branch_name
         FROM products p
         LEFT JOIN product_categories pc ON pc.category_id = p.category_id
@@ -110,10 +127,14 @@ router.get('/', async (req, res) => {
           p.unit_price,
           p.status,
           p.image_url,
-          COALESCE(SUM(i.quantity), 0) AS total_quantity,
+          FALSE AS has_stock_record,
+          COALESCE(SUM(COALESCE(i.available_stock, i.quantity, 0)), 0)::int AS quantity,
+          COALESCE(SUM(COALESCE(i.available_stock, i.quantity, 0)), 0)::int AS available_stock,
+          COALESCE(SUM(COALESCE(i.available_stock, i.quantity, 0)), 0)::int AS total_quantity,
+          NULL::int AS reorder_level,
           CASE
-            WHEN COALESCE(SUM(i.quantity), 0) = 0 THEN 'Out of Stock'
-            WHEN COALESCE(SUM(i.quantity), 0) <= 10 THEN 'Low Stock'
+            WHEN COALESCE(SUM(COALESCE(i.available_stock, i.quantity, 0)), 0) <= 0 THEN 'Out of Stock'
+            WHEN COALESCE(SUM(COALESCE(i.available_stock, i.quantity, 0)), 0) <= 10 THEN 'Low Stock'
             ELSE 'Sufficient'
           END AS stock_status
         FROM products p
@@ -166,9 +187,11 @@ router.get('/:id', async (req, res) => {
               p.description,
               p.unit_type,
               p.reorder_point,
-              p.supplier_id
+              p.supplier_id,
+              s.supplier_name
        FROM products p
        LEFT JOIN product_categories pc ON pc.category_id = p.category_id
+       LEFT JOIN suppliers s ON s.suppliers_id = p.supplier_id
        WHERE p.id = $1`,
       [req.params.id]
     );
@@ -199,9 +222,32 @@ router.get('/:id', async (req, res) => {
          i.stock_status,
          i.last_updated,
          i.created_at,
-         i.updated_at
+         i.updated_at,
+         COALESCE(pending.reserved, 0)::int AS pending_outbound,
+         GREATEST(0, i.available_stock - COALESCE(pending.reserved, 0))::int AS available_to_transfer
        FROM branch_inventory i
        JOIN branches b ON b.id = i.branch_id
+       LEFT JOIN LATERAL (
+         SELECT COALESCE(SUM(qty), 0)::int AS reserved
+         FROM (
+           SELECT l.quantity AS qty
+           FROM inventory_transfer_lines l
+           JOIN inventory_transfers t ON t.transfer_id = l.transfer_id
+           WHERE t.source_branch_id = i.branch_id
+             AND l.product_id = i.product_id
+             AND t.status IN ('Pending Approval', 'Submitted', 'Approved')
+           UNION ALL
+           SELECT t.quantity AS qty
+           FROM inventory_transfers t
+           WHERE t.source_branch_id = i.branch_id
+             AND t.product_id = i.product_id
+             AND t.status IN ('Pending Approval', 'Submitted', 'Approved')
+             AND t.quantity IS NOT NULL AND t.quantity > 0
+             AND NOT EXISTS (
+               SELECT 1 FROM inventory_transfer_lines l2 WHERE l2.transfer_id = t.transfer_id
+             )
+         ) reserved_rows
+       ) pending ON TRUE
        WHERE i.product_id = $1
          ${scopedBranchId != null ? 'AND i.branch_id = $2' : ''}
        ORDER BY b.name`,
@@ -248,7 +294,7 @@ function readProductImageBody(req, res, next) {
 // POST /api/products/:id/image  — Replace the product photo
 // DELETE /api/products/:id/image — Remove the product photo
 // ──────────────────────────────────────────────────────────────────────────────
-router.post('/:id/image', readProductImageBody, async (req, res) => {
+router.post('/:id/image', requireRole(CATALOG_OWNER_ROLES), readProductImageBody, async (req, res) => {
   try {
     const pool = req.app.locals.pool;
     const productId = Number(req.params.id);
@@ -283,7 +329,7 @@ router.post('/:id/image', readProductImageBody, async (req, res) => {
   }
 });
 
-router.delete('/:id/image', async (req, res) => {
+router.delete('/:id/image', requireRole(CATALOG_OWNER_ROLES), async (req, res) => {
   try {
     const pool = req.app.locals.pool;
     const productId = Number(req.params.id);
@@ -313,7 +359,7 @@ router.delete('/:id/image', async (req, res) => {
 // ──────────────────────────────────────────────────────────────────────────────
 // POST /api/products  — Create product
 // ──────────────────────────────────────────────────────────────────────────────
-router.post('/', async (req, res) => {
+router.post('/', requireRole(CATALOG_OWNER_ROLES), async (req, res) => {
   try {
     const pool = req.app.locals.pool;
     const { name, sku, category_id, description, unit_price, unit_type, barcode, supplier_id, reorder_point, image_url } = req.body;
@@ -374,7 +420,7 @@ router.post('/', async (req, res) => {
 // ──────────────────────────────────────────────────────────────────────────────
 // PUT /api/products/:id  — Update product
 // ──────────────────────────────────────────────────────────────────────────────
-router.put('/:id', async (req, res) => {
+router.put('/:id', requireRole(CATALOG_OWNER_ROLES), async (req, res) => {
   try {
     const pool = req.app.locals.pool;
     const { name, category_id, description, unit_price, unit_type, barcode, supplier_id, reorder_point, status, image_url } = req.body;

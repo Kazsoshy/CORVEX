@@ -105,12 +105,23 @@ export function InvoiceDetailsPage({
       ]
     : [];
 
+  const isInstallment = String(invoice?.pay_type || '').toLowerCase() === 'installment';
   const paymentSummaryRows = [
     { label: 'Items Subtotal', value: formatCurrency(itemsSubtotal) },
     { label: 'Invoice Total', value: <strong>{formatCurrency(headerTotal)}</strong> },
+    { label: 'Pay Type', value: isInstallment ? 'Installment (Monthly)' : 'Pay in Full' },
     { label: 'Payment Method', value: invoice?.payment_method || '—' },
+    ...(isInstallment
+      ? [
+          { label: 'Down Payment', value: formatCurrency(invoice?.down_payment || 0) },
+          { label: 'Months', value: invoice?.term_months ?? '—' },
+          { label: 'Monthly Amount', value: formatCurrency(invoice?.monthly_amount || 0) },
+          { label: 'First Due Date', value: formatDisplayDate(invoice?.first_due_date || invoice?.due_date) },
+        ]
+      : [
+          { label: 'Due Date', value: formatDisplayDate(invoice?.due_date) },
+        ]),
     { label: 'Payment Status', value: invoice?.status ? <StatusBadge status={invoice.status} /> : '—' },
-    { label: 'Due Date', value: formatDisplayDate(invoice?.due_date) },
   ];
 
   const content = (

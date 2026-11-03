@@ -2,12 +2,13 @@ const ROUTE_DEFINITIONS = [
   { pattern: /^\/sales\/dashboard$/, pageType: 'dashboard' },
   { pattern: /^\/sales\/settings$/, pageType: 'settings' },
   { pattern: /^\/sales\/schedule\/map$/, pageType: 'scheduleMap' },
+  { pattern: /^\/sales\/schedule\/(\d+)$/, pageType: 'areaAssignmentDetail', params: ['assignmentId'] },
   { pattern: /^\/sales\/schedule$/, pageType: 'scheduleList' },
+  { pattern: /^\/sales\/field-reports\/(\d+)$/, pageType: 'fieldActivityReportDetail', params: ['reportId'] },
   { pattern: /^\/sales\/field-reports$/, pageType: 'fieldActivityReports' },
   { pattern: /^\/sales\/customers$/, pageType: 'customers' },
   { pattern: /^\/sales\/customers\/new$/, pageType: 'customerForm' },
-  { pattern: /^\/sales\/purchase-requests\/(\d+)$/, pageType: 'purchaseRequestDetail', params: ['requestId'] },
-  { pattern: /^\/sales\/purchase-requests$/, pageType: 'purchaseRequests' },
+  { pattern: /^\/sales\/customers\/(\d+)\/edit$/, pageType: 'customerEdit', params: ['customerId'] },
   { pattern: /^\/sales\/customer-detail\/([^/]+)$/, pageType: 'customerDetail', params: ['customerId'] },
   { pattern: /^\/sales\/visit-log\/(\d+)$/, pageType: 'visitLog', params: ['visitId'] },
   { pattern: /^\/sales\/log-sale\/(\d+)$/, pageType: 'logSale', params: ['customerId'] },
@@ -56,7 +57,7 @@ export function buildSalesBreadcrumbs(pageType, params = {}, parentContext = 'cu
   const customerLabel = params.customerId ? `Customer #${params.customerId}` : 'Customer Detail';
   const productLabel = params.productId ? `Product #${params.productId}` : 'Product Details';
 
-  const creditCrumbs = [{ label: 'Customer Credit History', to: '/sales/credit-history' }];
+  const creditCrumbs = [{ label: 'Payment History', to: '/sales/credit-history' }];
 
   switch (pageType) {
     case 'dashboard':
@@ -73,14 +74,36 @@ export function buildSalesBreadcrumbs(pageType, params = {}, parentContext = 'cu
         ...(pageType === 'scheduleMap' ? [{ label: 'Territory Map', to: '/sales/schedule/map' }] : []),
       ];
 
+    case 'areaAssignmentDetail':
+      return [
+        ...crumbs,
+        { label: "Today's Schedule", to: '/sales/schedule' },
+        { label: 'Assigned Area', to: `/sales/schedule/${params.assignmentId}` },
+      ];
+
     case 'fieldActivityReports':
       return [...crumbs, { label: 'Field Activity Reports', to: '/sales/field-reports' }];
+
+    case 'fieldActivityReportDetail':
+      return [
+        ...crumbs,
+        { label: 'Field Activity Reports', to: '/sales/field-reports' },
+        { label: 'Report Detail', to: `/sales/field-reports/${params.reportId}` },
+      ];
 
     case 'customers':
       return [...crumbs, { label: 'Customers', to: '/sales/customers' }];
 
     case 'customerForm':
       return [...crumbs, { label: 'Customers', to: '/sales/customers' }, { label: 'Add Customer', to: '/sales/customers/new' }];
+
+    case 'customerEdit':
+      return [
+        ...crumbs,
+        { label: 'Customers', to: '/sales/customers' },
+        { label: customerLabel, to: `/sales/customer-detail/${params.customerId}?from=customers` },
+        { label: 'Edit', to: `/sales/customers/${params.customerId}/edit` },
+      ];
 
     case 'customerDetail': {
       const parentCrumb =
@@ -106,23 +129,13 @@ export function buildSalesBreadcrumbs(pageType, params = {}, parentContext = 'cu
         },
       ];
 
-    case 'purchaseRequests':
-      return [...crumbs, { label: 'Purchase Requests', to: '/sales/purchase-requests' }];
-
-    case 'purchaseRequestDetail':
-      return [
-        ...crumbs,
-        { label: 'Purchase Requests', to: '/sales/purchase-requests' },
-        { label: `Request #${params.requestId}`, to: `/sales/purchase-requests/${params.requestId}` },
-      ];
-
     case 'ciSubmissions':
-      return [...crumbs, { label: 'Credit Investigations', to: '/sales/credit-investigations' }];
+      return [...crumbs, { label: 'Credit Reviews', to: '/sales/credit-investigations' }];
 
     case 'ciSubmissionDetail':
       return [
         ...crumbs,
-        { label: 'Credit Investigations', to: '/sales/credit-investigations' },
+        { label: 'Credit Reviews', to: '/sales/credit-investigations' },
         { label: `CI #${params.ciId}`, to: `/sales/credit-investigations/${params.ciId}` },
       ];
 
@@ -130,7 +143,7 @@ export function buildSalesBreadcrumbs(pageType, params = {}, parentContext = 'cu
       return [
         ...buildSalesBreadcrumbs('customerDetail', params, parentContext).slice(0, -1),
         { label: customerLabel, to: `/sales/customer-detail/${params.customerId}?from=${parentContext}` },
-        { label: 'Credit Investigation Form', to: `/sales/ci-form/${params.customerId}?from=${parentContext}` },
+        { label: 'Request Credit Review', to: `/sales/ci-form/${params.customerId}?from=${parentContext}` },
       ];
 
     case 'history':
@@ -157,7 +170,7 @@ export function buildSalesBreadcrumbs(pageType, params = {}, parentContext = 'cu
       return [...crumbs, ...creditCrumbs];
 
     case 'creditDetail':
-      return [...crumbs, ...creditCrumbs, { label: 'Credit Record', to: `/sales/credit-history/${params.creditId}` }];
+      return [...crumbs, ...creditCrumbs, { label: 'Payment Details', to: `/sales/credit-history/${params.creditId}` }];
 
     case 'notifications':
       return [...crumbs, { label: 'Notifications', to: '/sales/notifications' }];
@@ -188,17 +201,18 @@ export function resolveSalesPage(pathname, search = '') {
     settings: 'Settings',
     scheduleList: "Today's Schedule",
     scheduleMap: 'Territory Map',
+    areaAssignmentDetail: 'Assigned Area',
     fieldActivityReports: 'Field Activity Reports',
+    fieldActivityReportDetail: 'Field Activity Report',
     customers: 'Customers',
     customerForm: 'Add Customer',
-    purchaseRequests: 'Purchase Requests',
-    purchaseRequestDetail: 'Review Purchase Request',
+    customerEdit: 'Edit Customer',
     customerDetail: 'Customer Detail',
     visitLog: 'Field Visit Log',
     logSale: 'Log a Sale',
-    ciForm: 'Credit Investigation Form',
-    ciSubmissions: 'Credit Investigations',
-    ciSubmissionDetail: 'Credit Investigation Detail',
+    ciForm: 'Request Credit Review',
+    ciSubmissions: 'Credit Reviews',
+    ciSubmissionDetail: 'Credit Review Detail',
     history: 'Sales History',
     invoiceDetails: 'Invoice Details',
     inventory: 'Inventory',
@@ -207,18 +221,14 @@ export function resolveSalesPage(pathname, search = '') {
     profile: 'Profile',
     routeTracking: 'Route Tracking',
     auditLog: 'Audit Log',
-    creditHistory: 'Customer Credit History',
-    creditDetail: 'Credit Record',
+    creditHistory: 'Payment History',
+    creditDetail: 'Payment Details',
   };
-
-  const searchParams = new URLSearchParams(search);
-  const purchaseRequestId = searchParams.get('purchaseRequestId') || null;
 
   return {
     pageType: match.pageType,
     params: match.params,
     parentContext,
-    purchaseRequestId,
     breadcrumbs,
     title: titles[match.pageType] ?? 'Sales Agent',
     badge: 'Sales agent',
@@ -229,11 +239,17 @@ export function isSalesNavActive(fullPath, navTo) {
   const pathname = fullPath.split('?')[0];
   if (navTo === '/sales/dashboard') return pathname === '/sales/dashboard' || pathname === '/sales/route-tracking' || pathname === '/sales/audit-log';
   if (navTo === '/sales/log-sale') return pathname.startsWith('/sales/log-sale');
-  if (navTo === '/sales/schedule') return pathname.startsWith('/sales/schedule') || pathname.startsWith('/sales/visit-log') || fullPath.includes('from=schedule');
-  if (navTo === '/sales/field-reports') return pathname === '/sales/field-reports';
+  if (navTo === '/sales/schedule') {
+    return pathname.startsWith('/sales/schedule')
+      || pathname.startsWith('/sales/visit-log')
+      || fullPath.includes('from=schedule');
+  }
+  if (navTo === '/sales/field-reports') return pathname.startsWith('/sales/field-reports');
   if (navTo === '/sales/customers') {
     return pathname === '/sales/customers'
       || pathname === '/sales/customers/new'
+      || /^\/sales\/customers\/\d+\/edit$/.test(pathname)
+      || pathname.startsWith('/sales/customer-detail/')
       || fullPath.includes('from=customers');
   }
   if (navTo === '/sales/history') return pathname.startsWith('/sales/history') || pathname.startsWith('/sales/invoices');

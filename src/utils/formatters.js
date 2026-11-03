@@ -86,3 +86,16 @@ export function formatPaymentTimestamp(paymentDate, paymentTime) {
   const timePart = timeRaw.length >= 8 ? timeRaw.slice(0, 8) : `${timeRaw}:00`.slice(0, 8);
   return formatDisplayDateTime(`${datePart}T${timePart}`);
 }
+
+/**
+ * Display formatter for warehouse document / movement refs.
+ * Does not invent missing values — only normalizes casing/spacing for known codes.
+ * Examples: TRF-2026-0001, RST-2026-0001, SC-2026-0001, DR-2026-0001, MOV-RST-2026-0001-12
+ */
+export function formatDocumentRef(value) {
+  if (value === null || value === undefined || value === '') return '—';
+  const raw = String(value).trim();
+  if (!raw) return '—';
+  // Keep internal punctuation; collapse spaces; uppercase letter/digit codes.
+  return raw.replace(/\s+/g, '').toUpperCase();
+}
