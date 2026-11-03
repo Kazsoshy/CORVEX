@@ -50,6 +50,20 @@ export const notifyScheduleAssigned = guard('schedule', async (pool, {
   });
 });
 
+export const notifyAreaScheduleAssigned = guard('area schedule', async (pool, {
+  userId,
+  workDate,
+  areaName,
+}) => {
+  if (!userId || !workDate || !areaName) return;
+  await insertUserNotification(pool, {
+    userId,
+    title: 'Area assignment scheduled',
+    message: `Your Branch Head assigned you to canvass ${areaName} on ${workDate}.`,
+    category: 'Schedule',
+  });
+});
+
 export const notifyTodaysSchedules = guard('schedule sweep', async (pool) => {
   const today = manilaDateString();
   const result = await pool.query(

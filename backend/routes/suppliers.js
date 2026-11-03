@@ -1,8 +1,9 @@
 import express from 'express';
-import { allow, ROLE_SETS } from '../middleware/auth.js';
+import { allow, isUnscoped, ROLE_SETS } from '../middleware/auth.js';
 
 const router = express.Router();
-router.use(allow(ROLE_SETS.suppliers));
+// Warehouse/BM: read-only. OM/super_admin: create, edit, archive.
+router.use(allow(ROLE_SETS.suppliersRead, ROLE_SETS.suppliersWrite));
 
 // ──────────────────────────────────────────────────────────────────────────────
 // GET /api/suppliers
@@ -76,6 +77,7 @@ router.get('/', async (req, res) => {
 router.get('/:id', async (req, res) => {
   try {
     const pool = req.app.locals.pool;
+    const user = req.currentUser;
 
     const result = await pool.query(
       `SELECT
@@ -97,9 +99,43 @@ router.get('/:id', async (req, res) => {
       return res.status(404).json({ success: false, message: 'Supplier not found.' });
     }
 
+    const restockParams = [req.params.id];
+    let branchSql = '';
+    if (!isUnscoped(user) && user.branchId != null) {
+      branchSql = ' AND h.branch_id = $2';
+      restockParams.push(user.branchId);
+    }
+
+    const restocks = await pool.query(
+      `SELECT
+         h.restock_id,
+         h.restock_ref,
+         h.delivery_ref,
+         h.received_date,
+         rec.full_name AS recorded_by_name,
+         COALESCE(agg.line_count, 0)::int AS line_count,
+         COALESCE(agg.total_quantity, 0)::int AS total_quantity
+       FROM restock_headers h
+       LEFT JOIN users rec ON rec.id = h.recorded_by
+       LEFT JOIN LATERAL (
+         SELECT
+           COUNT(*)::int AS line_count,
+           COALESCE(SUM(l.quantity), 0)::int AS total_quantity
+         FROM restock_lines l
+         WHERE l.restock_id = h.restock_id
+       ) agg ON TRUE
+       WHERE h.supplier_id = $1${branchSql}
+       ORDER BY h.received_date DESC, h.restock_id DESC
+       LIMIT 20`,
+      restockParams
+    );
+
     return res.status(200).json({
       success: true,
-      data: result.rows[0],
+      data: {
+        ...result.rows[0],
+        recent_restocks: restocks.rows,
+      },
     });
   } catch (err) {
     console.error('[Suppliers] GET /:id error:', err.message);
@@ -113,7 +149,8 @@ router.get('/:id', async (req, res) => {
 router.post('/', async (req, res) => {
   try {
     const pool = req.app.locals.pool;
-    const { supplier_name, contact, email, address, status } = req.body;
+    const { supplier_name, contact, contact_number, email, address, status } = req.body;
+    const contactValue = contact ?? contact_number;
 
     if (!supplier_name) {
       return res.status(400).json({ success: false, message: 'supplier_name is required.' });
@@ -125,7 +162,7 @@ router.post('/', async (req, res) => {
        RETURNING suppliers_id, supplier_name, contact, email, address, status, created_at, updated_at`,
       [
         supplier_name.trim(),
-        contact?.trim() || null,
+        typeof contactValue === 'string' ? contactValue.trim() || null : null,
         email?.trim() || null,
         address?.trim() || null,
         status || 'Active',
@@ -149,7 +186,8 @@ router.post('/', async (req, res) => {
 router.put('/:id', async (req, res) => {
   try {
     const pool = req.app.locals.pool;
-    const { supplier_name, contact, email, address, status } = req.body;
+    const { supplier_name, contact, contact_number, email, address, status } = req.body;
+    const contactValue = contact !== undefined ? contact : contact_number;
 
     const existing = await pool.query(`SELECT suppliers_id FROM suppliers WHERE suppliers_id = $1`, [Number(req.params.id)]);
     if (existing.rows.length === 0) {
@@ -161,7 +199,10 @@ router.put('/:id', async (req, res) => {
     let pIdx = 1;
 
     if (supplier_name !== undefined) { updates.push(`supplier_name = $${pIdx++}`); params.push(supplier_name.trim()); }
-    if (contact !== undefined) { updates.push(`contact = $${pIdx++}`); params.push(contact?.trim() || null); }
+    if (contactValue !== undefined) {
+      updates.push(`contact = $${pIdx++}`);
+      params.push(typeof contactValue === 'string' ? contactValue.trim() || null : null);
+    }
     if (email !== undefined) { updates.push(`email = $${pIdx++}`); params.push(email?.trim() || null); }
     if (address !== undefined) { updates.push(`address = $${pIdx++}`); params.push(address?.trim() || null); }
     if (status !== undefined) { updates.push(`status = $${pIdx++}`); params.push(status); }
@@ -206,6 +247,12 @@ router.delete('/:id', async (req, res) => {
       return res.status(400).json({ success: false, message: 'Supplier is already archived.' });
     }
 
+    const linked = await pool.query(
+      `SELECT COUNT(*)::int AS c FROM restock_headers WHERE supplier_id = $1`,
+      [supplierId]
+    );
+    const linkedCount = Number(linked.rows[0]?.c) || 0;
+
     await pool.query(
       `UPDATE suppliers SET status = 'Inactive', updated_at = NOW() WHERE suppliers_id = $1`,
       [supplierId]
@@ -213,7 +260,10 @@ router.delete('/:id', async (req, res) => {
 
     return res.status(200).json({
       success: true,
-      message: 'Supplier archived successfully. The record is preserved.',
+      message: linkedCount > 0
+        ? `Supplier archived. ${linkedCount} historical restock(s) are preserved; this supplier cannot be used on new restocks.`
+        : 'Supplier archived successfully. The record is preserved.',
+      data: { linked_restocks: linkedCount },
     });
   } catch (err) {
     console.error('[Suppliers] DELETE /:id error:', err.message);

@@ -23,10 +23,12 @@ export async function notifyTransferSubmitted(pool, {
   transferRef,
   productName,
   quantity,
+  lineCount = 1,
   submitterName,
 }) {
   const title = 'Transfer approval required';
-  const message = `${submitterName} requested transfer ${transferRef} (${productName}, ${quantity} units). Review in Approval Center.`;
+  const linesLabel = Number(lineCount) > 1 ? `${lineCount} products` : productName;
+  const message = `${submitterName} requested transfer ${transferRef} (${linesLabel}, ${quantity} units). Review in Approval Center.`;
   await notifyApprovers(pool, { sourceBranchId, title, message });
 }
 
@@ -51,9 +53,29 @@ export async function notifyTransferDecision(pool, {
   });
 }
 
+/** Confirmation for the warehouse user who recorded a restock (not an approval ping). */
+export async function notifyRestockRecorded(pool, {
+  userId,
+  restockRef,
+  deliveryRef,
+  lineCount = 1,
+  totalQuantity,
+}) {
+  if (!userId) return;
+  const linesLabel = Number(lineCount) > 1 ? `${lineCount} products` : '1 product';
+  await insertUserNotification(pool, {
+    userId,
+    title: 'Restock recorded',
+    message: `${restockRef} (${deliveryRef}): ${linesLabel}, +${totalQuantity} units saved to your branch stock.`,
+    category: 'Restock',
+  });
+}
+
 export async function notifyTransferCompleted(pool, {
   transferRef,
   productName,
+  lineCount = 1,
+  totalQuantity,
   destinationBranchId,
 }) {
   const recipients = await pool.query(
@@ -67,7 +89,9 @@ export async function notifyTransferCompleted(pool, {
     [destinationBranchId]
   );
   const title = 'Transfer completed';
-  const message = `Transfer ${transferRef} (${productName}) was completed. Stock updated at destination branch.`;
+  const linesLabel = Number(lineCount) > 1 ? `${lineCount} products` : productName;
+  const qtyLabel = totalQuantity != null ? `, ${totalQuantity} units` : '';
+  const message = `Transfer ${transferRef} (${linesLabel}${qtyLabel}) was completed. Stock updated at destination branch.`;
   await Promise.all(
     recipients.rows.map((row) =>
       insertUserNotification(pool, { userId: row.id, title, message, category: 'Transfer' })

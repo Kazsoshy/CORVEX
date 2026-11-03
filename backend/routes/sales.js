@@ -14,6 +14,11 @@ import {
   CREDIT_INVESTIGATION_SELECT,
 } from '../lib/creditInvestigationQueries.js';
 import { notifyCreditInvestigationSubmitted } from '../lib/creditInvestigationNotifications.js';
+import {
+  buildCustomerCreditEvidence,
+  createCreditReview,
+  mapCreditReviewApiRow,
+} from '../lib/creditReview.js';
 import { applySalesInvoice } from '../lib/salesInvoiceWrite.js';
 import {
   notifyInvoicePendingReview,
@@ -21,6 +26,15 @@ import {
   notifyScheduleAssigned,
   publishStockAlerts,
 } from '../lib/operationalNotifications.js';
+import {
+  AREA_ASSIGNMENT_FROM,
+  AREA_ASSIGNMENT_SELECT,
+  AREA_ASSIGNMENT_STATUSES,
+  fetchAssignmentOutcomeStats,
+  loadAssignmentProducts,
+  resolveScopeDates,
+  withProducts,
+} from '../lib/salesAreaAssignments.js';
 
 const router = express.Router();
 
@@ -73,6 +87,11 @@ async function getInvoice(invoiceIdentifier, user) {
        si.invoices_date::text AS invoices_date,
        si.due_date::text AS due_date,
        si.notes,
+       si.pay_type,
+       si.down_payment,
+       si.term_months,
+       si.monthly_amount,
+       si.first_due_date::text AS first_due_date,
        pm.method_name AS payment_method,
        si.created_at,
        si.updated_at
@@ -192,21 +211,27 @@ router.get('/dashboard', salesStaffOnly, async (req, res) => {
     const today = manilaTodayString();
 
     const [
-      visitsToday,
+      areasToday,
       salesPeriods,
       recentSales,
       topProducts,
       topCustomers,
       lowStock,
       ciCounts,
+      actionableCredits,
     ] = await Promise.all([
       pool.query(
-        `SELECT
-           COUNT(*)::int AS total,
-           COUNT(*) FILTER (WHERE fv.status = 'Pending')::int AS pending,
-           COUNT(*) FILTER (WHERE fv.status = 'Completed')::int AS completed
-         FROM field_visits fv
-         WHERE fv.user_id = $1 AND fv.visit_type = 'Sales' AND fv.scheduled_date = $2::date`,
+        `SELECT ${AREA_ASSIGNMENT_SELECT}
+         ${AREA_ASSIGNMENT_FROM}
+         WHERE saa.sales_agent_id = $1
+           AND saa.work_date = $2::date
+         ORDER BY
+           CASE saa.status
+             WHEN 'In Progress' THEN 0
+             WHEN 'Assigned' THEN 1
+             ELSE 2
+           END,
+           saa.assignment_id ASC`,
         [userId, today]
       ),
       pool.query(
@@ -216,12 +241,13 @@ router.get('/dashboard', salesStaffOnly, async (req, res) => {
            COALESCE(SUM(total_amount) FILTER (WHERE invoices_date >= date_trunc('month', $2::date)::date), 0) AS monthly,
            COUNT(*) FILTER (WHERE invoices_date = $2::date)::int AS sales_logged_today
          FROM sales_invoices
-         WHERE sales_agent_id = $1`,
+         WHERE sales_agent_id = $1
+           AND status IN ('Pending Review', 'Confirmed', 'Cancelled', 'Draft')`,
         [userId, today]
       ),
       pool.query(
-        `SELECT si.sales_invoices_id, si.invoice_number, si.total_amount, si.invoices_date::text AS invoices_date,
-                c.first_name, c.last_name,
+        `SELECT si.sales_invoices_id, si.invoice_number, si.total_amount, si.status,
+                si.invoices_date::text AS invoices_date,
                 COALESCE(NULLIF(CONCAT_WS(' ', c.first_name, c.last_name), ''), 'Customer') AS customer_name
          FROM sales_invoices si
          LEFT JOIN customers c ON c.customer_id = si.customer_id
@@ -254,32 +280,69 @@ router.get('/dashboard', salesStaffOnly, async (req, res) => {
       ),
       branchId
         ? pool.query(
-            `SELECT p.id, p.name, p.sku, bi.available_stock AS stock, bi.stock_status AS status, b.name AS branch
+            `SELECT
+               p.id,
+               p.name,
+               p.sku,
+               COALESCE(bi.available_stock, bi.quantity, 0)::int AS stock,
+               bi.reorder_level,
+               b.name AS branch,
+               CASE
+                 WHEN COALESCE(bi.available_stock, bi.quantity, 0) <= 0 THEN 'Out'
+                 WHEN COALESCE(bi.reorder_level, 0) > 0
+                   AND COALESCE(bi.available_stock, bi.quantity, 0) <= COALESCE(bi.reorder_level, 0)
+                   THEN 'Low'
+                 ELSE 'Sufficient'
+               END AS status
              FROM branch_inventory bi
-             JOIN products p ON p.id = bi.product_id
+             JOIN products p ON p.id = bi.product_id AND p.status = 'Active'
              JOIN branches b ON b.id = bi.branch_id
-             WHERE bi.branch_id = $1 AND bi.available_stock <= bi.reorder_level
-             ORDER BY bi.available_stock ASC
-             LIMIT 10`,
+             WHERE bi.branch_id = $1
+               AND (
+                 COALESCE(bi.available_stock, bi.quantity, 0) <= 0
+                 OR (
+                   COALESCE(bi.reorder_level, 0) > 0
+                   AND COALESCE(bi.available_stock, bi.quantity, 0) <= COALESCE(bi.reorder_level, 0)
+                 )
+               )
+             ORDER BY COALESCE(bi.available_stock, bi.quantity, 0) ASC
+             LIMIT 8`,
             [branchId]
           )
         : Promise.resolve({ rows: [] }),
       pool.query(
         `SELECT
            COUNT(*)::int AS total,
-           COUNT(*) FILTER (WHERE status = 'Pending')::int AS pending,
+           COUNT(*) FILTER (WHERE status IN ('Pending', 'Revision Requested'))::int AS pending,
            COUNT(*) FILTER (WHERE status = 'Approved')::int AS approved,
            COUNT(*) FILTER (WHERE status IN ('Rejected', 'Revision Requested'))::int AS needs_action
          FROM credit_investigations
          WHERE submitted_by = $1`,
         [userId]
       ),
+      pool.query(
+        `SELECT
+           ci.ci_id,
+           ci.status,
+           ci.request_reason,
+           ci.purpose,
+           ci.updated_at,
+           ci.created_at,
+           COALESCE(NULLIF(CONCAT_WS(' ', c.first_name, c.last_name), ''), 'Customer') AS customer_name
+         FROM credit_investigations ci
+         JOIN customers c ON c.customer_id = ci.customer_id
+         WHERE ci.submitted_by = $1
+           AND ci.status IN ('Rejected', 'Revision Requested')
+         ORDER BY ci.updated_at DESC NULLS LAST, ci.created_at DESC
+         LIMIT 5`,
+        [userId]
+      ),
     ]);
 
-    const vt = visitsToday.rows[0] || {};
-    const totalVisits = Number(vt.total) || 0;
-    const completedVisits = Number(vt.completed) || 0;
-    const pendingVisits = Number(vt.pending) || 0;
+    const assignments = areasToday.rows || [];
+    const areasAssigned = assignments.length;
+    const areasDone = assignments.filter((row) => row.status === 'Done').length;
+    const areasInProgress = assignments.filter((row) => row.status === 'In Progress').length;
     const sp = salesPeriods.rows[0] || {};
     const ciRow = ciCounts.rows[0] || {};
 
@@ -287,14 +350,29 @@ router.get('/dashboard', salesStaffOnly, async (req, res) => {
       success: true,
       data: {
         summary: {
-          accountsToVisit: totalVisits,
-          pendingVisits,
-          completedVisits,
+          areasAssignedToday: areasAssigned,
+          areasCompletedToday: areasDone,
+          areasInProgressToday: areasInProgress,
+          areaProgress: areasAssigned > 0 ? Math.round((areasDone / areasAssigned) * 100) : 0,
           salesLogged: Number(sp.sales_logged_today) || 0,
-          visitProgress: totalVisits > 0 ? Math.round((completedVisits / totalVisits) * 100) : 0,
           creditInvestigationsPending: Number(ciRow.pending) || 0,
+          creditInvestigationsNeedsAction: Number(ciRow.needs_action) || 0,
           creditInvestigationsTotal: Number(ciRow.total) || 0,
+          // Legacy aliases kept so older clients don't crash
+          accountsToVisit: areasAssigned,
+          completedVisits: areasDone,
+          pendingVisits: Math.max(0, areasAssigned - areasDone),
+          visitProgress: areasAssigned > 0 ? Math.round((areasDone / areasAssigned) * 100) : 0,
         },
+        todayAssignments: assignments.map((row) => ({
+          assignmentId: row.assignment_id,
+          areaName: row.area_name,
+          workDate: row.work_date,
+          status: row.status,
+          coverageNotes: row.coverage_notes || null,
+          territoryName: row.territory_name || null,
+          branchName: row.branch_name || null,
+        })),
         analytics: {
           dailyRevenue: Number(sp.daily) || 0,
           weeklyRevenue: Number(sp.weekly) || 0,
@@ -310,15 +388,24 @@ router.get('/dashboard', salesStaffOnly, async (req, res) => {
           invoiceNumber: r.invoice_number,
           customerName: r.customer_name,
           totalAmount: Number(r.total_amount) || 0,
+          status: r.status,
           date: r.invoices_date,
         })),
-        lowStockItems: lowStock.rows.map((r, idx) => ({
-          id: r.id ?? idx,
+        lowStockItems: lowStock.rows.map((r) => ({
+          id: r.id,
           name: r.name,
           sku: r.sku,
           stock: r.stock,
           status: r.status,
           branch: r.branch,
+          reorderLevel: r.reorder_level,
+        })),
+        creditReviewsNeedingAttention: actionableCredits.rows.map((r) => ({
+          id: r.ci_id,
+          status: r.status,
+          customerName: r.customer_name,
+          reason: r.request_reason || r.purpose || null,
+          updatedAt: r.updated_at || r.created_at,
         })),
       },
     });
@@ -329,78 +416,74 @@ router.get('/dashboard', salesStaffOnly, async (req, res) => {
 });
 
 router.post('/credit-investigations', salesStaffOnly, async (req, res) => {
+  const client = await req.app.locals.pool.connect();
   try {
-    const pool = req.app.locals.pool;
     const user = req.currentUser;
     const customerId = Number(req.body.customer_id);
-    const {
-      purpose,
-      monthly_income: monthlyIncome,
-      business_type: businessType,
-      references_summary: referencesSummary,
-      form_remarks: formRemarks,
-    } = req.body;
+    const requestReason = req.body.request_reason || req.body.purpose;
+    const requestedCreditLimit = req.body.requested_credit_limit;
+    const requestRemarks = req.body.request_remarks || req.body.form_remarks;
 
     if (!Number.isFinite(customerId)) {
       return res.status(400).json({ success: false, message: 'Customer is required.' });
     }
-    if (!String(purpose || '').trim()) {
-      return res.status(400).json({ success: false, message: 'Purpose is required.' });
-    }
 
-    const access = await assertSalesCustomerAccess(pool, user, customerId);
+    const access = await assertSalesCustomerAccess(client, user, customerId);
     if (!access.ok) {
       return res.status(access.status).json({ success: false, message: access.message });
     }
 
-    const customerMeta = await pool.query(
-      `SELECT first_name, last_name FROM customers WHERE customer_id = $1`,
-      [customerId]
-    );
-    const customerName = customerMeta.rows[0]
-      ? `${customerMeta.rows[0].first_name} ${customerMeta.rows[0].last_name}`.trim()
-      : 'Customer';
-
-    const submitterMeta = await pool.query(
+    const submitterMeta = await client.query(
       `SELECT COALESCE(NULLIF(TRIM(full_name), ''), email) AS display_name FROM users WHERE id = $1`,
       [user.id]
     );
     const submitterName = submitterMeta.rows[0]?.display_name || 'Sales agent';
 
-    const result = await pool.query(
-      `INSERT INTO credit_investigations (
-         customer_id, branch_id, submitted_by, status, purpose, monthly_income,
-         business_type, references_summary, form_remarks
-       ) VALUES ($1, $2, $3, 'Pending', $4, $5, $6, $7, $8)
-       RETURNING ci_id, status, created_at`,
-      [
-        customerId,
-        access.row.branch_id,
-        user.id,
-        String(purpose).trim(),
-        Number(monthlyIncome) || 0,
-        businessType ? String(businessType).trim() : null,
-        referencesSummary ? String(referencesSummary).trim() : null,
-        formRemarks ? String(formRemarks).trim() : null,
-      ]
-    );
-
-    const ciId = result.rows[0].ci_id;
-    await notifyCreditInvestigationSubmitted(pool, {
+    await client.query('BEGIN');
+    const created = await createCreditReview(client, {
+      customerId,
       branchId: access.row.branch_id,
-      ciId,
+      submittedBy: user.id,
+      requestReason,
+      requestedCreditLimit,
+      requestRemarks,
+    });
+    await client.query('COMMIT');
+
+    const customerName = created.evidence?.customer?.name || 'Customer';
+    await notifyCreditInvestigationSubmitted(req.app.locals.pool, {
+      branchId: access.row.branch_id,
+      ciId: created.row.ci_id,
       customerName,
       submitterName,
     });
 
     return res.status(201).json({
       success: true,
-      message: 'Credit investigation submitted for branch approval.',
-      data: { ...result.rows[0], customer_id: customerId, customer_name: customerName },
+      message: 'Credit review submitted for Branch Manager decision.',
+      data: {
+        ...created.row,
+        customer_id: customerId,
+        customer_name: customerName,
+        risk_level: created.row.risk_level,
+      },
     });
   } catch (err) {
+    try { await client.query('ROLLBACK'); } catch { /* ignore */ }
+    if (err.status === 409) {
+      return res.status(409).json({
+        success: false,
+        message: err.message,
+        data: err.existingId ? { ci_id: err.existingId } : undefined,
+      });
+    }
+    if (err.status) {
+      return res.status(err.status).json({ success: false, message: err.message });
+    }
     console.error('[Sales] POST /credit-investigations error:', err.message);
-    return res.status(500).json({ success: false, message: 'Failed to submit credit investigation.' });
+    return res.status(500).json({ success: false, message: 'Failed to submit credit review.' });
+  } finally {
+    client.release();
   }
 });
 
@@ -408,12 +491,16 @@ router.get('/credit-investigations', salesStaffOnly, async (req, res) => {
   try {
     const pool = req.app.locals.pool;
     const user = req.currentUser;
-    const { status } = req.query;
+    const status = String(req.query.status || '').replace(/\+/g, ' ').trim();
     const params = [user.id];
     let statusSql = '';
     if (status && status !== 'All') {
-      statusSql = ' AND ci.status = $2';
-      params.push(String(status));
+      if (status === 'Needs BM' || status === 'Pending' || status === 'needs_bm') {
+        statusSql = ` AND ci.status IN ('Pending', 'Revision Requested')`;
+      } else {
+        statusSql = ' AND ci.status = $2';
+        params.push(status);
+      }
     }
 
     const result = await pool.query(
@@ -425,10 +512,13 @@ router.get('/credit-investigations', salesStaffOnly, async (req, res) => {
       params
     );
 
-    return res.status(200).json({ success: true, data: result.rows });
+    return res.status(200).json({
+      success: true,
+      data: result.rows.map((row) => mapCreditReviewApiRow(row)),
+    });
   } catch (err) {
     console.error('[Sales] GET /credit-investigations error:', err.message);
-    return res.status(500).json({ success: false, message: 'Failed to load your credit investigations.' });
+    return res.status(500).json({ success: false, message: 'Failed to load your credit reviews.' });
   }
 });
 
@@ -438,7 +528,7 @@ router.get('/credit-investigations/:id', salesStaffOnly, async (req, res) => {
     const user = req.currentUser;
     const ciId = Number(req.params.id);
     if (!Number.isFinite(ciId)) {
-      return res.status(400).json({ success: false, message: 'Invalid CI id.' });
+      return res.status(400).json({ success: false, message: 'Invalid credit review id.' });
     }
 
     const result = await pool.query(
@@ -449,12 +539,42 @@ router.get('/credit-investigations/:id', salesStaffOnly, async (req, res) => {
     );
 
     if (!result.rows.length) {
-      return res.status(404).json({ success: false, message: 'Credit investigation not found.' });
+      return res.status(404).json({ success: false, message: 'Credit review not found.' });
     }
-    return res.status(200).json({ success: true, data: result.rows[0] });
+
+    const row = result.rows[0];
+    let liveEvidence = null;
+    if (row.status === 'Pending' || row.status === 'Revision Requested') {
+      liveEvidence = await buildCustomerCreditEvidence(pool, row.customer_id);
+    }
+
+    return res.status(200).json({
+      success: true,
+      data: mapCreditReviewApiRow(row, { liveEvidence }),
+    });
   } catch (err) {
     console.error('[Sales] GET /credit-investigations/:id error:', err.message);
-    return res.status(500).json({ success: false, message: 'Failed to load credit investigation.' });
+    return res.status(500).json({ success: false, message: 'Failed to load credit review.' });
+  }
+});
+
+router.get('/customers/:id/credit-review-context', salesStaffOnly, async (req, res) => {
+  try {
+    const pool = req.app.locals.pool;
+    const user = req.currentUser;
+    const customerId = Number(req.params.id);
+    if (!Number.isFinite(customerId)) {
+      return res.status(400).json({ success: false, message: 'Invalid customer id.' });
+    }
+    const access = await assertSalesCustomerAccess(pool, user, customerId);
+    if (!access.ok) {
+      return res.status(access.status).json({ success: false, message: access.message });
+    }
+    const evidence = await buildCustomerCreditEvidence(pool, customerId);
+    return res.status(200).json({ success: true, data: evidence });
+  } catch (err) {
+    console.error('[Sales] GET /customers/:id/credit-review-context error:', err.message);
+    return res.status(500).json({ success: false, message: 'Failed to load credit review context.' });
   }
 });
 
@@ -539,6 +659,11 @@ router.get('/invoices', salesStaffOrOperatingManager, async (req, res) => {
          si.invoices_date::text AS invoices_date,
          si.due_date::text AS due_date,
          si.notes,
+         si.pay_type,
+         si.down_payment,
+         si.term_months,
+         si.monthly_amount,
+         si.first_due_date::text AS first_due_date,
          pm.method_name AS payment_method,
          ARRAY(
            SELECT DISTINCT p.name
@@ -672,24 +797,13 @@ router.post('/invoices', async (req, res) => {
   const pool = req.app.locals.pool;
   const user = req.currentUser;
   const customerId = positiveInteger(req.body.customer_id);
-  const paymentMethodId = positiveInteger(req.body.payment_method_id);
   const invoicesDate = req.body.invoices_date;
-  const dueDate = req.body.due_date;
-  const notes = typeof req.body.notes === 'string' ? req.body.notes.trim() : '';
   const items = Array.isArray(req.body.items) ? req.body.items : [];
-  const purchaseRequestId = positiveInteger(req.body.purchase_request_id);
 
-  if (!customerId || !paymentMethodId || !isValidDate(invoicesDate)) {
+  if (!customerId || !isValidDate(invoicesDate)) {
     return res.status(400).json({
       success: false,
-      message: 'Valid customer_id, payment_method_id, and invoices_date are required.',
-    });
-  }
-
-  if (dueDate !== undefined && dueDate !== null && dueDate !== '' && !isValidDate(dueDate)) {
-    return res.status(400).json({
-      success: false,
-      message: 'due_date must be a valid YYYY-MM-DD date when provided.',
+      message: 'Valid customer_id and invoices_date are required.',
     });
   }
 
@@ -704,25 +818,6 @@ router.post('/invoices', async (req, res) => {
     return res.status(400).json({
       success: false,
       message: 'Sales invoices must be logged by a branch-assigned sales agent.',
-    });
-  }
-
-  const normalizedItems = [];
-  for (const rawItem of items) {
-    const productId = positiveInteger(rawItem.product_id);
-    const quantity = positiveInteger(rawItem.quantity);
-    if (!productId || !quantity) {
-      return res.status(400).json({
-        success: false,
-        message: 'Each line item requires a valid product_id and quantity.',
-      });
-    }
-    normalizedItems.push({
-      productId,
-      quantity,
-      unitPrice: rawItem.unit_price !== undefined && rawItem.unit_price !== null
-        ? Number(rawItem.unit_price)
-        : null,
     });
   }
 
@@ -1359,27 +1454,45 @@ router.patch('/purchase-requests/:id', async (req, res) => {
   }
 });
 
+const SALES_FAR_SELECT = `
+  far.report_id,
+  far.visit_id,
+  far.assignment_id,
+  far.customer_id,
+  far.activity_type,
+  far.remarks,
+  far.sync_status,
+  far.photo,
+  far.created_at,
+  saa.area_name,
+  saa.work_date::text AS work_date,
+  saa.status AS assignment_status,
+  fv.scheduled_date,
+  fv.visit_type,
+  fv.status AS visit_status,
+  COALESCE(
+    NULLIF(CONCAT_WS(' ', linked.first_name, linked.last_name), ''),
+    NULLIF(CONCAT_WS(' ', visit_c.first_name, visit_c.last_name), ''),
+    NULL
+  ) AS customer_name
+`;
+
+const SALES_FAR_FROM = `
+  FROM field_activity_reports far
+  LEFT JOIN sales_area_assignments saa ON saa.assignment_id = far.assignment_id
+  LEFT JOIN field_visits fv ON fv.visit_id = far.visit_id
+  LEFT JOIN customers visit_c ON visit_c.customer_id = fv.customer_id
+  LEFT JOIN customers linked ON linked.customer_id = far.customer_id
+`;
+
 router.get('/field-reports', async (req, res) => {
   const pool = req.app.locals.pool;
   const userId = req.currentUser.id;
 
   try {
     const result = await pool.query(
-      `SELECT
-         far.report_id,
-         far.visit_id,
-         far.activity_type,
-         far.remarks,
-         far.sync_status,
-         far.photo,
-         far.created_at,
-         fv.scheduled_date,
-         fv.visit_type,
-         fv.status AS visit_status,
-         COALESCE(NULLIF(CONCAT_WS(' ', c.first_name, c.last_name), ''), 'Customer') AS customer_name
-       FROM field_activity_reports far
-       JOIN field_visits fv ON fv.visit_id = far.visit_id
-       JOIN customers c ON c.customer_id = fv.customer_id
+      `SELECT ${SALES_FAR_SELECT}
+       ${SALES_FAR_FROM}
        WHERE far.user_id = $1
        ORDER BY far.created_at DESC
        LIMIT 100`,
@@ -1393,16 +1506,57 @@ router.get('/field-reports', async (req, res) => {
   }
 });
 
+router.get('/field-reports/:id', async (req, res) => {
+  const pool = req.app.locals.pool;
+  const userId = req.currentUser.id;
+  const reportId = positiveInteger(req.params.id);
+  if (!reportId) {
+    return res.status(400).json({ success: false, message: 'Invalid report id.' });
+  }
+
+  try {
+    const result = await pool.query(
+      `SELECT ${SALES_FAR_SELECT}
+       ${SALES_FAR_FROM}
+       WHERE far.user_id = $1 AND far.report_id = $2`,
+      [userId, reportId]
+    );
+    if (!result.rows.length) {
+      return res.status(404).json({ success: false, message: 'Field activity report not found.' });
+    }
+    return res.status(200).json({ success: true, data: result.rows[0] });
+  } catch (error) {
+    console.error('[Sales] GET /field-reports/:id error:', error);
+    return res.status(500).json({ success: false, message: 'Failed to fetch field activity report.' });
+  }
+});
+
 router.post('/field-reports', async (req, res) => {
   const pool = req.app.locals.pool;
   const userId = req.currentUser.id;
-  const { visit_id, activity_type, remarks, photo } = req.body;
+  const {
+    assignment_id: assignmentIdRaw,
+    visit_id: visitIdRaw,
+    customer_id: customerIdRaw,
+    activity_type,
+    remarks,
+    photo,
+  } = req.body;
   const photoValue = typeof photo === 'string' ? photo.trim() : '';
+  const assignmentId = positiveInteger(assignmentIdRaw);
+  const visitId = positiveInteger(visitIdRaw);
+  const customerId = positiveInteger(customerIdRaw);
 
-  if (!visit_id || !activity_type || !String(remarks || '').trim()) {
+  if (!activity_type || !String(remarks || '').trim()) {
     return res.status(400).json({
       success: false,
-      message: 'visit_id, activity_type, and remarks are required.',
+      message: 'activity_type and remarks are required.',
+    });
+  }
+  if (!assignmentId && !visitId) {
+    return res.status(400).json({
+      success: false,
+      message: 'assignment_id is required for sales field reports.',
     });
   }
   if (!photoValue || !photoValue.startsWith('data:image/')) {
@@ -1419,19 +1573,53 @@ router.post('/field-reports', async (req, res) => {
   }
 
   try {
-    const visitCheck = await pool.query(
-      `SELECT visit_id FROM field_visits WHERE visit_id = $1 AND user_id = $2`,
-      [Number(visit_id), userId]
-    );
-    if (!visitCheck.rows.length) {
-      return res.status(404).json({ success: false, message: 'Visit not found for this sales agent.' });
+    if (assignmentId) {
+      const assignmentCheck = await pool.query(
+        `SELECT assignment_id FROM sales_area_assignments
+         WHERE assignment_id = $1 AND sales_agent_id = $2`,
+        [assignmentId, userId]
+      );
+      if (!assignmentCheck.rows.length) {
+        return res.status(404).json({ success: false, message: 'Area assignment not found for this sales agent.' });
+      }
+    }
+
+    if (visitId) {
+      const visitCheck = await pool.query(
+        `SELECT visit_id FROM field_visits WHERE visit_id = $1 AND user_id = $2`,
+        [visitId, userId]
+      );
+      if (!visitCheck.rows.length) {
+        return res.status(404).json({ success: false, message: 'Visit not found for this sales agent.' });
+      }
+    }
+
+    if (customerId) {
+      const customerCheck = await pool.query(
+        `SELECT customer_id FROM customers
+         WHERE customer_id = $1
+           AND branch_id = $2`,
+        [customerId, req.currentUser.branchId]
+      );
+      if (!customerCheck.rows.length) {
+        return res.status(404).json({ success: false, message: 'Customer not found in your branch.' });
+      }
     }
 
     const result = await pool.query(
-      `INSERT INTO field_activity_reports (visit_id, user_id, activity_type, remarks, photo, sync_status)
-       VALUES ($1, $2, $3, $4, $5, 'Synced')
-       RETURNING report_id, visit_id, activity_type, remarks, photo, sync_status, created_at`,
-      [Number(visit_id), userId, String(activity_type).trim(), String(remarks).trim(), photoValue]
+      `INSERT INTO field_activity_reports
+         (visit_id, assignment_id, customer_id, user_id, activity_type, remarks, photo, sync_status)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, 'Synced')
+       RETURNING report_id, visit_id, assignment_id, customer_id, activity_type, remarks, photo, sync_status, created_at`,
+      [
+        visitId,
+        assignmentId,
+        customerId,
+        userId,
+        String(activity_type).trim(),
+        String(remarks).trim(),
+        photoValue,
+      ]
     );
 
     return res.status(201).json({
@@ -1442,6 +1630,167 @@ router.post('/field-reports', async (req, res) => {
   } catch (error) {
     console.error('[Sales] POST /field-reports error:', error);
     return res.status(500).json({ success: false, message: 'Failed to submit field activity report.' });
+  }
+});
+
+// ── Area assignments (canvass schedule — not customer field_visits) ───────────
+
+router.get('/area-assignments', async (req, res) => {
+  try {
+    const pool = req.app.locals.pool;
+    const user = req.currentUser;
+    const { scope, today, dateSql } = resolveScopeDates(req.query.scope);
+    const params = [user.id, today];
+    const result = await pool.query(
+      `SELECT ${AREA_ASSIGNMENT_SELECT}
+       ${AREA_ASSIGNMENT_FROM}
+       WHERE saa.sales_agent_id = $1
+         AND ${dateSql}
+       ORDER BY
+         CASE saa.status
+           WHEN 'In Progress' THEN 0
+           WHEN 'Assigned' THEN 1
+           ELSE 2
+         END,
+         saa.work_date ASC,
+         saa.assignment_id ASC`,
+      params
+    );
+    const productsByAssignment = await loadAssignmentProducts(
+      pool,
+      result.rows.map((row) => row.assignment_id)
+    );
+    const data = result.rows.map((row) => withProducts(row, productsByAssignment));
+    let summary = null;
+    if (scope === 'today') {
+      summary = await fetchAssignmentOutcomeStats(pool, user.id, today);
+      summary.areas_assigned = data.length;
+      summary.areas_done = data.filter((row) => row.status === 'Done').length;
+      summary.areas_in_progress = data.filter((row) => row.status === 'In Progress').length;
+    }
+    return res.status(200).json({
+      success: true,
+      data,
+      count: data.length,
+      meta: { scope, today, summary },
+    });
+  } catch (error) {
+    console.error('[Sales] GET /area-assignments error:', error);
+    return res.status(500).json({ success: false, message: 'Failed to load area assignments.' });
+  }
+});
+
+router.get('/area-assignments/:id', async (req, res) => {
+  try {
+    const pool = req.app.locals.pool;
+    const user = req.currentUser;
+    const assignmentId = positiveInteger(req.params.id);
+    if (!assignmentId) {
+      return res.status(400).json({ success: false, message: 'Invalid assignment id.' });
+    }
+    const result = await pool.query(
+      `SELECT ${AREA_ASSIGNMENT_SELECT}
+       ${AREA_ASSIGNMENT_FROM}
+       WHERE saa.assignment_id = $1 AND saa.sales_agent_id = $2`,
+      [assignmentId, user.id]
+    );
+    if (!result.rows.length) {
+      return res.status(404).json({ success: false, message: 'Area assignment not found.' });
+    }
+    const productsByAssignment = await loadAssignmentProducts(pool, [assignmentId]);
+    const row = withProducts(result.rows[0], productsByAssignment);
+    const outcomes = await fetchAssignmentOutcomeStats(pool, user.id, row.work_date);
+    return res.status(200).json({
+      success: true,
+      data: { ...row, outcomes },
+    });
+  } catch (error) {
+    console.error('[Sales] GET /area-assignments/:id error:', error);
+    return res.status(500).json({ success: false, message: 'Failed to load area assignment.' });
+  }
+});
+
+router.patch('/area-assignments/:id/status', async (req, res) => {
+  try {
+    const pool = req.app.locals.pool;
+    const user = req.currentUser;
+    const assignmentId = positiveInteger(req.params.id);
+    const nextStatus = String(req.body?.status || '').trim();
+    if (!assignmentId) {
+      return res.status(400).json({ success: false, message: 'Invalid assignment id.' });
+    }
+    if (!AREA_ASSIGNMENT_STATUSES.has(nextStatus) || nextStatus === 'Assigned') {
+      return res.status(400).json({
+        success: false,
+        message: 'Status must be In Progress or Done.',
+      });
+    }
+
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      const existing = await client.query(
+        `SELECT assignment_id, status, started_at, completed_at
+         FROM sales_area_assignments
+         WHERE assignment_id = $1 AND sales_agent_id = $2
+         FOR UPDATE`,
+        [assignmentId, user.id]
+      );
+      if (!existing.rows.length) {
+        await client.query('ROLLBACK');
+        return res.status(404).json({ success: false, message: 'Area assignment not found.' });
+      }
+
+      const current = existing.rows[0];
+      if (current.status === 'Done' && nextStatus !== 'Done') {
+        await client.query('ROLLBACK');
+        return res.status(400).json({ success: false, message: 'Completed assignments cannot be reopened by the sales agent.' });
+      }
+      if (nextStatus === 'In Progress' && current.status === 'Done') {
+        await client.query('ROLLBACK');
+        return res.status(400).json({ success: false, message: 'Assignment is already done.' });
+      }
+
+      const startedAt = (nextStatus === 'In Progress' || nextStatus === 'Done')
+        ? (current.started_at || new Date())
+        : current.started_at;
+      const completedAt = nextStatus === 'Done'
+        ? (current.completed_at || new Date())
+        : null;
+
+      const updated = await client.query(
+        `UPDATE sales_area_assignments
+         SET status = $1,
+             started_at = $2,
+             completed_at = $3,
+             updated_at = CURRENT_TIMESTAMP
+         WHERE assignment_id = $4 AND sales_agent_id = $5
+         RETURNING assignment_id`,
+        [nextStatus, startedAt, completedAt, assignmentId, user.id]
+      );
+      await client.query('COMMIT');
+
+      const detail = await pool.query(
+        `SELECT ${AREA_ASSIGNMENT_SELECT}
+         ${AREA_ASSIGNMENT_FROM}
+         WHERE saa.assignment_id = $1`,
+        [updated.rows[0].assignment_id]
+      );
+      const productsByAssignment = await loadAssignmentProducts(pool, [assignmentId]);
+      return res.status(200).json({
+        success: true,
+        message: nextStatus === 'Done' ? 'Area marked as done.' : 'Area started.',
+        data: withProducts(detail.rows[0], productsByAssignment),
+      });
+    } catch (err) {
+      try { await client.query('ROLLBACK'); } catch { /* ignore */ }
+      throw err;
+    } finally {
+      client.release();
+    }
+  } catch (error) {
+    console.error('[Sales] PATCH /area-assignments/:id/status error:', error);
+    return res.status(500).json({ success: false, message: 'Failed to update area assignment.' });
   }
 });
 

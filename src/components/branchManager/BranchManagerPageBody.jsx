@@ -20,7 +20,7 @@ import {
 } from '../../api/approvalsService.js';
 import { fetchOperationalAlerts, patchOperationalAlert, mapOperationalAlertRow } from '../../api/operationalAlertsService.js';
 import { fetchNotifications, markNotificationRead, markAllNotificationsRead, mapNotificationRow } from '../../api/notificationService.js';
-import { fetchInventoryTransfers, patchInventoryTransfer, mapInventoryTransferRow } from '../../api/inventoryService.js';
+import { fetchInventoryTransfers, fetchInventoryTransferById, patchInventoryTransfer, mapInventoryTransferRow } from '../../api/inventoryService.js';
 import { BranchInventoryViewPage } from '../inventory/BranchInventoryViewPage.jsx';
 import { EmptyState } from '../shared/EmptyState';
 import { LoadingState } from '../shared/LoadingState';
@@ -30,6 +30,11 @@ import { NavIcon } from '../../navIcons';
 import LeafletMap from '../common/LeafletMap';
 import { StatusBadge } from '../StatusBadge';
 import { requestLogout, getCurrentUser } from '../../api/authService.js';
+import {
+  CREDIT_REVIEW_FILTERS,
+  formatMoneyOrNA,
+  mapCreditReviewRow,
+} from '../../utils/creditReview';
 import {
   getBranchAnalytics,
   getBranchStaff,
@@ -43,7 +48,10 @@ import {
   getFieldActivityReport,
   fetchCollectorSawPriority,
   assignCollectorCollectionRoute,
+  getSalesAgentAreaAssignments,
+  assignSalesAgentArea,
 } from '../../api/branchManagerService.js';
+import { fetchTerritories } from '../../api/territoriesService.js';
 import { getReportCollection, getReportSales, getReportInventory, getReportDelinquency, getReportCompliance, getReportKPI, getReportInvoices } from '../../api/reportsService.js';
 import { CreditHistoryListPage, CreditHistoryDetailPage } from '../shared/CreditHistoryPages';
 import { TerritoriesPage } from '../territories/TerritoriesPage';
@@ -310,11 +318,12 @@ function DashboardPage({
       </div>
 
       <div className="flex flex-wrap gap-2 mt-2">
-        <button className="button" type="button" onClick={() => navigate(`${opsBase}/field-operations`)}>Field Operations</button>
+        <button className="button" type="button" onClick={() => navigate(`${opsBase}/leaflet`)}>Field Map</button>
+        <button className="button secondary" type="button" onClick={() => navigate(`${opsBase}/field-operations/collectors`)}>Collectors</button>
+        <button className="button secondary" type="button" onClick={() => navigate(`${opsBase}/field-operations/sales`)}>Sales Agents</button>
         <button className="button secondary" type="button" onClick={() => navigate(`${opsBase}/field-activity-reports`)}>Field Reports</button>
         <button className="button secondary" type="button" onClick={() => navigate(`${opsBase}/customers`)}>Customers</button>
-        <button className="button secondary" type="button" onClick={() => navigate(`${opsBase}/ci-approvals`)}>Approve CIs</button>
-        <button className="button secondary" type="button" onClick={() => navigate(`${opsBase}/leaflet`)}>Leaflet | OpenStreetMap</button>
+        <button className="button secondary" type="button" onClick={() => navigate(`${opsBase}/ci-approvals`)}>Credit Reviews</button>
         <button className="button secondary" type="button" onClick={() => navigate(`${opsBase}/reports`)}>Reports</button>
       </div>
       <ChartDrilldownModal {...drilldown} onClose={closeDrilldown} showToast={showToast} />
@@ -345,16 +354,20 @@ function FieldOperationsHub({
   const [loading, setLoading] = useState(true);
   const tabs = [{
     key: 'overview',
-    label: 'Overview'
+    label: 'Overview',
+    path: `${opsBase}/field-operations`,
   }, {
     key: 'collectors',
-    label: 'Collector Routes'
+    label: 'Collectors',
+    path: `${opsBase}/field-operations/collectors`,
   }, {
     key: 'sales',
-    label: 'Sales Schedules'
+    label: 'Sales Agents',
+    path: `${opsBase}/field-operations/sales`,
   }, {
     key: 'performance',
-    label: 'Route Performance'
+    label: 'Route Performance',
+    path: `${opsBase}/field-operations/performance`,
   }];
   useEffect(() => {
     async function fetchData() {
@@ -400,10 +413,10 @@ function FieldOperationsHub({
   ], [staff.collectors, staff.salesAgents]);
   const pagination_route_performance = usePagination(routePerformanceRows);
   const paginated_route_performance = pagination_route_performance.paginatedData;
-  if (loading) return <LoadingState variant="dashboard" message="Loading field operations..." />;
+  if (loading) return <LoadingState variant="dashboard" message="Loading routes and schedules..." />;
   return <div className="page">
       <div className="segmented-control">
-        {tabs.map(t => <button key={t.key} className={tab === t.key ? 'segment active' : 'segment'} type="button" onClick={() => setTab(t.key)}>{t.label}</button>)}
+        {tabs.map(t => <button key={t.key} className={tab === t.key ? 'segment active' : 'segment'} type="button" onClick={() => { setTab(t.key); navigate(t.path); }}>{t.label}</button>)}
       </div>
 
       {tab === 'overview' && <>
@@ -553,7 +566,7 @@ function FieldOperationsHub({
                       <td>{formatCurrency(c.collectionAmount)}</td>
                       <td className="table-actions" onClick={e => e.stopPropagation()}>
                         <button className="icon-action-button" type="button" title="Expand Route" onClick={() => navigate(`${opsBase}/field-operations/collectors/${c.id}`)}><NavIcon name="view" /></button>
-                        <button className="icon-action-button" type="button" title="View on Map" onClick={() => navigate(`${opsBase}/leaflet`)}><NavIcon name="map" /></button>
+                        <button className="icon-action-button" type="button" title="View on Field Map" onClick={() => navigate(`${opsBase}/leaflet?staff=${encodeURIComponent(c.id)}`)}><NavIcon name="map" /></button>
                       </td>
                     </tr>)}
                 </tbody>
@@ -587,7 +600,7 @@ function FieldOperationsHub({
                       <td>{formatCurrency(a.totalSalesAmount)}</td>
                       <td className="table-actions" onClick={e => e.stopPropagation()}>
                         <button className="icon-action-button" type="button" title="Expand Schedule" onClick={() => navigate(`${opsBase}/field-operations/sales/${a.id}`)}><NavIcon name="view" /></button>
-                        <button className="icon-action-button" type="button" title="View on Map" onClick={() => navigate(`${opsBase}/leaflet`)}><NavIcon name="map" /></button>
+                        <button className="icon-action-button" type="button" title="View on Field Map" onClick={() => navigate(`${opsBase}/leaflet?staff=${encodeURIComponent(a.id)}`)}><NavIcon name="map" /></button>
                       </td>
                     </tr>)}
                 </tbody>
@@ -716,7 +729,7 @@ function CollectorDetailPage({
   }
 
   if (loading) return <LoadingState variant="detail" message="Loading collector details..." />;
-  if (!c) return <EmptyState title="Collector not found" actionLabel="Back" onAction={() => navigate(`${opsBase}/field-operations`)} />;
+  if (!c) return <EmptyState title="Collector not found" actionLabel="Back" onAction={() => navigate(`${opsBase}/field-operations/collectors`)} />;
   return <div className="page">
       <Stats stats={[{
       label: 'Compliance',
@@ -830,40 +843,116 @@ function CollectorDetailPage({
         </div>
       </section>
       <div className="flex justify-end gap-2 mt-4">
-        <button className="button ghost" type="button" onClick={() => navigate(`${opsBase}/field-operations`)}>Back</button>
-        <button className="button secondary" type="button" onClick={() => navigate(`${opsBase}/leaflet`)}>View on Map</button>
+        <button className="button ghost" type="button" onClick={() => navigate(`${opsBase}/field-operations/collectors`)}>Back to Collectors</button>
+        <button className="button secondary" type="button" onClick={() => navigate(`${opsBase}/leaflet?staff=${encodeURIComponent(collectorId)}`)}>View on Field Map</button>
       </div>
     </div>;
 }
+function manilaTodayInput() {
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Manila',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(new Date());
+}
+
 function SalesAgentDetailPage({
   agentId,
   navigate,
-  opsBase
+  opsBase,
+  showToast,
 }) {
   const [staff, setStaff] = useState({
     collectors: [],
     salesAgents: []
   });
   const [detail, setDetail] = useState({ customers: [], productPerformance: [] });
+  const [assignments, setAssignments] = useState([]);
+  const [territories, setTerritories] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [assigning, setAssigning] = useState(false);
+  const [form, setForm] = useState({
+    territory_id: '',
+    area_name: '',
+    work_date: manilaTodayInput(),
+    coverage_notes: '',
+  });
+
+  async function reloadAssignments() {
+    const result = await getSalesAgentAreaAssignments(agentId);
+    if (result.success) setAssignments(result.data || []);
+  }
+
   useEffect(() => {
     async function load() {
       setLoading(true);
-      const [staffResult, detailResult] = await Promise.all([
+      const [staffResult, detailResult, assignmentResult, territoryResult] = await Promise.all([
         getBranchStaff(),
         getBranchSalesAgentDetail(agentId),
+        getSalesAgentAreaAssignments(agentId),
+        fetchTerritories(),
       ]);
       if (staffResult.success) setStaff(staffResult.data);
       if (detailResult.success && detailResult.data) setDetail(detailResult.data);
+      if (assignmentResult.success) setAssignments(assignmentResult.data || []);
+      if (territoryResult?.success) setTerritories(territoryResult.data || []);
+      else if (Array.isArray(territoryResult)) setTerritories(territoryResult);
+      else setTerritories([]);
       setLoading(false);
     }
     load();
   }, [agentId]);
+
   const a = staff.salesAgents.find(x => x.id === String(agentId));
   const customers = detail.customers?.length ? detail.customers : a?.customers || [];
   const productPerformance = detail.productPerformance?.length ? detail.productPerformance : a?.productPerformance || [];
   const pagination_customers = usePagination(customers);
   const pagination_products = usePagination(productPerformance);
+  const pagination_assignments = usePagination(assignments);
+
+  const handleTerritoryChange = (territoryId) => {
+    const territory = territories.find((t) => String(t.territory_id) === String(territoryId));
+    setForm((prev) => ({
+      ...prev,
+      territory_id: territoryId,
+      area_name: territory?.territory_name || prev.area_name,
+      coverage_notes: territory?.coverage_area || prev.coverage_notes,
+    }));
+  };
+
+  const handleAssign = async () => {
+    if (!form.work_date) {
+      showToast?.('Work date is required.', 'error');
+      return;
+    }
+    if (!form.territory_id && !form.area_name.trim()) {
+      showToast?.('Choose a territory or enter an area name.', 'error');
+      return;
+    }
+    setAssigning(true);
+    const result = await assignSalesAgentArea(agentId, {
+      territory_id: form.territory_id ? Number(form.territory_id) : undefined,
+      area_name: form.area_name.trim() || undefined,
+      work_date: form.work_date,
+      coverage_notes: form.coverage_notes.trim() || undefined,
+    });
+    setAssigning(false);
+    if (!result.success) {
+      showToast?.(result.message || 'Failed to assign area.', 'error');
+      return;
+    }
+    showToast?.(result.message || 'Area assigned.', 'success');
+    setForm((prev) => ({
+      ...prev,
+      coverage_notes: '',
+      area_name: prev.territory_id
+        ? (territories.find((t) => String(t.territory_id) === String(prev.territory_id))?.territory_name || '')
+        : '',
+    }));
+    await reloadAssignments();
+  };
+
   if (loading) return <LoadingState variant="detail" message="Loading agent details..." />;
   if (!a) return <EmptyState title="Agent not found" actionLabel="Back" onAction={() => navigate(`${opsBase}/field-operations`)} />;
   return <div className="page">
@@ -880,6 +969,94 @@ function SalesAgentDetailPage({
       label: 'New Customers',
       value: String(a.newCustomersAcquired)
     }]} />
+
+      <section className="panel content-panel relative overflow-hidden">
+        <div className="list-section-header">
+          <div>
+            <h3>Assign canvass area</h3>
+            <p className="muted" style={{ marginTop: 4 }}>
+              Tell this sales agent where to work. They will see it on Today&apos;s Schedule — not a customer stop list.
+            </p>
+          </div>
+        </div>
+        <div className="list-section-toolbar">
+          <div className="list-section-controls" style={{ flexWrap: 'wrap', gap: 8 }}>
+            <select
+              className="filter-select"
+              value={form.territory_id}
+              onChange={(e) => handleTerritoryChange(e.target.value)}
+              aria-label="Territory"
+            >
+              <option value="">Select territory (optional)</option>
+              {territories.map((t) => (
+                <option key={t.territory_id} value={t.territory_id}>{t.territory_name}</option>
+              ))}
+            </select>
+            <input
+              className="filter-input"
+              type="text"
+              placeholder="Area / location name"
+              value={form.area_name}
+              onChange={(e) => setForm((prev) => ({ ...prev, area_name: e.target.value }))}
+              aria-label="Area name"
+            />
+            <input
+              className="filter-input"
+              type="date"
+              value={form.work_date}
+              onChange={(e) => setForm((prev) => ({ ...prev, work_date: e.target.value }))}
+              aria-label="Work date"
+            />
+          </div>
+        </div>
+        <div className="form-group" style={{ marginTop: 8 }}>
+          <label htmlFor={`area-notes-${agentId}`}>Instructions / notes</label>
+          <textarea
+            id={`area-notes-${agentId}`}
+            rows={2}
+            placeholder="Focus barangay, landmark, products to emphasize…"
+            value={form.coverage_notes}
+            onChange={(e) => setForm((prev) => ({ ...prev, coverage_notes: e.target.value }))}
+          />
+        </div>
+        <div className="flex justify-end mt-2">
+          <button className="button" type="button" disabled={assigning} onClick={handleAssign}>
+            {assigning ? 'Assigning…' : 'Assign area'}
+          </button>
+        </div>
+
+        <div className="list-section-header" style={{ marginTop: 20 }}>
+          <h3>Area assignments <span className="text-ink/70">({assignments.length})</span></h3>
+        </div>
+        {assignments.length ? <>
+          <div className="corvex-table-wrapper">
+            <table className="corvex-table">
+              <thead>
+                <tr>
+                  <th>Area</th>
+                  <th>Work Date</th>
+                  <th>Status</th>
+                  <th>Notes</th>
+                </tr>
+              </thead>
+              <tbody>
+                {pagination_assignments.paginatedData.map((row) => (
+                  <tr key={row.assignment_id}>
+                    <td><strong>{row.area_name}</strong></td>
+                    <td>{row.work_date ? formatDisplayDate(row.work_date) : '—'}</td>
+                    <td><StatusBadge status={row.status} /></td>
+                    <td style={{ maxWidth: 240, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={row.coverage_notes || ''}>
+                      {row.coverage_notes || '—'}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <Pagination {...pagination_assignments} />
+        </> : <EmptyState title="No area assignments yet" description="Assign a territory and work date so this agent can canvass." />}
+      </section>
+
       <section className="panel content-panel relative overflow-hidden">
         {customers.length ? <>
           <div className="list-section-header"><h3>Customers <span className="text-ink/70">({customers.length})</span></h3></div>
@@ -910,7 +1087,8 @@ function SalesAgentDetailPage({
         {!customers.length && !productPerformance.length ? <EmptyState title="No activity yet" description="Customers and sales mix will appear after visits and invoices are logged." /> : null}
       </section>
       <div className="flex justify-end gap-2 mt-4">
-        <button className="button ghost" type="button" onClick={() => navigate(`${opsBase}/field-operations`)}>Back</button>
+        <button className="button ghost" type="button" onClick={() => navigate(`${opsBase}/field-operations/sales`)}>Back to Sales Agents</button>
+        <button className="button secondary" type="button" onClick={() => navigate(`${opsBase}/leaflet?staff=${encodeURIComponent(agentId)}`)}>View on Field Map</button>
       </div>
     </div>;
 }
@@ -1727,146 +1905,387 @@ function StaffPerformancePage({
     </div>;
 }
 
-// ── CI Queue ──────────────────────────────────────────────────────────────────
+// ── Credit Reviews (BM) ───────────────────────────────────────────────────────
 function CIQueuePage({
   navigate,
   showToast,
   opsBase
 }) {
-  const [filter, setFilter] = useState('Pending');
+  const [filter, setFilter] = useState('Needs BM');
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
   const reload = async () => {
     setLoading(true);
-    const res = await fetchCreditInvestigations({ status: filter === 'All' ? undefined : filter });
-    if (res.success) setItems((res.data || []).map(mapCreditInvestigationRow));
+    // API stores Pending/Revision Requested; UI label is "Needs BM"
+    const apiStatus = filter === 'All'
+      ? undefined
+      : filter === 'Needs BM'
+        ? 'Pending'
+        : filter;
+    const res = await fetchCreditInvestigations({ status: apiStatus });
+    if (res.success) {
+      const mapped = (res.data || []).map(mapCreditReviewRow);
+      setItems(
+        filter === 'Needs BM'
+          ? mapped.filter((row) => row.status === 'Pending' || row.status === 'Revision Requested')
+          : mapped
+      );
+    }
     setLoading(false);
   };
   useEffect(() => {
     reload();
   }, [filter]);
-  const filtered = items;
-  const pagination_filtered = usePagination(filtered);
-  const paginated_filtered = pagination_filtered.paginatedData;
-  const handlePatch = async (ci, status, rejectionReason) => {
-    const result = await patchCreditInvestigation(ci.ciId, { status, rejection_reason: rejectionReason });
-    if (result.success) {
-      showToast(`CI ${status.toLowerCase()} for ${ci.customerName}.`, status === 'Rejected' ? 'error' : 'success');
-      reload();
-    } else showToast(result.message || 'Action failed.', 'error');
-  };
-  if (loading && !items.length) return <LoadingState message="Loading credit investigations..." />;
-  return <div className="page">
+  const pagination = usePagination(items);
+  const rows = pagination.paginatedData;
+  if (loading && !items.length) return <LoadingState message="Loading credit reviews…" />;
+  return (
+    <div className="page">
       <section className="panel content-panel relative overflow-hidden">
         <div className="list-section-header">
-          <h3>Credit Investigation Queue</h3>
+          <h3>Credit Reviews</h3>
+          <p className="muted">
+            Review system-prepared credit cases. Approving sets or updates the customer&apos;s credit limit.
+          </p>
         </div>
-        <div className="list-section-toolbar" style={{
-        marginBottom: 12
-      }}>
+        <div className="list-section-toolbar" style={{ marginBottom: 12 }}>
           <div className="segmented-control">
-            {['Pending', 'Approved', 'Rejected', 'All'].map(f => <button key={f} className={filter === f ? 'segment active' : 'segment'} type="button" onClick={() => setFilter(f)}>{f}</button>)}
+            {CREDIT_REVIEW_FILTERS.map((option) => (
+              <button
+                key={option}
+                className={filter === option ? 'segment active' : 'segment'}
+                type="button"
+                onClick={() => setFilter(option)}
+              >
+                {option}
+              </button>
+            ))}
           </div>
         </div>
-        {filtered.length ? <><div className="corvex-table-wrapper"><table className="corvex-table">
-            <thead><tr><th>Customer</th><th>Submitted By</th><th>Date</th><th>Delinquency</th><th>Status</th><th>Actions</th></tr></thead>
-            <tbody>{paginated_filtered.map(ci => <tr key={ci.id}><td>{ci.customerName}</td><td>{ci.submittedBy}</td><td>{formatDisplayDate(ci.submissionDate)}</td><td><StatusBadge status={ci.delinquencyStatus} /></td><td><StatusBadge status={ci.status} /></td><td className="table-actions">
-              <button className="icon-action-button" type="button" title="View" onClick={() => navigate(`${opsBase}/ci-approvals/${ci.id}`)}><NavIcon name="view" /></button>
-              {ci.status === 'Pending' && <><button className="icon-action-button" type="button" title="Approve" onClick={() => handlePatch(ci, 'Approved')}><NavIcon name="check" /></button><button className="icon-action-button danger" type="button" title="Reject" onClick={() => {
-                const reason = window.prompt('Rejection reason (required):');
-                if (!reason?.trim()) {
-                  showToast('Reason required.', 'error');
-                  return;
-                }
-                handlePatch(ci, 'Rejected', reason.trim());
-              }}><NavIcon name="close" /></button></>}
-            </td></tr>)}</tbody>
-          </table></div><Pagination {...pagination_filtered} /></>
-        : <EmptyState title="No CI records" description="No items match this filter." />}
+        {items.length ? (
+          <>
+            <div className="corvex-table-wrapper">
+              <table className="corvex-table">
+                <thead>
+                  <tr>
+                    <th>Customer</th>
+                    <th>Why / Trigger</th>
+                    <th>Risk</th>
+                    <th>Requested / Current</th>
+                    <th>Status</th>
+                    <th>Updated</th>
+                    <th>Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {rows.map((review) => (
+                    <tr
+                      key={review.id}
+                      className="clickable-row"
+                      onClick={() => navigate(`${opsBase}/ci-approvals/${review.ciId}`)}
+                    >
+                      <td>
+                        <div>{review.customerName}</div>
+                        {review.customerCode ? <div className="muted">{review.customerCode}</div> : null}
+                      </td>
+                      <td>{review.reason || '—'}</td>
+                      <td><StatusBadge status={review.riskLevel || '—'} /></td>
+                      <td>
+                        {[
+                          review.requestedLimit != null ? `Req ${formatCurrency(review.requestedLimit)}` : null,
+                          review.currentLimit != null && review.currentLimit > 0
+                            ? `Cur ${formatCurrency(review.currentLimit)}`
+                            : null,
+                        ].filter(Boolean).join(' · ') || 'Not available'}
+                      </td>
+                      <td><StatusBadge status={review.displayStatus} /></td>
+                      <td>{formatDisplayDate(review.updatedAt || review.submissionDate)}</td>
+                      <td className="table-actions" onClick={(e) => e.stopPropagation()}>
+                        <button
+                          className="icon-action-button"
+                          type="button"
+                          title="Open review"
+                          onClick={() => navigate(`${opsBase}/ci-approvals/${review.ciId}`)}
+                        >
+                          <NavIcon name="view" />
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <Pagination {...pagination} />
+          </>
+        ) : (
+          <EmptyState title="No credit reviews" description="No items match this filter." />
+        )}
       </section>
-    </div>;
+    </div>
+  );
 }
+
 function CIDetailPage({
   ciId,
   navigate,
   showToast,
   opsBase
 }) {
-  const [ci, setCi] = useState(null);
+  const [review, setReview] = useState(null);
   const [loading, setLoading] = useState(true);
   const [rejectReason, setRejectReason] = useState('');
-  const [showReject, setShowReject] = useState(false);
+  const [decisionRemarks, setDecisionRemarks] = useState('');
+  const [approvedLimit, setApprovedLimit] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+
   useEffect(() => {
     async function load() {
       setLoading(true);
       const res = await fetchCreditInvestigationById(ciId);
-      if (res.success && res.data) setCi(mapCreditInvestigationRow(res.data));
-      else setCi(null);
+      if (res.success && res.data) {
+        const mapped = mapCreditReviewRow(res.data);
+        setReview(mapped);
+        const suggested = mapped.suggestion?.suggested_limit
+          || mapped.requestedLimit
+          || mapped.currentLimit
+          || '';
+        setApprovedLimit(suggested !== '' && suggested != null ? String(suggested) : '');
+        setDecisionRemarks('');
+        setRejectReason('');
+      } else {
+        setReview(null);
+      }
       setLoading(false);
     }
     load();
   }, [ciId]);
-  const pagination_ci_paymentHistory = usePagination(ci?.paymentHistory || []);
-  const paginated_ci_paymentHistory = pagination_ci_paymentHistory.paginatedData;
-  const applyStatus = async (status, rejectionReason) => {
-    const result = await patchCreditInvestigation(ciId, { status, rejection_reason: rejectionReason });
+
+  const applyDecision = async (status) => {
+    if (status === 'Approved' && !(Number(approvedLimit) > 0)) {
+      showToast('Enter the approved credit limit.', 'error');
+      return;
+    }
+    if (status === 'Rejected' && !rejectReason.trim() && !decisionRemarks.trim()) {
+      showToast('Rejection reason is required.', 'error');
+      return;
+    }
+    setSubmitting(true);
+    const result = await patchCreditInvestigation(ciId, {
+      status,
+      approved_credit_limit: status === 'Approved' ? Number(approvedLimit) : undefined,
+      rejection_reason: status === 'Rejected' ? (rejectReason.trim() || decisionRemarks.trim()) : undefined,
+      decision_remarks: decisionRemarks.trim() || rejectReason.trim() || undefined,
+    });
+    setSubmitting(false);
     if (result.success) {
-      showToast(`CI ${status.toLowerCase()}.`, status === 'Rejected' ? 'error' : 'success');
+      showToast(result.message || `Credit review ${status.toLowerCase()}.`, status === 'Rejected' ? 'error' : 'success');
       navigate(`${opsBase}/ci-approvals`);
-    } else showToast(result.message || 'Action failed.', 'error');
+    } else {
+      showToast(result.message || 'Action failed.', 'error');
+    }
   };
-  if (loading) return <LoadingState message="Loading credit investigation..." />;
-  if (!ci) return <EmptyState title="CI not found" actionLabel="Back" onAction={() => navigate(`${opsBase}/ci-approvals`)} />;
-  return <div className="page">
-      <Stats stats={[{
-      label: 'Customer',
-      value: ci.customerName
-    }, {
-      label: 'Risk Score',
-      value: String(ci.riskScore)
-    }, {
-      label: 'Delinquency',
-      value: ci.delinquencyStatus
-    }, {
-      label: 'Map Zone',
-      value: ci.leafletClassification
-    }]} />
-      <section className="panel content-panel relative overflow-hidden">
-        <DetailRowsTable rows={[
-          { label: 'Purpose', value: ci.purpose || '—' },
-          { label: 'Monthly Income', value: formatCurrency(ci.monthlyIncome) },
-          { label: 'Business Type', value: ci.businessType || '—' },
-          { label: 'References', value: ci.references || '—' },
-          { label: 'Remarks', value: ci.formRemarks || '—' },
-        ]} />
-        {ci.delinquencyFlags.length ? <div style={{
-        marginTop: 16,
-        padding: 12,
-        background: 'rgba(220,38,38,0.06)',
-        borderRadius: 12
-      }}><strong>Delinquency Flags:</strong><ul className="flag-list" style={{
-          marginTop: 8
-        }}>{ci.delinquencyFlags.map(f => <li key={f}>{f}</li>)}</ul></div> : null}
-        {ci.paymentHistory.length ? <><h4 className="subsection-title">Payment History</h4><><div className="corvex-table-wrapper"><table className="corvex-table"><thead><tr><th>Date</th><th>Amount</th><th>Status</th></tr></thead><tbody>{paginated_ci_paymentHistory.map(p => <tr key={p.date}><td>{p.date}</td><td>{formatCurrency(p.amount)}</td><td><StatusBadge status={p.status} /></td></tr>)}</tbody></table></div><Pagination {...pagination_ci_paymentHistory} /></></> : null}
+
+  if (loading) return <LoadingState message="Loading credit review…" />;
+  if (!review) {
+    return <EmptyState title="Credit review not found" actionLabel="Back" onAction={() => navigate(`${opsBase}/ci-approvals`)} />;
+  }
+
+  const snap = review.snapshot || {};
+  const financial = snap.financial || {};
+  const customer = snap.customer || {};
+  const liveFinancial = review.live?.financial;
+  const payments = financial.payment_history || review.paymentHistory || [];
+  const canDecide = review.status === 'Pending' || review.status === 'Revision Requested';
+
+  return (
+    <div className="page">
+      <Stats stats={[
+        { label: 'Customer', value: review.customerName },
+        { label: 'Risk', value: review.riskLevel || '—' },
+        { label: 'Status', value: review.displayStatus },
+        { label: 'Requested Limit', value: formatMoneyOrNA(review.requestedLimit) },
+      ]} />
+
+      <section className="panel content-panel">
+        <div className="panel-section-header">
+          <h3>Request</h3>
+        </div>
+        <DetailRowsTable
+          rows={[
+            { label: 'Why / Trigger', value: review.reason || '—' },
+            { label: 'Submitted By', value: review.submittedBy || '—' },
+            { label: 'Submitted', value: formatDisplayDateTime(review.submissionDate) },
+            { label: 'Remarks', value: review.requestRemarks || '—' },
+            { label: 'Customer Code', value: review.customerCode || customer.customer_code || '—' },
+            { label: 'Account Status', value: customer.status || '—' },
+            { label: 'ID / KYC', value: customer.id_verification_status || '—' },
+          ]}
+        />
       </section>
-      {showReject && <section className="panel form-panel content-panel"><div className="form-group"><label>Rejection Reason<span className="required">*</span></label><textarea value={rejectReason} onChange={e => setRejectReason(e.target.value)} placeholder="Mandatory reason..." /></div></section>}
-      {ci.status === 'Pending' ? <div className="flex justify-end gap-2 mt-4">
-          <button className="button ghost" type="button" onClick={() => navigate(`${opsBase}/ci-approvals`)}>Back</button>
-          <button className="button secondary" type="button" onClick={() => applyStatus('Revision Requested')}>Request Revision</button>
-          <button className="button secondary" type="button" onClick={() => {
-        if (showReject) {
-          if (!rejectReason.trim()) {
-            showToast('Reason required.', 'error');
-            return;
-          }
-          applyStatus('Rejected', rejectReason.trim());
-        } else setShowReject(true);
-      }}>{showReject ? 'Confirm Reject' : 'Reject'}</button>
-          <button className="button" type="button" onClick={() => applyStatus('Approved')}>Approve</button>
-        </div> : <div className="flex justify-end gap-2 mt-4">
-          <button className="button ghost" type="button" onClick={() => navigate(`${opsBase}/ci-approvals`)}>Back</button>
-        </div>}
-    </div>;
+
+      <section className="panel content-panel">
+        <div className="panel-section-header">
+          <h3>Credit Snapshot</h3>
+          <p className="muted">Frozen at request time</p>
+        </div>
+        <DetailRowsTable
+          rows={[
+            { label: 'Outstanding', value: formatMoneyOrNA(financial.outstanding_balance) },
+            { label: 'Current Limit', value: formatMoneyOrNA(financial.credit_limit) },
+            { label: 'Remaining', value: formatMoneyOrNA(financial.remaining_credit) },
+            {
+              label: 'Utilization',
+              value: financial.utilization_pct != null ? `${financial.utilization_pct}%` : 'Not available',
+            },
+            {
+              label: 'Overdue',
+              value: financial.overdue_count
+                ? `${financial.overdue_count} · ${formatMoneyOrNA(financial.overdue_amount)}`
+                : 'None detected',
+            },
+          ]}
+        />
+        {liveFinancial && canDecide ? (
+          <div style={{ marginTop: 16 }}>
+            <h4 className="subsection-title">Live updates since request</h4>
+            <DetailRowsTable
+              rows={[
+                { label: 'Live Outstanding', value: formatMoneyOrNA(liveFinancial.outstanding_balance) },
+                { label: 'Live Limit', value: formatMoneyOrNA(liveFinancial.credit_limit) },
+                { label: 'Live Remaining', value: formatMoneyOrNA(liveFinancial.remaining_credit) },
+              ]}
+            />
+          </div>
+        ) : null}
+      </section>
+
+      <section className="panel content-panel">
+        <div className="panel-section-header">
+          <h3>Payment History</h3>
+          <p className="muted">From recorded collections</p>
+        </div>
+        {payments.length ? (
+          <div className="corvex-table-wrapper">
+            <table className="corvex-table">
+              <thead>
+                <tr><th>Date</th><th>Paid</th><th>Remaining</th><th>Status</th><th>Receipt / Invoice</th></tr>
+              </thead>
+              <tbody>
+                {payments.slice(0, 5).map((payment, index) => (
+                  <tr key={payment.credit_id || payment.collection_id || index}>
+                    <td>{formatDisplayDate(payment.payment_date || payment.date)}</td>
+                    <td>{formatCurrency(payment.amount || payment.amount_paid)}</td>
+                    <td>{payment.remaining_balance != null ? formatCurrency(payment.remaining_balance) : '—'}</td>
+                    <td><StatusBadge status={payment.payment_status || payment.status || '—'} /></td>
+                    <td>
+                      {[payment.receipt_number, payment.invoice_number, payment.reference_number]
+                        .filter(Boolean)
+                        .filter((value, idx, arr) => arr.indexOf(value) === idx)
+                        .join(' · ') || '—'}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : (
+          <EmptyState title="No payment history" description="No collection payments were on file for this snapshot." />
+        )}
+      </section>
+
+      <section className="panel content-panel">
+        <div className="panel-section-header">
+          <h3>Risk Assessment</h3>
+        </div>
+        <DetailRowsTable
+          rows={[
+            { label: 'Risk', value: <StatusBadge status={review.riskLevel || '—'} /> },
+            { label: 'Score', value: review.riskScore != null ? String(review.riskScore) : '—' },
+          ]}
+        />
+        {review.riskReasons?.length ? (
+          <ul style={{ marginTop: 12, paddingLeft: 18 }}>
+            {review.riskReasons.map((reason) => <li key={reason} className="muted">{reason}</li>)}
+          </ul>
+        ) : null}
+        {review.suggestion?.message ? (
+          <p style={{ marginTop: 12 }}><strong>Suggestion:</strong> {review.suggestion.message}</p>
+        ) : null}
+      </section>
+
+      {canDecide ? (
+        <section className="panel form-panel content-panel">
+          <div className="panel-section-header">
+            <h3>Branch Manager Decision</h3>
+            <p className="muted">Approval writes the credit limit to the customer credit record.</p>
+          </div>
+          <div className="form-group">
+            <label htmlFor="bm-approved-limit">Approved credit limit (₱) *</label>
+            <input
+              id="bm-approved-limit"
+              type="number"
+              min="0"
+              step="0.01"
+              value={approvedLimit}
+              onChange={(e) => setApprovedLimit(e.target.value)}
+            />
+          </div>
+          <div className="form-group">
+            <label htmlFor="bm-decision-remarks">Decision remarks</label>
+            <textarea
+              id="bm-decision-remarks"
+              rows={3}
+              value={decisionRemarks}
+              onChange={(e) => setDecisionRemarks(e.target.value)}
+              placeholder="Optional notes for Sales Agent"
+            />
+          </div>
+          <div className="form-group">
+            <label htmlFor="bm-reject-reason">Rejection reason (required when rejecting)</label>
+            <textarea
+              id="bm-reject-reason"
+              rows={2}
+              value={rejectReason}
+              onChange={(e) => setRejectReason(e.target.value)}
+              placeholder="Why this review is rejected"
+            />
+          </div>
+          <div className="flex flex-wrap justify-end gap-2 mt-4">
+            <button className="button ghost" type="button" onClick={() => navigate(`${opsBase}/ci-approvals`)} disabled={submitting}>
+              Back
+            </button>
+            <button className="button secondary" type="button" onClick={() => applyDecision('Revision Requested')} disabled={submitting}>
+              Request Revision
+            </button>
+            <button className="button secondary" type="button" onClick={() => applyDecision('Rejected')} disabled={submitting}>
+              Reject
+            </button>
+            <button className="button" type="button" onClick={() => applyDecision('Approved')} disabled={submitting}>
+              {submitting ? 'Saving…' : 'Approve & Set Limit'}
+            </button>
+          </div>
+        </section>
+      ) : (
+        <section className="panel content-panel">
+          <div className="panel-section-header">
+            <h3>Decision</h3>
+          </div>
+          <DetailRowsTable
+            rows={[
+              { label: 'Status', value: <StatusBadge status={review.displayStatus} /> },
+              { label: 'Decided By', value: review.approvedBy || '—' },
+              { label: 'Decided At', value: review.decidedAt ? formatDisplayDateTime(review.decidedAt) : '—' },
+              { label: 'Approved Limit', value: formatMoneyOrNA(review.approvedLimit) },
+              { label: 'Remarks', value: review.decisionRemarks || review.rejectionReason || '—' },
+            ]}
+          />
+          <div className="flex justify-end gap-2 mt-4">
+            <button className="button ghost" type="button" onClick={() => navigate(`${opsBase}/ci-approvals`)}>Back</button>
+          </div>
+        </section>
+      )}
+    </div>
+  );
 }
 
 // ── Customers ─────────────────────────────────────────────────────────────────
@@ -2292,6 +2711,8 @@ function ApprovalCenterPage({
   const [tab, setTab] = useState('ci');
   const [ciList, setCiList] = useState([]);
   const [transferList, setTransferList] = useState([]);
+  const [transferDetail, setTransferDetail] = useState(null);
+  const [transferDetailLoading, setTransferDetailLoading] = useState(false);
   const [specialList, setSpecialList] = useState([]);
   const [invoiceList, setInvoiceList] = useState([]);
   const [collectionList, setCollectionList] = useState([]);
@@ -2323,7 +2744,7 @@ function ApprovalCenterPage({
   }, []);
   const tabs = [{
     key: 'ci',
-    label: `Credit Investigations (${ciList.filter(c => c.status === 'Pending').length})`
+    label: `Credit Reviews (${ciList.filter(c => c.status === 'Pending' || c.status === 'Revision Requested').length})`
   }, {
     key: 'transfers',
     label: `Inventory Transfers (${transferList.filter(t => t.status === 'Pending Approval').length})`
@@ -2337,30 +2758,20 @@ function ApprovalCenterPage({
     key: 'collections',
     label: `Collections (${collectionList.length})`
   }];
-  const totalPending = ciList.filter(c => c.status === 'Pending').length + transferList.filter(t => t.status === 'Pending Approval').length + specialList.filter(s => s.status === 'Pending').length + invoiceList.length + collectionList.length;
-  const approveCI = async (ciId) => {
-    const result = await patchCreditInvestigation(ciId, { status: 'Approved' });
-    if (result.success) {
-      showToast('CI approved successfully.', 'success');
-      reload();
-    } else showToast(result.message || 'Approve failed.', 'error');
-  };
-  const rejectCI = async (ciId) => {
-    const reason = window.prompt('Rejection reason (required):');
-    if (!reason?.trim()) {
-      showToast('Reason required.', 'error');
-      return;
-    }
-    const result = await patchCreditInvestigation(ciId, { status: 'Rejected', rejection_reason: reason.trim() });
-    if (result.success) {
-      showToast('CI rejected.', 'success');
-      reload();
-    } else showToast(result.message || 'Reject failed.', 'error');
+  const totalPending = ciList.filter(c => c.status === 'Pending' || c.status === 'Revision Requested').length + transferList.filter(t => t.status === 'Pending Approval').length + specialList.filter(s => s.status === 'Pending').length + invoiceList.length + collectionList.length;
+  const openTransferDetail = async (transferId) => {
+    setTransferDetailLoading(true);
+    setTransferDetail(null);
+    const result = await fetchInventoryTransferById(transferId);
+    if (result.success) setTransferDetail(result.data);
+    else showToast(result.message || 'Could not load transfer lines.', 'error');
+    setTransferDetailLoading(false);
   };
   const approveTransfer = async (transferId) => {
     const result = await patchInventoryTransfer(transferId, { status: 'Approved' });
     if (result.success) {
-      showToast('Transfer approved.', 'success');
+      showToast('Transfer approved. Source warehouse can confirm shipment.', 'success');
+      setTransferDetail(null);
       reload();
     } else showToast(result.message || 'Approve failed.', 'error');
   };
@@ -2376,6 +2787,7 @@ function ApprovalCenterPage({
     });
     if (result.success) {
       showToast('Transfer rejected.', 'success');
+      setTransferDetail(null);
       reload();
     } else showToast(result.message || 'Reject failed.', 'error');
   };
@@ -2396,9 +2808,9 @@ function ApprovalCenterPage({
   const confirmInvoice = async (invoiceId) => {
     const result = await patchSalesInvoiceReview(invoiceId, { status: 'Confirmed' });
     if (result.success) {
-      showToast(result.message || 'Invoice confirmed.', 'success');
+      showToast(result.message || 'Invoice acknowledged.', 'success');
       reload();
-    } else showToast(result.message || 'Confirm failed.', 'error');
+    } else showToast(result.message || 'Acknowledge failed.', 'error');
   };
   const rejectInvoice = async (invoiceId) => {
     const reason = window.prompt('Rejection reason (required):');
@@ -2496,77 +2908,71 @@ function ApprovalCenterPage({
         {tabs.map(t => <button key={t.key} className={tab === t.key ? 'segment active' : 'segment'} type="button" onClick={() => setTab(t.key)}>{t.label}</button>)}
       </div>
 
-      {/* ── CI Approvals ── */}
+      {/* ── Credit Reviews ── */}
       {tab === 'ci' && <section className="panel content-panel relative overflow-hidden">
           <div className="flex flex-col md:flex-row justify-between gap-4 items-start md:items-center mb-4">
-            <h3>Credit Investigation Queue</h3>
-            <button className="button ghost" type="button" onClick={() => navigate(`${opsBase}/ci-approvals`)}>Open Full CI Queue</button>
+            <h3>Credit Reviews</h3>
+            <button className="button ghost" type="button" onClick={() => navigate(`${opsBase}/ci-approvals`)}>Open Full Queue</button>
           </div>
           {ciList.length ? <><div className="corvex-table-wrapper">
               <table className="corvex-table">
                 <thead>
-                  <tr><th>Customer</th><th>Submitted By</th><th>Purpose</th><th>Income</th><th>Risk Score</th><th>Delinquency</th><th>Status</th><th>Actions</th></tr>
+                  <tr><th>Customer</th><th>Submitted By</th><th>Why / Trigger</th><th>Risk</th><th>Requested</th><th>Status</th><th>Actions</th></tr>
                 </thead>
                 <tbody>
-                  {paginated_ciList.map(ci => <tr key={ci.id}>
-                      <td><strong>{ci.customerName}</strong><span className="text-ink/70" style={{
+                  {paginated_ciList.map(ci => <tr key={ci.id} className="clickable-row" onClick={() => navigate(`${opsBase}/ci-approvals/${ci.ciId || ci.id}`)}>
+                      <td><strong>{ci.customerName}</strong>{ci.customerCode ? <span className="text-ink/70" style={{
                     display: 'block',
                     fontSize: '0.8rem'
-                  }}>{ci.id}</span></td>
+                  }}>{ci.customerCode}</span> : null}</td>
                       <td>{ci.submittedBy}<span className="text-ink/70" style={{
                     display: 'block',
                     fontSize: '0.8rem'
                   }}>{formatDisplayDate(ci.submissionDate)}</span></td>
-                      <td>{ci.purpose}</td>
-                      <td>{formatCurrency(ci.monthlyIncome)}</td>
-                      <td><RiskBadge score={ci.riskScore} /></td>
-                      <td><StatusBadge status={ci.delinquencyStatus} /></td>
-                      <td><StatusBadge status={ci.status} /></td>
-                      <td className="table-actions">
-                        <button className="icon-action-button" type="button" title="View" onClick={() => navigate(`${opsBase}/ci-approvals/${ci.id}`)}><NavIcon name="view" /></button>
-                        {ci.status === 'Pending' && <>
-                          <button className="icon-action-button" type="button" title="Approve" onClick={() => approveCI(ci.ciId)}><NavIcon name="check" /></button>
-                          <button className="icon-action-button danger" type="button" title="Reject" onClick={() => rejectCI(ci.ciId)}><NavIcon name="close" /></button>
-                        </>}
+                      <td>{ci.purpose || ci.requestReason || '—'}</td>
+                      <td><StatusBadge status={ci.riskLevel || '—'} /></td>
+                      <td>{ci.requestedLimit != null ? formatCurrency(ci.requestedLimit) : '—'}</td>
+                      <td><StatusBadge status={ci.displayStatus || ci.status} /></td>
+                      <td className="table-actions" onClick={(e) => e.stopPropagation()}>
+                        <button className="icon-action-button" type="button" title="Decide" onClick={() => navigate(`${opsBase}/ci-approvals/${ci.ciId || ci.id}`)}><NavIcon name="view" /></button>
                       </td>
                     </tr>)}
                 </tbody>
               </table>
-            </div><Pagination {...pagination_ciList} /></> : <EmptyState title="No CI records" description="No credit investigation forms on file." />}
+            </div><Pagination {...pagination_ciList} /></> : <EmptyState title="No credit reviews" description="No credit review cases on file." />}
         </section>}
 
-      {/* ── Inventory Transfers ── */}
+      {/* ── Inventory Transfers (multi-line documents) ── */}
       {tab === 'transfers' && <section className="panel content-panel relative overflow-hidden">
           <div className="flex flex-col md:flex-row justify-between gap-4 items-start md:items-center mb-4">
             <h3>Inventory Transfer Requests</h3>
             <p className="text-ink/70" style={{
           margin: 0,
           fontSize: '0.85rem'
-        }}>Review and approve cross-branch stock movements.</p>
+        }}>Approve or reject the whole document once. Stock moves only after warehouse confirms shipment.</p>
           </div>
           {transferList.length ? <><div className="corvex-table-wrapper">
               <table className="corvex-table">
                 <thead>
-                  <tr><th>Transfer ID</th><th>Product</th><th>Qty</th><th>From</th><th>To</th><th>Value</th><th>Requested By</th><th>Date</th><th>Status</th><th>Actions</th></tr>
+                  <tr><th>Ref</th><th>Products</th><th>Lines</th><th>Total qty</th><th>From</th><th>To</th><th>Requested By</th><th>Date</th><th>Status</th><th>Actions</th></tr>
                 </thead>
                 <tbody>
-                  {paginated_transferList.map(t => <tr key={t.id}>
+                  {paginated_transferList.map(t => <tr key={t.id} className="clickable-row" onClick={() => openTransferDetail(t.id)}>
                       <td><strong>{t.ref || t.id}</strong></td>
                       <td>{t.product}</td>
+                      <td>{t.lineCount || 1}</td>
                       <td>{t.qty} units</td>
                       <td style={{
                   fontSize: '0.85rem'
-                }}>{t.from.replace(' Branch', '')}</td>
+                }}>{String(t.from || '').replace(' Branch', '')}</td>
                       <td style={{
                   fontSize: '0.85rem'
-                }}>{t.to.replace(' Branch', '')}</td>
-                      <td style={{
-                  fontWeight: 600
-                }}>{formatCurrency(t.value)}</td>
+                }}>{String(t.to || '').replace(' Branch', '')}</td>
                       <td>{t.requestedBy}</td>
                       <td>{formatDisplayDate(t.date)}</td>
                       <td><StatusBadge status={t.status} /></td>
-                      <td className="table-actions">
+                      <td className="table-actions" onClick={(e) => e.stopPropagation()}>
+                        <button className="icon-action-button" type="button" title="View lines" onClick={() => openTransferDetail(t.id)}><NavIcon name="view" /></button>
                         {['Pending Approval', 'Submitted'].includes(t.status) && <>
                           <button className="icon-action-button" type="button" title="Approve" onClick={() => approveTransfer(t.id)}><NavIcon name="check" /></button>
                           <button className="icon-action-button danger" type="button" title="Reject" onClick={() => rejectTransfer(t.id)}><NavIcon name="close" /></button>
@@ -2576,6 +2982,51 @@ function ApprovalCenterPage({
                 </tbody>
               </table>
             </div><Pagination {...pagination_transferList} /></> : <EmptyState title="No transfer requests" description="All transfers have been processed." />}
+
+          {(transferDetailLoading || transferDetail) ? (
+            <div className="panel content-panel" style={{ marginTop: 16 }}>
+              {transferDetailLoading ? <LoadingState message="Loading transfer lines…" /> : null}
+              {transferDetail ? (
+                <>
+                  <div className="flex flex-col md:flex-row justify-between gap-4 items-start md:items-center mb-4">
+                    <div>
+                      <h3 style={{ margin: 0 }}>{transferDetail.transfer_ref}</h3>
+                      <p className="text-ink/70" style={{ margin: '4px 0 0', fontSize: '0.85rem' }}>
+                        {transferDetail.source_branch} → {transferDetail.destination_branch}
+                        {' · '}{transferDetail.line_count ?? transferDetail.lines?.length ?? 0} product(s)
+                        {' · '}{transferDetail.total_quantity ?? transferDetail.quantity} units
+                        {' · '}{transferDetail.submitted_by_name || '—'}
+                      </p>
+                    </div>
+                    <button className="button ghost" type="button" onClick={() => setTransferDetail(null)}>Close</button>
+                  </div>
+                  {transferDetail.notes ? <p className="muted">Notes: {transferDetail.notes}</p> : null}
+                  <div className="corvex-table-wrapper">
+                    <table className="corvex-table">
+                      <thead>
+                        <tr><th>SKU</th><th>Product</th><th>Qty</th></tr>
+                      </thead>
+                      <tbody>
+                        {(transferDetail.lines || []).map((line) => (
+                          <tr key={line.line_id || line.product_id}>
+                            <td><span className="mono-cell">{line.sku || '—'}</span></td>
+                            <td><strong>{line.product_name}</strong></td>
+                            <td>{line.quantity}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                  {['Pending Approval', 'Submitted'].includes(transferDetail.status) ? (
+                    <div className="flex justify-end gap-2 mt-4">
+                      <button className="button secondary" type="button" onClick={() => rejectTransfer(transferDetail.transfer_id)}>Reject</button>
+                      <button className="button" type="button" onClick={() => approveTransfer(transferDetail.transfer_id)}>Approve document</button>
+                    </div>
+                  ) : null}
+                </>
+              ) : null}
+            </div>
+          ) : null}
         </section>}
 
       {/* ── Special Collections ── */}
@@ -2627,7 +3078,7 @@ function ApprovalCenterPage({
       {tab === 'invoices' && <section className="panel content-panel relative overflow-hidden">
           <div className="list-section-header">
             <h3>Sales invoices waiting for review <span className="text-ink/70">({invoiceList.length})</span></h3>
-            <p className="list-section-subtitle">Confirm a sale logged by a sales agent, or reject it to return the stock and reopen the purchase request.</p>
+            <p className="list-section-subtitle">Acknowledge a sale logged by a sales agent, or reject it to return the stock and reopen the purchase request. Acknowledgement does not assign a collector.</p>
           </div>
           {invoiceList.length ? <>
             <div className="corvex-table-wrapper">
@@ -2658,7 +3109,7 @@ function ApprovalCenterPage({
                       <td style={{ fontWeight: 600 }}>{formatCurrency(Number(inv.total_amount))}</td>
                       <td>{formatDisplayDate(inv.invoices_date)}</td>
                       <td className="table-actions">
-                        <button className="icon-action-button" type="button" title="Confirm" onClick={() => confirmInvoice(inv.sales_invoices_id)}><NavIcon name="check" /></button>
+                        <button className="icon-action-button" type="button" title="Acknowledge" onClick={() => confirmInvoice(inv.sales_invoices_id)}><NavIcon name="check" /></button>
                         <button className="icon-action-button danger" type="button" title="Reject" onClick={() => rejectInvoice(inv.sales_invoices_id)}><NavIcon name="close" /></button>
                       </td>
                     </tr>;
@@ -2667,7 +3118,7 @@ function ApprovalCenterPage({
               </table>
             </div>
             <Pagination {...pagination_invoiceList} />
-          </> : <EmptyState title="No sales invoices to review" description="Invoices logged by sales agents will appear here until you confirm or reject them." />}
+          </> : <EmptyState title="No sales invoices to review" description="Invoices logged by sales agents will appear here until you acknowledge or reject them." />}
         </section>}
 
       {tab === 'collections' && <section className="panel content-panel relative overflow-hidden">
@@ -2885,7 +3336,7 @@ function FieldActivityReportsPage({
     return reports.filter((r) => {
       const matchActivity = activityFilter === 'All' || r.activity_type === activityFilter;
       const matchSync = syncFilter === 'All' || r.sync_status === syncFilter;
-      const haystack = [r.collector_name, r.staff_role, r.customer_name, r.remarks, r.branch_name, r.activity_type, r.visit_type]
+      const haystack = [r.collector_name, r.staff_role, r.customer_name, r.area_name, r.remarks, r.branch_name, r.activity_type, r.visit_type]
         .filter(Boolean)
         .join(' ')
         .toLowerCase();
@@ -2929,7 +3380,7 @@ function FieldActivityReportsPage({
           <div>
             <h3>Field Activity Reports</h3>
             <p className="text-ink/70" style={{ margin: '4px 0 0', fontSize: '0.82rem' }}>
-              {`Visit reports submitted by collectors and sales agents${showBranch ? ' across branches' : ''}.${total > reports.length ? ` Showing the ${reports.length} most recent of ${total}.` : ''}`}
+              {`Field reports from collectors (customer visits) and sales agents (assigned areas)${showBranch ? ' across branches' : ''}.${total > reports.length ? ` Showing the ${reports.length} most recent of ${total}.` : ''}`}
             </p>
           </div>
         </div>
@@ -2938,7 +3389,7 @@ function FieldActivityReportsPage({
             <input
               className="filter-input search"
               type="search"
-              placeholder="Search staff, customer, or remarks"
+              placeholder="Search staff, area, customer, or remarks"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
             />
@@ -2957,9 +3408,9 @@ function FieldActivityReportsPage({
                 <tr>
                   <th>Staff</th>
                   {showBranch ? <th>Branch</th> : null}
-                  <th>Customer</th>
+                  <th>Area / Customer</th>
                   <th>Activity</th>
-                  <th>Visit Date</th>
+                  <th>Date</th>
                   <th>Sync</th>
                   <th>Submitted</th>
                   <th>Remarks</th>
@@ -2970,7 +3421,11 @@ function FieldActivityReportsPage({
                 {rows.map((r) => <tr key={r.report_id}>
                     <td><strong>{r.collector_name}</strong>{r.staff_role ? <div className="muted">{r.staff_role}</div> : null}</td>
                     {showBranch ? <td>{r.branch_name || '—'}</td> : null}
-                    <td>{r.customer_name}</td>
+                    <td>
+                      {r.area_name ? <strong>{r.area_name}</strong> : null}
+                      {r.area_name && r.customer_name ? <div className="muted">{r.customer_name}</div> : null}
+                      {!r.area_name ? (r.customer_name || '—') : null}
+                    </td>
                     <td>{r.activity_type}</td>
                     <td>{formatDisplayDate(r.scheduled_date)}</td>
                     <td><StatusBadge status={r.sync_status} /></td>
@@ -2984,15 +3439,17 @@ function FieldActivityReportsPage({
             </table>
           </div>
           <Pagination {...pagination} />
-        </> : <EmptyState title="No field activity reports" description="Collector and sales agent submissions will appear here after a visit report is filed." />}
+        </> : <EmptyState title="No field activity reports" description="Collector visit reports and sales area reports will appear here after they are filed." />}
       </section>
       {selected ? <div className="modal-overlay" onClick={() => setSelected(null)}>
           <div className="modal-content" style={{ maxWidth: 640 }} onClick={(e) => e.stopPropagation()}>
             <div className="flex flex-col md:flex-row justify-between gap-4 items-start md:items-center mb-4">
               <div>
-                <h3 style={{ margin: 0 }}>Report {selected.report_id}</h3>
+                <h3 style={{ margin: 0 }}>Field Activity Report</h3>
                 <p className="text-ink/70" style={{ margin: '4px 0 0', fontSize: '0.82rem' }}>
-                  {selected.collector_name} · {selected.customer_name}
+                  {selected.collector_name}
+                  {selected.area_name ? ` · ${selected.area_name}` : ''}
+                  {selected.customer_name ? ` · ${selected.customer_name}` : ''}
                 </p>
               </div>
               <StatusBadge status={selected.sync_status} />
@@ -3000,7 +3457,15 @@ function FieldActivityReportsPage({
             {detailLoading ? <LoadingState message="Loading report..." /> : <div className="grid gap-3">
                 <div className="grid two-up">
                   <p style={{ margin: 0 }}><span className="text-ink/70">Activity</span><br /><strong>{selected.activity_type || '—'}</strong></p>
-                  <p style={{ margin: 0 }}><span className="text-ink/70">Visit</span><br /><strong>{selected.visit_type || '—'} · {formatDisplayDate(selected.scheduled_date)} · <StatusBadge status={selected.visit_status || '—'} /></strong></p>
+                  <p style={{ margin: 0 }}>
+                    <span className="text-ink/70">{selected.area_name ? 'Assigned Area' : 'Visit'}</span><br />
+                    <strong>
+                      {selected.area_name
+                        ? `${selected.area_name} · ${formatDisplayDate(selected.scheduled_date)}`
+                        : `${selected.visit_type || '—'} · ${formatDisplayDate(selected.scheduled_date)} · `}
+                      {!selected.area_name ? <StatusBadge status={selected.visit_status || '—'} /> : null}
+                    </strong>
+                  </p>
                   {showBranch ? <p style={{ margin: 0 }}><span className="text-ink/70">Branch</span><br /><strong>{selected.branch_name || '—'}</strong></p> : null}
                   <p style={{ margin: 0 }}><span className="text-ink/70">Submitted</span><br /><strong>{formatDisplayDateTime(selected.created_at)}</strong></p>
                 </div>

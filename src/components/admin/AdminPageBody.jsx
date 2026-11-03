@@ -2055,10 +2055,14 @@ function ProductCategoriesPage({
     setShowForm(true);
   };
   const handleArchive = async c => {
-    if (!window.confirm(`Archive category "${c.category_name}"?`)) return;
+    const count = Number(c.product_count) || 0;
+    const warn = count > 0
+      ? `\n\n${count} product(s) are filed under this category. Archiving hides it from Active pickers but keeps those product assignments.`
+      : '';
+    if (!window.confirm(`Archive category "${c.category_name}"?${warn}`)) return;
     try {
-      await apiClient.delete(`/product-categories/${c.category_id}`);
-      showToast('Category archived.', 'success');
+      const res = await apiClient.delete(`/product-categories/${c.category_id}`);
+      showToast(res.data?.message || 'Category archived.', 'success');
       loadData();
     } catch (err) {
       showToast(err.response?.data?.message || 'Failed to archive.', 'error');
@@ -2124,17 +2128,35 @@ function ProductCategoriesPage({
         </div>
         {loading ? <LoadingState message="Loading categories..." /> : categories.length === 0 ? <EmptyState title="No categories found" /> : <><div className="corvex-table-wrapper">
             <table className="corvex-table">
-              <thead><tr><th>ID</th><th>Category Name</th><th>Status</th><th>Created At</th><th>Updated At</th><th>Actions</th></tr></thead>
+              <thead><tr><th>Category Name</th><th>Status</th><th># Products</th><th>Updated At</th><th>Actions</th></tr></thead>
               <tbody>
                 {paginated_categories.map(c => <tr key={c.category_id}>
-                    <td>{c.category_id}</td>
                     <td>{c.category_name}</td>
                     <td><StatusPill status={c.status} /></td>
-                    <td>{formatDisplayDateTime(c.created_at)}</td>
+                    <td>{Number(c.product_count) || 0}</td>
                     <td>{formatDisplayDateTime(c.updated_at || c.created_at)}</td>
                     <td className="table-actions">
                       <button className="icon-action-button" type="button" title="Edit" onClick={() => handleEdit(c)}><NavIcon name="edit" /></button>
-                      {c.status === 'Active' && <button className="icon-action-button danger" type="button" title="Archive" onClick={() => handleArchive(c)}><NavIcon name="archive" /></button>}
+                      {String(c.status || '').toLowerCase() === 'inactive' ? (
+                        <button
+                          className="icon-action-button"
+                          type="button"
+                          title="Restore"
+                          onClick={async () => {
+                            try {
+                              await apiClient.put(`/product-categories/${c.category_id}`, { status: 'Active' });
+                              showToast('Category restored.', 'success');
+                              loadData();
+                            } catch (err) {
+                              showToast(err.response?.data?.message || 'Failed to restore.', 'error');
+                            }
+                          }}
+                        >
+                          <NavIcon name="reset" />
+                        </button>
+                      ) : (
+                        <button className="icon-action-button danger" type="button" title="Archive" onClick={() => handleArchive(c)}><NavIcon name="archive" /></button>
+                      )}
                     </td>
                   </tr>)}
               </tbody>

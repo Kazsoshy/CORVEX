@@ -1939,8 +1939,14 @@ router.get('/credit-history', requireAuth, async (req, res) => {
       params.push(Number(req.query.customer_id));
     }
     if (req.query.payment_status && req.query.payment_status !== 'All') {
-      conditions.push(`ch.payment_status = $${pIdx++}`);
-      params.push(req.query.payment_status);
+      const status = String(req.query.payment_status).trim();
+      if (status === 'Overdue') {
+        // Only when an invoice due date exists and balance remains after this payment
+        conditions.push(`ch.remaining_balance > 0 AND si.due_date IS NOT NULL AND si.due_date < CURRENT_DATE`);
+      } else {
+        conditions.push(`ch.payment_status = $${pIdx++}`);
+        params.push(status);
+      }
     }
     if (req.query.date_from) {
       conditions.push(`ch.transaction_date >= $${pIdx++}`);
@@ -1950,31 +1956,63 @@ router.get('/credit-history', requireAuth, async (req, res) => {
       conditions.push(`ch.transaction_date <= $${pIdx++}`);
       params.push(req.query.date_to);
     }
+    if (req.query.q || req.query.search) {
+      const q = String(req.query.q || req.query.search).trim();
+      if (q) {
+        conditions.push(`(
+          CONCAT_WS(' ', c.first_name, c.middle_name, c.last_name) ILIKE $${pIdx}
+          OR COALESCE(si.invoice_number, '') ILIKE $${pIdx}
+          OR COALESCE(cp.receipt_number, '') ILIKE $${pIdx}
+        )`);
+        params.push(`%${q}%`);
+        pIdx += 1;
+      }
+    }
 
     const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
+    const limit = Math.min(Math.max(Number(req.query.limit) || 500, 1), 1000);
 
     const result = await pool.query(
       `SELECT
          ch.credit_id,
          ch.customer_id,
-         COALESCE(NULLIF(CONCAT_WS(' ', c.first_name, c.last_name), ''), 'Customer') AS customer_name,
-         b.name   AS branch_name,
+         COALESCE(NULLIF(TRIM(CONCAT_WS(' ', c.first_name, c.middle_name, c.last_name)), ''), 'Customer') AS customer_name,
+         c.customer_code,
+         b.name AS branch_name,
          ch.sales_id,
          si.invoice_number,
+         si.total_amount AS invoice_amount,
+         si.due_date AS invoice_due_date,
          ch.collection_id,
          cp.receipt_number,
+         cp.notes AS collection_notes,
+         cp.status AS collection_status,
+         pm.method_name AS payment_method,
+         COALESCE(NULLIF(TRIM(collector.full_name), ''), collector.email) AS collector_name,
          ch.previous_balance,
          ch.payment_amount,
          ch.remaining_balance,
          ch.payment_status,
+         CASE
+           WHEN ch.remaining_balance > 0
+             AND si.due_date IS NOT NULL
+             AND si.due_date < CURRENT_DATE
+           THEN 'Overdue'
+           WHEN ch.remaining_balance <= 0 THEN 'Paid'
+           WHEN ch.payment_status = 'Paid' AND ch.remaining_balance > 0 THEN 'Partial'
+           ELSE ch.payment_status
+         END AS display_status,
          ch.transaction_date
        FROM credit_history ch
-       JOIN customers c    ON c.customer_id            = ch.customer_id
-       JOIN branches  b    ON b.id                     = c.branch_id
-       LEFT JOIN sales_invoices      si ON si.sales_invoices_id     = ch.sales_id
-       LEFT JOIN collection_payment  cp ON cp.collectionpayment_id  = ch.collection_id
+       JOIN customers c ON c.customer_id = ch.customer_id
+       JOIN branches b ON b.id = c.branch_id
+       LEFT JOIN sales_invoices si ON si.sales_invoices_id = ch.sales_id
+       LEFT JOIN collection_payment cp ON cp.collectionpayment_id = ch.collection_id
+       LEFT JOIN payment_methods pm ON pm.payment_method_id = cp.payment_method_id
+       LEFT JOIN users collector ON collector.id = cp.collector_id
        ${where}
-       ORDER BY ch.transaction_date DESC, ch.credit_id DESC`,
+       ORDER BY ch.transaction_date DESC, ch.credit_id DESC
+       LIMIT ${limit}`,
       params
     );
 
@@ -1985,7 +2023,7 @@ router.get('/credit-history', requireAuth, async (req, res) => {
     });
   } catch (err) {
     console.error('[Reports] GET /credit-history error:', err.message);
-    return res.status(500).json({ success: false, message: 'Failed to fetch credit history.' });
+    return res.status(500).json({ success: false, message: 'Failed to fetch payment history.' });
   }
 });
 

@@ -105,8 +105,12 @@ export async function fetchApprovalCenterSummary() {
 }
 
 export function mapCreditInvestigationRow(row) {
-  const flags = row.delinquency_flags_json ?? [];
-  const payments = row.payment_history_json ?? [];
+  // Prefer the shared Credit Review mapper; keep legacy shape for older screens.
+  const flags = row.delinquency_flags_json ?? row.risk_reasons ?? [];
+  const payments = row.payment_history_json
+    || row.snapshot?.financial?.payment_history
+    || [];
+  const reason = row.request_reason || row.purpose;
   return {
     id: String(row.ci_id),
     ciId: row.ci_id,
@@ -117,20 +121,29 @@ export function mapCreditInvestigationRow(row) {
     submissionDate: row.created_at,
     delinquencyStatus: row.delinquency_status,
     status: row.status,
-    purpose: row.purpose,
+    displayStatus: row.display_status || (row.status === 'Pending' ? 'Needs BM' : row.status),
+    purpose: reason,
+    requestReason: reason,
+    requestedLimit: row.requested_credit_limit != null ? Number(row.requested_credit_limit) : null,
+    approvedLimit: row.approved_credit_limit != null ? Number(row.approved_credit_limit) : null,
+    riskLevel: row.risk_level || row.leaflet_classification || null,
     monthlyIncome: Number(row.monthly_income || 0),
     businessType: row.business_type,
     references: row.references_summary,
-    formRemarks: row.form_remarks,
+    formRemarks: row.request_remarks || row.form_remarks,
     riskScore: row.risk_score ?? 0,
-    leafletClassification: row.leaflet_classification,
+    leafletClassification: row.leaflet_classification || row.risk_level,
     rejectionReason: row.rejection_reason,
+    decisionRemarks: row.decision_remarks || null,
+    snapshot: row.snapshot || row.financial_snapshot_json || null,
+    live: row.live || null,
     delinquencyFlags: Array.isArray(flags) ? flags : [],
     paymentHistory: Array.isArray(payments)
       ? payments.map((p) => ({
-          date: p.date,
-          amount: Number(p.amount || 0),
-          status: p.status || 'Confirmed',
+          date: p.payment_date || p.date,
+          amount: Number(p.amount || p.amount_paid || 0),
+          status: p.status || 'Completed',
+          reference_number: p.reference_number || null,
         }))
       : [],
   };

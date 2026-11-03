@@ -8,10 +8,18 @@ import {
 } from '../lib/sawCollectionData.js';
 import { manilaDateString } from '../lib/sawCollection.js';
 import { buildCollectorSawRoad } from '../lib/sawRoad.js';
-import { notifyScheduleAssigned } from '../lib/operationalNotifications.js';
+import { notifyScheduleAssigned, notifyAreaScheduleAssigned } from '../lib/operationalNotifications.js';
 import { inventoryHealthPercent } from '../lib/inventoryHealth.js';
 import { readPerformanceTargets } from '../lib/performanceTargets.js';
 import { readCreditExposure } from '../lib/creditExposure.js';
+import {
+  AREA_ASSIGNMENT_FROM,
+  AREA_ASSIGNMENT_SELECT,
+  isValidDate,
+  loadAssignmentProducts,
+  positiveInteger,
+  withProducts,
+} from '../lib/salesAreaAssignments.js';
 
 const OVERDUE_CUSTOMER = `EXISTS (
   SELECT 1
@@ -1174,8 +1182,10 @@ router.get('/staff/sales/:id', requireAuth, async (req, res) => {
 
 const FIELD_REPORT_FROM = `
   FROM field_activity_reports far
-  JOIN field_visits fv ON fv.visit_id = far.visit_id
-  JOIN customers c ON c.customer_id = fv.customer_id
+  LEFT JOIN field_visits fv ON fv.visit_id = far.visit_id
+  LEFT JOIN customers visit_c ON visit_c.customer_id = fv.customer_id
+  LEFT JOIN customers linked_c ON linked_c.customer_id = far.customer_id
+  LEFT JOIN sales_area_assignments saa ON saa.assignment_id = far.assignment_id
   JOIN users u ON u.id = far.user_id
   JOIN roles r ON r.role_id = u.role_id AND r.slug IN ('collector', 'sales_staff')
   LEFT JOIN branches b ON b.id = u.branch_id
@@ -1184,16 +1194,22 @@ const FIELD_REPORT_FROM = `
 const FIELD_REPORT_COLUMNS = `
   far.report_id,
   far.visit_id,
+  far.assignment_id,
   far.activity_type,
   far.remarks,
   far.sync_status,
   far.created_at,
   (far.photo IS NOT NULL AND far.photo <> '') AS has_photo,
-  fv.scheduled_date,
+  COALESCE(saa.work_date, fv.scheduled_date) AS scheduled_date,
   fv.visit_type,
   fv.status AS visit_status,
-  COALESCE(NULLIF(CONCAT_WS(' ', c.first_name, c.last_name), ''), 'Customer') AS customer_name,
-  c.customer_id,
+  saa.area_name,
+  COALESCE(
+    NULLIF(CONCAT_WS(' ', linked_c.first_name, linked_c.last_name), ''),
+    NULLIF(CONCAT_WS(' ', visit_c.first_name, visit_c.last_name), ''),
+    NULL
+  ) AS customer_name,
+  COALESCE(far.customer_id, visit_c.customer_id) AS customer_id,
   CONCAT_WS(' ', u.first_name, u.last_name) AS collector_name,
   u.id AS collector_id,
   CASE r.slug WHEN 'sales_staff' THEN 'Sales Agent' ELSE 'Collector' END AS staff_role,
@@ -1204,6 +1220,8 @@ function mapFieldReportRow(row, { includePhoto = false } = {}) {
   const mapped = {
     report_id: row.report_id,
     visit_id: row.visit_id,
+    assignment_id: row.assignment_id,
+    area_name: row.area_name || null,
     activity_type: row.activity_type,
     remarks: row.remarks,
     sync_status: row.sync_status,
@@ -1212,7 +1230,7 @@ function mapFieldReportRow(row, { includePhoto = false } = {}) {
     scheduled_date: row.scheduled_date,
     visit_type: row.visit_type,
     visit_status: row.visit_status,
-    customer_name: row.customer_name,
+    customer_name: row.customer_name || (row.area_name ? null : '—'),
     customer_id: row.customer_id,
     collector_name: row.collector_name,
     collector_id: row.collector_id,
@@ -1294,6 +1312,171 @@ router.get('/field-activity-reports/:id', requireAuth, async (req, res) => {
   } catch (err) {
     console.error('[Branch Manager] GET /field-activity-reports/:id error:', err.message);
     return res.status(500).json({ success: false, message: 'Failed to load field activity report.' });
+  }
+});
+
+// ── Sales area / canvass assignments (BM assigns WHERE SA works) ──────────────
+
+router.get('/staff/sales/:id/area-assignments', requireAuth, async (req, res) => {
+  try {
+    const pool = req.app.locals.pool;
+    const user = req.currentUser;
+    const agentId = positiveInteger(req.params.id);
+    if (!agentId) {
+      return res.status(400).json({ success: false, message: 'Invalid sales agent ID.' });
+    }
+    const allowed = await assertStaffInBranch(pool, user, agentId, 'sales_staff');
+    if (!allowed) {
+      return res.status(404).json({ success: false, message: 'Sales agent not found.' });
+    }
+
+    const result = await pool.query(
+      `SELECT ${AREA_ASSIGNMENT_SELECT}
+       ${AREA_ASSIGNMENT_FROM}
+       WHERE saa.sales_agent_id = $1
+       ORDER BY saa.work_date DESC, saa.assignment_id DESC
+       LIMIT 100`,
+      [agentId]
+    );
+    const productsByAssignment = await loadAssignmentProducts(
+      pool,
+      result.rows.map((row) => row.assignment_id)
+    );
+    return res.status(200).json({
+      success: true,
+      data: result.rows.map((row) => withProducts(row, productsByAssignment)),
+    });
+  } catch (err) {
+    console.error('[Branch Manager] GET sales area-assignments error:', err.message);
+    return res.status(500).json({ success: false, message: 'Failed to load area assignments.' });
+  }
+});
+
+router.post('/staff/sales/:id/area-assignments', requireAuth, async (req, res) => {
+  try {
+    const pool = req.app.locals.pool;
+    const user = req.currentUser;
+    const agentId = positiveInteger(req.params.id);
+    if (!agentId) {
+      return res.status(400).json({ success: false, message: 'Invalid sales agent ID.' });
+    }
+    const allowed = await assertStaffInBranch(pool, user, agentId, 'sales_staff');
+    if (!allowed) {
+      return res.status(404).json({ success: false, message: 'Sales agent not found.' });
+    }
+
+    const workDate = req.body?.work_date || manilaDateString();
+    if (!isValidDate(String(workDate))) {
+      return res.status(400).json({ success: false, message: 'work_date must be YYYY-MM-DD.' });
+    }
+
+    const territoryId = positiveInteger(req.body?.territory_id);
+    let areaName = typeof req.body?.area_name === 'string' ? req.body.area_name.trim() : '';
+    let coverageNotes = typeof req.body?.coverage_notes === 'string' ? req.body.coverage_notes.trim() : '';
+    let latitude = req.body?.latitude != null && req.body.latitude !== '' ? Number(req.body.latitude) : null;
+    let longitude = req.body?.longitude != null && req.body.longitude !== '' ? Number(req.body.longitude) : null;
+    const radiusMeters = positiveInteger(req.body?.radius_meters) || 800;
+    const productIds = Array.isArray(req.body?.product_ids)
+      ? [...new Set(req.body.product_ids.map((id) => positiveInteger(id)).filter(Boolean))]
+      : [];
+
+    const agentResult = await pool.query(
+      `SELECT u.id, u.branch_id, b.latitude AS branch_lat, b.longitude AS branch_lng, b.name AS branch_name
+       FROM users u
+       JOIN branches b ON b.id = u.branch_id
+       WHERE u.id = $1`,
+      [agentId]
+    );
+    if (!agentResult.rows.length || agentResult.rows[0].branch_id == null) {
+      return res.status(400).json({ success: false, message: 'Sales agent has no branch.' });
+    }
+    const agent = agentResult.rows[0];
+
+    if (territoryId) {
+      const territory = await pool.query(
+        `SELECT territory_id, territory_name, coverage_area, branch_id
+         FROM territories
+         WHERE territory_id = $1`,
+        [territoryId]
+      );
+      if (!territory.rows.length || Number(territory.rows[0].branch_id) !== Number(agent.branch_id)) {
+        return res.status(400).json({ success: false, message: 'Territory not found in this branch.' });
+      }
+      if (!areaName) areaName = territory.rows[0].territory_name;
+      if (!coverageNotes) coverageNotes = territory.rows[0].coverage_area || '';
+    }
+
+    if (!areaName) {
+      return res.status(400).json({ success: false, message: 'area_name is required (or choose a territory).' });
+    }
+
+    if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) {
+      latitude = agent.branch_lat != null ? Number(agent.branch_lat) : null;
+      longitude = agent.branch_lng != null ? Number(agent.branch_lng) : null;
+    }
+
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      const inserted = await client.query(
+        `INSERT INTO sales_area_assignments (
+           branch_id, sales_agent_id, assigned_by, territory_id, area_name, coverage_notes,
+           work_date, status, latitude, longitude, radius_meters
+         ) VALUES ($1, $2, $3, $4, $5, $6, $7::date, 'Assigned', $8, $9, $10)
+         RETURNING assignment_id`,
+        [
+          agent.branch_id,
+          agentId,
+          user.id,
+          territoryId,
+          areaName,
+          coverageNotes || null,
+          workDate,
+          latitude,
+          longitude,
+          Math.min(20000, Math.max(100, radiusMeters)),
+        ]
+      );
+      const assignmentId = inserted.rows[0].assignment_id;
+
+      for (const productId of productIds) {
+        await client.query(
+          `INSERT INTO sales_area_assignment_products (assignment_id, product_id)
+           VALUES ($1, $2)
+           ON CONFLICT DO NOTHING`,
+          [assignmentId, productId]
+        );
+      }
+
+      await client.query('COMMIT');
+
+      const detail = await pool.query(
+        `SELECT ${AREA_ASSIGNMENT_SELECT}
+         ${AREA_ASSIGNMENT_FROM}
+         WHERE saa.assignment_id = $1`,
+        [assignmentId]
+      );
+      const productsByAssignment = await loadAssignmentProducts(pool, [assignmentId]);
+      await notifyAreaScheduleAssigned(pool, {
+        userId: agentId,
+        workDate,
+        areaName,
+      });
+
+      return res.status(201).json({
+        success: true,
+        message: `Assigned ${areaName} for ${workDate}.`,
+        data: withProducts(detail.rows[0], productsByAssignment),
+      });
+    } catch (err) {
+      try { await client.query('ROLLBACK'); } catch { /* ignore */ }
+      throw err;
+    } finally {
+      client.release();
+    }
+  } catch (err) {
+    console.error('[Branch Manager] POST sales area-assignments error:', err.message);
+    return res.status(500).json({ success: false, message: 'Failed to create area assignment.' });
   }
 });
 

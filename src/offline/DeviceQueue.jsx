@@ -14,7 +14,7 @@ function recordTitle(row) {
     return [payload.customer_name || 'Collection', money].filter(Boolean).join(' · ');
   }
   if (row.tableName === 'sales_invoices') return payload.customer_name || 'Sale';
-  return payload.customer_name || 'Field report';
+  return payload.area_name || payload.customer_name || 'Field report';
 }
 
 function recordDetail(row) {

@@ -19,13 +19,10 @@ import { formatDisplayDate, formatCurrency, formatPhone } from '../../utils/form
 import { EmptyState } from '../shared/EmptyState';
 import { LoadingState } from '../shared/LoadingState';
 import { DetailRowsTable } from '../shared/DetailRowsTable';
-import { QuantityStepper } from '../shared/QuantityStepper.jsx';
 import { StatusBadge } from '../StatusBadge';
 import { NavIcon } from '../../navIcons';
 import { UserSettingsPanel } from '../shared/UserSettingsPanel';
 import { CustomerProfilePanel } from '../shared/CustomerProfilePanel';
-import { CustomerPurchaseDesk } from './CustomerPurchaseDesk';
-
 function portalStatusLabel(status) {
   switch (String(status || '').toLowerCase()) {
     case 'invited':
@@ -863,9 +860,6 @@ function ProfilePage({
 }) {
   return <CustomerProfilePanel showToast={showToast} />;
 }
-function CustomerPurchaseRequestsPage({ showToast }) {
-  return <CustomerPurchaseDesk showToast={showToast} />;
-}
 
 export function CustomerPageBody({
   page,
@@ -884,8 +878,6 @@ export function CustomerPageBody({
       return <LoginPage {...props} />;
     case 'home':
       return <HomePage {...props} />;
-    case 'purchaseRequests':
-      return <CustomerPurchaseRequestsPage {...props} />;
     case 'accountDetails':
       return <AccountDetailsPage {...props} />;
     case 'paymentHistory':

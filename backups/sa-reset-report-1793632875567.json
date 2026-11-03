@@ -1,0 +1,303 @@
+{
+  "environment": {
+    "database": "corvex",
+    "host": "localhost"
+  },
+  "backupPath": "C:\\corvex\\backups\\sa-reset-backup-2026-11-02T15-21-15-294Z.json",
+  "deleted": {
+    "field_activity_reports": 7,
+    "sales_area_assignment_products": 3,
+    "sales_area_assignments": 9,
+    "credit_history": 49,
+    "sales_invoice_items": 0,
+    "sales_invoices": 109,
+    "credit_investigations": 4,
+    "customers": 1
+  },
+  "preserved": {
+    "customers_with_shared_deps": [
+      {
+        "customer_id": 3,
+        "customer_code": "C-003-2026",
+        "payments": 16,
+        "saw": 1,
+        "special_coll": 0
+      },
+      {
+        "customer_id": 5,
+        "customer_code": "C-005-2026",
+        "payments": 6,
+        "saw": 1,
+        "special_coll": 0
+      },
+      {
+        "customer_id": 1,
+        "customer_code": "C-001-2026",
+        "payments": 24,
+        "saw": 1,
+        "special_coll": 1
+      },
+      {
+        "customer_id": 2,
+        "customer_code": "C-002-2026",
+        "payments": 5,
+        "saw": 1,
+        "special_coll": 1
+      },
+      {
+        "customer_id": 7,
+        "customer_code": "C-007-2026",
+        "payments": 2,
+        "saw": 1,
+        "special_coll": 0
+      },
+      {
+        "customer_id": 9,
+        "customer_code": "C-009-2026",
+        "payments": 5,
+        "saw": 1,
+        "special_coll": 0
+      },
+      {
+        "customer_id": 11,
+        "customer_code": "C-011-2026",
+        "payments": 0,
+        "saw": 1,
+        "special_coll": 0
+      }
+    ]
+  },
+  "created": {
+    "customers": 5,
+    "customer_credit_info": 4,
+    "sales_area_assignments": 5,
+    "field_activity_reports": 5,
+    "credit_investigations": 5,
+    "sales_invoices": 5,
+    "sales_invoice_items": 5
+  },
+  "samples": {
+    "agents": [
+      {
+        "id": 7,
+        "name": "Jane Smith",
+        "email": "jane.s@corvex.ph"
+      },
+      {
+        "id": 8,
+        "name": "Robert Lee",
+        "email": "robert.l@corvex.ph"
+      },
+      {
+        "id": 9,
+        "name": "Patricia Cruz",
+        "email": "patricia.c@corvex.ph"
+      }
+    ],
+    "customers": [
+      {
+        "code": "DEV-SA-C01",
+        "name": "Maricel Bautista",
+        "status": "Active",
+        "creditLimit": 45000,
+        "balance": 8500
+      },
+      {
+        "code": "DEV-SA-C02",
+        "name": "Erwin Villanueva",
+        "status": "Active",
+        "creditLimit": null,
+        "balance": 0
+      },
+      {
+        "code": "DEV-SA-C03",
+        "name": "Lovely Carandang",
+        "status": "Active",
+        "creditLimit": 20000,
+        "balance": 16200
+      },
+      {
+        "code": "DEV-SA-C04",
+        "name": "Jonah Alcantara",
+        "status": "Inactive",
+        "creditLimit": 10000,
+        "balance": 0
+      },
+      {
+        "code": "DEV-SA-C05",
+        "name": "Thelma Ocampo",
+        "status": "Active",
+        "creditLimit": 60000,
+        "balance": 3200
+      }
+    ],
+    "area_assignments": [
+      {
+        "id": 25,
+        "area": "Buhangin Market Perimeter",
+        "date": "2026-11-01T16:00:00.000Z",
+        "status": "In Progress"
+      },
+      {
+        "id": 26,
+        "area": "Matina Crossing Loop",
+        "date": "2026-11-01T16:00:00.000Z",
+        "status": "Assigned"
+      },
+      {
+        "id": 27,
+        "area": "Bajada Commercial Strip",
+        "date": "2026-11-02T16:00:00.000Z",
+        "status": "Assigned"
+      },
+      {
+        "id": 28,
+        "area": "Ecoland Residential Cluster",
+        "date": "2026-10-31T16:00:00.000Z",
+        "status": "Done"
+      },
+      {
+        "id": 29,
+        "area": "Lanang Boulevard Stretch",
+        "date": "2026-11-03T16:00:00.000Z",
+        "status": "Assigned"
+      }
+    ],
+    "field_activity_reports": [
+      {
+        "id": 33,
+        "type": "Canvass",
+        "assignment_id": 25
+      },
+      {
+        "id": 34,
+        "type": "Follow-up",
+        "assignment_id": 25
+      },
+      {
+        "id": 35,
+        "type": "Product Demo",
+        "assignment_id": 26
+      },
+      {
+        "id": 36,
+        "type": "Lead Capture",
+        "assignment_id": 28
+      },
+      {
+        "id": 37,
+        "type": "Credit Discussion",
+        "assignment_id": 29
+      }
+    ],
+    "credit_reviews": [
+      {
+        "id": 20,
+        "status": "Pending",
+        "reason": "First installment"
+      },
+      {
+        "id": 21,
+        "status": "Revision Requested",
+        "reason": "Need higher limit"
+      },
+      {
+        "id": 22,
+        "status": "Approved",
+        "reason": "Customer over limit but wants another sale"
+      },
+      {
+        "id": 23,
+        "status": "Rejected",
+        "reason": "Other"
+      },
+      {
+        "id": 24,
+        "status": "Pending",
+        "reason": "Need higher limit"
+      }
+    ],
+    "sales_invoices": [
+      {
+        "invoice": "DEV-SA-INV-20261102-01",
+        "status": "Confirmed",
+        "total": "12999.00",
+        "pay_type": "full",
+        "qty": 1,
+        "customer": "DEV-SA-C01"
+      },
+      {
+        "invoice": "DEV-SA-INV-20261102-02",
+        "status": "Pending Review",
+        "total": "12999.00",
+        "pay_type": "installment",
+        "qty": 1,
+        "customer": "DEV-SA-C03"
+      },
+      {
+        "invoice": "DEV-SA-INV-20261102-03",
+        "status": "Confirmed",
+        "total": "25998.00",
+        "pay_type": "full",
+        "qty": 2,
+        "customer": "DEV-SA-C05"
+      },
+      {
+        "invoice": "DEV-SA-INV-20261102-04",
+        "status": "Draft",
+        "total": "12999.00",
+        "pay_type": "full",
+        "qty": 1,
+        "customer": "DEV-SA-C02"
+      },
+      {
+        "invoice": "DEV-SA-INV-20261102-05",
+        "status": "Confirmed",
+        "total": "12999.00",
+        "pay_type": "installment",
+        "qty": 1,
+        "customer": "DEV-SA-C05"
+      }
+    ]
+  },
+  "verification": {
+    "area_assignments": 5,
+    "field_activity_reports": 5,
+    "customers_dev": 5,
+    "credit_investigations": 5,
+    "sales_invoices": 5,
+    "invoice_items": 5,
+    "far_with_assignment": 5,
+    "ci_with_customer": 5,
+    "inventory_unchanged": false,
+    "stock_movements_unchanged": true,
+    "products_unchanged": true,
+    "collection_payment_count": 106,
+    "inventory_before": [
+      {
+        "inventory_id": 1,
+        "branch_id": 1,
+        "product_id": 1,
+        "available_stock": 11,
+        "quantity": 11,
+        "reorder_level": 5,
+        "stock_status": "Sufficient"
+      }
+    ],
+    "inventory_after": [
+      {
+        "inventory_id": 1,
+        "available_stock": 11,
+        "quantity": 11
+      }
+    ],
+    "stock_movements_before": 2,
+    "stock_movements_after": 2,
+    "products_count": 1
+  },
+  "notes": [
+    "Only one active product (Sample Sofa / SOFA-001) exists; invoices vary quantity, pay type, and dates instead of product mix.",
+    "Preserved 7 customer(s) with collector/SAW/portal links; unassigned from sales agents.",
+    "DEV-SA-C02 has no approved credit limit (credit-info row omitted)."
+  ]
+}

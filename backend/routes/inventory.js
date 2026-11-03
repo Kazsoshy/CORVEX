@@ -8,12 +8,32 @@ import {
   upsertBranchInventoryStock,
 } from '../lib/branchInventoryStock.js';
 import {
+  notifyRestockRecorded,
   notifyTransferCompleted,
   notifyTransferDecision,
   notifyTransferSubmitted,
 } from '../lib/inventoryTransferNotifications.js';
+import {
+  completeTransferStockMulti,
+  getAvailableToTransfer,
+  loadRestockLines,
+  loadTransferLines,
+  manilaToday,
+  movementRefForRestock,
+  movementRefForStockCount,
+  nextDeliveryRef,
+  nextRestockRef,
+  nextStockCountRef,
+  nextTransferRef,
+  parseDocumentLines,
+  summarizeLines,
+} from '../lib/inventoryDocuments.js';
 import { publishStockAlerts } from '../lib/operationalNotifications.js';
 import { normalizeProductName, productNameConflict, productNameTaken } from '../lib/productName.js';
+import {
+  parseMovementDocument,
+  selectMatchingGroups,
+} from '../lib/stockMovementGroups.js';
 
 const TRANSFER_APPROVER_ROLES = new Set(['branch_manager', 'operating_manager', 'super_admin']);
 /** Stock mutations (restock / count / transfer create / product create) — not branch managers. */
@@ -364,21 +384,53 @@ router.get('/transfers', requireAuth, async (req, res) => {
 
     const result = await pool.query(
       `SELECT
-         it.transfer_id, it.transfer_ref, it.quantity, it.status,
+         it.transfer_id, it.transfer_ref, it.status, it.notes,
          it.source_branch_id, it.destination_branch_id, it.submitted_by,
          it.submitted_date, it.completed_date, it.approval_info,
          it.created_at, it.updated_at,
-         p.name AS product_name, p.sku,
          sb.name AS source_branch,
          db.name AS destination_branch,
          sub.full_name AS submitted_by_name,
-         apv.full_name AS approved_by_name
+         apv.full_name AS approved_by_name,
+         CASE
+           WHEN COALESCE(agg.line_count, 0) > 0 THEN agg.line_count
+           WHEN it.product_id IS NOT NULL AND COALESCE(it.quantity, 0) > 0 THEN 1
+           ELSE 0
+         END::int AS line_count,
+         CASE
+           WHEN COALESCE(agg.line_count, 0) > 0 THEN agg.total_quantity
+           ELSE COALESCE(it.quantity, 0)
+         END::int AS quantity,
+         CASE
+           WHEN COALESCE(agg.line_count, 0) > 0 THEN agg.total_quantity
+           ELSE COALESCE(it.quantity, 0)
+         END::int AS total_quantity,
+         CASE
+           WHEN COALESCE(agg.line_count, 0) > 1 THEN agg.first_product_name || ' +' || (agg.line_count - 1)::text || ' more'
+           WHEN COALESCE(agg.line_count, 0) = 1 THEN agg.first_product_name
+           ELSE lp.name
+         END AS product_name,
+         CASE
+           WHEN COALESCE(agg.line_count, 0) = 1 THEN agg.first_sku
+           WHEN COALESCE(agg.line_count, 0) = 0 THEN lp.sku
+           ELSE NULL
+         END AS sku
        FROM inventory_transfers it
-       JOIN products p ON p.id = it.product_id
        JOIN branches sb ON sb.id = it.source_branch_id
        JOIN branches db ON db.id = it.destination_branch_id
        LEFT JOIN users sub ON sub.id = it.submitted_by
        LEFT JOIN users apv ON apv.id = it.approved_by
+       LEFT JOIN products lp ON lp.id = it.product_id
+       LEFT JOIN LATERAL (
+         SELECT
+           COUNT(*)::int AS line_count,
+           COALESCE(SUM(l.quantity), 0)::int AS total_quantity,
+           (ARRAY_AGG(p.name ORDER BY p.name))[1] AS first_product_name,
+           (ARRAY_AGG(p.sku ORDER BY p.name))[1] AS first_sku
+         FROM inventory_transfer_lines l
+         JOIN products p ON p.id = l.product_id
+         WHERE l.transfer_id = it.transfer_id
+       ) agg ON TRUE
        ${where}
        ORDER BY it.created_at DESC`,
       params
@@ -400,16 +452,15 @@ router.get('/transfers/:id', requireAuth, async (req, res) => {
 
     const result = await pool.query(
       `SELECT
-         it.transfer_id, it.transfer_ref, it.quantity, it.status,
+         it.transfer_id, it.transfer_ref, it.status, it.notes,
+         it.product_id, it.quantity AS header_quantity,
          it.source_branch_id, it.destination_branch_id, it.submitted_by,
          it.submitted_date, it.completed_date, it.approval_info, it.created_at, it.updated_at,
-         p.name AS product_name, p.sku,
          sb.name AS source_branch,
          db.name AS destination_branch,
          sub.full_name AS submitted_by_name,
          apv.full_name AS approved_by_name
        FROM inventory_transfers it
-       JOIN products p ON p.id = it.product_id
        JOIN branches sb ON sb.id = it.source_branch_id
        JOIN branches db ON db.id = it.destination_branch_id
        LEFT JOIN users sub ON sub.id = it.submitted_by
@@ -422,7 +473,24 @@ router.get('/transfers/:id', requireAuth, async (req, res) => {
     if (result.rows.length === 0) {
       return res.status(404).json({ success: false, message: 'Transfer not found.' });
     }
-    return res.status(200).json({ success: true, data: result.rows[0] });
+
+    const lines = await loadTransferLines(pool, result.rows[0].transfer_id);
+    const summary = summarizeLines(lines);
+    // Prefer live lines; if still empty, surface header qty honestly (do not invent products).
+    const payload = {
+      ...result.rows[0],
+      ...summary,
+      lines,
+    };
+    if (!lines.length && Number(result.rows[0].header_quantity) > 0) {
+      payload.total_quantity = Number(result.rows[0].header_quantity);
+      payload.quantity = Number(result.rows[0].header_quantity);
+      payload.line_count = 0;
+    }
+    return res.status(200).json({
+      success: true,
+      data: payload,
+    });
   } catch (err) {
     console.error('[Inventory] GET /transfers/:id error:', err.message);
     return res.status(500).json({ success: false, message: 'Failed to fetch transfer.' });
@@ -436,15 +504,6 @@ const TRANSFER_STATUSES = new Set([
   'Completed',
   'Rejected',
 ]);
-
-function manilaToday() {
-  return new Intl.DateTimeFormat('en-CA', {
-    timeZone: 'Asia/Manila',
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-  }).format(new Date());
-}
 
 function assertTransferStatusChange(user, currentStatus, nextStatus, transferRow) {
   const role = user.roleSlug;
@@ -477,7 +536,7 @@ function assertTransferStatusChange(user, currentStatus, nextStatus, transferRow
       };
     }
     if (role === 'inventory_staff') {
-      if (user.branchId !== transferRow.source_branch_id) {
+      if (Number(user.branchId) !== Number(transferRow.source_branch_id)) {
         return {
           ok: false,
           status: 403,
@@ -491,52 +550,6 @@ function assertTransferStatusChange(user, currentStatus, nextStatus, transferRow
   }
 
   return { ok: false, status: 400, message: 'Invalid or unsupported status change.' };
-}
-
-async function completeTransferStock(client, transferRow, userId) {
-  const {
-    product_id: productId,
-    quantity,
-    source_branch_id: sourceId,
-    destination_branch_id: destId,
-    transfer_ref: transferRef,
-  } = transferRow;
-  const product = await client.query(`SELECT reorder_point FROM products WHERE id = $1`, [productId]);
-  const reorder = product.rows[0]?.reorder_point ?? 5;
-  const today = manilaToday();
-
-  const sourceSnapshot = await upsertBranchInventoryStock(client, {
-    branchId: sourceId,
-    productId,
-    delta: -quantity,
-    reorderLevel: reorder,
-  });
-  await upsertBranchInventoryStock(client, {
-    branchId: destId,
-    productId,
-    delta: quantity,
-    reorderLevel: reorder,
-  });
-
-  await insertStockMovement(client, {
-    performedBy: userId,
-    productId,
-    branchId: sourceId,
-    quantity: -quantity,
-    type: 'Transfer Out',
-    movementRef: `MOV-${transferRef}-OUT`,
-    movementDate: today,
-  });
-  await insertStockMovement(client, {
-    performedBy: userId,
-    productId,
-    branchId: destId,
-    quantity,
-    type: 'Transfer In',
-    movementRef: `MOV-${transferRef}-IN`,
-    movementDate: today,
-  });
-  return sourceSnapshot;
 }
 
 // PATCH /api/inventory/transfers/:id — approve or reject (org / inventory roles)
@@ -616,8 +629,14 @@ router.patch('/transfers/:id', requireAuth, async (req, res) => {
       );
 
       let sourceSnapshot = null;
+      let lines = [];
       if (status === 'Completed' && transferRow.status !== 'Completed') {
-        sourceSnapshot = await completeTransferStock(client, transferRow, user.id);
+        lines = await loadTransferLines(client, transferId);
+        if (!lines.length) {
+          await client.query('ROLLBACK');
+          return res.status(400).json({ success: false, message: 'Transfer has no product lines to complete.' });
+        }
+        sourceSnapshot = await completeTransferStockMulti(client, transferRow, lines, user.id);
       }
 
       await client.query('COMMIT');
@@ -632,10 +651,13 @@ router.patch('/transfers/:id', requireAuth, async (req, res) => {
         });
       }
       if (status === 'Completed') {
-        const productRow = await pool.query(`SELECT name FROM products WHERE id = $1`, [transferRow.product_id]);
+        if (!lines.length) lines = await loadTransferLines(pool, transferId);
+        const summary = summarizeLines(lines);
         await notifyTransferCompleted(pool, {
           transferRef: transferRow.transfer_ref,
-          productName: productRow.rows[0]?.name || 'Product',
+          productName: summary.product_name,
+          lineCount: summary.line_count,
+          totalQuantity: summary.total_quantity,
           destinationBranchId: transferRow.destination_branch_id,
         });
       }
@@ -662,8 +684,13 @@ router.patch('/transfers/:id', requireAuth, async (req, res) => {
       });
     } catch (err) {
       await client.query('ROLLBACK');
-      if (err.message === 'INSUFFICIENT_STOCK') {
-        return res.status(400).json({ success: false, message: 'Insufficient stock to complete transfer.' });
+      if (err.code === 'INSUFFICIENT_STOCK' || err.message === 'INSUFFICIENT_STOCK' || /Insufficient stock/i.test(err.message || '')) {
+        return res.status(400).json({
+          success: false,
+          message: err.message && err.message !== 'INSUFFICIENT_STOCK'
+            ? err.message
+            : 'Insufficient stock to complete transfer. No stock was moved.',
+        });
       }
       throw err;
     } finally {
@@ -682,27 +709,91 @@ router.get('/restocks', requireAuth, async (req, res) => {
   try {
     const pool = req.app.locals.pool;
     const user = req.currentUser;
+    const { search, product_id, supplier_id, date_from, date_to } = req.query;
 
-    const scopedBranchId = isUnscoped(user) ? null : user.branchId;
-    const branchWhere = scopedBranchId ? 'WHERE r.branch_id = $1' : '';
-    const params = scopedBranchId ? [scopedBranchId] : [];
+    const conditions = [];
+    const params = [];
+    let pIdx = 1;
+
+    if (!isUnscoped(user)) {
+      if (user.branchId == null) {
+        return res.status(403).json({ success: false, message: 'No branch assigned.' });
+      }
+      conditions.push(`h.branch_id = $${pIdx++}`);
+      params.push(user.branchId);
+    }
+
+    if (supplier_id && Number.isFinite(Number(supplier_id))) {
+      conditions.push(`h.supplier_id = $${pIdx++}`);
+      params.push(Number(supplier_id));
+    }
+
+    if (date_from) {
+      conditions.push(`h.received_date >= $${pIdx++}`);
+      params.push(date_from);
+    }
+    if (date_to) {
+      conditions.push(`h.received_date <= $${pIdx++}`);
+      params.push(date_to);
+    }
+
+    const q = String(search || '').trim();
+    if (q) {
+      conditions.push(`(
+        h.delivery_ref ILIKE $${pIdx}
+        OR h.restock_ref ILIKE $${pIdx}
+        OR s.supplier_name ILIKE $${pIdx}
+      )`);
+      params.push(`%${q}%`);
+      pIdx++;
+    }
+
+    if (product_id && Number.isFinite(Number(product_id))) {
+      conditions.push(`EXISTS (
+        SELECT 1 FROM restock_lines rl
+        WHERE rl.restock_id = h.restock_id AND rl.product_id = $${pIdx}
+      )`);
+      params.push(Number(product_id));
+      pIdx++;
+    }
+
+    const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
 
     const result = await pool.query(
       `SELECT
-         r.restock_id, r.delivery_ref, r.quantity, r.received_date,
-         p.name AS product_name, p.sku,
+         h.restock_id, h.restock_ref, h.delivery_ref, h.received_date, h.notes, h.created_at,
+         h.branch_id, h.supplier_id, h.recorded_by,
          b.name AS branch_name,
-         s.supplier_name
-       FROM restocks r
-       JOIN products p ON p.id = r.product_id
-       JOIN branches b ON b.id = r.branch_id
-       JOIN suppliers s ON s.suppliers_id = r.supplier_id
-       ${branchWhere}
-       ORDER BY r.received_date DESC`,
+         s.supplier_name,
+         rec.full_name AS recorded_by_name,
+         COALESCE(agg.line_count, 0)::int AS line_count,
+         COALESCE(agg.total_quantity, 0)::int AS quantity,
+         COALESCE(agg.total_quantity, 0)::int AS total_quantity,
+         CASE
+           WHEN COALESCE(agg.line_count, 0) <= 1 THEN agg.first_product_name
+           ELSE agg.first_product_name || ' +' || (agg.line_count - 1)::text || ' more'
+         END AS product_name,
+         CASE WHEN COALESCE(agg.line_count, 0) = 1 THEN agg.first_sku ELSE NULL END AS sku
+       FROM restock_headers h
+       JOIN branches b ON b.id = h.branch_id
+       JOIN suppliers s ON s.suppliers_id = h.supplier_id
+       LEFT JOIN users rec ON rec.id = h.recorded_by
+       LEFT JOIN LATERAL (
+         SELECT
+           COUNT(*)::int AS line_count,
+           COALESCE(SUM(l.quantity), 0)::int AS total_quantity,
+           (ARRAY_AGG(p.name ORDER BY p.name))[1] AS first_product_name,
+           (ARRAY_AGG(p.sku ORDER BY p.name))[1] AS first_sku
+         FROM restock_lines l
+         JOIN products p ON p.id = l.product_id
+         WHERE l.restock_id = h.restock_id
+       ) agg ON TRUE
+       ${where}
+       ORDER BY h.received_date DESC, h.restock_id DESC`,
       params
     );
 
-    return res.status(200).json({ success: true, data: result.rows });
+    return res.status(200).json({ success: true, data: result.rows, count: result.rows.length });
   } catch (err) {
     console.error('[Inventory] GET /restocks error:', err.message);
     return res.status(500).json({ success: false, message: 'Failed to fetch restocks.' });
@@ -763,6 +854,8 @@ router.get('/branch-inventory', requireAuth, async (req, res) => {
          p.sku,
          pc.category_name,
          bi.available_stock,
+         COALESCE(pending.reserved, 0)::int AS pending_outbound,
+         GREATEST(0, bi.available_stock - COALESCE(pending.reserved, 0))::int AS available_to_transfer,
          bi.reorder_level,
          bi.stock_status,
          bi.created_at,
@@ -771,6 +864,27 @@ router.get('/branch-inventory', requireAuth, async (req, res) => {
        JOIN branches b          ON b.id               = bi.branch_id
        JOIN products p          ON p.id               = bi.product_id
        LEFT JOIN product_categories pc ON pc.category_id = p.category_id
+       LEFT JOIN LATERAL (
+         SELECT COALESCE(SUM(qty), 0)::int AS reserved
+         FROM (
+           SELECT l.quantity AS qty
+           FROM inventory_transfer_lines l
+           JOIN inventory_transfers t ON t.transfer_id = l.transfer_id
+           WHERE t.source_branch_id = bi.branch_id
+             AND l.product_id = bi.product_id
+             AND t.status IN ('Pending Approval', 'Submitted', 'Approved')
+           UNION ALL
+           SELECT t.quantity AS qty
+           FROM inventory_transfers t
+           WHERE t.source_branch_id = bi.branch_id
+             AND t.product_id = bi.product_id
+             AND t.status IN ('Pending Approval', 'Submitted', 'Approved')
+             AND t.quantity IS NOT NULL AND t.quantity > 0
+             AND NOT EXISTS (
+               SELECT 1 FROM inventory_transfer_lines l2 WHERE l2.transfer_id = t.transfer_id
+             )
+         ) reserved_rows
+       ) pending ON TRUE
        ${where}
        ORDER BY b.name, p.name`,
       params
@@ -794,6 +908,7 @@ const STOCK_MOVEMENT_SELECT = `
     sm.product_id,
     p.name AS product_name,
     p.sku,
+    p.unit_type,
     sm.quantity,
     sm.type,
     sm.movement_date,
@@ -808,67 +923,157 @@ const STOCK_MOVEMENT_SELECT = `
   LEFT JOIN users u ON u.id = sm.performed_by
 `;
 
+function buildMovementFilter({ user, query }) {
+  const { type, branch_id, date_from, date_to } = query;
+  const conditions = [];
+  const params = [];
+  let pIdx = 1;
+
+  const scopeBranchId = !isUnscoped(user)
+    ? user.branchId
+    : (branch_id ? Number(branch_id) : null);
+
+  if (scopeBranchId !== null && Number.isFinite(Number(scopeBranchId))) {
+    conditions.push(`sm.branch_id = $${pIdx++}`);
+    params.push(Number(scopeBranchId));
+  }
+
+  if (type && type !== 'All') {
+    conditions.push(`sm.type = $${pIdx++}`);
+    params.push(type);
+  }
+
+  if (date_from) {
+    conditions.push(`sm.movement_date >= $${pIdx++}`);
+    params.push(date_from);
+  }
+
+  if (date_to) {
+    conditions.push(`sm.movement_date <= $${pIdx++}`);
+    params.push(date_to);
+  }
+
+  return {
+    scopeBranchId,
+    where: conditions.length ? `WHERE ${conditions.join(' AND ')}` : '',
+    params,
+  };
+}
+
 // ──────────────────────────────────────────────────────────────────────────────
 // GET /api/inventory/movements
-// Query: type, product_id, branch_id, date_from, date_to
+// Query: type, product_id, branch_id, date_from, date_to, search, flat=1
+// Default: grouped by source transaction (restock / transfer / stock count / sale).
 // ──────────────────────────────────────────────────────────────────────────────
 router.get('/movements', requireAuth, async (req, res) => {
   try {
     const pool = req.app.locals.pool;
     const user = req.currentUser;
-    const { type, product_id, branch_id, date_from, date_to } = req.query;
-
-    const conditions = [];
-    const params = [];
-    let pIdx = 1;
-
-    const scopeBranchId = !isUnscoped(user)
-      ? user.branchId
-      : (branch_id ? Number(branch_id) : null);
-
-    if (scopeBranchId !== null && Number.isFinite(Number(scopeBranchId))) {
-      conditions.push(`sm.branch_id = $${pIdx++}`);
-      params.push(Number(scopeBranchId));
-    }
-
-    if (type && type !== 'All') {
-      conditions.push(`sm.type = $${pIdx++}`);
-      params.push(type);
-    }
-
-    if (product_id && Number.isFinite(Number(product_id))) {
-      conditions.push(`sm.product_id = $${pIdx++}`);
-      params.push(Number(product_id));
-    }
-
-    if (date_from) {
-      conditions.push(`sm.movement_date >= $${pIdx++}`);
-      params.push(date_from);
-    }
-
-    if (date_to) {
-      conditions.push(`sm.movement_date <= $${pIdx++}`);
-      params.push(date_to);
-    }
-
-    const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
+    const flat = String(req.query.flat || '') === '1';
+    const { scopeBranchId, where, params } = buildMovementFilter({ user, query: req.query });
 
     const result = await pool.query(
       `${STOCK_MOVEMENT_SELECT}
        ${where}
-       ORDER BY sm.movement_date DESC, sm.id DESC`,
+       ORDER BY sm.movement_date DESC, sm.created_at DESC, sm.id DESC`,
       params
     );
 
-    return res.status(200).json({ success: true, data: result.rows, count: result.rows.length });
+    if (flat) {
+      // Optional product/search filter for flat mode (product detail timelines).
+      let rows = result.rows;
+      const productId = req.query.product_id ? Number(req.query.product_id) : null;
+      const q = String(req.query.search || '').trim().toLowerCase();
+      if (Number.isFinite(productId)) {
+        rows = rows.filter((r) => Number(r.product_id) === productId);
+      }
+      if (q) {
+        rows = rows.filter((r) => (
+          String(r.product_name || '').toLowerCase().includes(q)
+          || String(r.sku || '').toLowerCase().includes(q)
+          || String(r.movement_ref || '').toLowerCase().includes(q)
+        ));
+      }
+      return res.status(200).json({
+        success: true,
+        data: rows,
+        count: rows.length,
+        grouped: false,
+        scoped_branch_id: scopeBranchId,
+      });
+    }
+
+    const groups = selectMatchingGroups(result.rows, {
+      search: req.query.search,
+      productId: req.query.product_id,
+    });
+
+    return res.status(200).json({
+      success: true,
+      data: groups,
+      count: groups.length,
+      grouped: true,
+      scoped_branch_id: scopeBranchId,
+    });
   } catch (err) {
     console.error('[Inventory] GET /movements error:', err.message);
     return res.status(500).json({ success: false, message: 'Failed to fetch stock movements.' });
   }
 });
 
+async function loadMovementGroupSiblings(pool, seedRow, scopeBranchId) {
+  const parsed = parseMovementDocument(seedRow);
+  const conditions = ['sm.branch_id = $1'];
+  const params = [scopeBranchId != null ? scopeBranchId : seedRow.branch_id];
+  let pIdx = 2;
+
+  if (parsed.kind === 'restock') {
+    // MOV-RST-…-productId, exact RST-…, or MOV-{document_ref}-%
+    conditions.push(`(
+      sm.movement_ref = $${pIdx}
+      OR sm.movement_ref ILIKE $${pIdx + 1}
+      OR sm.movement_ref ILIKE $${pIdx + 2}
+    )`);
+    params.push(
+      parsed.document_ref,
+      `MOV-${parsed.document_ref}-%`,
+      `${parsed.document_ref}-%`
+    );
+    pIdx += 3;
+  } else if (parsed.kind === 'transfer') {
+    conditions.push(`(
+      sm.movement_ref ILIKE $${pIdx}
+      OR sm.movement_ref ILIKE $${pIdx + 1}
+    )`);
+    params.push(
+      `MOV-${parsed.document_ref}-${parsed.direction}-%`,
+      `MOV-${parsed.document_ref}-${parsed.direction}`
+    );
+    pIdx += 2;
+  } else if (parsed.kind === 'stock_count') {
+    conditions.push(`(sm.movement_ref = $${pIdx} OR sm.movement_ref ILIKE $${pIdx + 1})`);
+    params.push(parsed.document_ref, `MOV-${parsed.document_ref}-%`);
+    pIdx += 2;
+  } else if (parsed.kind === 'sale' || parsed.kind === 'sale_reversal') {
+    conditions.push(`sm.movement_ref ILIKE $${pIdx++}`);
+    params.push(`${parsed.document_ref}-%`);
+  } else {
+    conditions.push(`sm.id = $${pIdx++}`);
+    params.push(seedRow.movement_id);
+  }
+
+  const result = await pool.query(
+    `${STOCK_MOVEMENT_SELECT}
+     WHERE ${conditions.join(' AND ')}
+     ORDER BY p.name, sm.id`,
+    params
+  );
+  return { parsed, lines: result.rows };
+}
+
 // ──────────────────────────────────────────────────────────────────────────────
 // GET /api/inventory/movements/:id
+// Returns the transaction group for the movement (siblings + related document).
 // ──────────────────────────────────────────────────────────────────────────────
 router.get('/movements/:id', requireAuth, async (req, res) => {
   try {
@@ -882,10 +1087,12 @@ router.get('/movements/:id', requireAuth, async (req, res) => {
 
     const params = [movementId];
     let branchClause = '';
+    let scopeBranchId = null;
 
     if (!isUnscoped(user)) {
       branchClause = ' AND sm.branch_id = $2';
       params.push(user.branchId);
+      scopeBranchId = user.branchId;
     }
 
     const result = await pool.query(
@@ -898,18 +1105,210 @@ router.get('/movements/:id', requireAuth, async (req, res) => {
       return res.status(404).json({ success: false, message: 'Movement not found.' });
     }
 
-    return res.status(200).json({ success: true, data: result.rows[0] });
+    const row = result.rows[0];
+    if (scopeBranchId == null) scopeBranchId = row.branch_id;
+
+    const { parsed, lines } = await loadMovementGroupSiblings(pool, row, scopeBranchId);
+    const unitTypes = [...new Set(lines.map((l) => String(l.unit_type || 'Unit').trim() || 'Unit'))];
+    const totalQuantity = lines.reduce((sum, l) => sum + (Number(l.quantity) || 0), 0);
+    const mixedUnits = unitTypes.length > 1;
+    const related = await resolveMovementRelatedDocument(pool, row, { includeDetails: true });
+
+    return res.status(200).json({
+      success: true,
+      data: {
+        group_key: parsed.group_key,
+        kind: parsed.kind,
+        document_ref: parsed.document_ref,
+        direction: parsed.direction || null,
+        type: parsed.display_type || row.type,
+        movement_date: row.movement_date,
+        created_at: row.created_at,
+        branch_id: row.branch_id,
+        branch_name: row.branch_name,
+        performed_by: row.performed_by,
+        performed_by_name: row.performed_by_name,
+        representative_movement_id: row.movement_id,
+        product_count: lines.length,
+        total_quantity: totalQuantity,
+        mixed_units: mixedUnits,
+        unit_type: mixedUnits ? null : unitTypes[0],
+        unit_types: unitTypes,
+        lines,
+        related_document: related,
+        // Backward-compatible single-line fields (first / seed row)
+        movement_id: row.movement_id,
+        movement_ref: row.movement_ref,
+        product_id: row.product_id,
+        product_name: row.product_name,
+        sku: row.sku,
+        quantity: row.quantity,
+      },
+    });
   } catch (err) {
     console.error('[Inventory] GET /movements/:id error:', err.message);
     return res.status(500).json({ success: false, message: 'Failed to fetch stock movement.' });
   }
 });
 
-function nextTransferRef(pool) {
-  return pool.query(`SELECT COUNT(*)::int AS c FROM inventory_transfers`).then((r) => {
-    const n = (r.rows[0]?.c || 0) + 1;
-    return `TRF-${String(n).padStart(5, '0')}`;
-  });
+/** Link movement_ref patterns back to restock/transfer/stock-count documents when possible. */
+async function resolveMovementRelatedDocument(pool, movement, { includeDetails = false } = {}) {
+  const parsed = parseMovementDocument(movement);
+  const ref = String(movement?.movement_ref || '');
+  const type = String(movement?.type || '');
+
+  if (parsed.kind === 'restock' || type === 'Restock') {
+    const restockRef = parsed.document_ref;
+    if (restockRef) {
+      const found = await pool.query(
+        `SELECT
+           h.restock_id, h.restock_ref, h.delivery_ref, h.received_date, h.notes, h.created_at,
+           h.supplier_id, s.supplier_name,
+           h.recorded_by, u.full_name AS recorded_by_name,
+           h.branch_id, b.name AS branch_name
+         FROM restock_headers h
+         LEFT JOIN suppliers s ON s.suppliers_id = h.supplier_id
+         LEFT JOIN users u ON u.id = h.recorded_by
+         LEFT JOIN branches b ON b.id = h.branch_id
+         WHERE h.restock_ref = $1
+         LIMIT 1`,
+        [restockRef]
+      );
+      if (found.rows[0]) {
+        const header = found.rows[0];
+        let lines = [];
+        if (includeDetails) {
+          const lineRes = await pool.query(
+            `SELECT
+               l.line_id, l.product_id, l.quantity,
+               p.name AS product_name, p.sku, p.unit_type
+             FROM restock_lines l
+             JOIN products p ON p.id = l.product_id
+             WHERE l.restock_id = $1
+             ORDER BY p.name`,
+            [header.restock_id]
+          );
+          lines = lineRes.rows;
+        }
+        return {
+          kind: 'restock',
+          id: header.restock_id,
+          ref: header.restock_ref,
+          status: 'Completed',
+          supplier_name: header.supplier_name,
+          delivery_ref: header.delivery_ref,
+          received_date: header.received_date,
+          notes: header.notes,
+          recorded_by_name: header.recorded_by_name,
+          branch_name: header.branch_name,
+          lines,
+        };
+      }
+    }
+  }
+
+  if (parsed.kind === 'transfer' || type === 'Transfer In' || type === 'Transfer Out') {
+    const transferRef = parsed.document_ref;
+    if (transferRef) {
+      const found = await pool.query(
+        `SELECT
+           t.transfer_id, t.transfer_ref, t.status, t.notes, t.submitted_date, t.completed_date,
+           t.source_branch_id, sb.name AS source_branch,
+           t.destination_branch_id, db.name AS destination_branch,
+           t.submitted_by, su.full_name AS submitted_by_name,
+           t.approved_by, au.full_name AS approved_by_name
+         FROM inventory_transfers t
+         JOIN branches sb ON sb.id = t.source_branch_id
+         JOIN branches db ON db.id = t.destination_branch_id
+         LEFT JOIN users su ON su.id = t.submitted_by
+         LEFT JOIN users au ON au.id = t.approved_by
+         WHERE t.transfer_ref = $1
+         LIMIT 1`,
+        [transferRef]
+      );
+      if (found.rows[0]) {
+        const header = found.rows[0];
+        let lines = [];
+        if (includeDetails) {
+          lines = await loadTransferLines(pool, header.transfer_id);
+        }
+        return {
+          kind: 'transfer',
+          id: header.transfer_id,
+          ref: header.transfer_ref,
+          status: header.status,
+          notes: header.notes,
+          submitted_date: header.submitted_date,
+          completed_date: header.completed_date,
+          source_branch: header.source_branch,
+          destination_branch: header.destination_branch,
+          source_branch_id: header.source_branch_id,
+          destination_branch_id: header.destination_branch_id,
+          submitted_by_name: header.submitted_by_name,
+          approved_by_name: header.approved_by_name,
+          direction: parsed.direction || null,
+          lines,
+        };
+      }
+    }
+  }
+
+  if (parsed.kind === 'stock_count' || type === 'Stock Count Adjustment') {
+    const countRef = parsed.document_ref;
+    if (countRef) {
+      const found = await pool.query(
+        `SELECT
+           h.count_id, h.count_ref, h.status, h.notes, h.created_at,
+           h.branch_id, b.name AS branch_name,
+           h.counted_by, u.full_name AS counted_by_name
+         FROM stock_count_headers h
+         JOIN branches b ON b.id = h.branch_id
+         LEFT JOIN users u ON u.id = h.counted_by
+         WHERE h.count_ref = $1
+         LIMIT 1`,
+        [countRef]
+      );
+      if (found.rows[0]) {
+        const header = found.rows[0];
+        let lines = [];
+        if (includeDetails) {
+          const lineRes = await pool.query(
+            `SELECT
+               l.line_id, l.product_id, l.system_quantity, l.physical_quantity, l.variance, l.notes,
+               p.name AS product_name, p.sku, p.unit_type
+             FROM stock_count_lines l
+             JOIN products p ON p.id = l.product_id
+             WHERE l.count_id = $1
+             ORDER BY p.name`,
+            [header.count_id]
+          );
+          lines = lineRes.rows;
+        }
+        return {
+          kind: 'stock_count',
+          id: header.count_id,
+          ref: header.count_ref,
+          status: header.status,
+          notes: header.notes,
+          created_at: header.created_at,
+          branch_name: header.branch_name,
+          counted_by_name: header.counted_by_name,
+          lines,
+        };
+      }
+    }
+  }
+
+  if ((type === 'Sale Deduction' || type === 'Sale Reversal') && ref) {
+    return {
+      kind: parsed.kind === 'sale_reversal' ? 'sale_reversal' : 'sale_ref',
+      id: null,
+      ref: parsed.document_ref || ref,
+      status: null,
+    };
+  }
+
+  return null;
 }
 
 // GET /api/inventory/branches — active branch names for transfer destinations.
@@ -927,103 +1326,141 @@ router.get('/branches', requireAuth, async (req, res) => {
   }
 });
 
-// GET /api/inventory/dashboard — warehouse staff KPIs
+// GET /api/inventory/dashboard — warehouse staff action queues + recent docs
 router.get('/dashboard', requireAuth, async (req, res) => {
   try {
     const pool = req.app.locals.pool;
     const user = req.currentUser;
     const branchId = user.branchId;
-    const today = manilaToday();
     if (branchId == null) {
       return res.status(403).json({ success: false, message: 'No branch assigned.' });
     }
 
-    const [products, health, movementsToday, pendingTransfers, recentTransfers, recentRestocks, topMoving] =
+    const needsRestockStatuses = ['Out of Stock', 'Critical Stock', 'Low Stock'];
+
+    const [transferCounts, needsRestock, lowStockSignal, recentTransfers, recentRestocks] =
       await Promise.all([
         pool.query(
-          `SELECT COUNT(*)::int AS total,
-                  COUNT(*) FILTER (WHERE stock_status IN ('Low Stock', 'Critical Stock', 'Out of Stock'))::int AS low_alerts
-           FROM branch_inventory WHERE branch_id = $1`,
+          `SELECT
+             COUNT(*) FILTER (
+               WHERE status = 'Approved' AND source_branch_id = $1
+             )::int AS ready_to_ship,
+             COUNT(*) FILTER (
+               WHERE status IN ('Pending Approval', 'Submitted') AND source_branch_id = $1
+             )::int AS awaiting_approval,
+             COUNT(*) FILTER (
+               WHERE status = 'Approved'
+                 AND destination_branch_id = $1
+                 AND source_branch_id IS DISTINCT FROM $1
+             )::int AS incoming
+           FROM inventory_transfers
+           WHERE source_branch_id = $1 OR destination_branch_id = $1`,
           [branchId]
         ),
         pool.query(
-          `SELECT stock_status, COUNT(*)::int AS count
-           FROM branch_inventory WHERE branch_id = $1
-           GROUP BY stock_status`,
-          [branchId]
+          `SELECT COUNT(*)::int AS count
+           FROM branch_inventory
+           WHERE branch_id = $1
+             AND stock_status = ANY($2::text[])`,
+          [branchId, needsRestockStatuses]
         ),
         pool.query(
-          `SELECT COUNT(*)::int AS count FROM stock_movements
-           WHERE branch_id = $1 AND movement_date = $2::date`,
-          [branchId, today]
+          `SELECT
+             p.id AS product_id,
+             p.name AS product_name,
+             p.sku,
+             bi.available_stock,
+             bi.reorder_level,
+             bi.stock_status
+           FROM branch_inventory bi
+           JOIN products p ON p.id = bi.product_id
+           WHERE bi.branch_id = $1
+             AND bi.stock_status = ANY($2::text[])
+           ORDER BY
+             CASE bi.stock_status
+               WHEN 'Out of Stock' THEN 0
+               WHEN 'Critical Stock' THEN 1
+               WHEN 'Low Stock' THEN 2
+               ELSE 3
+             END,
+             bi.available_stock ASC,
+             p.name ASC
+           LIMIT 10`,
+          [branchId, needsRestockStatuses]
         ),
         pool.query(
-          `SELECT COUNT(*)::int AS count FROM inventory_transfers
-           WHERE (source_branch_id = $1 OR destination_branch_id = $1)
-             AND status IN ('Pending Approval', 'Submitted')`,
-          [branchId]
-        ),
-        pool.query(
-          `SELECT it.transfer_id, it.transfer_ref, it.status, p.name AS product_name
+          `SELECT
+             it.transfer_id,
+             it.transfer_ref,
+             it.status,
+             sb.name AS source_branch,
+             db.name AS destination_branch,
+             COALESCE(agg.total_quantity, it.quantity, 0)::int AS total_quantity,
+             COALESCE(agg.line_count, 0)::int AS line_count,
+             CASE
+               WHEN COALESCE(agg.line_count, 0) <= 1 THEN agg.first_product_name
+               ELSE agg.first_product_name || ' +' || (agg.line_count - 1)::text || ' more'
+             END AS product_name
            FROM inventory_transfers it
-           JOIN products p ON p.id = it.product_id
+           JOIN branches sb ON sb.id = it.source_branch_id
+           JOIN branches db ON db.id = it.destination_branch_id
+           LEFT JOIN LATERAL (
+             SELECT
+               COUNT(*)::int AS line_count,
+               COALESCE(SUM(l.quantity), 0)::int AS total_quantity,
+               (ARRAY_AGG(p.name ORDER BY p.name))[1] AS first_product_name
+             FROM inventory_transfer_lines l
+             JOIN products p ON p.id = l.product_id
+             WHERE l.transfer_id = it.transfer_id
+           ) agg ON TRUE
            WHERE it.source_branch_id = $1 OR it.destination_branch_id = $1
-           ORDER BY it.created_at DESC LIMIT 5`,
+           ORDER BY it.created_at DESC
+           LIMIT 5`,
           [branchId]
         ),
         pool.query(
-          `SELECT r.restock_id, r.delivery_ref, r.quantity, r.received_date, p.name AS product_name
-           FROM restocks r
-           JOIN products p ON p.id = r.product_id
-           WHERE r.branch_id = $1
-           ORDER BY r.received_date DESC LIMIT 5`,
+          `SELECT
+             h.restock_id,
+             h.restock_ref,
+             h.delivery_ref,
+             s.supplier_name,
+             COALESCE(agg.total_quantity, 0)::int AS quantity,
+             h.received_date,
+             CASE
+               WHEN COALESCE(agg.line_count, 0) <= 1 THEN agg.first_product_name
+               ELSE agg.first_product_name || ' +' || (agg.line_count - 1)::text || ' more'
+             END AS product_name
+           FROM restock_headers h
+           JOIN suppliers s ON s.suppliers_id = h.supplier_id
+           LEFT JOIN LATERAL (
+             SELECT
+               COUNT(*)::int AS line_count,
+               COALESCE(SUM(l.quantity), 0)::int AS total_quantity,
+               (ARRAY_AGG(p.name ORDER BY p.name))[1] AS first_product_name
+             FROM restock_lines l
+             JOIN products p ON p.id = l.product_id
+             WHERE l.restock_id = h.restock_id
+           ) agg ON TRUE
+           WHERE h.branch_id = $1
+           ORDER BY h.received_date DESC, h.restock_id DESC
+           LIMIT 5`,
           [branchId]
-        ),
-        pool.query(
-          `SELECT p.name, COUNT(*)::int AS movements
-           FROM stock_movements sm
-           JOIN products p ON p.id = sm.product_id
-           WHERE sm.branch_id = $1 AND sm.movement_date >= $2::date - 30
-           GROUP BY p.name ORDER BY movements DESC LIMIT 5`,
-          [branchId, today]
         ),
       ]);
 
-    const healthMap = { sufficient: 0, low: 0, critical: 0, outOfStock: 0 };
-    for (const row of health.rows) {
-      const s = String(row.stock_status || '');
-      if (s === 'Sufficient') healthMap.sufficient = row.count;
-      else if (s === 'Low Stock') healthMap.low = row.count;
-      else if (s === 'Critical Stock') healthMap.critical = row.count;
-      else if (s === 'Out of Stock') healthMap.outOfStock = row.count;
-    }
-
-    const alerts = await pool.query(
-      `SELECT p.id AS product_id, p.name AS product_name, p.sku, bi.available_stock, bi.stock_status, b.name AS branch_name
-       FROM branch_inventory bi
-       JOIN products p ON p.id = bi.product_id
-       JOIN branches b ON b.id = bi.branch_id
-       WHERE bi.branch_id = $1 AND bi.stock_status IN ('Critical Stock', 'Out of Stock', 'Low Stock')
-       ORDER BY bi.available_stock ASC LIMIT 10`,
-      [branchId]
-    );
-
+    const counts = transferCounts.rows[0] || {};
     return res.status(200).json({
       success: true,
       data: {
         summary: {
-          totalProducts: products.rows[0]?.total || 0,
-          lowStockAlerts: products.rows[0]?.low_alerts || 0,
-          pendingRestocks: 0,
-          movementsToday: movementsToday.rows[0]?.count || 0,
-          pendingTransfers: pendingTransfers.rows[0]?.count || 0,
+          readyToShip: counts.ready_to_ship || 0,
+          awaitingApproval: counts.awaiting_approval || 0,
+          incoming: counts.incoming || 0,
+          needsRestock: needsRestock.rows[0]?.count || 0,
         },
-        inventoryHealth: healthMap,
-        criticalProducts: alerts.rows,
+        lowStockSignal: lowStockSignal.rows,
         recentTransfers: recentTransfers.rows,
         recentRestocks: recentRestocks.rows,
-        topMovingProducts: topMoving.rows,
-        quickProductId: alerts.rows[0]?.product_id || null,
       },
     });
   } catch (err) {
@@ -1041,95 +1478,172 @@ router.get('/restocks/:id', requireAuth, async (req, res) => {
     const params = [restockId];
     let branchSql = '';
     if (!isUnscoped(user)) {
-      branchSql = ' AND r.branch_id = $2';
+      branchSql = ' AND h.branch_id = $2';
       params.push(user.branchId);
     }
     const result = await pool.query(
-      `SELECT r.restock_id, r.delivery_ref, r.quantity, r.received_date, r.product_id, r.branch_id,
-              p.name AS product_name, p.sku, b.name AS branch_name, s.supplier_name, s.suppliers_id
-       FROM restocks r
-       JOIN products p ON p.id = r.product_id
-       JOIN branches b ON b.id = r.branch_id
-       JOIN suppliers s ON s.suppliers_id = r.supplier_id
-       WHERE r.restock_id = $1${branchSql}`,
+      `SELECT h.restock_id, h.restock_ref, h.delivery_ref, h.received_date, h.notes, h.created_at,
+              h.branch_id, h.supplier_id, h.recorded_by,
+              b.name AS branch_name, s.supplier_name, s.suppliers_id,
+              rec.full_name AS recorded_by_name
+       FROM restock_headers h
+       JOIN branches b ON b.id = h.branch_id
+       JOIN suppliers s ON s.suppliers_id = h.supplier_id
+       LEFT JOIN users rec ON rec.id = h.recorded_by
+       WHERE h.restock_id = $1${branchSql}`,
       params
     );
     if (!result.rows.length) {
       return res.status(404).json({ success: false, message: 'Restock not found.' });
     }
-    return res.status(200).json({ success: true, data: result.rows[0] });
+    const lines = await loadRestockLines(pool, restockId);
+    const summary = summarizeLines(lines);
+    return res.status(200).json({
+      success: true,
+      data: {
+        ...result.rows[0],
+        ...summary,
+        lines,
+        product_id: lines[0]?.product_id || null,
+      },
+    });
   } catch (err) {
     console.error('[Inventory] GET /restocks/:id error:', err.message);
     return res.status(500).json({ success: false, message: 'Failed to fetch restock.' });
   }
 });
 
-// POST /api/inventory/restocks
+// POST /api/inventory/restocks — multi-line goods receipt (legacy single SKU still accepted)
 router.post('/restocks', requireAuth, requireRole(INVENTORY_WRITER_ROLES), async (req, res) => {
   const pool = req.app.locals.pool;
   const user = req.currentUser;
   const branchId = user.branchId;
-  const productId = Number(req.body.product_id);
   const supplierId = Number(req.body.supplier_id);
-  const quantity = Number(req.body.quantity);
-  const deliveryRef = String(req.body.delivery_ref || '').trim();
   const receivedDate = req.body.received_date || manilaToday();
+  const notes = String(req.body.notes || '').trim();
+  // Optional supplier paper number only — system always assigns DR-YYYY-####.
+  const supplierPaper = String(
+    req.body.supplier_delivery_note
+    ?? req.body.supplier_paper_ref
+    ?? ''
+  ).trim();
+  const lines = parseDocumentLines(req.body);
 
   if (branchId == null) {
     return res.status(403).json({ success: false, message: 'No branch assigned.' });
   }
-  if (!Number.isFinite(productId) || !Number.isFinite(supplierId) || !Number.isFinite(quantity) || quantity <= 0) {
-    return res.status(400).json({ success: false, message: 'Product, supplier, and positive quantity are required.' });
+  if (!Number.isFinite(supplierId)) {
+    return res.status(400).json({ success: false, message: 'Supplier is required.' });
   }
-  if (!deliveryRef) {
-    return res.status(400).json({ success: false, message: 'Delivery reference is required.' });
+  if (!lines.length) {
+    return res.status(400).json({ success: false, message: 'Add at least one product line.' });
+  }
+  if (!receivedDate) {
+    return res.status(400).json({ success: false, message: 'Date received is required.' });
   }
 
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
-    const product = await client.query(
-      `SELECT id, reorder_point FROM products WHERE id = $1`,
-      [productId]
+
+    const supplier = await client.query(
+      `SELECT suppliers_id FROM suppliers
+       WHERE suppliers_id = $1 AND COALESCE(status, 'Active') = 'Active'`,
+      [supplierId]
     );
-    if (!product.rows.length) {
+    if (!supplier.rows.length) {
       await client.query('ROLLBACK');
-      return res.status(404).json({ success: false, message: 'Product not found.' });
+      return res.status(400).json({ success: false, message: 'Supplier not found or inactive.' });
     }
 
-    const restock = await client.query(
-      `INSERT INTO restocks (product_id, branch_id, delivery_ref, supplier_id, quantity, received_date)
-       VALUES ($1, $2, $3, $4, $5, $6::date)
-       RETURNING restock_id, delivery_ref`,
-      [productId, branchId, deliveryRef, supplierId, quantity, receivedDate]
+    for (const line of lines) {
+      if (!Number.isFinite(line.quantity) || line.quantity <= 0) {
+        await client.query('ROLLBACK');
+        return res.status(400).json({ success: false, message: 'Each line quantity must be a positive number.' });
+      }
+      const product = await client.query(
+        `SELECT id, reorder_point FROM products WHERE id = $1 AND COALESCE(status, 'Active') = 'Active'`,
+        [line.product_id]
+      );
+      if (!product.rows.length) {
+        await client.query('ROLLBACK');
+        return res.status(404).json({ success: false, message: `Product ${line.product_id} not found or inactive.` });
+      }
+      line.reorder_point = product.rows[0].reorder_point;
+    }
+
+    const restockRef = await nextRestockRef(client);
+    const deliveryRef = await nextDeliveryRef(client);
+    const combinedNotes = supplierPaper
+      ? (notes ? `Supplier delivery: ${supplierPaper}\n${notes}` : `Supplier delivery: ${supplierPaper}`)
+      : (notes || null);
+
+    const header = await client.query(
+      `INSERT INTO restock_headers (
+         restock_ref, branch_id, supplier_id, delivery_ref, received_date, recorded_by, notes
+       ) VALUES ($1, $2, $3, $4, $5::date, $6, $7)
+       RETURNING restock_id, restock_ref, delivery_ref`,
+      [restockRef, branchId, supplierId, deliveryRef, receivedDate, user.id, combinedNotes]
     );
+    const restockId = header.rows[0].restock_id;
+    const snapshots = [];
 
-    const stockSnapshot = await upsertBranchInventoryStock(client, {
-      branchId,
-      productId,
-      delta: quantity,
-      reorderLevel: product.rows[0].reorder_point,
-    });
-
-    const movRef = `MOV-${deliveryRef}`;
-    await insertStockMovement(client, {
-      performedBy: user.id,
-      productId,
-      branchId,
-      quantity,
-      type: 'Restock',
-      movementRef: movRef,
-      movementDate: receivedDate,
-    });
+    for (const line of lines) {
+      await client.query(
+        `INSERT INTO restock_lines (restock_id, product_id, quantity) VALUES ($1, $2, $3)`,
+        [restockId, line.product_id, line.quantity]
+      );
+      // Keep legacy table in sync for older reports/FKs.
+      await client.query(
+        `INSERT INTO restocks (product_id, branch_id, delivery_ref, supplier_id, quantity, received_date)
+         VALUES ($1, $2, $3, $4, $5, $6::date)`,
+        [line.product_id, branchId, deliveryRef, supplierId, line.quantity, receivedDate]
+      );
+      const stockSnapshot = await upsertBranchInventoryStock(client, {
+        branchId,
+        productId: line.product_id,
+        delta: line.quantity,
+        reorderLevel: line.reorder_point,
+      });
+      snapshots.push(stockSnapshot);
+      await insertStockMovement(client, {
+        performedBy: user.id,
+        productId: line.product_id,
+        branchId,
+        quantity: line.quantity,
+        type: 'Restock',
+        movementRef: movementRefForRestock(restockRef, line.product_id),
+        movementDate: receivedDate,
+      });
+    }
 
     await client.query('COMMIT');
-    await publishStockAlerts(pool, [stockSnapshot]);
-    await logWarehouseAudit(pool, user.id, 'Restock recorded', `${deliveryRef} +${quantity} units`, req.ip);
+    await publishStockAlerts(pool, snapshots);
+    const loadedLines = await loadRestockLines(pool, restockId);
+    const summary = summarizeLines(loadedLines);
+    await notifyRestockRecorded(pool, {
+      userId: user.id,
+      restockRef,
+      deliveryRef,
+      lineCount: summary.line_count,
+      totalQuantity: summary.total_quantity,
+    });
+    await logWarehouseAudit(
+      pool,
+      user.id,
+      'Restock recorded',
+      `${restockRef} / ${deliveryRef}: ${summary.line_count} product(s), +${summary.total_quantity} units`,
+      req.ip
+    );
 
     return res.status(201).json({
       success: true,
       message: 'Restock recorded and inventory updated.',
-      data: restock.rows[0],
+      data: {
+        ...header.rows[0],
+        ...summary,
+        lines: loadedLines,
+      },
     });
   } catch (err) {
     await client.query('ROLLBACK');
@@ -1140,70 +1654,277 @@ router.post('/restocks', requireAuth, requireRole(INVENTORY_WRITER_ROLES), async
   }
 });
 
-// POST /api/inventory/stock-counts
+function parseStockCountLines(body) {
+  const raw = Array.isArray(body?.lines) ? body.lines : null;
+  if (raw?.length) {
+    const map = new Map();
+    for (const row of raw) {
+      const productId = Number(row.product_id ?? row.productId);
+      const physical = Number(row.physical_count ?? row.physical_quantity ?? row.quantity);
+      const expectedSystem = row.expected_system_quantity != null
+        ? Number(row.expected_system_quantity)
+        : (row.system_quantity != null ? Number(row.system_quantity) : null);
+      const lineNotes = String(row.notes || '').trim();
+      if (!Number.isFinite(productId) || productId <= 0) continue;
+      if (!Number.isFinite(physical) || physical < 0) continue;
+      map.set(productId, {
+        product_id: productId,
+        physical_quantity: physical,
+        expected_system_quantity: Number.isFinite(expectedSystem) ? expectedSystem : null,
+        notes: lineNotes,
+      });
+    }
+    return [...map.values()];
+  }
+  // Legacy single-product body
+  const productId = Number(body?.product_id);
+  const physical = Number(body?.physical_count);
+  if (Number.isFinite(productId) && productId > 0 && Number.isFinite(physical) && physical >= 0) {
+    return [{
+      product_id: productId,
+      physical_quantity: physical,
+      expected_system_quantity: body.expected_system_quantity != null
+        ? Number(body.expected_system_quantity)
+        : null,
+      notes: String(body.notes || '').trim(),
+    }];
+  }
+  return [];
+}
+
+// GET /api/inventory/stock-counts
+router.get('/stock-counts', requireAuth, async (req, res) => {
+  try {
+    const pool = req.app.locals.pool;
+    const user = req.currentUser;
+    const params = [];
+    let where = '';
+    if (!isUnscoped(user)) {
+      if (user.branchId == null) {
+        return res.status(403).json({ success: false, message: 'No branch assigned.' });
+      }
+      params.push(user.branchId);
+      where = 'WHERE h.branch_id = $1';
+    }
+    const result = await pool.query(
+      `SELECT
+         h.count_id,
+         h.count_ref,
+         h.branch_id,
+         b.name AS branch_name,
+         h.counted_by,
+         u.full_name AS counted_by_name,
+         h.notes,
+         h.status,
+         h.created_at,
+         COALESCE(agg.line_count, 0)::int AS line_count,
+         COALESCE(agg.discrepancy_count, 0)::int AS discrepancy_count
+       FROM stock_count_headers h
+       JOIN branches b ON b.id = h.branch_id
+       LEFT JOIN users u ON u.id = h.counted_by
+       LEFT JOIN LATERAL (
+         SELECT
+           COUNT(*)::int AS line_count,
+           COUNT(*) FILTER (WHERE l.variance <> 0)::int AS discrepancy_count
+         FROM stock_count_lines l
+         WHERE l.count_id = h.count_id
+       ) agg ON TRUE
+       ${where}
+       ORDER BY h.created_at DESC, h.count_id DESC
+       LIMIT 200`,
+      params
+    );
+    return res.status(200).json({ success: true, data: result.rows });
+  } catch (err) {
+    console.error('[Inventory] GET /stock-counts error:', err.message);
+    return res.status(500).json({ success: false, message: 'Failed to load stock counts.' });
+  }
+});
+
+// GET /api/inventory/stock-counts/:id
+router.get('/stock-counts/:id', requireAuth, async (req, res) => {
+  try {
+    const pool = req.app.locals.pool;
+    const user = req.currentUser;
+    const countId = Number(req.params.id);
+    const params = [countId];
+    let branchSql = '';
+    if (!isUnscoped(user)) {
+      branchSql = ' AND h.branch_id = $2';
+      params.push(user.branchId);
+    }
+    const header = await pool.query(
+      `SELECT
+         h.count_id, h.count_ref, h.branch_id, h.counted_by, h.notes, h.status, h.created_at,
+         b.name AS branch_name, u.full_name AS counted_by_name
+       FROM stock_count_headers h
+       JOIN branches b ON b.id = h.branch_id
+       LEFT JOIN users u ON u.id = h.counted_by
+       WHERE h.count_id = $1${branchSql}`,
+      params
+    );
+    if (!header.rows.length) {
+      return res.status(404).json({ success: false, message: 'Stock count not found.' });
+    }
+    const lines = await pool.query(
+      `SELECT
+         l.line_id, l.product_id, l.system_quantity, l.physical_quantity, l.variance, l.notes,
+         p.name AS product_name, p.sku
+       FROM stock_count_lines l
+       JOIN products p ON p.id = l.product_id
+       WHERE l.count_id = $1
+       ORDER BY p.name`,
+      [countId]
+    );
+    const discrepancyCount = lines.rows.filter((l) => Number(l.variance) !== 0).length;
+    return res.status(200).json({
+      success: true,
+      data: {
+        ...header.rows[0],
+        line_count: lines.rows.length,
+        discrepancy_count: discrepancyCount,
+        lines: lines.rows,
+      },
+    });
+  } catch (err) {
+    console.error('[Inventory] GET /stock-counts/:id error:', err.message);
+    return res.status(500).json({ success: false, message: 'Failed to load stock count.' });
+  }
+});
+
+// POST /api/inventory/stock-counts — multi-product session (legacy single SKU still accepted)
 router.post('/stock-counts', requireAuth, requireRole(INVENTORY_WRITER_ROLES), async (req, res) => {
   const pool = req.app.locals.pool;
   const user = req.currentUser;
   const branchId = user.branchId;
-  const productId = Number(req.body.product_id);
-  const physicalCount = Number(req.body.physical_count);
-  const notes = String(req.body.notes || '').trim();
+  const sessionNotes = String(req.body.notes || '').trim();
+  const lines = parseStockCountLines(req.body);
 
   if (branchId == null) {
     return res.status(403).json({ success: false, message: 'No branch assigned.' });
   }
-  if (!Number.isFinite(productId) || !Number.isFinite(physicalCount) || physicalCount < 0) {
-    return res.status(400).json({ success: false, message: 'Valid product and physical count are required.' });
+  if (!lines.length) {
+    return res.status(400).json({ success: false, message: 'Add at least one product to count.' });
   }
 
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
-    const row = await client.query(
-      `SELECT available_stock, reorder_level FROM branch_inventory WHERE branch_id = $1 AND product_id = $2`,
-      [branchId, productId]
-    );
-    const systemQty = row.rows[0] ? Number(row.rows[0].available_stock) : 0;
-    const variance = physicalCount - systemQty;
-    if (variance !== 0 && !notes) {
-      await client.query('ROLLBACK');
-      return res.status(400).json({ success: false, message: 'Notes required when variance exists.' });
+
+    const prepared = [];
+    for (const line of lines) {
+      const row = await client.query(
+        `SELECT available_stock, reorder_level
+         FROM branch_inventory
+         WHERE branch_id = $1 AND product_id = $2
+         FOR UPDATE`,
+        [branchId, line.product_id]
+      );
+      const liveSystem = row.rows[0] ? Number(row.rows[0].available_stock) : 0;
+      if (
+        line.expected_system_quantity != null
+        && Number(line.expected_system_quantity) !== liveSystem
+      ) {
+        await client.query('ROLLBACK');
+        return res.status(409).json({
+          success: false,
+          message: `Stock for product ${line.product_id} changed during counting (was ${line.expected_system_quantity}, now ${liveSystem}). Refresh quantities and try again.`,
+          data: {
+            product_id: line.product_id,
+            expected_system_quantity: line.expected_system_quantity,
+            live_system_quantity: liveSystem,
+          },
+        });
+      }
+      const variance = line.physical_quantity - liveSystem;
+      if (variance !== 0 && !line.notes && !sessionNotes) {
+        await client.query('ROLLBACK');
+        return res.status(400).json({
+          success: false,
+          message: 'Notes are required when any counted product has a variance.',
+        });
+      }
+      prepared.push({
+        ...line,
+        system_quantity: liveSystem,
+        variance,
+        reorder_level: row.rows[0]?.reorder_level,
+        line_notes: line.notes || sessionNotes || null,
+      });
     }
 
-    let stockSnapshot = null;
-    if (variance !== 0) {
-      stockSnapshot = await upsertBranchInventoryStock(client, {
-        branchId,
-        productId,
-        delta: variance,
-        reorderLevel: row.rows[0]?.reorder_level,
-      });
-      const ref = `CNT-${Date.now()}`;
-      await insertStockMovement(client, {
-        performedBy: user.id,
-        productId,
-        branchId,
-        quantity: variance,
-        type: 'Stock Count Adjustment',
-        movementRef: ref,
-        movementDate: manilaToday(),
-      });
+    const countRef = await nextStockCountRef(client);
+    const header = await client.query(
+      `INSERT INTO stock_count_headers (count_ref, branch_id, counted_by, notes, status)
+       VALUES ($1, $2, $3, $4, 'Completed')
+       RETURNING *`,
+      [countRef, branchId, user.id, sessionNotes || null]
+    );
+    const countId = header.rows[0].count_id;
+    const snapshots = [];
+
+    for (const line of prepared) {
+      await client.query(
+        `INSERT INTO stock_count_lines (
+           count_id, product_id, system_quantity, physical_quantity, variance, notes
+         ) VALUES ($1, $2, $3, $4, $5, $6)`,
+        [countId, line.product_id, line.system_quantity, line.physical_quantity, line.variance, line.line_notes]
+      );
+
+      if (line.variance !== 0) {
+        const snap = await upsertBranchInventoryStock(client, {
+          branchId,
+          productId: line.product_id,
+          delta: line.variance,
+          reorderLevel: line.reorder_level,
+        });
+        snapshots.push(snap);
+        await insertStockMovement(client, {
+          performedBy: user.id,
+          productId: line.product_id,
+          branchId,
+          quantity: line.variance,
+          type: 'Stock Count Adjustment',
+          movementRef: movementRefForStockCount(countRef, line.product_id),
+          movementDate: manilaToday(),
+        });
+      }
     }
 
     await client.query('COMMIT');
-    if (stockSnapshot) await publishStockAlerts(pool, [stockSnapshot]);
+    if (snapshots.length) await publishStockAlerts(pool, snapshots);
+
+    const discrepancyCount = prepared.filter((l) => l.variance !== 0).length;
     await logWarehouseAudit(
       pool,
       user.id,
       'Stock count',
-      `Product ${productId}: system ${systemQty}, physical ${physicalCount}${notes ? ` — ${notes}` : ''}`,
+      `${countRef}: ${prepared.length} product(s), ${discrepancyCount} discrepancy(ies)`,
       req.ip
+    );
+
+    const detailLines = await pool.query(
+      `SELECT
+         l.line_id, l.product_id, l.system_quantity, l.physical_quantity, l.variance, l.notes,
+         p.name AS product_name, p.sku
+       FROM stock_count_lines l
+       JOIN products p ON p.id = l.product_id
+       WHERE l.count_id = $1
+       ORDER BY p.name`,
+      [countId]
     );
 
     return res.status(201).json({
       success: true,
-      message: variance === 0 ? 'Stock count recorded (no adjustment).' : 'Stock count adjustment applied.',
-      data: { systemQty, physicalCount, variance },
+      message: discrepancyCount
+        ? `Stock count ${countRef} saved. ${discrepancyCount} inventory adjustment(s) applied.`
+        : `Stock count ${countRef} saved. No inventory adjustments needed.`,
+      data: {
+        ...header.rows[0],
+        line_count: prepared.length,
+        discrepancy_count: discrepancyCount,
+        lines: detailLines.rows,
+      },
     });
   } catch (err) {
     await client.query('ROLLBACK');
@@ -1214,71 +1935,105 @@ router.post('/stock-counts', requireAuth, requireRole(INVENTORY_WRITER_ROLES), a
   }
 });
 
-// POST /api/inventory/transfers
+// POST /api/inventory/transfers — multi-line document (also accepts legacy single SKU)
 router.post('/transfers', requireAuth, requireRole(INVENTORY_WRITER_ROLES), async (req, res) => {
   const pool = req.app.locals.pool;
   const user = req.currentUser;
   const branchId = user.branchId;
-  const productId = Number(req.body.product_id);
   const destinationBranchId = Number(req.body.destination_branch_id);
-  const quantity = Number(req.body.quantity);
   const notes = String(req.body.notes || '').trim();
+  const lines = parseDocumentLines(req.body);
 
   if (branchId == null) {
     return res.status(403).json({ success: false, message: 'No branch assigned.' });
   }
-  if (!Number.isFinite(productId) || !Number.isFinite(destinationBranchId) || destinationBranchId === branchId) {
-    return res.status(400).json({ success: false, message: 'Valid product and destination branch are required.' });
+  if (!Number.isFinite(destinationBranchId) || destinationBranchId === Number(branchId)) {
+    return res.status(400).json({ success: false, message: 'Valid destination branch is required.' });
   }
-  if (!Number.isFinite(quantity) || quantity <= 0) {
-    return res.status(400).json({ success: false, message: 'Quantity must be positive.' });
-  }
-
-  const stock = await pool.query(
-    `SELECT available_stock FROM branch_inventory WHERE branch_id = $1 AND product_id = $2`,
-    [branchId, productId]
-  );
-  const available = stock.rows[0] ? Number(stock.rows[0].available_stock) : 0;
-  if (quantity > available) {
-    return res.status(400).json({
-      success: false,
-      message: `Cannot transfer more than available stock (${available} units).`,
-    });
+  if (!lines.length) {
+    return res.status(400).json({ success: false, message: 'Add at least one product line.' });
   }
 
-  const transferRef = await nextTransferRef(pool);
-  const result = await pool.query(
-    `INSERT INTO inventory_transfers (
-       transfer_ref, product_id, quantity, source_branch_id, destination_branch_id,
-       status, submitted_by, approval_info, submitted_date
-     ) VALUES ($1, $2, $3, $4, $5, 'Pending Approval', $6, $7, $8::date)
-     RETURNING transfer_id, transfer_ref, status`,
-    [transferRef, productId, quantity, branchId, destinationBranchId, user.id, notes || null, manilaToday()]
-  );
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
 
-  const [productMeta, submitterMeta] = await Promise.all([
-    pool.query(`SELECT name FROM products WHERE id = $1`, [productId]),
-    pool.query(
+    for (const line of lines) {
+      const available = await getAvailableToTransfer(client, branchId, line.product_id);
+      if (line.quantity > available) {
+        const product = await client.query(`SELECT name FROM products WHERE id = $1`, [line.product_id]);
+        const name = product.rows[0]?.name || `Product ${line.product_id}`;
+        await client.query('ROLLBACK');
+        return res.status(400).json({
+          success: false,
+          message: `Cannot transfer ${line.quantity} of ${name}. Available to transfer: ${available}.`,
+        });
+      }
+    }
+
+    const transferRef = await nextTransferRef(client);
+    const first = lines[0];
+    const totalQty = lines.reduce((sum, line) => sum + line.quantity, 0);
+    const header = await client.query(
+      `INSERT INTO inventory_transfers (
+         transfer_ref, product_id, quantity, source_branch_id, destination_branch_id,
+         status, submitted_by, notes, submitted_date
+       ) VALUES ($1, $2, $3, $4, $5, 'Pending Approval', $6, $7, $8::date)
+       RETURNING transfer_id, transfer_ref, status`,
+      [transferRef, first.product_id, totalQty, branchId, destinationBranchId, user.id, notes || null, manilaToday()]
+    );
+    const transferId = header.rows[0].transfer_id;
+
+    for (const line of lines) {
+      await client.query(
+        `INSERT INTO inventory_transfer_lines (transfer_id, product_id, quantity)
+         VALUES ($1, $2, $3)`,
+        [transferId, line.product_id, line.quantity]
+      );
+    }
+
+    await client.query('COMMIT');
+
+    const loadedLines = await loadTransferLines(pool, transferId);
+    const summary = summarizeLines(loadedLines);
+    const submitterMeta = await pool.query(
       `SELECT COALESCE(NULLIF(TRIM(full_name), ''), email) AS display_name FROM users WHERE id = $1`,
       [user.id]
-    ),
-  ]);
+    );
 
-  await notifyTransferSubmitted(pool, {
-    sourceBranchId: branchId,
-    transferRef,
-    productName: productMeta.rows[0]?.name || 'Product',
-    quantity,
-    submitterName: submitterMeta.rows[0]?.display_name || 'Warehouse staff',
-  });
+    await notifyTransferSubmitted(pool, {
+      sourceBranchId: branchId,
+      transferRef,
+      productName: summary.product_name,
+      quantity: summary.total_quantity,
+      lineCount: summary.line_count,
+      submitterName: submitterMeta.rows[0]?.display_name || 'Warehouse staff',
+    });
 
-  await logWarehouseAudit(pool, user.id, 'Transfer submitted', `${transferRef} qty ${quantity}`, req.ip);
+    await logWarehouseAudit(
+      pool,
+      user.id,
+      'Transfer submitted',
+      `${transferRef} ${summary.line_count} product(s), ${summary.total_quantity} units`,
+      req.ip
+    );
 
-  return res.status(201).json({
-    success: true,
-    message: 'Transfer submitted for branch manager approval.',
-    data: result.rows[0],
-  });
+    return res.status(201).json({
+      success: true,
+      message: 'Transfer submitted for branch manager approval.',
+      data: {
+        ...header.rows[0],
+        ...summary,
+        lines: loadedLines,
+      },
+    });
+  } catch (err) {
+    await client.query('ROLLBACK');
+    console.error('[Inventory] POST /transfers error:', err.message);
+    return res.status(500).json({ success: false, message: 'Failed to create transfer.' });
+  } finally {
+    client.release();
+  }
 });
 
 // GET /api/inventory/audit-logs

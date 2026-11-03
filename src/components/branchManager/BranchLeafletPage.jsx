@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import LeafletMap from '../common/LeafletMap';
 import { Pagination } from '../shared/Pagination';
 import { usePagination } from '../../hooks/usePagination';
@@ -25,6 +26,8 @@ export function BranchLeafletPage({
   opsBase,
   branchName,
 }) {
+  const [searchParams, setSearchParams] = useSearchParams();
+  const staffFromQuery = searchParams.get('staff') || 'all';
   const currentUser = getCurrentUser();
   const isOrgScope = ['operating_manager', 'super_admin'].includes(currentUser?.role?.slug);
   const scopedBranchLabel = branchName
@@ -32,13 +35,17 @@ export function BranchLeafletPage({
     || (isOrgScope ? 'All Branches' : 'Your Branch');
   const [period, setPeriod] = useState('month');
   const [branchId, setBranchId] = useState('all');
-  const [staffId, setStaffId] = useState('all');
+  const [staffId, setStaffId] = useState(staffFromQuery);
   const [layers, setLayers] = useState(() => defaultLayersForPage(pageType));
   const [payload, setPayload] = useState(null);
   const [loading, setLoading] = useState(true);
   const [sawRoads, setSawRoads] = useState([]);
   const [sawRoadDate, setSawRoadDate] = useState('');
   const roadsEnabled = layers.includes('Collector Routes') || layers.includes('Route Efficiency Layer');
+
+  useEffect(() => {
+    setStaffId(staffFromQuery);
+  }, [staffFromQuery]);
 
   useEffect(() => {
     setLayers(defaultLayersForPage(pageType));
@@ -117,7 +124,7 @@ export function BranchLeafletPage({
       ? 'Profitability Zones'
       : pageType === 'leafletTerritory'
         ? 'Territory Map'
-        : 'Leaflet | OpenStreetMap';
+        : 'Field Map';
 
   const toggleLayer = (layer) => {
     setLayers((current) => (
@@ -135,7 +142,7 @@ export function BranchLeafletPage({
             <p className="text-[0.82rem] font-bold tracking-widest uppercase text-navy/60 m-0">{scopedBranchLabel}</p>
             <h3>{title}</h3>
             <p className="text-ink/70" style={{ margin: '4px 0 0', fontSize: '0.85rem' }}>
-              {view.accountCount} mapped accounts · {view.visitCount} scheduled visits
+              Find collectors and sales agents by route and scheduled stops · {view.accountCount} mapped accounts · {view.visitCount} scheduled visits
               {payload?.range ? ` · ${formatDisplayDate(payload.range.start)} to ${formatDisplayDate(payload.range.end)}` : ''}
               {!isOrgScope ? ' · your branch only' : ''}
               {sawRoads.length ? ` · ${sawRoads.length} SAW road${sawRoads.length === 1 ? '' : 's'} for ${formatDisplayDate(sawRoadDate)}` : ''}
@@ -156,7 +163,18 @@ export function BranchLeafletPage({
               <option key={option.value} value={option.value}>{option.label}</option>
             ))}
           </select>
-          <select className="filter-select" value={staffId} onChange={(e) => setStaffId(e.target.value)}>
+          <select
+            className="filter-select"
+            value={staffId}
+            onChange={(e) => {
+              const next = e.target.value;
+              setStaffId(next);
+              const nextParams = new URLSearchParams(searchParams);
+              if (next === 'all') nextParams.delete('staff');
+              else nextParams.set('staff', next);
+              setSearchParams(nextParams, { replace: true });
+            }}
+          >
             <option value="all">{isOrgScope ? 'All Staff' : 'All Branch Staff'}</option>
             {staff.collectors.map((collector) => (
               <option key={`collector-${collector.id}`} value={collector.id}>Collector · {collector.name}</option>

@@ -6,6 +6,87 @@ import {
   dispatchPortalActivationEmail,
 } from '../lib/customerPortal.js';
 import { isMailConfigured } from '../lib/mail.js';
+import { notifyCustomerProfileUpdated, writeCustomerAudit } from '../lib/customerNotifications.js';
+
+const GOVERNMENT_ID_TYPES = new Set([
+  'Philippine National ID',
+  "Driver's License",
+  'Passport',
+  'UMID',
+  'SSS ID',
+  'PhilHealth ID',
+  'Postal ID',
+  "Voter's ID",
+  'PRC ID',
+  'Other',
+]);
+
+const ID_VERIFICATION_STATUSES = new Set(['Unverified', 'Pending Review', 'Verified']);
+
+const CIVIL_STATUSES = new Set([
+  'Single',
+  'Married',
+  'Widowed',
+  'Separated',
+  'Annulled',
+  'Divorced',
+]);
+
+function parseOptionalCoord(value) {
+  if (value === undefined || value === null || value === '') return null;
+  const num = Number(value);
+  return Number.isFinite(num) ? num : null;
+}
+
+function normalizeIdPhoto(value) {
+  if (value === undefined) return undefined;
+  if (value === null || value === '') return null;
+  const photo = String(value).trim();
+  if (!photo.startsWith('data:image/')) {
+    throw new Error('id_photo must be a valid image upload.');
+  }
+  if (photo.length > 900_000) {
+    throw new Error('id_photo is too large. Use a smaller image.');
+  }
+  return photo;
+}
+
+function cleanPart(value) {
+  if (value === undefined || value === null) return null;
+  const text = String(value).trim();
+  return text || null;
+}
+
+function composeAddress(parts = {}) {
+  return [
+    parts.address_street,
+    parts.address_barangay,
+    parts.address_city,
+    parts.address_province,
+    parts.address_region,
+    parts.address_zip,
+  ]
+    .map((part) => cleanPart(part))
+    .filter(Boolean)
+    .join(', ');
+}
+
+function namesMatchCustomer(customerName, contactName) {
+  const normalize = (value) => String(value || '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, '');
+  const left = normalize(customerName);
+  const right = normalize(contactName);
+  return Boolean(left && right && left === right);
+}
+
+function phonesMatch(a, b) {
+  const digits = (value) => String(value || '').replace(/\D/g, '');
+  const left = digits(a);
+  const right = digits(b);
+  if (!left || !right) return false;
+  return left === right || left.endsWith(right) || right.endsWith(left);
+}
 
 function salesAgentDisplayName(user) {
   if (!user) return 'Sales Agent';
@@ -69,7 +150,15 @@ const CUSTOMER_SELECT_CORE = `
          c.first_name,
          c.middle_name,
          c.last_name,
+         c.mothers_maiden_name,
+         c.civil_status,
          c.address,
+         c.address_region,
+         c.address_province,
+         c.address_city,
+         c.address_barangay,
+         c.address_street,
+         c.address_zip,
          c.latitude,
          c.longitude,
          c.contact_phone,
@@ -77,6 +166,7 @@ const CUSTOMER_SELECT_CORE = `
          c.contact_person_mname,
          c.contact_person_lname,
          c.contact_person_phone,
+         c.contact_person_relationship,
          c.secondary_contact_fname,
          c.secondary_contact_lname,
          c.secondary_contact_phone,
@@ -85,6 +175,10 @@ const CUSTOMER_SELECT_CORE = `
          c.user_id,
          c.portal_email,
          c.portal_status,
+         c.id_type,
+         c.id_number,
+         c.id_photo,
+         c.id_verification_status,
          c.created_at,
          c.updated_at,
          b.name AS branch_name,
@@ -113,8 +207,14 @@ router.get('/', async (req, res) => {
         OR c.last_name ILIKE $${pIdx}
         OR c.customer_code ILIKE $${pIdx}
         OR c.address ILIKE $${pIdx}
+        OR c.address_region ILIKE $${pIdx}
+        OR c.address_province ILIKE $${pIdx}
+        OR c.address_city ILIKE $${pIdx}
+        OR c.address_barangay ILIKE $${pIdx}
+        OR c.address_street ILIKE $${pIdx}
         OR c.contact_phone ILIKE $${pIdx}
         OR t.territory_name ILIKE $${pIdx}
+        OR b.name ILIKE $${pIdx}
         OR CONCAT(COALESCE(c.first_name, ''), ' ', COALESCE(c.last_name, '')) ILIKE $${pIdx}
         OR CONCAT(COALESCE(c.contact_person_fname, ''), ' ', COALESCE(c.contact_person_lname, '')) ILIKE $${pIdx}
       )`);
@@ -128,6 +228,7 @@ router.get('/', async (req, res) => {
     const countResult = await pool.query(
       `SELECT COUNT(*) FROM customers c
        LEFT JOIN territories t ON t.territory_id = c.territory_id
+       LEFT JOIN branches b ON b.id = c.branch_id
        ${where}`,
       params
     );
@@ -292,6 +393,52 @@ router.get('/:id', async (req, res) => {
       console.error('[Customers] payments lookup failed:', err.message);
     }
 
+    let recentSales = [];
+    let unpaidInvoiceCount = 0;
+    let hasOverdueInvoice = false;
+    try {
+      const [salesResult, countResult, overdue] = await Promise.all([
+        pool.query(
+          `SELECT si.sales_invoices_id,
+                  si.invoice_number,
+                  si.total_amount,
+                  si.status,
+                  si.invoices_date::text AS invoices_date,
+                  si.due_date::text AS due_date,
+                  si.pay_type
+           FROM sales_invoices si
+           WHERE si.customer_id = $1
+             AND si.status IN ('Pending Review', 'Confirmed')
+           ORDER BY si.invoices_date DESC, si.sales_invoices_id DESC
+           LIMIT 10`,
+          [req.params.id]
+        ),
+        pool.query(
+          `SELECT COUNT(*)::int AS count
+           FROM sales_invoices si
+           WHERE si.customer_id = $1
+             AND si.status IN ('Pending Review', 'Confirmed')`,
+          [req.params.id]
+        ),
+        pool.query(
+          `SELECT EXISTS (
+             SELECT 1
+             FROM sales_invoices si
+             WHERE si.customer_id = $1
+               AND si.status IN ('Pending Review', 'Confirmed')
+               AND si.due_date IS NOT NULL
+               AND si.due_date < (CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Manila')::date
+           ) AS has_overdue`,
+          [req.params.id]
+        ),
+      ]);
+      recentSales = salesResult.rows;
+      unpaidInvoiceCount = countResult.rows[0]?.count || 0;
+      hasOverdueInvoice = Boolean(overdue.rows[0]?.has_overdue);
+    } catch (err) {
+      console.error('[Customers] recent sales lookup failed:', err.message);
+    }
+
     return res.status(200).json({
       success: true,
       data: {
@@ -299,6 +446,9 @@ router.get('/:id', async (req, res) => {
         activity: activityResult.rows[0] || null,
         creditInfo: creditResult.rows[0] || null,
         paymentHistory: paymentsResult.rows,
+        recentSales,
+        unpaidInvoiceCount,
+        hasOverdueInvoice,
       },
     });
   } catch (err) {
@@ -310,57 +460,110 @@ router.get('/:id', async (req, res) => {
 
 router.post('/', async (req, res) => {
   const {
-    first_name, middle_name, last_name, address, latitude, longitude,
+    first_name, middle_name, last_name, mothers_maiden_name, civil_status,
+    address, latitude, longitude,
+    address_region, address_province, address_city, address_barangay, address_street, address_zip,
     contact_phone, contact_person_fname, contact_person_mname, contact_person_lname,
-    contact_person_phone,
+    contact_person_phone, contact_person_relationship,
     secondary_contact_fname, secondary_contact_lname,
     secondary_contact_phone, secondary_contact_relationship,
     branch_id, territory_id, account_manager_id, status,
     create_portal_account, portal_email,
+    id_type, id_number, id_photo,
   } = req.body;
 
   const resolvedBranchId = branch_id
     ? Number(branch_id)
     : (req.currentUser?.branchId ?? null);
+  const isSalesAgent = req.currentUser?.roleSlug === 'sales_staff';
 
-  if (!first_name || !last_name || !address || !contact_phone
-    || !contact_person_fname || !contact_person_lname || !contact_person_phone) {
+  const addressParts = {
+    address_region: cleanPart(address_region),
+    address_province: cleanPart(address_province),
+    address_city: cleanPart(address_city),
+    address_barangay: cleanPart(address_barangay),
+    address_street: cleanPart(address_street),
+    address_zip: cleanPart(address_zip),
+  };
+  const composedAddress = composeAddress(addressParts) || cleanPart(address);
+
+  const maidenName = cleanPart(mothers_maiden_name);
+  const civilStatus = cleanPart(civil_status);
+
+  if (!first_name || !last_name || !composedAddress || !contact_phone
+    || !contact_person_fname || !contact_person_lname || !contact_person_phone
+    || !contact_person_relationship || !maidenName || !civilStatus) {
     return res.status(400).json({ success: false, message: 'All required customer fields must be provided.' });
+  }
+  if (!CIVIL_STATUSES.has(civilStatus)) {
+    return res.status(400).json({ success: false, message: 'A valid civil status is required.' });
+  }
+  if (!addressParts.address_province || !addressParts.address_city || !addressParts.address_barangay) {
+    return res.status(400).json({
+      success: false,
+      message: 'Province, city/municipality, and barangay are required.',
+    });
+  }
+
+  const customerFullName = [first_name, middle_name, last_name].filter(Boolean).join(' ');
+  const contactFullName = [contact_person_fname, contact_person_mname, contact_person_lname].filter(Boolean).join(' ');
+  if (namesMatchCustomer(customerFullName, contactFullName) || phonesMatch(contact_phone, contact_person_phone)) {
+    return res.status(400).json({
+      success: false,
+      message: 'Primary contact must be someone else to call when the customer is unreachable.',
+    });
+  }
+
+  const idType = typeof id_type === 'string' ? id_type.trim() : '';
+  const idNumber = typeof id_number === 'string' ? id_number.trim() : '';
+  if (!idType || !GOVERNMENT_ID_TYPES.has(idType)) {
+    return res.status(400).json({ success: false, message: 'A valid government ID type is required.' });
+  }
+  if (!idNumber) {
+    return res.status(400).json({ success: false, message: 'Government ID number is required.' });
   }
 
   if (!resolvedBranchId) {
     return res.status(400).json({ success: false, message: 'branch_id is required to create a customer.' });
   }
 
-  if (wantsPortalAccount(create_portal_account) && !isMailConfigured()) {
+  // SA canvassing registration does not create portal accounts from this screen.
+  const portalRequested = !isSalesAgent && wantsPortalAccount(create_portal_account);
+  if (portalRequested && !isMailConfigured()) {
     return res.status(503).json({ success: false, message: PORTAL_EMAIL_NOT_CONFIGURED });
+  }
+
+  let idPhotoValue = null;
+  try {
+    idPhotoValue = normalizeIdPhoto(id_photo) ?? null;
+  } catch (photoError) {
+    return res.status(400).json({ success: false, message: photoError.message });
   }
 
   const client = await req.app.locals.pool.connect();
 
   try {
-
-    const lat = latitude !== undefined && latitude !== null && latitude !== ''
-      ? Number(latitude)
-      : 7.1907;
-    const lng = longitude !== undefined && longitude !== null && longitude !== ''
-      ? Number(longitude)
-      : 125.4553;
+    const lat = parseOptionalCoord(latitude);
+    const lng = parseOptionalCoord(longitude);
 
     await client.query('BEGIN');
 
-    const assignedSalesAgentId = req.currentUser?.roleSlug === 'sales_staff'
+    const assignedSalesAgentId = isSalesAgent
       ? req.currentUser.id
       : null;
 
     const result = await client.query(
       `INSERT INTO customers
         (branch_id, account_manager_id, assigned_sales_agent_id, territory_id,
-         first_name, middle_name, last_name, address, latitude, longitude,
+         first_name, middle_name, last_name, mothers_maiden_name, civil_status, address,
+         address_region, address_province, address_city, address_barangay, address_street, address_zip,
+         latitude, longitude,
          contact_phone, contact_person_fname, contact_person_mname, contact_person_lname, contact_person_phone,
+         contact_person_relationship,
          secondary_contact_fname, secondary_contact_lname, secondary_contact_phone,
-         secondary_contact_relationship, status)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20)
+         secondary_contact_relationship, status,
+         id_type, id_number, id_photo, id_verification_status)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,'Unverified')
        RETURNING customer_id, created_at`,
       [
         resolvedBranchId,
@@ -370,7 +573,15 @@ router.post('/', async (req, res) => {
         first_name.trim(),
         middle_name ? String(middle_name).trim() : null,
         last_name.trim(),
-        address.trim(),
+        maidenName,
+        civilStatus,
+        composedAddress,
+        addressParts.address_region,
+        addressParts.address_province,
+        addressParts.address_city,
+        addressParts.address_barangay,
+        addressParts.address_street,
+        addressParts.address_zip,
         lat,
         lng,
         contact_phone.trim(),
@@ -378,11 +589,15 @@ router.post('/', async (req, res) => {
         contact_person_mname ? String(contact_person_mname).trim() : null,
         contact_person_lname.trim(),
         contact_person_phone.trim(),
+        String(contact_person_relationship).trim(),
         secondary_contact_fname?.trim() || null,
         secondary_contact_lname?.trim() || null,
         secondary_contact_phone?.trim() || null,
         secondary_contact_relationship?.trim() || null,
-        status || 'Active',
+        isSalesAgent ? 'Active' : (status || 'Active'),
+        idType,
+        idNumber,
+        idPhotoValue,
       ]
     );
 
@@ -402,7 +617,7 @@ router.post('/', async (req, res) => {
     );
 
     let portalMeta = null;
-    if (wantsPortalAccount(create_portal_account)) {
+    if (portalRequested) {
       portalMeta = await createPortalInvitation(client, {
         customerId,
         branchId: resolvedBranchId,
@@ -413,7 +628,7 @@ router.post('/', async (req, res) => {
       console.log(`[CustomerPortal] Invitation created for customer ${customerId}: ${portalMeta.activationUrl}`);
     } else {
       await client.query(
-        `UPDATE customers SET portal_status = 'none' WHERE customer_id = $1 AND portal_status IS NULL`,
+        `UPDATE customers SET portal_status = 'none' WHERE customer_id = $1 AND (portal_status IS NULL OR portal_status = 'none')`,
         [customerId]
       );
     }
@@ -549,58 +764,192 @@ router.post('/:id/portal/resend', async (req, res) => {
 router.put('/:id', async (req, res) => {
   try {
     const pool = req.app.locals.pool;
-    const existing = await pool.query(`SELECT branch_id FROM customers WHERE customer_id = $1`, [Number(req.params.id)]);
+    const customerId = Number(req.params.id);
+    const existing = await pool.query(
+      `SELECT * FROM customers WHERE customer_id = $1`,
+      [customerId]
+    );
     if (existing.rows.length === 0) {
       return res.status(404).json({ success: false, message: 'Customer not found.' });
     }
     if (!assertSameBranch(res, req.currentUser, existing.rows[0].branch_id)) return;
+    const before = existing.rows[0];
+    const isSalesAgent = req.currentUser?.roleSlug === 'sales_staff';
     const {
-      first_name, middle_name, last_name, address, latitude, longitude,
+      first_name, middle_name, last_name, mothers_maiden_name, civil_status,
+      address, latitude, longitude,
+      address_region, address_province, address_city, address_barangay, address_street, address_zip,
       contact_phone, contact_person_fname, contact_person_mname, contact_person_lname,
-      contact_person_phone,
+      contact_person_phone, contact_person_relationship,
       secondary_contact_fname, secondary_contact_lname,
       secondary_contact_phone, secondary_contact_relationship,
       branch_id, territory_id, account_manager_id, status,
+      id_type, id_number, id_photo, id_verification_status,
     } = req.body;
 
     const updates = [];
     const params = [];
     let pIdx = 1;
+    const changedFields = [];
 
-    const addField = (col, val) => { updates.push(`${col} = $${pIdx++}`); params.push(val); };
+    const addField = (col, val, label = col) => {
+      updates.push(`${col} = $${pIdx++}`);
+      params.push(val);
+      const previous = before[col];
+      const nextText = val === null || val === undefined ? '' : String(val);
+      const prevText = previous === null || previous === undefined ? '' : String(previous);
+      if (prevText !== nextText) changedFields.push(label);
+    };
 
-    if (first_name !== undefined)            addField('first_name', first_name);
-    if (middle_name !== undefined)           addField('middle_name', middle_name ? String(middle_name).trim() : null);
-    if (last_name !== undefined)             addField('last_name', last_name);
-    if (address !== undefined)               addField('address', address);
-    if (latitude !== undefined)              addField('latitude', latitude ? Number(latitude) : null);
-    if (longitude !== undefined)             addField('longitude', longitude ? Number(longitude) : null);
-    if (contact_phone !== undefined)         addField('contact_phone', contact_phone);
-    if (contact_person_fname !== undefined)  addField('contact_person_fname', contact_person_fname);
-    if (contact_person_mname !== undefined)  addField('contact_person_mname', contact_person_mname ? String(contact_person_mname).trim() : null);
-    if (contact_person_lname !== undefined)  addField('contact_person_lname', contact_person_lname);
-    if (contact_person_phone !== undefined)  addField('contact_person_phone', contact_person_phone);
-    if (secondary_contact_fname !== undefined) addField('secondary_contact_fname', secondary_contact_fname);
-    if (secondary_contact_lname !== undefined) addField('secondary_contact_lname', secondary_contact_lname);
-    if (secondary_contact_phone !== undefined) addField('secondary_contact_phone', secondary_contact_phone);
-    if (secondary_contact_relationship !== undefined) {
-      addField('secondary_contact_relationship', secondary_contact_relationship ? String(secondary_contact_relationship).trim() : null);
+    if (first_name !== undefined)            addField('first_name', first_name, 'first name');
+    if (middle_name !== undefined)           addField('middle_name', middle_name ? String(middle_name).trim() : null, 'middle name');
+    if (last_name !== undefined)             addField('last_name', last_name, 'last name');
+    if (mothers_maiden_name !== undefined) {
+      const maidenName = cleanPart(mothers_maiden_name);
+      if (!maidenName) {
+        return res.status(400).json({ success: false, message: "Mother's maiden name is required." });
+      }
+      addField('mothers_maiden_name', maidenName, "mother's maiden name");
     }
-    if (branch_id !== undefined)             addField('branch_id', branch_id ? Number(branch_id) : null);
-    if (territory_id !== undefined)          addField('territory_id', territory_id ? Number(territory_id) : null);
-    if (account_manager_id !== undefined)    addField('account_manager_id', account_manager_id ? Number(account_manager_id) : null);
-    if (status !== undefined)                addField('status', status);
+    if (civil_status !== undefined) {
+      const civilStatus = cleanPart(civil_status);
+      if (!civilStatus || !CIVIL_STATUSES.has(civilStatus)) {
+        return res.status(400).json({ success: false, message: 'A valid civil status is required.' });
+      }
+      addField('civil_status', civilStatus, 'civil status');
+    }
+    if (address_region !== undefined)        addField('address_region', cleanPart(address_region), 'region');
+    if (address_province !== undefined)      addField('address_province', cleanPart(address_province), 'province');
+    if (address_city !== undefined)          addField('address_city', cleanPart(address_city), 'city');
+    if (address_barangay !== undefined)      addField('address_barangay', cleanPart(address_barangay), 'barangay');
+    if (address_street !== undefined)        addField('address_street', cleanPart(address_street), 'street');
+    if (address_zip !== undefined)           addField('address_zip', cleanPart(address_zip), 'ZIP');
+
+    const nextAddressParts = {
+      address_region: address_region !== undefined ? cleanPart(address_region) : before.address_region,
+      address_province: address_province !== undefined ? cleanPart(address_province) : before.address_province,
+      address_city: address_city !== undefined ? cleanPart(address_city) : before.address_city,
+      address_barangay: address_barangay !== undefined ? cleanPart(address_barangay) : before.address_barangay,
+      address_street: address_street !== undefined ? cleanPart(address_street) : before.address_street,
+      address_zip: address_zip !== undefined ? cleanPart(address_zip) : before.address_zip,
+    };
+    const composedFromParts = composeAddress(nextAddressParts);
+    if (composedFromParts) {
+      addField('address', composedFromParts, 'address');
+    } else if (address !== undefined) {
+      addField('address', address, 'address');
+    }
+
+    if (latitude !== undefined)              addField('latitude', parseOptionalCoord(latitude), 'latitude');
+    if (longitude !== undefined)             addField('longitude', parseOptionalCoord(longitude), 'longitude');
+    if (contact_phone !== undefined)         addField('contact_phone', contact_phone, 'phone');
+    if (contact_person_fname !== undefined)  addField('contact_person_fname', contact_person_fname, 'primary contact');
+    if (contact_person_mname !== undefined)  addField('contact_person_mname', contact_person_mname ? String(contact_person_mname).trim() : null, 'primary contact');
+    if (contact_person_lname !== undefined)  addField('contact_person_lname', contact_person_lname, 'primary contact');
+    if (contact_person_phone !== undefined)  addField('contact_person_phone', contact_person_phone, 'primary contact phone');
+    if (contact_person_relationship !== undefined) {
+      addField('contact_person_relationship', contact_person_relationship ? String(contact_person_relationship).trim() : null, 'primary relationship');
+    }
+    if (secondary_contact_fname !== undefined) addField('secondary_contact_fname', secondary_contact_fname, 'secondary contact');
+    if (secondary_contact_lname !== undefined) addField('secondary_contact_lname', secondary_contact_lname, 'secondary contact');
+    if (secondary_contact_phone !== undefined) addField('secondary_contact_phone', secondary_contact_phone, 'secondary contact phone');
+    if (secondary_contact_relationship !== undefined) {
+      addField('secondary_contact_relationship', secondary_contact_relationship ? String(secondary_contact_relationship).trim() : null, 'secondary relationship');
+    }
+    if (!isSalesAgent && branch_id !== undefined) {
+      addField('branch_id', branch_id ? Number(branch_id) : null, 'branch');
+    }
+    if (!isSalesAgent && territory_id !== undefined) {
+      addField('territory_id', territory_id ? Number(territory_id) : null, 'territory');
+    }
+    if (!isSalesAgent && account_manager_id !== undefined) {
+      addField('account_manager_id', account_manager_id ? Number(account_manager_id) : null, 'account manager');
+    }
+    if (!isSalesAgent && status !== undefined) {
+      addField('status', status, 'account status');
+    }
+
+    const mergedFirst = first_name !== undefined ? first_name : before.first_name;
+    const mergedMiddle = middle_name !== undefined ? middle_name : before.middle_name;
+    const mergedLast = last_name !== undefined ? last_name : before.last_name;
+    const mergedPhone = contact_phone !== undefined ? contact_phone : before.contact_phone;
+    const mergedContactFirst = contact_person_fname !== undefined ? contact_person_fname : before.contact_person_fname;
+    const mergedContactMiddle = contact_person_mname !== undefined ? contact_person_mname : before.contact_person_mname;
+    const mergedContactLast = contact_person_lname !== undefined ? contact_person_lname : before.contact_person_lname;
+    const mergedContactPhone = contact_person_phone !== undefined ? contact_person_phone : before.contact_person_phone;
+    const customerFullName = [mergedFirst, mergedMiddle, mergedLast].filter(Boolean).join(' ');
+    const contactFullName = [mergedContactFirst, mergedContactMiddle, mergedContactLast].filter(Boolean).join(' ');
+    if (namesMatchCustomer(customerFullName, contactFullName) || phonesMatch(mergedPhone, mergedContactPhone)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Primary contact must be someone else to call when the customer is unreachable.',
+      });
+    }
+
+    if (id_type !== undefined) {
+      const nextType = id_type ? String(id_type).trim() : null;
+      if (nextType && !GOVERNMENT_ID_TYPES.has(nextType)) {
+        return res.status(400).json({ success: false, message: 'Invalid government ID type.' });
+      }
+      addField('id_type', nextType, 'ID type');
+    }
+    if (id_number !== undefined) {
+      addField('id_number', id_number ? String(id_number).trim() : null, 'ID number');
+    }
+    if (id_photo !== undefined) {
+      try {
+        addField('id_photo', normalizeIdPhoto(id_photo), 'ID photo');
+      } catch (photoError) {
+        return res.status(400).json({ success: false, message: photoError.message });
+      }
+    }
+    if (id_verification_status !== undefined) {
+      if (isSalesAgent) {
+        return res.status(403).json({
+          success: false,
+          message: 'Sales agents cannot change ID verification status.',
+        });
+      }
+      const nextStatus = String(id_verification_status || '').trim();
+      if (!ID_VERIFICATION_STATUSES.has(nextStatus)) {
+        return res.status(400).json({ success: false, message: 'Invalid ID verification status.' });
+      }
+      addField('id_verification_status', nextStatus, 'ID verification');
+    }
 
     if (!updates.length) return res.status(400).json({ success: false, message: 'No fields to update.' });
 
-    params.push(Number(req.params.id));
+    params.push(customerId);
     const result = await pool.query(
       `UPDATE customers SET ${updates.join(', ')}, updated_at = NOW() WHERE customer_id = $${pIdx} RETURNING *`,
       params
     );
 
     if (result.rows.length === 0) return res.status(404).json({ success: false, message: 'Customer not found.' });
-    return res.status(200).json({ success: true, message: 'Customer updated.', data: result.rows[0] });
+
+    const after = result.rows[0];
+    const actorName = salesAgentDisplayName(req.currentUser);
+    const uniqueChanges = [...new Set(changedFields)];
+    if (uniqueChanges.length) {
+      const code = after.customer_code || `C-${customerId}`;
+      await writeCustomerAudit(pool, {
+        userId: req.currentUser?.id,
+        userName: actorName,
+        action: 'Customer profile updated',
+        statusDetails: `${code}: ${uniqueChanges.join(', ')}`,
+        ipAddress: req.ip || req.headers['x-forwarded-for'] || '127.0.0.1',
+      });
+      await notifyCustomerProfileUpdated(pool, {
+        branchId: after.branch_id,
+        customerId,
+        customerCode: after.customer_code,
+        customerName: `${after.first_name || ''} ${after.last_name || ''}`.trim(),
+        actorName,
+        changedFields: uniqueChanges,
+      });
+    }
+
+    return res.status(200).json({ success: true, message: 'Customer updated.', data: after });
   } catch (err) {
     console.error('[Customers] PUT /:id error:', err.message);
     return res.status(500).json({ success: false, message: 'Failed to update customer.' });

@@ -20,14 +20,14 @@ const ERROR_TERMS = [
 const WARNING_TERMS = [
   'pending', 'processing', 'in progress', 'low stock', 'low', 'warning',
   'submitted', 'awaiting', 'scheduled', 'rescheduled', 'partial', 'unread',
-  'due', 'open', 'needs alignment', 'misaligned',
+  'due', 'open', 'needs alignment', 'misaligned', 'assigned',
 ];
 
 const SUCCESS_TERMS = [
   'active', 'available', 'completed', 'approved', 'success', 'successful',
   'sufficient', 'paid', 'delivered', 'resolved', 'synced', 'read', 'online',
   'posted', 'confirmed', 'accepted', 'clear', 'verified', 'current', 'healthy',
-  'received', 'aligned',
+  'received', 'aligned', 'done',
 ];
 
 const INFO_TERMS = ['shipped', 'informational', 'info'];
@@ -41,6 +41,8 @@ export function getStatusTone(status) {
   if (!normalized) return 'neutral';
 
   if (NEUTRAL_EXACT.has(normalized)) return 'neutral';
+  if (normalized === 'never stocked') return 'info';
+  if (normalized === 'out') return 'danger';
   if (normalized.includes('draft') || normalized.includes('archived') || normalized.includes('disabled')) {
     return 'neutral';
   }

@@ -42,7 +42,7 @@ export const operatingManagerRole = {
       items: [
         { label: 'Field Operations', to: '/operating-manager/operations/field-operations' },
         { label: 'Field Activity Reports', to: '/operating-manager/operations/field-activity-reports' },
-        { label: 'Credit Investigation Approvals', to: '/operating-manager/operations/ci-approvals' },
+        { label: 'Credit Reviews', to: '/operating-manager/operations/ci-approvals' },
         { label: 'Approval Center', to: '/operating-manager/operations/approval-center' },
       ],
     },
@@ -83,7 +83,7 @@ export const operatingManagerRole = {
     { label: 'Territories', to: '/operating-manager/territories' },
     { label: 'Field Operations', to: '/operating-manager/operations/field-operations' },
     { label: 'Field Activity Reports', to: '/operating-manager/operations/field-activity-reports' },
-    { label: 'Credit Investigation Approvals', to: '/operating-manager/operations/ci-approvals' },
+    { label: 'Credit Reviews', to: '/operating-manager/operations/ci-approvals' },
     { label: 'Approval Center', to: '/operating-manager/operations/approval-center' },
     { label: 'Branch Performance', to: '/operating-manager/branch-performance' },
     { label: 'Staff Performance', to: '/operating-manager/operations/staff-performance' },

@@ -16,10 +16,13 @@ function cleanText(value, max) {
 
 function fieldReportError(payload) {
   const visitId = Number(payload?.visit_id);
+  const assignmentId = Number(payload?.assignment_id);
   const activity = cleanText(payload?.activity_type, 50);
   const remarks = cleanText(payload?.remarks);
   const photo = typeof payload?.photo === 'string' ? payload.photo.trim() : '';
-  if (!Number.isFinite(visitId) || visitId <= 0) return 'visit_id is required.';
+  const hasVisit = Number.isFinite(visitId) && visitId > 0;
+  const hasAssignment = Number.isFinite(assignmentId) && assignmentId > 0;
+  if (!hasVisit && !hasAssignment) return 'assignment_id or visit_id is required.';
   if (!activity) return 'activity_type is required.';
   if (!remarks) return 'remarks are required.';
   if (!photo.startsWith('data:image/')) return 'photo must be a valid image upload.';
@@ -35,21 +38,49 @@ async function applyFieldReport(client, user, payload) {
   if (problem) throw new Error(problem);
 
   const visitId = Number(payload.visit_id);
-  const visit = await client.query(
-    `SELECT visit_id, status FROM field_visits WHERE visit_id = $1 AND user_id = $2`,
-    [visitId, user.id]
-  );
-  if (!visit.rows.length) throw new Error('Visit not found for this user.');
-  if (payload.visit_status && visit.rows[0].status !== payload.visit_status) {
-    throw new SyncConflict('This visit changed on the server after the report was saved on the device.');
+  const assignmentId = Number(payload.assignment_id);
+  const customerId = Number(payload.customer_id);
+  const hasVisit = Number.isFinite(visitId) && visitId > 0;
+  const hasAssignment = Number.isFinite(assignmentId) && assignmentId > 0;
+  const hasCustomer = Number.isFinite(customerId) && customerId > 0;
+
+  if (hasVisit) {
+    const visit = await client.query(
+      `SELECT visit_id, status FROM field_visits WHERE visit_id = $1 AND user_id = $2`,
+      [visitId, user.id]
+    );
+    if (!visit.rows.length) throw new Error('Visit not found for this user.');
+    if (payload.visit_status && visit.rows[0].status !== payload.visit_status) {
+      throw new SyncConflict('This visit changed on the server after the report was saved on the device.');
+    }
+  }
+
+  if (hasAssignment) {
+    const assignment = await client.query(
+      `SELECT assignment_id FROM sales_area_assignments
+       WHERE assignment_id = $1 AND sales_agent_id = $2`,
+      [assignmentId, user.id]
+    );
+    if (!assignment.rows.length) throw new Error('Area assignment not found for this user.');
+  }
+
+  if (hasCustomer) {
+    const customer = await client.query(
+      `SELECT customer_id FROM customers WHERE customer_id = $1 AND branch_id = $2`,
+      [customerId, user.branchId]
+    );
+    if (!customer.rows.length) throw new Error('Customer not found in your branch.');
   }
 
   const inserted = await client.query(
-    `INSERT INTO field_activity_reports (visit_id, user_id, activity_type, remarks, photo, sync_status)
-     VALUES ($1, $2, $3, $4, $5, 'Synced')
+    `INSERT INTO field_activity_reports
+       (visit_id, assignment_id, customer_id, user_id, activity_type, remarks, photo, sync_status)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, 'Synced')
      RETURNING report_id`,
     [
-      visitId,
+      hasVisit ? visitId : null,
+      hasAssignment ? assignmentId : null,
+      hasCustomer ? customerId : null,
       user.id,
       cleanText(payload.activity_type, 50),
       cleanText(payload.remarks),

@@ -5,6 +5,11 @@ import {
   CREDIT_INVESTIGATION_SELECT,
 } from '../lib/creditInvestigationQueries.js';
 import { notifyCreditInvestigationDecision } from '../lib/creditInvestigationNotifications.js';
+import {
+  applyCreditReviewDecision,
+  buildCustomerCreditEvidence,
+  mapCreditReviewApiRow,
+} from '../lib/creditReview.js';
 import { upsertBranchInventoryStock, insertStockMovement } from '../lib/branchInventoryStock.js';
 import { reverseCustomerSaleCharge } from '../lib/salesInvoiceWrite.js';
 import { publishStockAlerts, notifyInvoiceReviewDecision, clearOverdueDedup, notifyOverdueAccounts } from '../lib/operationalNotifications.js';
@@ -30,14 +35,18 @@ router.get('/credit-investigations', async (req, res) => {
   try {
     const pool = req.app.locals.pool;
     const user = req.currentUser;
-    const { status } = req.query;
+    const status = String(req.query.status || '').replace(/\+/g, ' ').trim();
     const scope = branchFilter(user, 'ci');
     const params = [...scope.params];
     let idx = params.length + 1;
     let statusSql = '';
     if (status && status !== 'All') {
-      statusSql = ` AND ci.status = $${idx++}`;
-      params.push(status);
+      if (status === 'Needs BM' || status === 'Pending' || status === 'needs_bm') {
+        statusSql = ` AND ci.status IN ('Pending', 'Revision Requested')`;
+      } else {
+        statusSql = ` AND ci.status = $${idx++}`;
+        params.push(status);
+      }
     }
 
     const result = await pool.query(
@@ -49,10 +58,13 @@ router.get('/credit-investigations', async (req, res) => {
       params
     );
 
-    return res.status(200).json({ success: true, data: result.rows });
+    return res.status(200).json({
+      success: true,
+      data: result.rows.map((row) => mapCreditReviewApiRow(row)),
+    });
   } catch (err) {
     console.error('[Approvals] GET /credit-investigations error:', err.message);
-    return res.status(500).json({ success: false, message: 'Failed to load credit investigations.' });
+    return res.status(500).json({ success: false, message: 'Failed to load credit reviews.' });
   }
 });
 
@@ -72,80 +84,75 @@ router.get('/credit-investigations/:id', async (req, res) => {
     );
 
     if (!result.rows.length) {
-      return res.status(404).json({ success: false, message: 'Credit investigation not found.' });
+      return res.status(404).json({ success: false, message: 'Credit review not found.' });
     }
-    return res.status(200).json({ success: true, data: result.rows[0] });
+
+    const row = result.rows[0];
+    let liveEvidence = null;
+    if (row.status === 'Pending' || row.status === 'Revision Requested') {
+      liveEvidence = await buildCustomerCreditEvidence(pool, row.customer_id);
+    }
+
+    return res.status(200).json({
+      success: true,
+      data: mapCreditReviewApiRow(row, { liveEvidence }),
+    });
   } catch (err) {
     console.error('[Approvals] GET /credit-investigations/:id error:', err.message);
-    return res.status(500).json({ success: false, message: 'Failed to load credit investigation.' });
+    return res.status(500).json({ success: false, message: 'Failed to load credit review.' });
   }
 });
 
 router.patch('/credit-investigations/:id', async (req, res) => {
+  const client = await req.app.locals.pool.connect();
   try {
-    const pool = req.app.locals.pool;
     const user = req.currentUser;
     const ciId = Number(req.params.id);
-    const { status, rejection_reason: rejectionReason } = req.body;
-    const allowed = new Set(['Approved', 'Rejected', 'Revision Requested']);
-    if (!allowed.has(status)) {
-      return res.status(400).json({ success: false, message: 'Invalid status.' });
-    }
-    if (status === 'Rejected' && !String(rejectionReason || '').trim()) {
-      return res.status(400).json({ success: false, message: 'Rejection reason is required.' });
-    }
+    const {
+      status,
+      rejection_reason: rejectionReason,
+      decision_remarks: decisionRemarks,
+      approved_credit_limit: approvedCreditLimit,
+    } = req.body;
 
-    const scope = branchFilter(user, 'ci', 5);
-    const params = [status, user.id, rejectionReason || null, ciId, ...scope.params];
+    await client.query('BEGIN');
+    const decided = await applyCreditReviewDecision(client, {
+      ciId,
+      branchId: isUnscoped(user) ? null : user.branchId,
+      reviewerId: user.id,
+      status,
+      approvedCreditLimit,
+      rejectionReason,
+      decisionRemarks: decisionRemarks || rejectionReason,
+    });
+    await client.query('COMMIT');
 
-    const before = await pool.query(
-      `SELECT ci.submitted_by, c.first_name || ' ' || c.last_name AS customer_name
-       FROM credit_investigations ci
-       JOIN customers c ON c.customer_id = ci.customer_id
-       WHERE ci.ci_id = $1`,
-      [ciId]
-    );
+    await notifyCreditInvestigationDecision(req.app.locals.pool, {
+      submitterId: decided.submittedBy,
+      ciId,
+      customerName: decided.customerName,
+      status,
+      rejectionReason: rejectionReason || null,
+    });
 
-    const result = await pool.query(
-      `UPDATE credit_investigations ci
-       SET status = $1,
-           approved_by = $2,
-           rejection_reason = COALESCE($3, rejection_reason),
-           updated_at = CURRENT_TIMESTAMP
-       WHERE ci.ci_id = $4 AND ${scope.sql}
-       RETURNING ci_id, status`,
-      params
-    );
+    const message = status === 'Approved'
+      ? `Credit review approved. Limit set to ₱${Number(decided.approvedLimit || 0).toLocaleString('en-PH', { minimumFractionDigits: 2 })}.`
+      : `Credit review ${String(status).toLowerCase()}.`;
 
-    if (!result.rows.length) {
-      return res.status(404).json({ success: false, message: 'Credit investigation not found.' });
-    }
-
-    const meta = before.rows[0];
-    if (meta) {
-      await notifyCreditInvestigationDecision(pool, {
-        submitterId: meta.submitted_by,
-        ciId,
-        customerName: meta.customer_name,
-        status,
-        rejectionReason: rejectionReason || null,
-      });
-    }
-
-    if (status === 'Approved') {
-      await pool.query(
-        `UPDATE customer_credit_info cci
-         SET approved_by = $1, approved_date = CURRENT_DATE, updated_at = CURRENT_TIMESTAMP
-         FROM credit_investigations ci
-         WHERE ci.ci_id = $2 AND cci.customer_id = ci.customer_id`,
-        [user.id, ciId]
-      );
-    }
-
-    return res.status(200).json({ success: true, message: `CI ${status.toLowerCase()}.`, data: result.rows[0] });
+    return res.status(200).json({
+      success: true,
+      message,
+      data: mapCreditReviewApiRow(decided.row),
+    });
   } catch (err) {
+    try { await client.query('ROLLBACK'); } catch { /* ignore */ }
+    if (err.status) {
+      return res.status(err.status).json({ success: false, message: err.message });
+    }
     console.error('[Approvals] PATCH /credit-investigations/:id error:', err.message);
-    return res.status(500).json({ success: false, message: 'Failed to update credit investigation.' });
+    return res.status(500).json({ success: false, message: 'Failed to update credit review.' });
+  } finally {
+    client.release();
   }
 });
 
