@@ -140,49 +140,20 @@ router.patch('/credit-investigations/:id', async (req, res) => {
       ? `Credit review approved. Limit set to ₱${Number(decided.approvedLimit || 0).toLocaleString('en-PH', { minimumFractionDigits: 2 })}.`
       : `Credit review ${String(status).toLowerCase()}.`;
 
-<<<<<<< HEAD
-    if (!result.rows.length) {
-      return res.status(404).json({ success: false, message: 'Credit investigation not found.' });
-    }
-
-    const meta = before.rows[0];
-    if (meta) {
-      await notifyCreditInvestigationDecision(pool, {
-        submitterId: meta.submitted_by,
-        ciId,
-        customerName: meta.customer_name,
-        status,
-        rejectionReason: rejectionReason || null,
-      });
-    }
-
-    if (status === 'Approved') {
-      await pool.query(
-        `UPDATE customer_credit_info cci
-         SET approved_by = $1, approved_date = CURRENT_DATE, updated_at = CURRENT_TIMESTAMP
-         FROM credit_investigations ci
-         WHERE ci.ci_id = $2 AND cci.customer_id = ci.customer_id`,
-        [user.id, ciId]
-      );
-    }
-
-    await writeAuditFromReq(pool, req, {
+    await writeAuditFromReq(req.app.locals.pool, req, {
       module: 'Credit Approvals',
       activity: `Credit ${status}`,
       action: `Credit ${status}`,
-      description: `${status} credit investigation #${ciId}${meta?.customer_name ? ` for ${meta.customer_name}` : ''}${status === 'Rejected' && rejectionReason ? `. Reason: ${rejectionReason}` : ''}.`,
+      description: `${status} credit investigation #${ciId}${decided.customerName ? ` for ${decided.customerName}` : ''}${status === 'Rejected' && rejectionReason ? `. Reason: ${rejectionReason}` : ''}.`,
       status: status === 'Rejected' ? AUDIT_STATUS.FAILED : AUDIT_STATUS.UPDATED,
       affectedRecord: `credit_investigation:${ciId}`,
     });
 
-    return res.status(200).json({ success: true, message: `CI ${status.toLowerCase()}.`, data: result.rows[0] });
-=======
     return res.status(200).json({
       success: true,
       message,
       data: mapCreditReviewApiRow(decided.row),
     });
->>>>>>> c35bff3831df8285b9be2ba8522d80fdaec138a6
   } catch (err) {
     try { await client.query('ROLLBACK'); } catch { /* ignore */ }
     if (err.status) {

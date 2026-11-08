@@ -681,7 +681,6 @@ const LABEL_ICON_KEY = {
   Restock: 'restock',
   'New Restock': 'restock',
   'New Transfer': 'transfer',
-  Inventory: 'inventory',
   Notifications: 'bell',
   Profile: 'profile',
   'Field Operations': 'route',

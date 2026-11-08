@@ -1,10 +1,6 @@
 import express from 'express';
-<<<<<<< HEAD
-import { allow, ROLE_SETS } from '../middleware/auth.js';
-import { AUDIT_STATUS, writeAuditFromReq } from '../lib/auditLog.js';
-=======
 import { allow, isUnscoped, ROLE_SETS } from '../middleware/auth.js';
->>>>>>> c35bff3831df8285b9be2ba8522d80fdaec138a6
+import { AUDIT_STATUS, writeAuditFromReq } from '../lib/auditLog.js';
 
 const router = express.Router();
 // Warehouse/BM: read-only. OM/super_admin: create, edit, archive.

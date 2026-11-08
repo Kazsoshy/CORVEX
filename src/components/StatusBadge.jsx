@@ -20,22 +20,14 @@ const ERROR_TERMS = [
 const WARNING_TERMS = [
   'pending', 'processing', 'in progress', 'low stock', 'low', 'medium', 'warning',
   'submitted', 'awaiting', 'scheduled', 'rescheduled', 'partial', 'unread',
-<<<<<<< HEAD
-  'due', 'open', 'needs alignment', 'misaligned', 'investigating', 'archived',
-=======
-  'due', 'open', 'needs alignment', 'misaligned', 'assigned',
->>>>>>> c35bff3831df8285b9be2ba8522d80fdaec138a6
+  'due', 'open', 'needs alignment', 'misaligned', 'investigating', 'archived', 'assigned',
 ];
 
 const SUCCESS_TERMS = [
   'active', 'available', 'completed', 'approved', 'success', 'successful',
   'sufficient', 'paid', 'delivered', 'resolved', 'synced', 'read', 'online',
   'posted', 'confirmed', 'accepted', 'clear', 'verified', 'current', 'healthy',
-<<<<<<< HEAD
-  'received', 'aligned', 'created', 'restored', 'unlocked', 'allowed',
-=======
-  'received', 'aligned', 'done',
->>>>>>> c35bff3831df8285b9be2ba8522d80fdaec138a6
+  'received', 'aligned', 'created', 'restored', 'unlocked', 'allowed', 'done',
 ];
 
 const INFO_TERMS = ['shipped', 'informational', 'info', 'updated', 'exported', 'imported', 'password'];
@@ -49,13 +41,9 @@ export function getStatusTone(status) {
   if (!normalized) return 'neutral';
 
   if (NEUTRAL_EXACT.has(normalized)) return 'neutral';
-<<<<<<< HEAD
-  if (normalized.includes('draft') || normalized.includes('disabled')) {
-=======
   if (normalized === 'never stocked') return 'info';
   if (normalized === 'out') return 'danger';
   if (normalized.includes('draft') || normalized.includes('archived') || normalized.includes('disabled')) {
->>>>>>> c35bff3831df8285b9be2ba8522d80fdaec138a6
     return 'neutral';
   }
   if (ERROR_TERMS.some(term => normalized.includes(term))) return 'danger';

@@ -6,9 +6,7 @@ import {
   dispatchPortalActivationEmail,
 } from '../lib/customerPortal.js';
 import { isMailConfigured } from '../lib/mail.js';
-<<<<<<< HEAD
 import { AUDIT_STATUS, writeAuditFromReq } from '../lib/auditLog.js';
-=======
 import { notifyCustomerProfileUpdated, writeCustomerAudit } from '../lib/customerNotifications.js';
 
 const GOVERNMENT_ID_TYPES = new Set([
@@ -90,7 +88,6 @@ function phonesMatch(a, b) {
   if (!left || !right) return false;
   return left === right || left.endsWith(right) || right.endsWith(left);
 }
->>>>>>> c35bff3831df8285b9be2ba8522d80fdaec138a6
 
 function salesAgentDisplayName(user) {
   if (!user) return 'Sales Agent';
@@ -940,19 +937,6 @@ router.put('/:id', async (req, res) => {
 
     if (result.rows.length === 0) return res.status(404).json({ success: false, message: 'Customer not found.' });
 
-<<<<<<< HEAD
-    const row = result.rows[0];
-    await writeAuditFromReq(pool, req, {
-      module: 'Customer Management',
-      activity: 'Update Customer',
-      action: 'Update Customer',
-      description: `Updated customer ${row.first_name || ''} ${row.last_name || ''}`.trim(),
-      status: AUDIT_STATUS.UPDATED,
-      affectedRecord: `customer:${row.customer_id}`,
-    });
-
-    return res.status(200).json({ success: true, message: 'Customer updated.', data: row });
-=======
     const after = result.rows[0];
     const actorName = salesAgentDisplayName(req.currentUser);
     const uniqueChanges = [...new Set(changedFields)];
@@ -975,8 +959,16 @@ router.put('/:id', async (req, res) => {
       });
     }
 
+    await writeAuditFromReq(pool, req, {
+      module: 'Customer Management',
+      activity: 'Update Customer',
+      action: 'Update Customer',
+      description: `Updated customer ${after.first_name || ''} ${after.last_name || ''}`.trim(),
+      status: AUDIT_STATUS.UPDATED,
+      affectedRecord: `customer:${after.customer_id}`,
+    });
+
     return res.status(200).json({ success: true, message: 'Customer updated.', data: after });
->>>>>>> c35bff3831df8285b9be2ba8522d80fdaec138a6
   } catch (err) {
     console.error('[Customers] PUT /:id error:', err.message);
     return res.status(500).json({ success: false, message: 'Failed to update customer.' });

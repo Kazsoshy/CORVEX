@@ -8,6 +8,7 @@ export async function ensureSchema(client) {
     ALTER TABLE users ADD COLUMN IF NOT EXISTS phone VARCHAR(30);
     ALTER TABLE users ADD COLUMN IF NOT EXISTS full_name VARCHAR(120);
     ALTER TABLE users ADD COLUMN IF NOT EXISTS avatar_file VARCHAR(80);
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS preferences JSONB DEFAULT NULL;
 
     ALTER TABLE customers ADD COLUMN IF NOT EXISTS middle_name VARCHAR(50) DEFAULT NULL;
     ALTER TABLE customers ADD COLUMN IF NOT EXISTS contact_person_mname VARCHAR(100) DEFAULT NULL;
@@ -148,7 +149,43 @@ export async function ensureSchema(client) {
       ON branch_inventory (available_stock);
   `);
 
+  // Warehouse document tables (also created by 051/052 migrations). Ensure on
+  // boot so inventory routes do not 500 into empty Warehouse Staff screens.
   await client.query(`
+    CREATE TABLE IF NOT EXISTS inventory_transfer_lines (
+      line_id     SERIAL PRIMARY KEY,
+      transfer_id INTEGER NOT NULL REFERENCES inventory_transfers(transfer_id) ON DELETE CASCADE,
+      product_id  INTEGER NOT NULL REFERENCES products(id),
+      quantity    INTEGER NOT NULL CHECK (quantity > 0),
+      UNIQUE (transfer_id, product_id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_inventory_transfer_lines_transfer_id
+      ON inventory_transfer_lines (transfer_id);
+    CREATE INDEX IF NOT EXISTS idx_inventory_transfer_lines_product_id
+      ON inventory_transfer_lines (product_id);
+
+    CREATE TABLE IF NOT EXISTS restock_headers (
+      restock_id    SERIAL PRIMARY KEY,
+      restock_ref   VARCHAR(100) NOT NULL UNIQUE,
+      branch_id     INTEGER NOT NULL REFERENCES branches(id),
+      supplier_id   INTEGER NOT NULL REFERENCES suppliers(suppliers_id),
+      delivery_ref  VARCHAR(100) NOT NULL,
+      received_date DATE NOT NULL,
+      recorded_by   INTEGER REFERENCES users(id),
+      notes         TEXT,
+      created_at    TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+    CREATE TABLE IF NOT EXISTS restock_lines (
+      line_id    SERIAL PRIMARY KEY,
+      restock_id INTEGER NOT NULL REFERENCES restock_headers(restock_id) ON DELETE CASCADE,
+      product_id INTEGER NOT NULL REFERENCES products(id),
+      quantity   INTEGER NOT NULL CHECK (quantity > 0),
+      UNIQUE (restock_id, product_id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_restock_headers_branch_id ON restock_headers (branch_id);
+    CREATE INDEX IF NOT EXISTS idx_restock_headers_supplier_id ON restock_headers (supplier_id);
+    CREATE INDEX IF NOT EXISTS idx_restock_lines_restock_id ON restock_lines (restock_id);
+
     CREATE TABLE IF NOT EXISTS stock_count_headers (
       count_id     SERIAL PRIMARY KEY,
       count_ref    VARCHAR(100) NOT NULL UNIQUE,
@@ -173,6 +210,21 @@ export async function ensureSchema(client) {
     CREATE INDEX IF NOT EXISTS idx_stock_count_lines_count_id ON stock_count_lines (count_id);
     CREATE INDEX IF NOT EXISTS idx_stock_count_lines_product_id ON stock_count_lines (product_id);
   `);
+
+  // Soften legacy single-SKU transfer columns after document-lines model.
+  await client.query(`
+    ALTER TABLE inventory_transfers ADD COLUMN IF NOT EXISTS notes TEXT;
+  `);
+  try {
+    await client.query(`ALTER TABLE inventory_transfers ALTER COLUMN product_id DROP NOT NULL`);
+  } catch {
+    /* already nullable or constraint name differs */
+  }
+  try {
+    await client.query(`ALTER TABLE inventory_transfers ALTER COLUMN quantity DROP NOT NULL`);
+  } catch {
+    /* already nullable or constraint name differs */
+  }
 
   await client.query(`
     INSERT INTO central_inventory (product_id, total_quantity, branch_count, updated_at)
@@ -230,7 +282,6 @@ export async function ensureSchema(client) {
        OR contact !~ '[0-9]';
   `);
 
-<<<<<<< HEAD
   // Audit log enrichment + login lockout fields (safe if migration 052 already applied).
   // Run as separate statements so one failure cannot skip the rest.
   try {
@@ -315,7 +366,7 @@ export async function ensureSchema(client) {
   } catch (err) {
     console.error('[ensureSchema] permission catalog:', err.message);
   }
-=======
+
   await client.query(`
     ALTER TABLE field_activity_reports ALTER COLUMN visit_id DROP NOT NULL;
     ALTER TABLE field_activity_reports ADD COLUMN IF NOT EXISTS assignment_id INTEGER;
@@ -351,5 +402,4 @@ export async function ensureSchema(client) {
       PRIMARY KEY (assignment_id, product_id)
     );
   `);
->>>>>>> c35bff3831df8285b9be2ba8522d80fdaec138a6
 }

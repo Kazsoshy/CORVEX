@@ -1,5 +1,5 @@
 import React, { useState, useCallback, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Mail, Lock, Eye, EyeOff, AlertCircle, ArrowRight } from 'lucide-react';
 import { login as apiLogin, getEntryPathForRole } from '../../api/authService.js';
@@ -74,10 +74,10 @@ export function LoginPage() {
           <img src={bgImage} alt="" className="login-visual-image" />
           <div className="login-visual-overlay" aria-hidden="true" />
 
-          <div className="login-visual-brand">
+          <Link to="/" className="login-visual-brand" aria-label="Go to CORVEX landing page">
             <img src={whiteLogo} alt="" className="login-visual-logo" />
             <span>CORVEX</span>
-          </div>
+          </Link>
 
           <div className="login-visual-copy">
             <h2 className="login-visual-headline">

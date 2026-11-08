@@ -26,9 +26,7 @@ import {
   notifyScheduleAssigned,
   publishStockAlerts,
 } from '../lib/operationalNotifications.js';
-<<<<<<< HEAD
 import { AUDIT_STATUS, writeAuditFromReq } from '../lib/auditLog.js';
-=======
 import {
   AREA_ASSIGNMENT_FROM,
   AREA_ASSIGNMENT_SELECT,
@@ -38,7 +36,6 @@ import {
   resolveScopeDates,
   withProducts,
 } from '../lib/salesAreaAssignments.js';
->>>>>>> c35bff3831df8285b9be2ba8522d80fdaec138a6
 
 const router = express.Router();
 

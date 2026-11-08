@@ -211,7 +211,6 @@ router.delete('/:id', async (req, res) => {
       [catId]
     );
 
-<<<<<<< HEAD
     await writeAuditFromReq(pool, req, {
       module: 'Product Categories',
       activity: 'Archive Category',
@@ -221,8 +220,6 @@ router.delete('/:id', async (req, res) => {
       affectedRecord: `category:${catId}`,
     });
 
-    return res.status(200).json({ success: true, message: 'Product category archived successfully.' });
-=======
     return res.status(200).json({
       success: true,
       message: productCount > 0
@@ -230,7 +227,6 @@ router.delete('/:id', async (req, res) => {
         : 'Product category archived successfully.',
       data: { product_count: productCount },
     });
->>>>>>> c35bff3831df8285b9be2ba8522d80fdaec138a6
   } catch (err) {
     console.error('[ProductCategories] DELETE /:id error:', err.message);
     return res.status(500).json({ success: false, message: 'Failed to archive product category.' });

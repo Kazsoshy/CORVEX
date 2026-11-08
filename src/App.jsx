@@ -1,4 +1,4 @@
-import { useMemo, useState, useCallback, useEffect } from 'react';
+import { useMemo, useState, useCallback, useEffect, useRef } from 'react';
 import { Link, Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
 import { CollectorPageBody } from './components/collector/CollectorPageBody';
 import { SalesPageBody } from './components/sales/SalesPageBody';
@@ -39,9 +39,19 @@ import { customerRole } from './rolePages/customer';
 import { superAdminRole } from './rolePages/superAdmin';
 import { resolveSuperAdminPage, isSuperAdminNavActive } from './utils/superAdminRoutes';
 import { isBranchManagerNavActive, resolveBranchManagerPage } from './utils/branchManagerRoutes';
-import { SIDEBAR_EVENT } from './settings/preferences.js';
+import { SIDEBAR_EVENT, isSidebarCollapsedPref, setSidebarCollapsedPref } from './settings/preferences.js';
 import { ShortcutDialog } from './components/shared/ShortcutDialog';
+import { AccountMenuPopover } from './components/shared/AccountMenuPopover';
 import { useMyAvatar } from './components/shared/ProfilePhoto.jsx';
+
+/** Roles that have a dedicated personal settings page (not system/ops settings). */
+const PERSONAL_SETTINGS_PREFIXES = new Set([
+  'sales',
+  'warehouse',
+  'collector',
+  'branch-manager',
+  'customer',
+]);
 
 const ROLES = [collectorRole, salesRole, warehouseRole, operatingManagerRole, branchManagerRole, customerRole, superAdminRole];
 const ROLE_BY_KEY = Object.fromEntries(ROLES.map((role) => [role.key, role]));
@@ -68,10 +78,43 @@ function sidebarSectionsWithoutProfile(sections = []) {
     .filter((section) => section.items.length > 0);
 }
 
-function profilePathForRole(role) {
+function rolePathPrefix(role) {
   if (!role?.entryPath) return null;
-  const prefix = String(role.entryPath).split('/').filter(Boolean)[0];
+  return String(role.entryPath).split('/').filter(Boolean)[0] || null;
+}
+
+function profilePathForRole(role) {
+  const prefix = rolePathPrefix(role);
   return prefix ? `/${prefix}/profile` : null;
+}
+
+function settingsPathForRole(role) {
+  const prefix = rolePathPrefix(role);
+  if (!prefix) return null;
+  if (PERSONAL_SETTINGS_PREFIXES.has(prefix)) return `/${prefix}/settings`;
+  return `/${prefix}/profile?tab=settings`;
+}
+
+function profileTabPath(profilePath, tab) {
+  if (!profilePath) return null;
+  if (!tab || tab === 'account') return profilePath;
+  return `${profilePath}?tab=${encodeURIComponent(tab)}`;
+}
+
+function resolveAccountMenuActiveId(pathname, search, profilePath, settingsPath) {
+  const params = new URLSearchParams(search || '');
+  const tab = String(params.get('tab') || '').trim().toLowerCase();
+
+  if (settingsPath && !settingsPath.includes('?') && pathname === settingsPath) {
+    return 'settings';
+  }
+  if (profilePath && pathname === profilePath) {
+    if (tab === 'security') return 'security';
+    if (tab === 'session' || tab === 'activity') return 'session';
+    if (tab === 'settings') return 'settings';
+    return 'account';
+  }
+  return null;
 }
 
 function App() {
@@ -128,30 +171,41 @@ function PrototypeShell() {
   const [showMap, setShowMap] = useState(false);
   const [filter, setFilter] = useState('All');
   const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
+  const [accountMenuOpen, setAccountMenuOpen] = useState(false);
+  const profileAnchorRef = useRef(null);
   const { toast, showToast, clearToast } = useToast();
 
-  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(() => localStorage.getItem('corvex_sidebar_collapsed') === 'true');
+  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(() => isSidebarCollapsedPref());
   const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const [announce, setAnnounce] = useState('');
 
   const closeMobileSidebar = useCallback(() => setIsMobileSidebarOpen(false), []);
   const openMobileSidebar = useCallback(() => setIsMobileSidebarOpen(true), []);
+  const closeAccountMenu = useCallback(() => setAccountMenuOpen(false), []);
 
   useEffect(() => {
-    localStorage.setItem('corvex_sidebar_collapsed', String(isSidebarCollapsed));
-    window.dispatchEvent(new CustomEvent(SIDEBAR_EVENT, { detail: isSidebarCollapsed }));
+    if (isSidebarCollapsedPref() === isSidebarCollapsed) return;
+    setSidebarCollapsedPref(isSidebarCollapsed);
   }, [isSidebarCollapsed]);
 
   useEffect(() => {
     const onSidebar = (event) => setIsSidebarCollapsed(Boolean(event.detail));
+    const syncFromSession = () => setIsSidebarCollapsed(isSidebarCollapsedPref());
     window.addEventListener(SIDEBAR_EVENT, onSidebar);
-    return () => window.removeEventListener(SIDEBAR_EVENT, onSidebar);
+    window.addEventListener('corvex-session-ready', syncFromSession);
+    window.addEventListener('corvex-signed-out', syncFromSession);
+    return () => {
+      window.removeEventListener(SIDEBAR_EVENT, onSidebar);
+      window.removeEventListener('corvex-session-ready', syncFromSession);
+      window.removeEventListener('corvex-signed-out', syncFromSession);
+    };
   }, []);
 
   useEffect(() => {
     closeMobileSidebar();
-  }, [location.pathname, location.search, closeMobileSidebar]);
+    closeAccountMenu();
+  }, [location.pathname, location.search, closeMobileSidebar, closeAccountMenu]);
 
   useEffect(() => {
     const handleKeyDown = (e) => {
@@ -159,6 +213,7 @@ function PrototypeShell() {
       const typing = tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || e.target?.isContentEditable;
       if (e.key === 'Escape') {
         setShortcutsOpen(false);
+        closeAccountMenu();
         closeMobileSidebar();
         return;
       }
@@ -177,7 +232,7 @@ function PrototypeShell() {
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [closeMobileSidebar]);
+  }, [closeMobileSidebar, closeAccountMenu]);
 
   useEffect(() => {
     if (!isMobileSidebarOpen) return undefined;
@@ -296,7 +351,35 @@ function PrototypeShell() {
   );
 
   const profilePath = useMemo(() => profilePathForRole(currentRole), [currentRole]);
-  const isProfileActive = Boolean(profilePath && location.pathname === profilePath);
+  const settingsPath = useMemo(() => settingsPathForRole(currentRole), [currentRole]);
+  const accountMenuActiveId = useMemo(
+    () => resolveAccountMenuActiveId(location.pathname, location.search, profilePath, settingsPath),
+    [location.pathname, location.search, profilePath, settingsPath]
+  );
+  const isProfileActive = Boolean(
+    accountMenuActiveId
+    || (settingsPath && !settingsPath.includes('?') && location.pathname === settingsPath)
+  );
+
+  const handleAccountMenuSelect = useCallback((itemId) => {
+    closeAccountMenu();
+    closeMobileSidebar();
+    if (!profilePath) return;
+    if (itemId === 'settings' && settingsPath) {
+      navigate(settingsPath);
+      return;
+    }
+    navigate(profileTabPath(profilePath, itemId));
+  }, [closeAccountMenu, closeMobileSidebar, navigate, profilePath, settingsPath]);
+
+  const handleAccountMenuLogout = useCallback(() => {
+    closeAccountMenu();
+    setShowLogoutConfirm(true);
+  }, [closeAccountMenu]);
+
+  const toggleAccountMenu = useCallback(() => {
+    setAccountMenuOpen((open) => !open);
+  }, []);
 
   const isNavItemActive = useCallback((to) => {
     if (!to) return false;
@@ -486,47 +569,46 @@ function PrototypeShell() {
         {currentRole && !isAuthPath(location.pathname) && !isCustomerLogin && (
           <div className="sidebar-footer">
             <div
-              className={`sidebar-profile${isProfileActive ? ' active' : ''}`}
-                onClick={() => {
-                  if (!profilePath) return;
-                  closeMobileSidebar();
-                  navigate(profilePath);
-                }}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter' || e.key === ' ') {
-                    e.preventDefault();
-                    if (!profilePath) return;
-                    closeMobileSidebar();
-                    navigate(profilePath);
-                  }
-                }}
-                role="button"
-                tabIndex={0}
-                aria-label="Open profile"
-                aria-current={isProfileActive ? 'page' : undefined}
-                title="Profile"
-              >
-                <div className="sidebar-profile-avatar">
-                  {avatarSrc ? <img src={avatarSrc} alt="" /> : <NavIcon name="accounts" />}
-                </div>
-                <div className="sidebar-profile-info">
-                  <div className="sidebar-profile-name">{currentUser?.fullName || currentUser?.name || 'User'}</div>
-                  <div className="sidebar-profile-role">{currentRole.label}</div>
-                  <div className="sidebar-profile-location" title={userAssignedLocation}>
-                    {userAssignedLocation}
-                  </div>
+              ref={profileAnchorRef}
+              className={`sidebar-profile${isProfileActive ? ' active' : ''}${accountMenuOpen ? ' menu-open' : ''}`}
+              onClick={toggleAccountMenu}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                  e.preventDefault();
+                  toggleAccountMenu();
+                }
+              }}
+              role="button"
+              tabIndex={0}
+              aria-label="Open account menu"
+              aria-haspopup="menu"
+              aria-expanded={accountMenuOpen}
+              aria-current={isProfileActive ? 'page' : undefined}
+              title="Account menu"
+            >
+              <div className="sidebar-profile-avatar">
+                {avatarSrc ? <img src={avatarSrc} alt="" /> : <NavIcon name="accounts" />}
+              </div>
+              <div className="sidebar-profile-info">
+                <div className="sidebar-profile-name">{currentUser?.fullName || currentUser?.name || 'User'}</div>
+                <div className="sidebar-profile-role">{currentRole.label}</div>
+                <div className="sidebar-profile-location" title={userAssignedLocation}>
+                  {userAssignedLocation}
                 </div>
               </div>
-            <button
-              className="button sidebar-logout"
-              type="button"
-              onClick={() => setShowLogoutConfirm(true)}
-            >
-              <span className="sidebar-switch-icon">
-                <NavIcon name="login" />
-              </span>
-              <span className="sidebar-switch-text">Logout</span>
-            </button>
+            </div>
+            <AccountMenuPopover
+              open={accountMenuOpen}
+              onClose={closeAccountMenu}
+              onSelect={handleAccountMenuSelect}
+              onLogout={handleAccountMenuLogout}
+              activeItemId={accountMenuActiveId}
+              userName={currentUser?.fullName || currentUser?.name || 'User'}
+              userRole={currentRole.label}
+              avatarSrc={avatarSrc}
+              avatarFallback={<NavIcon name="accounts" />}
+              anchorRef={profileAnchorRef}
+            />
           </div>
         )}
       </aside>

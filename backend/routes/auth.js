@@ -523,6 +523,66 @@ function readAvatarBody(req, res, next) {
   });
 }
 
+function sanitizeUserPreferences(raw) {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
+  try {
+    return JSON.parse(JSON.stringify(raw));
+  } catch {
+    return null;
+  }
+}
+
+// GET /api/auth/me/preferences — signed-in user's UI preferences only
+router.get('/me/preferences', requireAuth, async (req, res) => {
+  try {
+    const pool = req.app.locals.pool;
+    const result = await pool.query(
+      `SELECT preferences FROM users WHERE id = $1`,
+      [req.currentUser.id]
+    );
+    if (!result.rows.length) {
+      return res.status(404).json({ success: false, message: 'User not found.' });
+    }
+    return res.status(200).json({
+      success: true,
+      data: result.rows[0].preferences || null,
+    });
+  } catch (err) {
+    console.error('[Auth] GET /me/preferences error:', err.message);
+    return res.status(500).json({ success: false, message: 'Failed to load preferences.' });
+  }
+});
+
+// PUT /api/auth/me/preferences — save UI preferences for the signed-in user only
+router.put('/me/preferences', requireAuth, async (req, res) => {
+  try {
+    const pool = req.app.locals.pool;
+    const preferences = sanitizeUserPreferences(req.body?.preferences ?? req.body);
+    if (!preferences) {
+      return res.status(400).json({ success: false, message: 'Preferences payload is required.' });
+    }
+    const result = await pool.query(
+      `UPDATE users
+          SET preferences = $1::jsonb,
+              updated_at = CURRENT_TIMESTAMP
+        WHERE id = $2
+      RETURNING preferences`,
+      [JSON.stringify(preferences), req.currentUser.id]
+    );
+    if (!result.rows.length) {
+      return res.status(404).json({ success: false, message: 'User not found.' });
+    }
+    return res.status(200).json({
+      success: true,
+      data: result.rows[0].preferences || preferences,
+      message: 'Preferences saved.',
+    });
+  } catch (err) {
+    console.error('[Auth] PUT /me/preferences error:', err.message);
+    return res.status(500).json({ success: false, message: 'Failed to save preferences.' });
+  }
+});
+
 // GET /api/auth/me/avatar — the signed-in user's profile photo
 router.get('/me/avatar', requireAuth, async (req, res) => {
   try {
