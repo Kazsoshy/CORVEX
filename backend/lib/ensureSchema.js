@@ -213,6 +213,13 @@ export async function ensureSchema(client) {
     ALTER TABLE field_activity_reports ALTER COLUMN visit_id DROP NOT NULL;
     ALTER TABLE field_activity_reports ADD COLUMN IF NOT EXISTS assignment_id INTEGER;
     ALTER TABLE field_activity_reports ADD COLUMN IF NOT EXISTS customer_id INTEGER;
+    ALTER TABLE field_activity_reports ADD COLUMN IF NOT EXISTS severity VARCHAR(20);
+
+    ALTER TABLE field_visits ADD COLUMN IF NOT EXISTS visit_outcome VARCHAR(40);
+    ALTER TABLE field_visits ADD COLUMN IF NOT EXISTS visit_remarks TEXT;
+    ALTER TABLE field_visits ADD COLUMN IF NOT EXISTS visited_at TIMESTAMP;
+
+    ALTER TABLE collection_payment ADD COLUMN IF NOT EXISTS reference_number VARCHAR(100);
   `);
 
   await client.query(`

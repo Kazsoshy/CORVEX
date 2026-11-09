@@ -189,7 +189,7 @@ const CUSTOMER_SELECT_CORE = `
 router.get('/', async (req, res) => {
   try {
     const pool = req.app.locals.pool;
-    let { branch_id, status, search, page = 1, limit = 20 } = req.query;
+    let { branch_id, status, search, standing, page = 1, limit = 20 } = req.query;
 
     if (!branch_id && req.currentUser && req.currentUser.branchId) {
       branch_id = String(req.currentUser.branchId);
@@ -205,6 +205,7 @@ router.get('/', async (req, res) => {
       conditions.push(`(
         c.first_name ILIKE $${pIdx}
         OR c.last_name ILIKE $${pIdx}
+        OR c.middle_name ILIKE $${pIdx}
         OR c.customer_code ILIKE $${pIdx}
         OR c.address ILIKE $${pIdx}
         OR c.address_region ILIKE $${pIdx}
@@ -219,6 +220,39 @@ router.get('/', async (req, res) => {
         OR CONCAT(COALESCE(c.contact_person_fname, ''), ' ', COALESCE(c.contact_person_lname, '')) ILIKE $${pIdx}
       )`);
       params.push(`%${search}%`);
+      pIdx += 1;
+    }
+
+    const standingKey = String(standing || '').trim().toLowerCase();
+    if (standingKey === 'with_balance') {
+      conditions.push(`COALESCE((
+        SELECT outstanding_balance FROM customer_activity WHERE customer_id = c.customer_id
+      ), 0) > 0`);
+    } else if (standingKey === 'overdue') {
+      conditions.push(`EXISTS (
+        SELECT 1
+        FROM sales_invoices si
+        WHERE si.customer_id = c.customer_id
+          AND si.status IN ('Pending Review', 'Confirmed')
+          AND si.due_date IS NOT NULL
+          AND si.due_date < (CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Manila')::date
+      )`);
+    } else if (standingKey === 'assigned_today') {
+      if (req.currentUser?.roleSlug !== 'collector' || !req.currentUser?.id) {
+        return res.status(403).json({
+          success: false,
+          message: 'Assigned Today filter is only available to collectors.',
+        });
+      }
+      conditions.push(`EXISTS (
+        SELECT 1
+        FROM field_visits fv
+        WHERE fv.customer_id = c.customer_id
+          AND fv.user_id = $${pIdx}
+          AND fv.visit_type = 'Collection'
+          AND fv.scheduled_date = (CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Manila')::date
+      )`);
+      params.push(req.currentUser.id);
       pIdx += 1;
     }
 
@@ -242,6 +276,51 @@ router.get('/', async (req, res) => {
           COALESCE((SELECT outstanding_balance FROM customer_activity WHERE customer_id = c.customer_id), 0) AS "outstandingBalance",
           COALESCE(TO_CHAR((SELECT last_sales_visit FROM customer_activity WHERE customer_id = c.customer_id), 'YYYY-MM-DD'), '') AS "lastVisitDate",
           COALESCE(TO_CHAR((SELECT last_collection_date FROM customer_activity WHERE customer_id = c.customer_id), 'YYYY-MM-DD'), '') AS "lastCollectionDate",
+          (
+            SELECT TO_CHAR(MIN(si.due_date), 'YYYY-MM-DD')
+            FROM sales_invoices si
+            LEFT JOIN (
+              SELECT sales_id, COALESCE(SUM(payment_amount), 0) AS paid
+              FROM credit_history WHERE sales_id IS NOT NULL GROUP BY sales_id
+            ) ip ON ip.sales_id = si.sales_invoices_id
+            WHERE si.customer_id = c.customer_id
+              AND si.status IN ('Confirmed', 'Pending Review')
+              AND si.due_date IS NOT NULL
+              AND COALESCE(ip.paid, 0) < si.total_amount
+          ) AS "earliestDueDate",
+          EXISTS (
+            SELECT 1
+            FROM sales_invoices si
+            WHERE si.customer_id = c.customer_id
+              AND si.status IN ('Pending Review', 'Confirmed')
+              AND si.due_date IS NOT NULL
+              AND si.due_date < (CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Manila')::date
+          ) AS "hasOverdueInvoice",
+          CASE
+            WHEN COALESCE((SELECT outstanding_balance FROM customer_activity WHERE customer_id = c.customer_id), 0) <= 0
+              THEN 0
+            ELSE COALESCE(
+              GREATEST(
+                0,
+                (
+                  (CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Manila')::date
+                  - (
+                    SELECT MIN(si.due_date)::date
+                    FROM sales_invoices si
+                    LEFT JOIN (
+                      SELECT sales_id, COALESCE(SUM(payment_amount), 0) AS paid
+                      FROM credit_history WHERE sales_id IS NOT NULL GROUP BY sales_id
+                    ) ip ON ip.sales_id = si.sales_invoices_id
+                    WHERE si.customer_id = c.customer_id
+                      AND si.status IN ('Confirmed', 'Pending Review')
+                      AND si.due_date IS NOT NULL
+                      AND COALESCE(ip.paid, 0) < si.total_amount
+                  )
+                )
+              ),
+              0
+            )
+          END AS "daysOverdue",
           (SELECT updated_at FROM customer_activity WHERE customer_id = c.customer_id) AS "activityUpdatedAt",
         `;
       }
@@ -396,8 +475,11 @@ router.get('/:id', async (req, res) => {
     let recentSales = [];
     let unpaidInvoiceCount = 0;
     let hasOverdueInvoice = false;
+    let earliestDueDate = null;
+    let lastFieldVisitDate = null;
+    let todayVisit = null;
     try {
-      const [salesResult, countResult, overdue] = await Promise.all([
+      const [salesResult, countResult, overdue, earliestDueRes, lastVisitRes, todayVisitRes] = await Promise.all([
         pool.query(
           `SELECT si.sales_invoices_id,
                   si.invoice_number,
@@ -405,8 +487,13 @@ router.get('/:id', async (req, res) => {
                   si.status,
                   si.invoices_date::text AS invoices_date,
                   si.due_date::text AS due_date,
-                  si.pay_type
+                  si.pay_type,
+                  GREATEST(0, si.total_amount - COALESCE(ip.paid, 0))::float AS balance
            FROM sales_invoices si
+           LEFT JOIN (
+             SELECT sales_id, COALESCE(SUM(payment_amount), 0) AS paid
+             FROM credit_history WHERE sales_id IS NOT NULL GROUP BY sales_id
+           ) ip ON ip.sales_id = si.sales_invoices_id
            WHERE si.customer_id = $1
              AND si.status IN ('Pending Review', 'Confirmed')
            ORDER BY si.invoices_date DESC, si.sales_invoices_id DESC
@@ -431,10 +518,48 @@ router.get('/:id', async (req, res) => {
            ) AS has_overdue`,
           [req.params.id]
         ),
+        pool.query(
+          `SELECT TO_CHAR(MIN(si.due_date), 'YYYY-MM-DD') AS earliest_due_date
+           FROM sales_invoices si
+           LEFT JOIN (
+             SELECT sales_id, COALESCE(SUM(payment_amount), 0) AS paid
+             FROM credit_history WHERE sales_id IS NOT NULL GROUP BY sales_id
+           ) ip ON ip.sales_id = si.sales_invoices_id
+           WHERE si.customer_id = $1
+             AND si.status IN ('Pending Review', 'Confirmed')
+             AND si.due_date IS NOT NULL
+             AND COALESCE(ip.paid, 0) < si.total_amount`,
+          [req.params.id]
+        ),
+        pool.query(
+          `SELECT TO_CHAR(MAX(scheduled_date), 'YYYY-MM-DD') AS last_visit_date
+           FROM field_visits
+           WHERE customer_id = $1
+             AND status = 'Completed'
+             AND visit_type = 'Collection'`,
+          [req.params.id]
+        ),
+        req.currentUser?.id
+          ? pool.query(
+              `SELECT visit_id, customer_id, visit_type, scheduled_date::text AS scheduled_date,
+                      status, visit_outcome, visit_remarks, visited_at
+               FROM field_visits
+               WHERE customer_id = $1
+                 AND user_id = $2
+                 AND visit_type = 'Collection'
+                 AND scheduled_date = (CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Manila')::date
+               ORDER BY visit_id DESC
+               LIMIT 1`,
+              [req.params.id, req.currentUser.id]
+            )
+          : Promise.resolve({ rows: [] }),
       ]);
       recentSales = salesResult.rows;
       unpaidInvoiceCount = countResult.rows[0]?.count || 0;
       hasOverdueInvoice = Boolean(overdue.rows[0]?.has_overdue);
+      earliestDueDate = earliestDueRes.rows[0]?.earliest_due_date || null;
+      lastFieldVisitDate = lastVisitRes.rows[0]?.last_visit_date || null;
+      todayVisit = todayVisitRes.rows[0] || null;
     } catch (err) {
       console.error('[Customers] recent sales lookup failed:', err.message);
     }
@@ -449,6 +574,9 @@ router.get('/:id', async (req, res) => {
         recentSales,
         unpaidInvoiceCount,
         hasOverdueInvoice,
+        earliestDueDate,
+        lastFieldVisitDate,
+        todayVisit,
       },
     });
   } catch (err) {

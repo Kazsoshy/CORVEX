@@ -14,12 +14,21 @@ function cleanText(value, max) {
   return max ? text.slice(0, max) : text;
 }
 
+const COLLECTOR_INCIDENT_ACTIVITIES = new Set([
+  'Payment Dispute',
+  'Customer Refused',
+  'Safety / Aggression',
+  'Location Issue',
+]);
+const COLLECTOR_SEVERITIES = new Set(['Low', 'Medium', 'High', 'Critical']);
+
 function fieldReportError(payload) {
   const visitId = Number(payload?.visit_id);
   const assignmentId = Number(payload?.assignment_id);
   const activity = cleanText(payload?.activity_type, 50);
   const remarks = cleanText(payload?.remarks);
   const photo = typeof payload?.photo === 'string' ? payload.photo.trim() : '';
+  const severity = cleanText(payload?.severity, 20);
   const hasVisit = Number.isFinite(visitId) && visitId > 0;
   const hasAssignment = Number.isFinite(assignmentId) && assignmentId > 0;
   if (!hasVisit && !hasAssignment) return 'assignment_id or visit_id is required.';
@@ -27,6 +36,13 @@ function fieldReportError(payload) {
   if (!remarks) return 'remarks are required.';
   if (!photo.startsWith('data:image/')) return 'photo must be a valid image upload.';
   if (photo.length > 900_000) return 'photo is too large. Use a smaller image.';
+  if (COLLECTOR_INCIDENT_ACTIVITIES.has(activity)) {
+    if (!severity || !COLLECTOR_SEVERITIES.has(severity)) {
+      return 'severity is required for incident/issue activities.';
+    }
+  } else if (severity) {
+    return 'severity is only allowed for incident/issue activities.';
+  }
   return null;
 }
 
@@ -72,17 +88,31 @@ async function applyFieldReport(client, user, payload) {
     if (!customer.rows.length) throw new Error('Customer not found in your branch.');
   }
 
+  const activity = cleanText(payload.activity_type, 50);
+  const severityRaw = cleanText(payload.severity, 20);
+  const severity = COLLECTOR_INCIDENT_ACTIVITIES.has(activity) ? severityRaw : null;
+
+  let resolvedCustomerId = hasCustomer ? customerId : null;
+  if (!resolvedCustomerId && hasVisit) {
+    const visitCustomer = await client.query(
+      `SELECT customer_id FROM field_visits WHERE visit_id = $1`,
+      [visitId]
+    );
+    resolvedCustomerId = visitCustomer.rows[0]?.customer_id ?? null;
+  }
+
   const inserted = await client.query(
     `INSERT INTO field_activity_reports
-       (visit_id, assignment_id, customer_id, user_id, activity_type, remarks, photo, sync_status)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, 'Synced')
+       (visit_id, assignment_id, customer_id, user_id, activity_type, severity, remarks, photo, sync_status)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'Synced')
      RETURNING report_id`,
     [
       hasVisit ? visitId : null,
       hasAssignment ? assignmentId : null,
-      hasCustomer ? customerId : null,
+      resolvedCustomerId,
       user.id,
-      cleanText(payload.activity_type, 50),
+      activity,
+      severity || null,
       cleanText(payload.remarks),
       payload.photo.trim(),
     ]

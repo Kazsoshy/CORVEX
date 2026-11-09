@@ -6,6 +6,8 @@ import {
   manilaDateString,
   runSawPipeline,
 } from './sawCollection.js';
+import { osrmDrivingTable } from './osrm.js';
+import { optimizePriorityAwareRoute } from './routeOrder.js';
 
 /**
  * Load invoice-level rows for SAW (ACM-shaped), scoped to one collector.
@@ -45,6 +47,7 @@ export async function fetchSawSourceRows(pool, { collectorId, branchId }) {
     )
     SELECT
       c.customer_id,
+      c.customer_code,
       $1::INTEGER AS collector_id,
       c.status,
       COALESCE(ca.outstanding_balance, 0)::FLOAT AS outstanding_balance,
@@ -185,6 +188,7 @@ export function mapSawPriorityRow(row) {
   return {
     customer_id: row.customer_id,
     collector_id: row.collector_id,
+    customer_code: row.customer_code || null,
     customer_name: name,
     address: row.address || '',
     phone: row.contact_phone || '',
@@ -204,26 +208,46 @@ export function mapSawPriorityRow(row) {
     weight_distance: row.weight_distance,
     score: row.score,
     rank: row.rank,
+    route_sequence: row.route_sequence ?? row.routeIndex ?? row.rank ?? null,
+    leg_distance_km: row.legDistanceKm ?? null,
+    leg_duration_min: row.legDurationMin ?? null,
     generated_at: row.generated_at,
     latitude: row.cust_lat,
     longitude: row.cust_lon,
     visit_id: row.visit_id ?? null,
     visit_status: row.visit_status ?? null,
+    visit_outcome: row.visit_outcome ?? null,
+    visit_remarks: row.visit_remarks ?? null,
+    visited_at: row.visited_at ?? null,
   };
 }
 
 export async function getCollectionAssignmentsForDate(pool, collectorId, scheduledDate) {
   const date = scheduledDate || manilaDateString();
-  const result = await pool.query(
-    `SELECT fv.visit_id, fv.customer_id, fv.status, fv.scheduled_date
-     FROM field_visits fv
-     WHERE fv.user_id = $1
-       AND fv.visit_type = 'Collection'
-       AND fv.scheduled_date = $2::date
-     ORDER BY fv.visit_id ASC`,
-    [collectorId, date]
-  );
-  return result.rows;
+  try {
+    const result = await pool.query(
+      `SELECT fv.visit_id, fv.customer_id, fv.status, fv.scheduled_date,
+              fv.visit_outcome, fv.visit_remarks, fv.visited_at
+       FROM field_visits fv
+       WHERE fv.user_id = $1
+         AND fv.visit_type = 'Collection'
+         AND fv.scheduled_date = $2::date
+       ORDER BY fv.visit_id ASC`,
+      [collectorId, date]
+    );
+    return result.rows;
+  } catch {
+    const fallback = await pool.query(
+      `SELECT fv.visit_id, fv.customer_id, fv.status, fv.scheduled_date
+       FROM field_visits fv
+       WHERE fv.user_id = $1
+         AND fv.visit_type = 'Collection'
+         AND fv.scheduled_date = $2::date
+       ORDER BY fv.visit_id ASC`,
+      [collectorId, date]
+    );
+    return fallback.rows;
+  }
 }
 
 /**
@@ -241,6 +265,9 @@ export function orderAssignedSawStops(scoredRows, extraRows, visitByCustomer) {
       score: Number.isFinite(score) ? score : null,
       visit_id: visit?.visit_id ?? null,
       visit_status: visit?.status ?? null,
+      visit_outcome: visit?.visit_outcome ?? null,
+      visit_remarks: visit?.visit_remarks ?? null,
+      visited_at: visit?.visited_at ?? null,
     };
   });
 
@@ -251,7 +278,9 @@ export function orderAssignedSawStops(scoredRows, extraRows, visitByCustomer) {
 }
 
 /**
- * When the collector has Collection visits for scheduledDate, return only those customers in SAW rank order.
+ * When the collector has Collection visits for scheduledDate, return only those customers,
+ * ordered by Priority-Aware Route Optimization (combining SAW priority with road-network distances)
+ * while preserving original SAW scores and rankings.
  */
 export async function computeAssignedSawRoute(pool, { collectorId, branchId, scheduledDate, asOfDate }) {
   const date = scheduledDate || manilaDateString();
@@ -261,8 +290,9 @@ export async function computeAssignedSawRoute(pool, { collectorId, branchId, sch
     return {
       asOf: asOfDate || manilaDateString(),
       ranked: [],
-      stats: { assigned: 0, onRoute: 0 },
+      stats: { assigned: 0, onRoute: 0, completed: 0, pending: 0 },
       assignmentMode: true,
+      published: false,
       scheduledDate: date,
     };
   }
@@ -285,16 +315,78 @@ export async function computeAssignedSawRoute(pool, { collectorId, branchId, sch
 
   const rankedAssigned = orderAssignedSawStops(filtered, extras, visitByCustomer);
 
+  // Determine depot coordinates from stop branch metadata or branches table
+  let depotLat = Number(rankedAssigned[0]?.branch_lat);
+  let depotLon = Number(rankedAssigned[0]?.branch_lon);
+  if ((!Number.isFinite(depotLat) || !Number.isFinite(depotLon)) && branchId != null) {
+    const bRes = await pool.query(
+      `SELECT latitude::float AS lat, longitude::float AS lon FROM branches WHERE id = $1`,
+      [branchId]
+    );
+    depotLat = Number(bRes.rows[0]?.lat);
+    depotLon = Number(bRes.rows[0]?.lon);
+  }
+
+  let optimizedAssigned = rankedAssigned.map((row, idx) => ({
+    ...row,
+    route_sequence: idx + 1,
+    routeIndex: idx + 1,
+  }));
+  let roadProvider = 'saw-fallback';
+
+  if (Number.isFinite(depotLat) && Number.isFinite(depotLon) && rankedAssigned.length >= 1) {
+    const coordRows = rankedAssigned.filter(
+      (r) => Number.isFinite(Number(r.cust_lat)) && Number.isFinite(Number(r.cust_lon))
+    );
+    let costMatrix = null;
+    let distanceMatrixKm = null;
+    let durationMatrixMin = null;
+
+    if (coordRows.length >= 2) {
+      const waypointsLonLat = [
+        [depotLon, depotLat],
+        ...coordRows.map((r) => [Number(r.cust_lon), Number(r.cust_lat)]),
+      ];
+      try {
+        const table = await Promise.race([
+          osrmDrivingTable(waypointsLonLat),
+          new Promise((_, reject) => setTimeout(() => reject(new Error('OSRM table timeout')), 4500)),
+        ]);
+        costMatrix = table.durationsMin;
+        distanceMatrixKm = table.distancesKm;
+        durationMatrixMin = table.durationsMin;
+        roadProvider = 'osrm';
+      } catch {
+        roadProvider = 'haversine-fallback';
+      }
+    } else {
+      roadProvider = 'osrm';
+    }
+
+    optimizedAssigned = optimizePriorityAwareRoute({
+      depot: { lat: depotLat, lon: depotLon },
+      stops: rankedAssigned,
+      costMatrix,
+      distanceMatrixKm,
+      durationMatrixMin,
+    });
+  }
+
+  const completedCount = optimizedAssigned.filter((row) => row.visit_status === 'Completed').length;
+
   return {
     asOf,
-    ranked: rankedAssigned,
+    ranked: optimizedAssigned,
     stats: {
       ...stats,
       assigned: assignments.length,
-      onRoute: rankedAssigned.length,
-      completed: rankedAssigned.filter((row) => row.visit_status === 'Completed').length,
+      onRoute: optimizedAssigned.length,
+      completed: completedCount,
+      pending: Math.max(0, optimizedAssigned.length - completedCount),
+      roadProvider,
     },
     assignmentMode: true,
+    published: true,
     scheduledDate: date,
   };
 }
@@ -304,6 +396,7 @@ async function fetchAssignedCustomersOutsideSaw(pool, customerIds, collectorId, 
   const result = await pool.query(
     `SELECT
        c.customer_id,
+       c.customer_code,
        c.first_name,
        c.last_name,
        c.address,
@@ -333,6 +426,7 @@ async function fetchAssignedCustomersOutsideSaw(pool, customerIds, collectorId, 
     const balance = Number(row.outstanding_balance) || 0;
     return {
       customer_id: row.customer_id,
+      customer_code: row.customer_code || null,
       collector_id: collectorId,
       first_name: row.first_name,
       last_name: row.last_name,

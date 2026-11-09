@@ -92,3 +92,40 @@ export async function osrmDrivingTrip(waypointsLonLat, { roundtrip = false, dest
     durationMin: round1(trip.duration / 60),
   };
 }
+
+/**
+ * OSRM Table — pairwise road distance (km) and driving duration (min) matrix
+ * across [depot, ...stops] on OpenStreetMap road network.
+ * @param {Array<[number, number]>} waypointsLonLat
+ * @returns {Promise<{ distancesKm: number[][], durationsMin: number[][] }>}
+ */
+export async function osrmDrivingTable(waypointsLonLat) {
+  if (!waypointsLonLat || waypointsLonLat.length < 2) {
+    return { distancesKm: [[0]], durationsMin: [[0]] };
+  }
+
+  const url =
+    `${baseUrl()}/table/v1/driving/${coordinatesPath(waypointsLonLat)}` +
+    '?annotations=distance,duration';
+
+  const res = await fetch(url, { headers: { Accept: 'application/json' } });
+  if (!res.ok) {
+    throw new Error(`OSRM table HTTP ${res.status}`);
+  }
+  const json = await res.json();
+  if (json.code !== 'Ok' || !Array.isArray(json.durations)) {
+    throw new Error(json.message || 'OSRM table failed');
+  }
+
+  const durationsMin = json.durations.map((row) =>
+    row.map((cell) => (cell == null ? Infinity : Number(cell) / 60))
+  );
+  const distancesKm = Array.isArray(json.distances)
+    ? json.distances.map((row) =>
+        row.map((cell) => (cell == null ? Infinity : Number(cell) / 1000))
+      )
+    : durationsMin.map((row) => row.map((v) => v));
+
+  return { distancesKm, durationsMin };
+}
+

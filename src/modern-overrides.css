@@ -1981,6 +1981,46 @@ input[type="search"]::-webkit-search-results-decoration {
   margin: 6px 0 0;
 }
 
+.collector-dash-actions {
+  padding: 12px 16px !important;
+}
+
+.collector-action-strip {
+  width: 100%;
+}
+
+.collector-action-strip .button {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.collector-action-strip .button svg {
+  width: 1rem;
+  height: 1rem;
+  flex-shrink: 0;
+}
+
+.collector-next-stop {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+@media (max-width: 720px) {
+  .collector-action-strip {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .collector-action-strip .button {
+    width: 100%;
+    justify-content: center;
+  }
+}
+
 .log-sale-lines-table {
   table-layout: fixed;
   width: 100%;

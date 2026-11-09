@@ -142,7 +142,7 @@ export default function LeafletMap({
 
   useEffect(() => {
     setSizeRevision((current) => current + 1);
-  }, [isFullscreen]);
+  }, [isFullscreen, height]);
 
   return (
     <div
@@ -222,12 +222,21 @@ export default function LeafletMap({
               key={marker.id}
               position={marker.position}
               draggable={Boolean(marker.draggable)}
-              eventHandlers={typeof marker.onDragEnd === 'function' ? {
-                dragend: (event) => {
-                  const next = event.target.getLatLng();
-                  marker.onDragEnd({ lat: next.lat, lng: next.lng });
-                },
-              } : undefined}
+              eventHandlers={{
+                ...(typeof marker.onDragEnd === 'function'
+                  ? {
+                      dragend: (event) => {
+                        const next = event.target.getLatLng();
+                        marker.onDragEnd({ lat: next.lat, lng: next.lng });
+                      },
+                    }
+                  : {}),
+                ...(typeof marker.onClick === 'function'
+                  ? {
+                      click: () => marker.onClick(marker),
+                    }
+                  : {}),
+              }}
               icon={marker.icon || (marker.color ? createCustomIcon(marker.color, marker.label) : new L.Icon.Default())}
             >
               {(marker.popupContent || marker.popup) && (

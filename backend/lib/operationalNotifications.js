@@ -42,10 +42,14 @@ export const notifyScheduleAssigned = guard('schedule', async (pool, {
 
   const kind = visitType === 'Sales' ? 'Sales' : 'Collection';
   const label = kind === 'Sales' ? 'sales' : 'collection';
+  const isCollection = kind === 'Collection';
+  const message = isCollection
+    ? `Today's route has been published. You have ${names.length} assigned stop${names.length === 1 ? '' : 's'} (${scheduledDate}): ${names.slice(0, 8).join(', ')}${names.length > 8 ? ` and ${names.length - 8} more` : ''}.`
+    : `${names.length} ${label} visit${names.length === 1 ? '' : 's'} added to your schedule for ${scheduledDate}: ${names.slice(0, 8).join(', ')}${names.length > 8 ? ` and ${names.length - 8} more` : ''}.`;
   await insertUserNotification(pool, {
     userId,
-    title: `${kind} schedule assigned`,
-    message: `${names.length} ${label} visit${names.length === 1 ? '' : 's'} added to your schedule for ${scheduledDate}: ${names.slice(0, 8).join(', ')}${names.length > 8 ? ` and ${names.length - 8} more` : ''}.`,
+    title: isCollection ? "Today's route published" : `${kind} schedule assigned`,
+    message,
     category: 'Schedule',
   });
 });

@@ -15,6 +15,7 @@ function stopFromRow(row) {
   if (lat == null || lng == null) return null;
   const rank = row.rank == null || row.rank === '' ? null : Number(row.rank);
   const score = row.score == null || row.score === '' ? null : Number(row.score);
+  const routeSequence = row.route_sequence ?? row.routeIndex ?? rank;
   const name = `${row.first_name || ''} ${row.last_name || ''}`.trim() || row.customer_name || 'Customer';
   return {
     customerId: Number(row.customer_id),
@@ -23,6 +24,7 @@ function stopFromRow(row) {
     lng,
     rank: Number.isFinite(rank) ? rank : null,
     score: Number.isFinite(score) ? score : null,
+    routeSequence: Number.isFinite(Number(routeSequence)) ? Number(routeSequence) : null,
   };
 }
 
@@ -59,7 +61,7 @@ export async function buildCollectorSawRoad(pool, {
   const stops = rows
     .map(stopFromRow)
     .filter(Boolean)
-    .sort((a, b) => (a.rank ?? Number.POSITIVE_INFINITY) - (b.rank ?? Number.POSITIVE_INFINITY)
+    .sort((a, b) => (a.routeSequence ?? a.rank ?? Number.POSITIVE_INFINITY) - (b.routeSequence ?? b.rank ?? Number.POSITIVE_INFINITY)
       || a.customerId - b.customerId);
 
   if (!stops.length || branchId == null) return null;
