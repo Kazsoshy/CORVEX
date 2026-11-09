@@ -1,8 +1,12 @@
 import express from 'express';
-import { allow, ROLE_SETS } from '../middleware/auth.js';
+import { requirePermission } from '../middleware/auth.js';
+import { recordPermissionChangeEvent } from '../lib/security/detectors.js';
+import { AUDIT_STATUS, writeAuditFromReq } from '../lib/auditLog.js';
 
 const router = express.Router();
-router.use(allow(ROLE_SETS.userAdmin, ROLE_SETS.roleAdmin));
+router.use(requirePermission(
+  'roles.view', 'roles.create', 'roles.edit', 'roles.delete', 'roles.assign',
+));
 
 // ──────────────────────────────────────────────────────────────────────────────
 // GET /api/roles  — List roles with their permission sets
@@ -22,7 +26,8 @@ router.get('/', async (req, res) => {
 
     // Active permissions by default (same status filter).
     const permsResult = await pool.query(
-      `SELECT permission_id, label, description, COALESCE(status, 'Active') AS status, created_at
+      `SELECT permission_id, label, description, module, code,
+              COALESCE(status, 'Active') AS status, created_at
        FROM permissions ${statusFilter} ORDER BY permission_id`
     );
 
@@ -65,7 +70,7 @@ router.get('/', async (req, res) => {
 // PUT /api/roles/:id/permissions  — Update permissions for a role
 // Body: { permissions: { [permission_id]: true, ... } }
 // ──────────────────────────────────────────────────────────────────────────────
-router.put('/:id/permissions', async (req, res) => {
+router.put('/:id/permissions', requirePermission('roles.assign'), async (req, res) => {
   const pool = req.app.locals.pool;
   const roleId = Number(req.params.id);
   const { permissions } = req.body;
@@ -75,7 +80,7 @@ router.put('/:id/permissions', async (req, res) => {
   }
 
   // Prevent editing Super Admin
-  const roleCheck = await pool.query(`SELECT slug FROM roles WHERE role_id = $1`, [roleId]);
+  const roleCheck = await pool.query(`SELECT role_name, slug FROM roles WHERE role_id = $1`, [roleId]);
   if (roleCheck.rows.length === 0) {
     return res.status(404).json({ success: false, message: 'Role not found.' });
   }
@@ -99,6 +104,30 @@ router.put('/:id/permissions', async (req, res) => {
     }
 
     await client.query('COMMIT');
+
+    try {
+      await recordPermissionChangeEvent(pool, {
+        actorId: req.currentUser?.id || null,
+        actorName: req.currentUser?.fullName || req.currentUser?.email || 'Administrator',
+        roleId,
+        roleName: roleCheck.rows[0].role_name,
+        roleSlug: roleCheck.rows[0].slug,
+        changedPermissions: permissions,
+        sourceIp: req.ip || null,
+      });
+    } catch (secErr) {
+      console.error('[Roles] security permission monitor:', secErr.message);
+    }
+
+    await writeAuditFromReq(pool, req, {
+      module: 'Roles and Permissions',
+      activity: 'Update Permissions',
+      action: 'Update Permissions',
+      description: `Updated permissions for role ${roleCheck.rows[0].role_name} (${roleCheck.rows[0].slug}).`,
+      status: AUDIT_STATUS.UPDATED,
+      affectedRecord: `role:${roleId}`,
+    });
+
     return res.status(200).json({ success: true, message: 'Permissions updated successfully.' });
   } catch (err) {
     await client.query('ROLLBACK');
@@ -112,7 +141,7 @@ router.put('/:id/permissions', async (req, res) => {
 // ──────────────────────────────────────────────────────────────────────────────
 // POST /api/roles  — Create role
 // ──────────────────────────────────────────────────────────────────────────────
-router.post('/', async (req, res) => {
+router.post('/', requirePermission('roles.create'), async (req, res) => {
   try {
     const pool = req.app.locals.pool;
     const { role_name, slug } = req.body;
@@ -122,6 +151,14 @@ router.post('/', async (req, res) => {
       `INSERT INTO roles (role_name, slug) VALUES ($1, $2) RETURNING *`,
       [role_name.trim(), slug.trim()]
     );
+    await writeAuditFromReq(pool, req, {
+      module: 'Roles and Permissions',
+      activity: 'Create Role',
+      action: 'Create Role',
+      description: `Created role ${role_name.trim()} (${slug.trim()}).`,
+      status: AUDIT_STATUS.CREATED,
+      affectedRecord: `role:${result.rows[0].role_id}`,
+    });
     return res.status(201).json({ success: true, data: result.rows[0] });
   } catch (err) {
     console.error('[Roles] POST / error:', err.message);
@@ -132,7 +169,7 @@ router.post('/', async (req, res) => {
 // ──────────────────────────────────────────────────────────────────────────────
 // PUT /api/roles/:id  — Update role
 // ──────────────────────────────────────────────────────────────────────────────
-router.put('/:id', async (req, res) => {
+router.put('/:id', requirePermission('roles.edit'), async (req, res) => {
   try {
     const pool = req.app.locals.pool;
     const { role_name, slug } = req.body;
@@ -147,6 +184,14 @@ router.put('/:id', async (req, res) => {
       `UPDATE roles SET role_name = $1, slug = $2, updated_at = NOW() WHERE role_id = $3 RETURNING *`,
       [role_name.trim(), slug.trim(), roleId]
     );
+    await writeAuditFromReq(pool, req, {
+      module: 'Roles and Permissions',
+      activity: 'Update Role',
+      action: 'Update Role',
+      description: `Updated role #${roleId} to ${role_name.trim()} (${slug.trim()}).`,
+      status: AUDIT_STATUS.UPDATED,
+      affectedRecord: `role:${roleId}`,
+    });
     return res.status(200).json({ success: true, data: result.rows[0] });
   } catch (err) {
     console.error('[Roles] PUT /:id error:', err.message);
@@ -157,7 +202,7 @@ router.put('/:id', async (req, res) => {
 // ──────────────────────────────────────────────────────────────────────────────
 // DELETE /api/roles/:id  — Soft archive (status = Inactive; record kept)
 // ──────────────────────────────────────────────────────────────────────────────
-router.delete('/:id', async (req, res) => {
+router.delete('/:id', requirePermission('roles.delete'), async (req, res) => {
   try {
     const pool = req.app.locals.pool;
     const roleId = Number(req.params.id);
@@ -189,6 +234,14 @@ router.delete('/:id', async (req, res) => {
       `UPDATE roles SET status = 'Inactive', updated_at = NOW() WHERE role_id = $1`,
       [roleId]
     );
+    await writeAuditFromReq(pool, req, {
+      module: 'Roles and Permissions',
+      activity: 'Archive Role',
+      action: 'Archive Role',
+      description: `Archived role #${roleId}. Record preserved.`,
+      status: AUDIT_STATUS.ARCHIVED,
+      affectedRecord: `role:${roleId}`,
+    });
     return res.status(200).json({
       success: true,
       message: 'Role archived successfully. The record is preserved.',

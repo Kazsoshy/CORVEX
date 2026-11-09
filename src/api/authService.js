@@ -1,5 +1,19 @@
 import apiClient from './apiClient.js';
 
+function normalizeSessionUser(user) {
+  if (!user || typeof user !== 'object') return user;
+  return {
+    ...user,
+    permissions: Array.isArray(user.permissions) ? user.permissions : [],
+  };
+}
+
+function writeSessionUser(user) {
+  const next = normalizeSessionUser(user);
+  localStorage.setItem('corvex_user', JSON.stringify(next));
+  return next;
+}
+
 /**
  * Login with email and password.
  * On success, persists user info to localStorage.
@@ -12,12 +26,30 @@ export async function login(email, password) {
   const data = response.data;
 
   if (data.success && data.user && data.token) {
-    localStorage.setItem('corvex_user', JSON.stringify(data.user));
+    writeSessionUser(data.user);
     localStorage.setItem('corvex_token', data.token);
     window.dispatchEvent(new Event('corvex-session-ready'));
   }
 
   return data;
+}
+
+/**
+ * Refresh effective permission codes from the API into the local session.
+ * Call after Super Admin changes the signed-in user's grants, or on app load.
+ */
+export async function refreshSessionPermissions() {
+  try {
+    const response = await apiClient.get('/auth/permissions');
+    if (!response.data?.success) return getCurrentUser();
+    const prev = getCurrentUser() || {};
+    return writeSessionUser({
+      ...prev,
+      permissions: response.data.data?.permissions || [],
+    });
+  } catch {
+    return getCurrentUser();
+  }
 }
 
 /**
@@ -78,7 +110,7 @@ export function persistCurrentUserFromProfile(profile) {
   )
     .replace(/\s+/g, ' ')
     .trim();
-  const next = {
+  writeSessionUser({
     ...prev,
     id: profile.user_id ?? prev.id,
     fullName: fullName || prev.fullName,
@@ -87,8 +119,8 @@ export function persistCurrentUserFromProfile(profile) {
     role: profile.role ?? prev.role,
     branch: profile.branch ?? prev.branch,
     hasAvatar: profile.has_avatar ?? prev.hasAvatar,
-  };
-  localStorage.setItem('corvex_user', JSON.stringify(next));
+    permissions: Array.isArray(profile.permissions) ? profile.permissions : prev.permissions,
+  });
 }
 
 /**

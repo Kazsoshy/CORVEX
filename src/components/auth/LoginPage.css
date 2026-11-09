@@ -355,6 +355,15 @@
   font-size: 1rem;
   font-weight: 700;
   letter-spacing: 0.12em;
+  text-decoration: none;
+  cursor: pointer;
+  transition: opacity var(--transition, 150ms ease);
+}
+
+.login-visual-brand:hover,
+.login-visual-brand:focus-visible {
+  opacity: 0.88;
+  outline: none;
 }
 
 .login-visual-logo {

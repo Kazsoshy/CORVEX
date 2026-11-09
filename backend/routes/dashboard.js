@@ -1,6 +1,13 @@
 import express from 'express';
 import os from 'os';
-import { requireAuth, requireRole, requireAssignedBranch, isUnscoped, ROLE_SETS } from '../middleware/auth.js';
+import {
+  requireAuth,
+  requireRole,
+  requireAssignedBranch,
+  requirePermission,
+  isUnscoped,
+  ROLE_SETS,
+} from '../middleware/auth.js';
 
 const router = express.Router();
 
@@ -8,7 +15,12 @@ const router = express.Router();
 // GET /api/dashboard/system-health
 // Returns live system metrics for the Super Admin dashboard
 // ──────────────────────────────────────────────────────────────────────────────
-router.get('/system-health', requireAuth, requireRole(ROLE_SETS.dashboardOrg), async (req, res) => {
+router.get(
+  '/system-health',
+  requireAuth,
+  requirePermission('dashboard.view', 'monitoring.view', 'monitoring.details'),
+  async (req, res) => {
+
   try {
     const pool = req.app.locals.pool;
 
@@ -57,7 +69,12 @@ router.get('/system-health', requireAuth, requireRole(ROLE_SETS.dashboardOrg), a
 // ──────────────────────────────────────────────────────────────────────────────
 // GET /api/dashboard/user-stats  — User count breakdown by role
 // ──────────────────────────────────────────────────────────────────────────────
-router.get('/user-stats', requireAuth, requireRole(ROLE_SETS.dashboardOrg), async (req, res) => {
+router.get(
+  '/user-stats',
+  requireAuth,
+  requirePermission('dashboard.view'),
+  async (req, res) => {
+
   try {
     const pool = req.app.locals.pool;
 
@@ -142,7 +159,12 @@ router.get('/inventory-health', requireAuth, requireRole(ROLE_SETS.dashboardBran
 // ──────────────────────────────────────────────────────────────────────────────
 // GET /api/dashboard/recent-audit  — Recent audit log entries (last 10)
 // ──────────────────────────────────────────────────────────────────────────────
-router.get('/recent-audit', requireAuth, requireRole(ROLE_SETS.dashboardOrg), async (req, res) => {
+router.get(
+  '/recent-audit',
+  requireAuth,
+  requirePermission('dashboard.view', 'audit.view'),
+  async (req, res) => {
+
   try {
     const pool = req.app.locals.pool;
 

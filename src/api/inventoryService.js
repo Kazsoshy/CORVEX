@@ -37,7 +37,11 @@ export async function fetchInventoryTransfers(params = {}) {
     return response.data;
   } catch (err) {
     console.error('Failed to fetch inventory transfers:', err);
-    return { success: false, data: [] };
+    return {
+      success: false,
+      message: err.response?.data?.message || 'Failed to load transfers.',
+      data: [],
+    };
   }
 }
 
@@ -47,7 +51,11 @@ export async function fetchInventoryTransferById(id) {
     return response.data;
   } catch (err) {
     console.error('Failed to fetch transfer:', err);
-    return { success: false, data: null };
+    return {
+      success: false,
+      message: err.response?.data?.message || 'Failed to load transfer.',
+      data: null,
+    };
   }
 }
 
@@ -87,7 +95,11 @@ export async function fetchRestocks(params = {}) {
     return response.data;
   } catch (err) {
     console.error('Failed to fetch restocks:', err);
-    return { success: false, data: [] };
+    return {
+      success: false,
+      message: err.response?.data?.message || 'Failed to load restocks.',
+      data: [],
+    };
   }
 }
 
@@ -97,7 +109,12 @@ export async function fetchBranchInventory(params = {}) {
     return response.data;
   } catch (err) {
     console.error('Failed to fetch branch inventory:', err);
-    return { success: false, data: [], count: 0 };
+    return {
+      success: false,
+      message: err.response?.data?.message || 'Failed to load branch inventory.',
+      data: [],
+      count: 0,
+    };
   }
 }
 
@@ -173,7 +190,11 @@ export async function fetchWarehouseDashboard() {
     return response.data;
   } catch (err) {
     console.error('Failed to fetch warehouse dashboard:', err);
-    return { success: false, data: null };
+    return {
+      success: false,
+      message: err.response?.data?.message || 'Failed to load warehouse dashboard.',
+      data: null,
+    };
   }
 }
 
@@ -212,7 +233,11 @@ export async function fetchStockCounts(params = {}) {
     return response.data;
   } catch (err) {
     console.error('Failed to fetch stock counts:', err);
-    return { success: false, data: [] };
+    return {
+      success: false,
+      message: err.response?.data?.message || 'Failed to load stock counts.',
+      data: [],
+    };
   }
 }
 

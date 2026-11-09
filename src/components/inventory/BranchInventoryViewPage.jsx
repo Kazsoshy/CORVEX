@@ -67,7 +67,9 @@ export function BranchInventoryViewPage({
             params: {
               product_status: 'Active',
               limit: 500,
-              ...(user?.branch?.id != null ? { branch_id: user.branch.id } : {}),
+              ...((user?.branch?.id ?? user?.branchId) != null
+                ? { branch_id: user?.branch?.id ?? user?.branchId }
+                : {}),
             },
           }).catch(() => null)
           : Promise.resolve(null),
@@ -112,7 +114,7 @@ export function BranchInventoryViewPage({
       showToast?.(err.message || 'Failed to load branch inventory.', 'error');
     }
     setLoading(false);
-  }, [showToast, isWarehouse, user?.branch?.id]);
+  }, [showToast, isWarehouse, user?.branch?.id, user?.branchId]);
 
   useEffect(() => {
     load();

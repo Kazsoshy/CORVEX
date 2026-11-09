@@ -16,6 +16,7 @@ import {
   assertCollectorPublishedVisit,
   manilaNow,
 } from '../lib/collectionPayment.js';
+import { AUDIT_STATUS, writeAuditFromReq } from '../lib/auditLog.js';
 
 const router = express.Router();
 
@@ -63,6 +64,13 @@ function normalizeCollectorSeverity(value) {
   if (!text) return null;
   const match = COLLECTOR_SEVERITIES.find((s) => s.toLowerCase() === text.toLowerCase());
   return match || null;
+}
+
+function mapIncidentSeverity(severity) {
+  const value = String(severity || 'Medium').toLowerCase();
+  if (value === 'critical' || value === 'high') return 'Critical';
+  if (value === 'low') return 'Informational';
+  return 'Warning';
 }
 
 // All routes here require the collector role
@@ -1333,6 +1341,15 @@ router.post('/credit-investigations', async (req, res) => {
       submitterName,
     });
 
+    await writeAuditFromReq(pool, req, {
+      module: 'Collections',
+      activity: 'Submit Credit Investigation',
+      action: 'Submit Credit Investigation',
+      description: `Submitted credit investigation for ${customerName}.`,
+      status: AUDIT_STATUS.CREATED,
+      affectedRecord: `credit_investigation:${ciId}`,
+    });
+
     return res.status(201).json({
       success: true,
       message: 'Credit investigation submitted for branch approval.',
@@ -1341,6 +1358,74 @@ router.post('/credit-investigations', async (req, res) => {
   } catch (error) {
     console.error('[Collector] POST /credit-investigations error:', error);
     return res.status(500).json({ success: false, message: 'Failed to submit credit investigation.' });
+  }
+});
+
+// POST /api/collector/incidents — operational alert for OM / branch ops
+router.post('/incidents', async (req, res) => {
+  const pool = req.app.locals.pool;
+  const user = req.currentUser;
+  const customerId = req.body.customer_id != null ? Number(req.body.customer_id) : null;
+  const {
+    incident_type: incidentType,
+    description,
+    location,
+    severity,
+    gps,
+  } = req.body;
+
+  if (!String(incidentType || '').trim() || !String(description || '').trim() || !String(severity || '').trim()) {
+    return res.status(400).json({
+      success: false,
+      message: 'incident_type, description, and severity are required.',
+    });
+  }
+
+  if (customerId != null && Number.isFinite(customerId)) {
+    const access = await assertCollectorCustomerAccess(pool, user, customerId);
+    if (!access.ok) {
+      return res.status(access.status).json({ success: false, message: access.message });
+    }
+  }
+
+  const branchId = user.branchId;
+  if (branchId == null) {
+    return res.status(403).json({ success: false, message: 'No branch assigned.' });
+  }
+
+  const title = `Field incident: ${String(incidentType).trim()}`;
+  const messageParts = [
+    String(description).trim(),
+    location ? `Location: ${String(location).trim()}` : null,
+    gps ? `GPS: ${String(gps).trim()}` : null,
+    customerId ? `Customer ID: ${customerId}` : null,
+  ].filter(Boolean);
+
+  try {
+    const result = await pool.query(
+      `INSERT INTO operational_alerts (branch_id, alert_type, severity, title, message, status)
+       VALUES ($1, 'Field Incident', $2, $3, $4, 'Open')
+       RETURNING alert_id, title, status, created_at`,
+      [branchId, mapIncidentSeverity(severity), title, messageParts.join('\n')]
+    );
+
+    await writeAuditFromReq(pool, req, {
+      module: 'Collections',
+      activity: 'Report Incident',
+      action: 'Report Incident',
+      description: `Reported field incident: ${String(incidentType).trim()}.`,
+      status: AUDIT_STATUS.CREATED,
+      affectedRecord: `alert:${result.rows[0].alert_id}`,
+    });
+
+    return res.status(201).json({
+      success: true,
+      message: 'Incident report sent to operating manager.',
+      data: result.rows[0],
+    });
+  } catch (error) {
+    console.error('[Collector] POST /incidents error:', error);
+    return res.status(500).json({ success: false, message: 'Failed to submit incident report.' });
   }
 });
 

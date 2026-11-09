@@ -389,6 +389,17 @@ html[data-contrast="high"] .reading-guide {
   align-items: start;
 }
 
+.profile-page .settings-shell.profile-shell {
+  grid-template-columns: minmax(0, 1fr);
+  gap: 0;
+  width: 100%;
+}
+
+.profile-page .profile-shell .settings-stage {
+  width: 100%;
+  max-width: none;
+}
+
 .settings-nav {
   position: sticky;
   top: 12px;

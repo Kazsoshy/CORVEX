@@ -6,6 +6,7 @@ import {
   dispatchPortalActivationEmail,
 } from '../lib/customerPortal.js';
 import { isMailConfigured } from '../lib/mail.js';
+import { AUDIT_STATUS, writeAuditFromReq } from '../lib/auditLog.js';
 import { notifyCustomerProfileUpdated, writeCustomerAudit } from '../lib/customerNotifications.js';
 
 const GOVERNMENT_ID_TYPES = new Set([
@@ -799,6 +800,15 @@ router.post('/', async (req, res) => {
       }
     }
 
+    await writeAuditFromReq(req.app.locals.pool, req, {
+      module: 'Customer Management',
+      activity: 'Create Customer',
+      action: 'Create Customer',
+      description: `Created customer ${first_name} ${last_name}.`,
+      status: AUDIT_STATUS.CREATED,
+      affectedRecord: `customer:${customerId}`,
+    });
+
     return res.status(201).json({
       success: true,
       message: createMessage,
@@ -1076,6 +1086,15 @@ router.put('/:id', async (req, res) => {
         changedFields: uniqueChanges,
       });
     }
+
+    await writeAuditFromReq(pool, req, {
+      module: 'Customer Management',
+      activity: 'Update Customer',
+      action: 'Update Customer',
+      description: `Updated customer ${after.first_name || ''} ${after.last_name || ''}`.trim(),
+      status: AUDIT_STATUS.UPDATED,
+      affectedRecord: `customer:${after.customer_id}`,
+    });
 
     return res.status(200).json({ success: true, message: 'Customer updated.', data: after });
   } catch (err) {

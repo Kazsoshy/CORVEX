@@ -1,4 +1,5 @@
 import { ApplyError, SyncConflict } from './syncErrors.js';
+import { AUDIT_STATUS, writeAuditLog } from './auditLog.js';
 
 function money(value) {
   return Math.round(Number(value) * 100) / 100;
@@ -6,16 +7,34 @@ function money(value) {
 
 async function writePaymentAudit(client, userId, action, detail, ipAddress) {
   const userRow = await client.query(
-    `SELECT COALESCE(NULLIF(TRIM(full_name), ''), email, 'User') AS name FROM users WHERE id = $1`,
+    `SELECT COALESCE(NULLIF(TRIM(full_name), ''), email, 'User') AS name,
+            (SELECT role_name FROM roles r WHERE r.role_id = users.role_id) AS role_name
+     FROM users WHERE id = $1`,
     [userId]
   );
   const userName = String(userRow.rows[0]?.name || 'User').slice(0, 150);
-  const ip = String(ipAddress || '127.0.0.1').slice(0, 45) || '127.0.0.1';
-  await client.query(
-    `INSERT INTO audit_logs (user_id, user_name, action, ip_address, status_details)
-     VALUES ($1, $2, $3, $4, $5)`,
-    [userId, userName, String(action).slice(0, 150), ip, String(detail).slice(0, 150)]
-  );
+  const roleName = userRow.rows[0]?.role_name || null;
+  const actionText = String(action || 'Payment Activity');
+  const lower = actionText.toLowerCase();
+  let status = AUDIT_STATUS.SUCCESS;
+  if (lower.includes('create') || lower.includes('record')) status = AUDIT_STATUS.CREATED;
+  else if (lower.includes('update') || lower.includes('modify') || lower.includes('edit')) status = AUDIT_STATUS.UPDATED;
+  else if (lower.includes('delete') || lower.includes('void')) status = AUDIT_STATUS.DELETED;
+  else if (lower.includes('archive')) status = AUDIT_STATUS.ARCHIVED;
+  else if (lower.includes('restore')) status = AUDIT_STATUS.RESTORED;
+
+  await writeAuditLog(client, {
+    userId,
+    userName,
+    roleName,
+    module: 'Collections and Payments',
+    activity: actionText,
+    action: actionText,
+    description: String(detail || ''),
+    status,
+    ipAddress: ipAddress || '127.0.0.1',
+    affectedRecord: null,
+  });
 }
 
 function paymentAuditDetail(payment, sentence) {

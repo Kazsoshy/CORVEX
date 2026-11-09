@@ -28,10 +28,13 @@ import approvalsRouter from './routes/approvals.js';
 import operationalAlertsRouter from './routes/operationalAlerts.js';
 import systemRouter from './routes/system.js';
 import syncRouter from './routes/sync.js';
+import securityRouter from './routes/security.js';
 import { requireAuth, requireBranchScope } from './middleware/auth.js';
 import { ensureSchema } from './lib/ensureSchema.js';
 import { loadProductImage } from './lib/productImages.js';
 import { startOperationalNotificationSweep } from './lib/operationalNotifications.js';
+import { startSecurityMonitor } from './lib/security/monitor.js';
+import { createSecurityRequestInspector } from './lib/security/requestInspector.js';
 import { isMailConfigured } from './lib/mail.js';
 
 import path from 'path';
@@ -78,6 +81,9 @@ const pool = new Pool({
 
 // Make pool available to all routes via app.locals
 app.locals.pool = pool;
+
+// Live request threat inspection (runs for all API traffic, including unauthenticated)
+app.use(createSecurityRequestInspector(pool));
 
 async function connectDatabase() {
   try {
@@ -150,6 +156,7 @@ app.use('/api/operational-alerts', requireAuth, operationalAlertsRouter);
 app.use('/api/admin', requireAuth, adminRouter);
 app.use('/api/system', requireAuth, systemRouter);
 app.use('/api/sync', requireAuth, syncRouter);
+app.use('/api/security', requireAuth, securityRouter);
 
 app.get('/api/health', (req, res) => {
   res.json({
@@ -171,6 +178,8 @@ app.get('/', (req, res) => {
       'POST /api/users',
       'PUT  /api/users/:id',
       'DEL  /api/users/:id',
+      'GET  /api/users/:id/permissions',
+      'PUT  /api/users/:id/permissions',
       'GET  /api/roles',
       'PUT  /api/roles/:id/permissions',
       'GET  /api/products',
@@ -230,6 +239,9 @@ async function startServer() {
   }
 
   startOperationalNotificationSweep(pool);
+  startSecurityMonitor(pool).catch((err) => {
+    console.error('[SecurityMonitor] failed to start:', err.message);
+  });
 
   app.listen(PORT, () => {
     console.log(`🚀 CORVEX API running at http://localhost:${PORT}`);

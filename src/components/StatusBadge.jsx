@@ -1,6 +1,6 @@
 import { usePreferences } from '../settings/PreferencesProvider.jsx';
 
-const NEUTRAL_EXACT = new Set(['draft', 'archived', 'disabled', 'n/a', '—', '-', 'na']);
+const NEUTRAL_EXACT = new Set(['draft', 'disabled', 'n/a', '—', '-', 'na', 'logout']);
 
 const STATUS_MARKS = {
   success: '●',
@@ -12,25 +12,25 @@ const STATUS_MARKS = {
 
 const ERROR_TERMS = [
   'inactive', 'cancelled', 'canceled', 'rejected', 'failed',
-  'failure', 'critical', 'out of stock', 'out of balance', 'overdue', 'late',
+  'failure', 'critical', 'high', 'out of stock', 'out of balance', 'overdue', 'late',
   'offline', 'declined', 'denied', 'void', 'error', 'unpaid', 'unavailable',
-  'returned', 'reversed',
+  'returned', 'reversed', 'degraded', 'deleted', 'locked', 'unauthorized',
 ];
 
 const WARNING_TERMS = [
-  'pending', 'processing', 'in progress', 'low stock', 'low', 'warning',
+  'pending', 'processing', 'in progress', 'low stock', 'low', 'medium', 'warning',
   'submitted', 'awaiting', 'scheduled', 'rescheduled', 'partial', 'unread',
-  'due', 'open', 'needs alignment', 'misaligned', 'assigned',
+  'due', 'open', 'needs alignment', 'misaligned', 'investigating', 'archived', 'assigned',
 ];
 
 const SUCCESS_TERMS = [
   'active', 'available', 'completed', 'approved', 'success', 'successful',
   'sufficient', 'paid', 'delivered', 'resolved', 'synced', 'read', 'online',
   'posted', 'confirmed', 'accepted', 'clear', 'verified', 'current', 'healthy',
-  'received', 'aligned', 'done',
+  'received', 'aligned', 'created', 'restored', 'unlocked', 'allowed', 'done',
 ];
 
-const INFO_TERMS = ['shipped', 'informational', 'info'];
+const INFO_TERMS = ['shipped', 'informational', 'info', 'updated', 'exported', 'imported', 'password'];
 
 /**
  * Maps a status label to a semantic tone used for colored text.

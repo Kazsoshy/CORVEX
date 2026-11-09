@@ -331,7 +331,7 @@ function InventoryPage({
       setLoading(true);
       try {
         // Catalog from /products; on-hand always merged from branch-inventory so it matches Branch Stock.
-        const branchId = user?.branch?.id;
+        const branchId = user?.branch?.id ?? user?.branchId;
         const [prodRes, invRes] = await Promise.all([
           apiClient.get('/products', {
             params: {
@@ -2021,11 +2021,12 @@ const TRANSFER_REQUEST_SEGMENTS = ['Action required', 'Awaiting approval', 'Inco
 
 function TransfersPage({
   navigate,
+  showToast,
   transferTab: transferTabProp = 'requests',
   transferSegment: transferSegmentProp = 'Action required',
 }) {
   const user = getCurrentUser();
-  const branchId = user?.branch?.id;
+  const branchId = user?.branch?.id ?? user?.branchId;
   const branchName = user?.branch?.name || 'your branch';
   const mainTab = transferTabProp === 'history' ? 'history' : 'requests';
   const [requestSegment, setRequestSegment] = useState(
@@ -2051,12 +2052,18 @@ function TransfersPage({
     async function load() {
       setLoading(true);
       const result = await fetchInventoryTransfers();
-      if (!cancelled && result.success) setTransfers(result.data || []);
-      if (!cancelled) setLoading(false);
+      if (cancelled) return;
+      if (result.success) {
+        setTransfers(result.data || []);
+      } else {
+        setTransfers([]);
+        showToast?.(result.message || 'Failed to load transfers.', 'error');
+      }
+      setLoading(false);
     }
     load();
     return () => { cancelled = true; };
-  }, [reloadTick]);
+  }, [reloadTick, showToast]);
 
   useEffect(() => {
     const onFocus = () => setReloadTick((n) => n + 1);
@@ -2939,7 +2946,6 @@ function ProfilePage({
   return <AccountProfilePanel
     showToast={showToast}
     title="Warehouse profile"
-    subtitle="Your name, contact details, and sign-in for this CORVEX account."
     settingsRole="warehouse"
     extraActions={<>
       <button className="button ghost" type="button" onClick={() => navigate('/warehouse/audit-log')}>Audit log</button>

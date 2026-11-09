@@ -5,12 +5,16 @@
  * requireBranchScope   — branch roles may only touch their own branch.
  * requireAssignedBranch — branch roles without a branch are rejected.
  * requireRole          — rejects callers whose role slug is not allowed.
+ * requirePermission    — rejects callers missing a catalog permission code.
+ * allowRolesOrPermission — role slug allowlist OR permission code.
  */
 
 import crypto from 'crypto';
+import { resolvePermissionCodes, userHasPermission } from '../lib/permissions.js';
 
 const TOKEN_TTL_MS = 12 * 60 * 60 * 1000;
-const IDLE_TTL_MS = 15 * 60 * 1000;
+/** 15 minutes of inactivity + 30s client warning grace before hard reject. */
+const IDLE_TTL_MS = (15 * 60 * 1000) + (30 * 1000);
 
 export const UNSCOPED_ROLES = ['super_admin', 'operating_manager'];
 
@@ -53,13 +57,14 @@ function authSecret() {
   return globalThis.__corvexAuthSecret;
 }
 
-export function issueSessionToken(userId, issuedAt = Date.now()) {
+export function issueSessionToken(userId, issuedAt = Date.now(), lastActivity = Date.now()) {
   const now = Date.now();
   const iat = Number(issuedAt) || now;
+  const la = Number(lastActivity) || now;
   const payload = Buffer.from(JSON.stringify({
     sub: Number(userId),
     iat,
-    la: now,
+    la,
     exp: iat + TOKEN_TTL_MS,
   })).toString('base64url');
   const signature = crypto.createHmac('sha256', authSecret()).update(payload).digest('base64url');
@@ -87,7 +92,7 @@ function readSessionToken(header) {
     if (!Number.isInteger(userId) || userId <= 0 || !iat || !la || !exp) return null;
     if (Date.now() > exp) return { error: 'expired' };
     if (Date.now() - la > IDLE_TTL_MS) return { error: 'idle' };
-    return { userId, iat };
+    return { userId, iat, la };
   } catch {
     return null;
   }
@@ -114,8 +119,10 @@ export async function requireAuth(req, res, next) {
   try {
     const pool = req.app.locals.pool;
     const result = await pool.query(
-      `SELECT u.id, u.status, u.branch_id,
-              r.slug AS role_slug
+      `SELECT u.id, u.status, u.branch_id, u.email, u.role_id,
+              COALESCE(NULLIF(TRIM(u.full_name), ''), TRIM(CONCAT_WS(' ', u.first_name, u.last_name)), u.email) AS full_name,
+              r.slug AS role_slug,
+              r.role_name
        FROM users u
        JOIN roles r ON r.role_id = u.role_id
        WHERE u.id = $1`,
@@ -134,12 +141,32 @@ export async function requireAuth(req, res, next) {
       });
     }
 
+    let permissionCodes = new Set();
+    try {
+      permissionCodes = await resolvePermissionCodes(pool, {
+        userId: user.id,
+        roleId: user.role_id,
+        roleSlug: user.role_slug,
+      });
+    } catch (permErr) {
+      console.error('[Auth Middleware] permission resolve error:', permErr.message);
+    }
+
     req.currentUser = {
       id: user.id,
+      email: user.email,
+      fullName: user.full_name,
       roleSlug: user.role_slug,
+      roleName: user.role_name,
+      roleId: user.role_id,
       branchId: user.branch_id,
+      permissionCodes,
+      tokenIat: session.iat,
+      tokenLa: session.la,
     };
-    res.setHeader('X-Session-Token', issueSessionToken(user.id, session.iat));
+    // Preserve last-activity unless /auth/touch refreshes it — background API
+    // calls must not reset the inactivity clock.
+    res.setHeader('X-Session-Token', issueSessionToken(user.id, session.iat, session.la));
     next();
   } catch (err) {
     console.error('[Auth Middleware] requireAuth error:', err.message);
@@ -231,5 +258,61 @@ export function allow(readRoles, writeRoles = readRoles) {
   return function methodGuard(req, res, next) {
     const roles = req.method === 'GET' || req.method === 'HEAD' ? readRoles : writeRoles;
     return requireRole(roles)(req, res, next);
+  };
+}
+
+export function requirePermission(...codes) {
+  const required = codes.flat().filter(Boolean);
+  return function permissionGuard(req, res, next) {
+    const user = req.currentUser;
+    if (!user) {
+      return res.status(401).json({ success: false, message: 'Not authenticated.' });
+    }
+    if (!required.length || userHasPermission(user, ...required)) {
+      return next();
+    }
+    return res.status(403).json({
+      success: false,
+      message: 'Access denied: missing required permission.',
+    });
+  };
+}
+
+/**
+ * Allow if the caller's role slug is in `roles`, OR they hold any of `codes`.
+ * Useful while migrating from ROLE_SETS to catalog permissions.
+ */
+export function allowRolesOrPermission(roles, ...codes) {
+  const allowedRoles = Array.isArray(roles) ? roles : [roles];
+  const required = codes.flat().filter(Boolean);
+  return function hybridGuard(req, res, next) {
+    const user = req.currentUser;
+    if (!user) {
+      return res.status(401).json({ success: false, message: 'Not authenticated.' });
+    }
+    if (allowedRoles.includes(user.roleSlug)) return next();
+    if (required.length && userHasPermission(user, ...required)) return next();
+    return res.status(403).json({
+      success: false,
+      message: 'Access denied.',
+    });
+  };
+}
+
+/**
+ * Method-aware hybrid guard: read and write can require different permission codes
+ * while still honoring legacy role slug allowlists.
+ */
+export function allowWithPermissions({
+  readRoles,
+  writeRoles = readRoles,
+  readPermissions = [],
+  writePermissions = readPermissions,
+} = {}) {
+  return function methodHybridGuard(req, res, next) {
+    const isRead = req.method === 'GET' || req.method === 'HEAD';
+    const roles = isRead ? readRoles : writeRoles;
+    const perms = isRead ? readPermissions : writePermissions;
+    return allowRolesOrPermission(roles, ...perms)(req, res, next);
   };
 }
