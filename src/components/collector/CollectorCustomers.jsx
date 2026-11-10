@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { fetchAccounts, fetchAccountById } from '../../api/collectorService';
+import { fetchAccounts, fetchAccountById, flagCustomerForCreditReview } from '../../api/collectorService';
 import { getCurrentUser, getUserAssignedLocation } from '../../api/authService.js';
 import {
   formatContactPersonName,
@@ -8,6 +8,7 @@ import {
   formatSecondaryContactName,
 } from '../../utils/customerDisplay';
 import { openExternalNavigation } from '../../utils/mapsNavigation';
+import { paymentStanding as sharedPaymentStanding } from '../../utils/customerStanding.js';
 import { formatCurrency, formatDisplayDate } from '../../utils/formatters.js';
 import { useServerPagination, DEFAULT_PAGE_SIZE } from '../../hooks/usePagination';
 import LeafletMap from '../common/LeafletMap';
@@ -46,10 +47,7 @@ function areaOrAddress(customer) {
 
 function paymentStanding(customer) {
   if (customer?.paymentStanding) return customer.paymentStanding;
-  const outstanding = money(customer?.activity?.outstanding_balance ?? customer?.outstandingBalance ?? 0);
-  if (outstanding <= 0) return 'Current';
-  if (customer?.hasOverdueInvoice || Number(customer?.daysOverdue) > 0) return 'Overdue';
-  return 'Has Balance';
+  return sharedPaymentStanding(customer);
 }
 
 function creditStatusLabel(customer) {
@@ -270,6 +268,9 @@ export function AccountDetailPage({
 }) {
   const [customer, setCustomer] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [flagReason, setFlagReason] = useState('');
+  const [flagNote, setFlagNote] = useState('');
+  const [flagging, setFlagging] = useState(false);
   const isFromRoute = parentContext === 'route';
 
   useEffect(() => {
@@ -412,6 +413,65 @@ export function AccountDetailPage({
             </a>
           </div>
         ) : null}
+      </section>
+
+      <section className="panel content-panel">
+        <div className="panel-section-header">
+          <h3>Flag for Credit Review</h3>
+          <p className="muted">
+            Field observation only — this does not create a formal credit investigation or change the credit limit.
+          </p>
+        </div>
+        <div className="form-group">
+          <label htmlFor="ci-flag-reason">Reason</label>
+          <select
+            id="ci-flag-reason"
+            className="filter-select"
+            value={flagReason}
+            onChange={(e) => setFlagReason(e.target.value)}
+          >
+            <option value="">Select reason</option>
+            <option value="Customer frequently requests additional credit">Customer frequently requests additional credit</option>
+            <option value="Customer has payment difficulties">Customer has payment difficulties</option>
+            <option value="Customer reports a change in employment">Customer reports a change in employment</option>
+            <option value="Customer requests a higher credit limit">Customer requests a higher credit limit</option>
+            <option value="Possible account-risk concern">Possible account-risk concern</option>
+          </select>
+        </div>
+        <div className="form-group">
+          <label htmlFor="ci-flag-note">Supporting note</label>
+          <textarea
+            id="ci-flag-note"
+            rows={2}
+            value={flagNote}
+            onChange={(e) => setFlagNote(e.target.value)}
+            placeholder="Optional field observation"
+          />
+        </div>
+        <button
+          className="button secondary"
+          type="button"
+          disabled={flagging || !flagReason}
+          onClick={async () => {
+            setFlagging(true);
+            const res = await flagCustomerForCreditReview({
+              customer_id: customer.customer_id || customer.id,
+              reason: flagReason,
+              observation: flagNote || null,
+              note: flagNote || null,
+            });
+            setFlagging(false);
+            if (!res.success) {
+              showToast?.(res.message || 'Failed to flag customer.', 'error');
+              return;
+            }
+            showToast?.(res.message || 'Customer flagged for credit review.', 'success');
+            setFlagReason('');
+            setFlagNote('');
+          }}
+        >
+          {flagging ? 'Submitting…' : 'Submit Flag'}
+        </button>
       </section>
 
       <section className="panel content-panel">

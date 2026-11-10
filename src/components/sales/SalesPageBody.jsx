@@ -1467,6 +1467,7 @@ export function SalesPageBody({
           navigate={navigate}
           showToast={showToast}
           basePath="/sales/credit-history"
+          customerBasePath="/sales/customer-detail"
           variant="sales"
         />
       );
@@ -1477,6 +1478,7 @@ export function SalesPageBody({
           navigate={navigate}
           showToast={showToast}
           basePath="/sales/credit-history"
+          customerBasePath="/sales/customer-detail"
           variant="sales"
         />
       );

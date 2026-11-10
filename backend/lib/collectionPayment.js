@@ -5,7 +5,7 @@ function money(value) {
   return Math.round(Number(value) * 100) / 100;
 }
 
-async function writePaymentAudit(client, userId, action, detail, ipAddress) {
+async function writePaymentAudit(client, userId, action, detail, ipAddress, extras = {}) {
   const userRow = await client.query(
     `SELECT COALESCE(NULLIF(TRIM(full_name), ''), email, 'User') AS name,
             (SELECT role_name FROM roles r WHERE r.role_id = users.role_id) AS role_name
@@ -18,11 +18,15 @@ async function writePaymentAudit(client, userId, action, detail, ipAddress) {
   const lower = actionText.toLowerCase();
   let status = AUDIT_STATUS.SUCCESS;
   if (lower.includes('create') || lower.includes('record')) status = AUDIT_STATUS.CREATED;
+  else if (lower.includes('reverse')) status = AUDIT_STATUS.UPDATED;
+  else if (lower.includes('reject') || lower.includes('cancel')) status = AUDIT_STATUS.REJECTED;
+  else if (lower.includes('confirm')) status = AUDIT_STATUS.APPROVED;
   else if (lower.includes('update') || lower.includes('modify') || lower.includes('edit')) status = AUDIT_STATUS.UPDATED;
   else if (lower.includes('delete') || lower.includes('void')) status = AUDIT_STATUS.DELETED;
   else if (lower.includes('archive')) status = AUDIT_STATUS.ARCHIVED;
   else if (lower.includes('restore')) status = AUDIT_STATUS.RESTORED;
 
+  const paymentId = extras.paymentId ?? extras.collectionpayment_id ?? null;
   await writeAuditLog(client, {
     userId,
     userName,
@@ -33,7 +37,8 @@ async function writePaymentAudit(client, userId, action, detail, ipAddress) {
     description: String(detail || ''),
     status,
     ipAddress: ipAddress || '127.0.0.1',
-    affectedRecord: null,
+    affectedRecord: paymentId != null ? `collection_payment:${paymentId}` : extras.affectedRecord || null,
+    branchId: extras.branchId ?? null,
   });
 }
 
@@ -309,7 +314,8 @@ export async function applyCollectionPayment(client, user, body, ipAddress = '12
     user.id,
     'Collection recorded',
     paymentAuditDetail(payment, `Balance updated to PHP ${balances.remainingBalance.toFixed(2)}.`),
-    ipAddress
+    ipAddress,
+    { paymentId: collectionId, branchId: user.branchId }
   );
 
   return {
@@ -474,7 +480,8 @@ export async function confirmCollectionPayment(client, reviewer, paymentId, scop
     reviewer.id,
     'Collection confirmed',
     paymentAuditDetail(updated.rows[0], 'Balance updated.'),
-    ipAddress
+    ipAddress,
+    { paymentId, branchId: payment.branch_id }
   );
   return {
     payment: updated.rows[0],
@@ -502,7 +509,8 @@ export async function rejectCollectionPayment(client, reviewer, paymentId, scope
     reviewer.id,
     'Collection rejected',
     paymentAuditDetail(updated.rows[0], 'Balance unchanged.'),
-    ipAddress
+    ipAddress,
+    { paymentId, branchId: payment.branch_id }
   );
   return { payment: updated.rows[0], customerId: payment.customer_id };
 }
@@ -548,7 +556,8 @@ export async function reverseCollectionPayment(client, reviewer, paymentId, scop
     reviewer.id,
     'Collection reversed',
     paymentAuditDetail(updated.rows[0], 'Amount returned to the balance.'),
-    ipAddress
+    ipAddress,
+    { paymentId, branchId: payment.branch_id }
   );
   return {
     payment: updated.rows[0],

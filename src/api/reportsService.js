@@ -133,12 +133,25 @@ export async function getCreditHistory(params = {}) {
     const response = await apiClient.get('/reports/credit-history', { params });
     return response.data;
   } catch (error) {
-    console.error('Failed to fetch credit history:', error);
+    console.error('Failed to fetch payment history:', error);
     return {
       success: false,
       data: [],
       count: 0,
-      message: error?.response?.data?.message || 'Failed to load credit history.',
+      message: error?.response?.data?.message || 'Failed to load payment history.',
+    };
+  }
+}
+
+export async function getCreditHistoryById(id) {
+  try {
+    const response = await apiClient.get(`/reports/credit-history/${id}`);
+    return response.data;
+  } catch (error) {
+    return {
+      success: false,
+      data: null,
+      message: error?.response?.data?.message || 'Failed to load payment record.',
     };
   }
 }

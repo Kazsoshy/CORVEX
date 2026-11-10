@@ -249,15 +249,86 @@ export function summarizeLines(lines) {
   };
 }
 
-/** All-or-nothing: move every line or throw Error with clear message. */
-export async function completeTransferStockMulti(client, transferRow, lines, userId) {
+/** Apply restock line quantities to branch stock + movements (after BM approve). */
+export async function postRestockStock(client, {
+  restockRef,
+  deliveryRef,
+  branchId,
+  supplierId,
+  receivedDate,
+  postedBy,
+  lines,
+}) {
+  const snapshots = [];
+  for (const line of lines) {
+    const product = await client.query(
+      `SELECT reorder_point FROM products WHERE id = $1`,
+      [line.product_id]
+    );
+    const reorder = product.rows[0]?.reorder_point ?? 5;
+    await client.query(
+      `INSERT INTO restocks (product_id, branch_id, delivery_ref, supplier_id, quantity, received_date)
+       VALUES ($1, $2, $3, $4, $5, $6::date)`,
+      [line.product_id, branchId, deliveryRef, supplierId, line.quantity, receivedDate]
+    );
+    const stockSnapshot = await upsertBranchInventoryStock(client, {
+      branchId,
+      productId: line.product_id,
+      delta: line.quantity,
+      reorderLevel: reorder,
+    });
+    snapshots.push(stockSnapshot);
+    await insertStockMovement(client, {
+      performedBy: postedBy,
+      productId: line.product_id,
+      branchId,
+      quantity: line.quantity,
+      type: 'Restock',
+      movementRef: movementRefForRestock(restockRef, line.product_id),
+      movementDate: receivedDate,
+    });
+  }
+  return snapshots;
+}
+
+/** Apply non-zero stock-count variances to branch stock + movements. */
+export async function postStockCountAdjustments(client, {
+  countRef,
+  branchId,
+  postedBy,
+  lines,
+}) {
+  const snapshots = [];
+  for (const line of lines) {
+    const variance = Number(line.variance);
+    if (!variance) continue;
+    const snap = await upsertBranchInventoryStock(client, {
+      branchId,
+      productId: line.product_id,
+      delta: variance,
+      reorderLevel: line.reorder_level,
+    });
+    snapshots.push(snap);
+    await insertStockMovement(client, {
+      performedBy: postedBy,
+      productId: line.product_id,
+      branchId,
+      quantity: variance,
+      type: 'Stock Count Adjustment',
+      movementRef: movementRefForStockCount(countRef, line.product_id),
+      movementDate: manilaToday(),
+    });
+  }
+  return snapshots;
+}
+
+/** Source warehouse: Transfer Out only (stock leaves source). */
+export async function shipTransferStock(client, transferRow, lines, userId) {
   const sourceId = transferRow.source_branch_id;
-  const destId = transferRow.destination_branch_id;
   const transferRef = transferRow.transfer_ref;
   const today = manilaToday();
   const snapshots = [];
 
-  // Pre-check all lines so we fail the whole document clearly before any movement.
   for (const line of lines) {
     const productId = Number(line.product_id);
     const quantity = Number(line.quantity);
@@ -270,7 +341,7 @@ export async function completeTransferStockMulti(client, transferRow, lines, use
     if (quantity > onHand) {
       const name = line.product_name || `product ${productId}`;
       const err = new Error(
-        `Insufficient stock to complete ${transferRef}: ${name} needs ${quantity} but source has ${onHand}. No stock was moved.`
+        `Insufficient stock to ship ${transferRef}: ${name} needs ${quantity} but source has ${onHand}. No stock was moved.`
       );
       err.code = 'INSUFFICIENT_STOCK';
       throw err;
@@ -282,20 +353,12 @@ export async function completeTransferStockMulti(client, transferRow, lines, use
     const quantity = Number(line.quantity);
     const product = await client.query(`SELECT reorder_point FROM products WHERE id = $1`, [productId]);
     const reorder = product.rows[0]?.reorder_point ?? 5;
-
     const sourceSnapshot = await upsertBranchInventoryStock(client, {
       branchId: sourceId,
       productId,
       delta: -quantity,
       reorderLevel: reorder,
     });
-    await upsertBranchInventoryStock(client, {
-      branchId: destId,
-      productId,
-      delta: quantity,
-      reorderLevel: reorder,
-    });
-
     await insertStockMovement(client, {
       performedBy: userId,
       productId,
@@ -304,6 +367,30 @@ export async function completeTransferStockMulti(client, transferRow, lines, use
       type: 'Transfer Out',
       movementRef: movementRefForTransfer(transferRef, 'OUT', productId),
       movementDate: today,
+    });
+    snapshots.push(sourceSnapshot);
+  }
+
+  return snapshots[0] || null;
+}
+
+/** Destination warehouse: Transfer In only (stock arrives at destination). */
+export async function receiveTransferStock(client, transferRow, lines, userId) {
+  const destId = transferRow.destination_branch_id;
+  const transferRef = transferRow.transfer_ref;
+  const today = manilaToday();
+  const snapshots = [];
+
+  for (const line of lines) {
+    const productId = Number(line.product_id);
+    const quantity = Number(line.quantity);
+    const product = await client.query(`SELECT reorder_point FROM products WHERE id = $1`, [productId]);
+    const reorder = product.rows[0]?.reorder_point ?? 5;
+    const destSnapshot = await upsertBranchInventoryStock(client, {
+      branchId: destId,
+      productId,
+      delta: quantity,
+      reorderLevel: reorder,
     });
     await insertStockMovement(client, {
       performedBy: userId,
@@ -314,8 +401,14 @@ export async function completeTransferStockMulti(client, transferRow, lines, use
       movementRef: movementRefForTransfer(transferRef, 'IN', productId),
       movementDate: today,
     });
-    snapshots.push(sourceSnapshot);
+    snapshots.push(destSnapshot);
   }
 
   return snapshots[0] || null;
+}
+
+/** Legacy helper: ship + receive in one step (kept for scripts/tests). Prefer ship/receive. */
+export async function completeTransferStockMulti(client, transferRow, lines, userId) {
+  await shipTransferStock(client, transferRow, lines, userId);
+  return receiveTransferStock(client, transferRow, lines, userId);
 }

@@ -1,6 +1,7 @@
 import express from 'express';
 import { requireRole } from '../middleware/auth.js';
-import { insertUserNotification, notifyCreditInvestigationSubmitted } from '../lib/creditInvestigationNotifications.js';
+import { insertUserNotification } from '../lib/creditInvestigationNotifications.js';
+import { flagCustomerForCreditReview } from '../lib/creditRecommendations.js';
 import {
   computeCollectorSawPriority,
   computeAssignedSawRoute,
@@ -817,10 +818,39 @@ router.post('/field-reports', async (req, res) => {
       ]
     );
 
+    const report = result.rows[0];
+
+    // Exception-desk alert for field incidents (deduped by report id).
+    if (incident && req.currentUser?.branchId != null) {
+      try {
+        const { upsertOpenOperationalAlert } = await import('../lib/operationalAlerts.js');
+        const customerLabel = customerId ? `Customer #${customerId}` : 'Customer';
+        await upsertOpenOperationalAlert(pool, {
+          branchId: req.currentUser.branchId,
+          alertType: 'Field Incident',
+          severity: mapIncidentSeverity(normalizedSeverity),
+          title: `Field incident: ${activity}`,
+          message: [
+            remarksText,
+            `Activity: ${activity}`,
+            `Severity: ${normalizedSeverity}`,
+            customerId ? `Customer ID: ${customerId}` : null,
+            `Report #${report.report_id}`,
+          ].filter(Boolean).join('\n'),
+          sourceKey: `far:${report.report_id}`,
+          entityType: 'field_report',
+          entityId: report.report_id,
+          linkPath: `field-activity-reports/${report.report_id}`,
+        });
+      } catch (alertErr) {
+        console.error('[Collector] FAR operational alert:', alertErr.message);
+      }
+    }
+
     return res.status(201).json({
       success: true,
-      message: 'Field activity report submitted.',
-      data: result.rows[0],
+      message: 'Field activity report submitted successfully. Your Branch Manager can now review this report.',
+      data: report,
     });
   } catch (error) {
     console.error('[Collector] POST /field-reports error:', error);
@@ -1282,82 +1312,117 @@ router.post('/payments', async (req, res) => {
   }
 });
 
-// POST /api/collector/credit-investigations
-router.post('/credit-investigations', async (req, res) => {
-  const pool = req.app.locals.pool;
-  const user = req.currentUser;
-  const customerId = Number(req.body.customer_id);
-  const {
-    purpose,
-    monthly_income: monthlyIncome,
-    business_type: businessType,
-    references_summary: referencesSummary,
-    form_remarks: formRemarks,
-  } = req.body;
+// POST /api/collector/credit-investigations — full CI submission is Sales-only.
+router.post('/credit-investigations', async (_req, res) => {
+  return res.status(403).json({
+    success: false,
+    message: 'Collectors cannot submit formal credit investigations. Use Flag for Credit Review instead.',
+  });
+});
 
-  if (!Number.isFinite(customerId)) {
-    return res.status(400).json({ success: false, message: 'Customer is required.' });
-  }
-  if (!String(purpose || '').trim()) {
-    return res.status(400).json({ success: false, message: 'Purpose is required.' });
-  }
-
-  const access = await assertCollectorCustomerAccess(pool, user, customerId);
-  if (!access.ok) {
-    return res.status(access.status).json({ success: false, message: access.message });
-  }
-
+// POST /api/collector/credit-review-flags — recommendation only, not a formal CI.
+router.post('/credit-review-flags', async (req, res) => {
+  const client = await req.app.locals.pool.connect();
   try {
-    const customerName = `${access.row.first_name || ''} ${access.row.last_name || ''}`.trim() || 'Customer';
-    const submitterMeta = await pool.query(
-      `SELECT COALESCE(NULLIF(TRIM(full_name), ''), email) AS display_name FROM users WHERE id = $1`,
-      [user.id]
-    );
-    const submitterName = submitterMeta.rows[0]?.display_name || 'Collector';
+    const user = req.currentUser;
+    const customerId = Number(req.body.customer_id);
+    const reason = req.body.reason || req.body.purpose;
+    const observation = req.body.observation || req.body.field_observation || null;
+    const note = req.body.note || req.body.form_remarks || null;
+    const photoUrl = req.body.photo_url || req.body.photoUrl || null;
 
-    const result = await pool.query(
-      `INSERT INTO credit_investigations (
-         customer_id, branch_id, submitted_by, status, purpose, monthly_income,
-         business_type, references_summary, form_remarks
-       ) VALUES ($1, $2, $3, 'Pending', $4, $5, $6, $7, $8)
-       RETURNING ci_id, status, created_at`,
-      [
-        customerId,
-        access.row.branch_id,
-        user.id,
-        String(purpose).trim(),
-        Number(monthlyIncome) || 0,
-        businessType ? String(businessType).trim() : null,
-        referencesSummary ? String(referencesSummary).trim() : null,
-        formRemarks ? String(formRemarks).trim() : null,
-      ]
-    );
+    if (!Number.isFinite(customerId)) {
+      return res.status(400).json({ success: false, message: 'Customer is required.' });
+    }
+    if (!String(reason || '').trim()) {
+      return res.status(400).json({ success: false, message: 'A flag reason is required.' });
+    }
 
-    const ciId = result.rows[0].ci_id;
-    await notifyCreditInvestigationSubmitted(pool, {
+    const access = await assertCollectorCustomerAccess(client, user, customerId);
+    if (!access.ok) {
+      return res.status(access.status).json({ success: false, message: access.message });
+    }
+
+    await client.query('BEGIN');
+    const flagged = await flagCustomerForCreditReview(client, {
+      customerId,
       branchId: access.row.branch_id,
-      ciId,
-      customerName,
-      submitterName,
+      flaggedBy: user.id,
+      reason,
+      observation,
+      note,
+      photoUrl,
     });
+    await client.query('COMMIT');
 
-    await writeAuditFromReq(pool, req, {
+    const customerName = `${access.row.first_name || ''} ${access.row.last_name || ''}`.trim() || 'Customer';
+    await writeAuditFromReq(req.app.locals.pool, req, {
       module: 'Collections',
-      activity: 'Submit Credit Investigation',
-      action: 'Submit Credit Investigation',
-      description: `Submitted credit investigation for ${customerName}.`,
-      status: AUDIT_STATUS.CREATED,
-      affectedRecord: `credit_investigation:${ciId}`,
+      activity: 'Flag Credit Review',
+      action: 'Flag Credit Review',
+      description: `Flagged ${customerName} for credit review: ${String(reason).trim()}`,
+      status: flagged.created ? AUDIT_STATUS.CREATED : AUDIT_STATUS.UPDATED,
+      affectedRecord: `credit_recommendation:${flagged.row.recommendation_id}`,
     });
 
-    return res.status(201).json({
+    // Notify branch managers / ops and assigned sales agent.
+    try {
+      const recipients = await req.app.locals.pool.query(
+        `SELECT DISTINCT u.id
+         FROM users u
+         JOIN roles r ON r.role_id = u.role_id
+         WHERE u.status = 'Active'
+           AND r.slug IN ('branch_manager', 'operating_manager')
+           AND (r.slug = 'operating_manager' OR u.branch_id = $1)`,
+        [access.row.branch_id]
+      );
+      for (const recipient of recipients.rows) {
+        await insertUserNotification(req.app.locals.pool, {
+          userId: recipient.id,
+          title: 'Collector credit-review flag',
+          message: `${customerName}: ${String(reason).trim()}. Open Credit Investigation → Recommended Customers.`,
+          category: 'CI',
+        });
+      }
+      const salesAgent = await req.app.locals.pool.query(
+        `SELECT assigned_sales_agent_id FROM customers WHERE customer_id = $1`,
+        [customerId]
+      );
+      const salesAgentId = salesAgent.rows[0]?.assigned_sales_agent_id;
+      if (salesAgentId) {
+        await insertUserNotification(req.app.locals.pool, {
+          userId: salesAgentId,
+          title: 'Collector flagged customer for credit review',
+          message: `${customerName}: ${String(reason).trim()}. Review under Credit Reviews → Recommended.`,
+          category: 'CI',
+        });
+      }
+    } catch (notifyErr) {
+      console.error('[Collector] credit-review-flag notify:', notifyErr.message);
+    }
+
+    return res.status(flagged.created ? 201 : 200).json({
       success: true,
-      message: 'Credit investigation submitted for branch approval.',
-      data: { ...result.rows[0], customer_id: customerId, customer_name: customerName },
+      message: flagged.created
+        ? 'Customer flagged for credit review. Branch Manager and Sales can review the recommendation.'
+        : 'Credit-review flag updated.',
+      data: {
+        recommendation_id: flagged.row.recommendation_id,
+        customer_id: customerId,
+        customer_name: customerName,
+        status: flagged.row.status,
+        recommendation_type: flagged.row.recommendation_type,
+      },
     });
   } catch (error) {
-    console.error('[Collector] POST /credit-investigations error:', error);
-    return res.status(500).json({ success: false, message: 'Failed to submit credit investigation.' });
+    try { await client.query('ROLLBACK'); } catch { /* ignore */ }
+    if (error.status) {
+      return res.status(error.status).json({ success: false, message: error.message });
+    }
+    console.error('[Collector] POST /credit-review-flags error:', error);
+    return res.status(500).json({ success: false, message: 'Failed to flag customer for credit review.' });
+  } finally {
+    client.release();
   }
 });
 
@@ -1402,12 +1467,21 @@ router.post('/incidents', async (req, res) => {
   ].filter(Boolean);
 
   try {
-    const result = await pool.query(
-      `INSERT INTO operational_alerts (branch_id, alert_type, severity, title, message, status)
-       VALUES ($1, 'Field Incident', $2, $3, $4, 'Open')
-       RETURNING alert_id, title, status, created_at`,
-      [branchId, mapIncidentSeverity(severity), title, messageParts.join('\n')]
-    );
+    const { upsertOpenOperationalAlert } = await import('../lib/operationalAlerts.js');
+    const sourceKey = customerId
+      ? `incident:${branchId}:${customerId}:${String(incidentType).trim().slice(0, 40)}`
+      : `incident:${branchId}:${user.id}:${Date.now()}`;
+    const { row, created } = await upsertOpenOperationalAlert(pool, {
+      branchId,
+      alertType: 'Field Incident',
+      severity: mapIncidentSeverity(severity),
+      title,
+      message: messageParts.join('\n'),
+      sourceKey,
+      entityType: customerId ? 'customer' : 'other',
+      entityId: customerId || null,
+      linkPath: customerId ? `customers/${customerId}` : 'field-activity-reports',
+    });
 
     await writeAuditFromReq(pool, req, {
       module: 'Collections',
@@ -1415,13 +1489,15 @@ router.post('/incidents', async (req, res) => {
       action: 'Report Incident',
       description: `Reported field incident: ${String(incidentType).trim()}.`,
       status: AUDIT_STATUS.CREATED,
-      affectedRecord: `alert:${result.rows[0].alert_id}`,
+      affectedRecord: `alert:${row.alert_id}`,
     });
 
-    return res.status(201).json({
+    return res.status(created ? 201 : 200).json({
       success: true,
-      message: 'Incident report sent to operating manager.',
-      data: result.rows[0],
+      message: created
+        ? 'Incident report sent to branch exception desk.'
+        : 'Matching open incident alert updated.',
+      data: row,
     });
   } catch (error) {
     console.error('[Collector] POST /incidents error:', error);

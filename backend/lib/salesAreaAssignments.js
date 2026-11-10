@@ -227,3 +227,112 @@ export function resolveScopeDates(scope, today = manilaDateString()) {
   }
   return { scope: 'today', today, dateSql: 'saa.work_date = $2::date', needsToday: true };
 }
+
+/** Normalize area names for duplicate detection (case/spacing insensitive). */
+export function normalizeAreaName(value) {
+  return String(value || '')
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, ' ');
+}
+
+function haversineMeters(lat1, lon1, lat2, lon2) {
+  const toRad = (deg) => (Number(deg) * Math.PI) / 180;
+  const R = 6371000;
+  const dLat = toRad(lat2 - lat1);
+  const dLon = toRad(lon2 - lon1);
+  const a = Math.sin(dLat / 2) ** 2
+    + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) ** 2;
+  return 2 * R * Math.asin(Math.sqrt(a));
+}
+
+/**
+ * Find conflicting area assignments for the same work date.
+ * Blocks:
+ * - same agent + same territory
+ * - same agent + same normalized area name
+ * - different agents + same territory
+ * Warns (does not block alone):
+ * - pin/radius circles that likely overlap when both have coordinates
+ */
+export async function findAreaAssignmentConflicts(pool, {
+  branchId,
+  salesAgentId,
+  workDate,
+  territoryId = null,
+  areaName = '',
+  latitude = null,
+  longitude = null,
+  radiusMeters = 800,
+  excludeAssignmentId = null,
+}) {
+  const conflicts = [];
+  const warnings = [];
+  const normalizedName = normalizeAreaName(areaName);
+
+  const existing = await pool.query(
+    `SELECT saa.assignment_id, saa.sales_agent_id, saa.territory_id, saa.area_name,
+            saa.status, saa.latitude, saa.longitude, saa.radius_meters,
+            TRIM(CONCAT_WS(' ', u.first_name, u.last_name)) AS sales_agent_name
+     FROM sales_area_assignments saa
+     JOIN users u ON u.id = saa.sales_agent_id
+     WHERE saa.branch_id = $1
+       AND saa.work_date = $2::date
+       AND saa.status IN ('Assigned', 'In Progress', 'Done')
+       AND ($3::int IS NULL OR saa.assignment_id <> $3::int)`,
+    [branchId, workDate, excludeAssignmentId]
+  );
+
+  for (const row of existing.rows) {
+    const sameAgent = Number(row.sales_agent_id) === Number(salesAgentId);
+    const sameTerritory = territoryId != null
+      && row.territory_id != null
+      && Number(row.territory_id) === Number(territoryId);
+    const sameAreaName = normalizedName
+      && normalizeAreaName(row.area_name) === normalizedName;
+
+    if (sameAgent && sameTerritory) {
+      conflicts.push({
+        code: 'same_agent_same_territory',
+        message: `This agent already has territory coverage for ${workDate}.`,
+        assignment: row,
+      });
+      continue;
+    }
+    if (sameAgent && sameAreaName) {
+      conflicts.push({
+        code: 'same_agent_same_area_name',
+        message: `This agent already has an assignment named "${row.area_name}" for ${workDate}.`,
+        assignment: row,
+      });
+      continue;
+    }
+    if (!sameAgent && sameTerritory) {
+      conflicts.push({
+        code: 'other_agent_same_territory',
+        message: `${row.sales_agent_name || 'Another agent'} already covers this territory on ${workDate}.`,
+        assignment: row,
+      });
+      continue;
+    }
+
+    const hasCoords = Number.isFinite(Number(latitude))
+      && Number.isFinite(Number(longitude))
+      && Number.isFinite(Number(row.latitude))
+      && Number.isFinite(Number(row.longitude));
+    if (hasCoords) {
+      const distance = haversineMeters(latitude, longitude, row.latitude, row.longitude);
+      const combined = (Number(radiusMeters) || 800) + (Number(row.radius_meters) || 800);
+      if (distance < combined) {
+        warnings.push({
+          code: 'possible_spatial_overlap',
+          message: `Coverage may overlap ${row.sales_agent_name || 'another assignment'} (~${Math.round(distance)} m apart).`,
+          assignment: row,
+          distance_meters: Math.round(distance),
+        });
+      }
+    }
+  }
+
+  return { conflicts, warnings };
+}

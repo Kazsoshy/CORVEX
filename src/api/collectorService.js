@@ -57,20 +57,20 @@ function transformCustomerToAccount(customer) {
     customer.last_collection_date ||
     null;
 
-  let daysOverdue = 0;
-  if (outstandingBalance > 0 && earliestDueRaw) {
+  // Days overdue only from unpaid past-due invoices — never invent overdue from collection age.
+  let daysOverdue = Number(customer.daysOverdue) || 0;
+  const serverHasOverdue = Boolean(customer.hasOverdueInvoice ?? customer.has_overdue_invoice);
+  if (serverHasOverdue && earliestDueRaw && !(Number.isFinite(daysOverdue) && daysOverdue > 0)) {
     const manilaToday = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Manila' }).format(new Date());
     const asOf = new Date(`${manilaToday}T12:00:00`);
     const due = new Date(earliestDueRaw);
     const diff = Math.floor((asOf - due) / 86400000);
     daysOverdue = Math.max(0, diff);
-  } else if (outstandingBalance > 0 && lastCollectionRaw) {
-    const daysDiff = Math.floor((Date.now() - new Date(lastCollectionRaw).getTime()) / (1000 * 60 * 60 * 24));
-    daysOverdue = Math.max(0, daysDiff - 30);
   }
+  if (!serverHasOverdue) daysOverdue = 0;
 
   // Payment standing (not customer account status). Prefer server overdue flag when present.
-  const hasOverdue = Boolean(customer.hasOverdueInvoice) || daysOverdue > 0;
+  const hasOverdue = serverHasOverdue;
   const paymentStanding = outstandingBalance <= 0
     ? 'Current'
     : (hasOverdue ? 'Overdue' : 'Has Balance');
@@ -392,15 +392,27 @@ export async function submitCollectionPayment(body) {
   }
 }
 
+/** @deprecated Collectors cannot submit formal CI — use flagCustomerForCreditReview. */
 export async function submitCollectorCreditInvestigation(body) {
   try {
     const response = await apiClient.post('/collector/credit-investigations', body);
     return response.data;
   } catch (error) {
-    console.error('Failed to submit CI:', error);
     return {
       success: false,
-      message: error.response?.data?.message || 'Failed to submit credit investigation.',
+      message: error.response?.data?.message || 'Collectors cannot submit formal credit investigations.',
+    };
+  }
+}
+
+export async function flagCustomerForCreditReview(body) {
+  try {
+    const response = await apiClient.post('/collector/credit-review-flags', body);
+    return response.data;
+  } catch (error) {
+    return {
+      success: false,
+      message: error.response?.data?.message || 'Failed to flag customer for credit review.',
     };
   }
 }

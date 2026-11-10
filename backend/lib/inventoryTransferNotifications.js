@@ -43,7 +43,7 @@ export async function notifyTransferDecision(pool, {
   let message = `Transfer ${transferRef} was ${status.toLowerCase()}.`;
   if (status === 'Rejected' && rejectionReason) message += ` Reason: ${rejectionReason}`;
   if (status === 'Approved') {
-    message += ' Source-branch warehouse can confirm shipment to complete stock movement.';
+    message += ' Source-branch warehouse can confirm shipment (stock leaves source). Destination receives separately.';
   }
   await insertUserNotification(pool, {
     userId: submitterId,
@@ -65,10 +65,109 @@ export async function notifyRestockRecorded(pool, {
   const linesLabel = Number(lineCount) > 1 ? `${lineCount} products` : '1 product';
   await insertUserNotification(pool, {
     userId,
-    title: 'Restock recorded',
-    message: `${restockRef} (${deliveryRef}): ${linesLabel}, +${totalQuantity} units saved to your branch stock.`,
+    title: 'Restock posted',
+    message: `${restockRef} (${deliveryRef}): ${linesLabel}, +${totalQuantity} units posted to your branch stock.`,
     category: 'Restock',
   });
+}
+
+export async function notifyRestockSubmitted(pool, {
+  branchId,
+  restockRef,
+  deliveryRef,
+  lineCount = 1,
+  totalQuantity,
+  submitterName,
+}) {
+  const title = 'Restock approval required';
+  const linesLabel = Number(lineCount) > 1 ? `${lineCount} products` : '1 product';
+  const message = `${submitterName || 'Warehouse'} submitted ${restockRef} (${deliveryRef}): ${linesLabel}, +${totalQuantity} units. Review in Approval Center.`;
+  await notifyApprovers(pool, { sourceBranchId: branchId, title, message });
+}
+
+export async function notifyRestockDecision(pool, {
+  submitterId,
+  restockRef,
+  status,
+  rejectionReason,
+}) {
+  if (!submitterId) return;
+  const approved = status === 'Posted' || status === 'Approved';
+  const title = approved ? 'Restock approved & posted' : 'Restock rejected';
+  let message = approved
+    ? `Restock ${restockRef} was approved and stock was posted.`
+    : `Restock ${restockRef} was rejected.`;
+  if (!approved && rejectionReason) message += ` Reason: ${rejectionReason}`;
+  await insertUserNotification(pool, {
+    userId: submitterId,
+    title,
+    message,
+    category: 'Restock',
+  });
+}
+
+export async function notifyStockCountSubmitted(pool, {
+  branchId,
+  countRef,
+  discrepancyCount,
+  submitterName,
+}) {
+  const title = 'Stock count approval required';
+  const message = `${submitterName || 'Warehouse'} submitted ${countRef} with ${discrepancyCount} variance line(s). Review in Approval Center.`;
+  await notifyApprovers(pool, { sourceBranchId: branchId, title, message });
+}
+
+export async function notifyStockCountDecision(pool, {
+  submitterId,
+  countRef,
+  status,
+  rejectionReason,
+}) {
+  if (!submitterId) return;
+  const approved = status === 'Completed' || status === 'Approved';
+  const title = approved ? 'Stock count approved' : 'Stock count rejected';
+  let message = approved
+    ? `Stock count ${countRef} was approved and inventory adjustments were posted.`
+    : `Stock count ${countRef} was rejected.`;
+  if (!approved && rejectionReason) message += ` Reason: ${rejectionReason}`;
+  await insertUserNotification(pool, {
+    userId: submitterId,
+    title,
+    message,
+    category: 'Stock Count',
+  });
+}
+
+export async function notifyTransferShipped(pool, {
+  transferRef,
+  productName,
+  lineCount = 1,
+  totalQuantity,
+  destinationBranchId,
+  sourceBranchName,
+}) {
+  const recipients = await pool.query(
+    `SELECT DISTINCT u.id FROM users u
+     JOIN roles r ON r.role_id = u.role_id
+     WHERE u.status = 'Active'
+       AND r.slug = 'inventory_staff'
+       AND u.branch_id = $1`,
+    [destinationBranchId]
+  );
+  const linesLabel = Number(lineCount) > 1 ? `${lineCount} products` : productName;
+  const qtyLabel = totalQuantity != null ? `, ${totalQuantity} units` : '';
+  const fromLabel = sourceBranchName ? ` from ${sourceBranchName}` : '';
+  const message = `Transfer ${transferRef} (${linesLabel}${qtyLabel}) shipped${fromLabel}. Confirm receipt to add stock.`;
+  await Promise.all(
+    recipients.rows.map((row) =>
+      insertUserNotification(pool, {
+        userId: row.id,
+        title: 'Transfer ready to receive',
+        message,
+        category: 'Transfer',
+      })
+    )
+  );
 }
 
 export async function notifyTransferCompleted(pool, {
@@ -88,10 +187,10 @@ export async function notifyTransferCompleted(pool, {
        )`,
     [destinationBranchId]
   );
-  const title = 'Transfer completed';
+  const title = 'Transfer received';
   const linesLabel = Number(lineCount) > 1 ? `${lineCount} products` : productName;
   const qtyLabel = totalQuantity != null ? `, ${totalQuantity} units` : '';
-  const message = `Transfer ${transferRef} (${linesLabel}${qtyLabel}) was completed. Stock updated at destination branch.`;
+  const message = `Transfer ${transferRef} (${linesLabel}${qtyLabel}) was received. Destination stock updated.`;
   await Promise.all(
     recipients.rows.map((row) =>
       insertUserNotification(pool, { userId: row.id, title, message, category: 'Transfer' })

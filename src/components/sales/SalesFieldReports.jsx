@@ -190,7 +190,10 @@ export function FieldActivityReportsPage({ navigate, showToast }) {
     setSubmitting(false);
 
     if (result.success) {
-      showToast(result.message || 'Report submitted.', 'success');
+      showToast(
+        result.message || 'Field activity report submitted successfully. Your Branch Manager can now review this report.',
+        'success'
+      );
       setForm({
         assignment_id: form.assignment_id,
         activity_type: '',

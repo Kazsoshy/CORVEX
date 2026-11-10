@@ -6,17 +6,36 @@ export async function getBranchAnalytics() {
     return response.data;
   } catch (error) {
     console.error('Failed to fetch branch analytics:', error);
-    return { success: false, data: null };
+    return {
+      success: false,
+      data: null,
+      message: error?.response?.data?.message || 'Failed to fetch analytics.',
+    };
   }
 }
 
-export async function getBranchStaff() {
+export async function getBranchStaff(params = {}) {
   try {
-    const response = await apiClient.get('/branch-manager/staff');
+    const response = await apiClient.get('/branch-manager/staff', { params });
     return response.data;
   } catch (error) {
     console.error('Failed to fetch branch staff:', error);
     return { success: false, data: { collectors: [], salesAgents: [] } };
+  }
+}
+
+/** Period-scoped evaluation metrics. period: 'week' | 'month' */
+export async function getStaffPerformance(params = {}) {
+  try {
+    const response = await apiClient.get('/branch-manager/staff-performance', { params });
+    return response.data;
+  } catch (error) {
+    console.error('Failed to fetch staff performance:', error);
+    return {
+      success: false,
+      message: error.response?.data?.message || 'Failed to load staff performance.',
+      data: null,
+    };
   }
 }
 
@@ -88,13 +107,20 @@ export async function getBranchAuditLogs(params = {}) {
   }
 }
 
-export async function getBranchCollectorDetail(collectorId) {
+export async function getBranchCollectorDetail(collectorId, params = {}) {
   try {
-    const response = await apiClient.get(`/branch-manager/staff/collectors/${collectorId}`);
+    const response = await apiClient.get(`/branch-manager/staff/collectors/${collectorId}`, {
+      params,
+      timeout: 30000,
+    });
     return response.data;
   } catch (error) {
     console.error('Failed to fetch collector detail:', error);
-    return { success: false, data: null };
+    return {
+      success: false,
+      message: error.response?.data?.message || error.message || 'Failed to load collector detail.',
+      data: null,
+    };
   }
 }
 
@@ -106,8 +132,25 @@ export async function fetchCollectorSawPriority(collectorId, params = {}) {
     );
     return response.data;
   } catch (error) {
-    console.error('Failed to fetch collector SAW priority:', error);
+    console.error('Failed to fetch collector priority list:', error);
     return { success: false, data: [], meta: null };
+  }
+}
+
+export async function previewCollectorCollectionRoute(collectorId, body) {
+  try {
+    const response = await apiClient.post(
+      `/branch-manager/staff/collectors/${collectorId}/route-preview`,
+      body
+    );
+    return response.data;
+  } catch (error) {
+    console.error('Failed to preview collection route:', error);
+    return {
+      success: false,
+      message: error.response?.data?.message || 'Failed to preview route.',
+      data: [],
+    };
   }
 }
 
@@ -123,13 +166,14 @@ export async function assignCollectorCollectionRoute(collectorId, body) {
     return {
       success: false,
       message: error.response?.data?.message || 'Failed to assign collection visits.',
+      data: error.response?.data?.data || null,
     };
   }
 }
 
-export async function getFieldActivityReports() {
+export async function getFieldActivityReports(params = {}) {
   try {
-    const response = await apiClient.get('/branch-manager/field-activity-reports');
+    const response = await apiClient.get('/branch-manager/field-activity-reports', { params });
     return response.data;
   } catch (error) {
     console.error('Failed to fetch field activity reports:', error);
@@ -155,19 +199,23 @@ export async function getFieldActivityReport(reportId) {
   }
 }
 
-export async function getBranchSalesAgentDetail(agentId) {
+export async function getBranchSalesAgentDetail(agentId, params = {}) {
   try {
-    const response = await apiClient.get(`/branch-manager/staff/sales/${agentId}`);
+    const response = await apiClient.get(`/branch-manager/staff/sales/${agentId}`, { params });
     return response.data;
   } catch (error) {
     console.error('Failed to fetch sales agent detail:', error);
-    return { success: false, data: null };
+    return {
+      success: false,
+      message: error.response?.data?.message || 'Failed to load sales agent detail.',
+      data: null,
+    };
   }
 }
 
-export async function getSalesAgentAreaAssignments(agentId) {
+export async function getSalesAgentAreaAssignments(agentId, params = {}) {
   try {
-    const response = await apiClient.get(`/branch-manager/staff/sales/${agentId}/area-assignments`);
+    const response = await apiClient.get(`/branch-manager/staff/sales/${agentId}/area-assignments`, { params });
     return response.data;
   } catch (error) {
     console.error('Failed to fetch sales area assignments:', error);
@@ -191,6 +239,23 @@ export async function assignSalesAgentArea(agentId, body) {
     return {
       success: false,
       message: error.response?.data?.message || 'Failed to assign area.',
+      data: error.response?.data?.data || null,
+    };
+  }
+}
+
+export async function fetchBranchProducts(params = {}) {
+  try {
+    const response = await apiClient.get('/products', {
+      params: { limit: 100, status: undefined, ...params },
+    });
+    return response.data;
+  } catch (error) {
+    console.error('Failed to fetch products:', error);
+    return {
+      success: false,
+      message: error.response?.data?.message || 'Failed to load products.',
+      data: [],
     };
   }
 }

@@ -85,6 +85,14 @@ const MIGRATIONS = [
   { file: '058_customer_civil_status_maiden.sql',    label: '058_customer_civil_status_maiden.sql' },
   { file: '059_credit_reviews.sql',                  label: '059_credit_reviews.sql' },
   { file: '060_user_preferences.sql',                label: '060_user_preferences.sql' },
+  { file: '060_far_severity.sql',                     label: '060_far_severity.sql' },
+  { file: '061_field_visits_collection_day_unique.sql', label: '061_field_visits_collection_day_unique.sql' },
+  { file: '062_sales_area_assignment_conflicts.sql', label: '062_sales_area_assignment_conflicts.sql' },
+  { file: '063_territories_operational_model.sql', label: '063_territories_operational_model.sql' },
+  { file: '064_credit_recommendations.sql', label: '064_credit_recommendations.sql' },
+  { file: '065_inventory_approval_controls.sql', label: '065_inventory_approval_controls.sql' },
+  { file: '066_operational_alerts_desk.sql', label: '066_operational_alerts_desk.sql' },
+  { file: '067_audit_logs_branch_id.sql', label: '067_audit_logs_branch_id.sql' },
 ];
 
 async function ensureMigrationsTable() {

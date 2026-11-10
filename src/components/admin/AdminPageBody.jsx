@@ -1858,6 +1858,8 @@ function buildAuditDetailRows(log) {
     { key: 'module', label: 'Module', value: log.module || '—' },
     { key: 'activity', label: 'Activity', value: auditActivityLabel(log) },
     { key: 'status', label: 'Status', value: <StatusBadge status={status} /> },
+    { key: 'reference', label: 'Reference', value: log.affected_record || '—' },
+    { key: 'branch', label: 'Affected Branch', value: log.branch_name || log.branch_id || '—' },
     { key: 'description', label: 'Description', value: description },
     { key: 'ip', label: 'IP Address', value: log.ip_address || '—' },
   ];

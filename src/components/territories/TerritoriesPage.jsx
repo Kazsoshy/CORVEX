@@ -1,6 +1,9 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
-import { NavIcon } from '../../navIcons';
+import { useEffect, useMemo, useState } from 'react';
 import { EmptyState } from '../shared/EmptyState';
+import { Pagination } from '../shared/Pagination';
+import { usePagination } from '../../hooks/usePagination';
+import { StatusBadge } from '../StatusBadge';
+import LeafletMap from '../common/LeafletMap';
 import {
   fetchTerritories,
   createTerritory,
@@ -10,8 +13,9 @@ import {
 } from '../../api/territoriesService';
 import { getCurrentUser } from '../../api/authService';
 import apiClient from '../../api/apiClient';
-import { usePagination } from '../../hooks/usePagination';
-import { Pagination } from '../shared/Pagination';
+
+const DEFAULT_RADIUS = 800;
+const DEFAULT_CENTER = [7.1907, 125.4553];
 
 function formatPersonName(user) {
   if (!user) return '';
@@ -26,19 +30,6 @@ function formatPersonName(user) {
   return '';
 }
 
-function getAssignedUsers(territory) {
-  const list = Array.isArray(territory?.assigned_users) ? territory.assigned_users : [];
-  if (list.length > 0) return list;
-  if (territory?.assigned_user_name || territory?.assigned_user) {
-    return [{
-      user_id: territory.assigned_user,
-      user_name: territory.assigned_user_name,
-      role_name: territory.role_name,
-    }];
-  }
-  return [];
-}
-
 function getBranchLabel(branch) {
   return String(branch?.branch_name || branch?.name || '').trim();
 }
@@ -47,622 +38,543 @@ function getBranchId(branch) {
   return branch?.branch_id ?? branch?.id ?? null;
 }
 
-export function TerritoriesPage({ showToast }) {
-  const currentUser = getCurrentUser();
-  const [territories, setTerritories] = useState([]);
-  const [branches, setBranches] = useState([]);
-  const [users, setUsers] = useState([]);
-  const [search, setSearch] = useState('');
-  const [branchSuggestionsOpen, setBranchSuggestionsOpen] = useState(false);
-  const [loading, setLoading] = useState(true);
-  const [showForm, setShowForm] = useState(false);
-  const [editing, setEditing] = useState(null);
-  const [errors, setErrors] = useState({});
-  const [submitting, setSubmitting] = useState(false);
-  const [branchQuery, setBranchQuery] = useState('');
-  const [branchMenuOpen, setBranchMenuOpen] = useState(false);
-  const [userQuery, setUserQuery] = useState('');
-  const [userMenuOpen, setUserMenuOpen] = useState(false);
-  const [selectedUsers, setSelectedUsers] = useState([]);
-  const searchRef = useRef(null);
-  const branchFieldRef = useRef(null);
-  const userFieldRef = useRef(null);
+function emptyForm(branchId = '') {
+  return {
+    territory_name: '',
+    branch_id: branchId || '',
+    status: 'Active',
+    notes: '',
+    latitude: '',
+    longitude: '',
+    radius_meters: String(DEFAULT_RADIUS),
+    default_sales_agent_id: '',
+    default_collector_id: '',
+  };
+}
 
+export function TerritoriesPage({ showToast, navigate, opsBase }) {
+  const currentUser = getCurrentUser();
   const userBranchId = currentUser?.branch?.id ?? currentUser?.branchId ?? null;
-  const canListAllUsers = ['super_admin', 'operating_manager'].includes(currentUser?.role?.slug);
+  const canListAllBranches = ['super_admin', 'operating_manager'].includes(currentUser?.role?.slug);
   const isBranchManager = userBranchId != null && currentUser?.role?.slug === 'branch_manager';
 
-  const [form, setForm] = useState({
-    territory_name: '',
-    branch_id: isBranchManager ? userBranchId : '',
-    coverage_area: '',
-  });
+  const [territories, setTerritories] = useState([]);
+  const [branches, setBranches] = useState([]);
+  const [salesAgents, setSalesAgents] = useState([]);
+  const [collectors, setCollectors] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [statusFilter, setStatusFilter] = useState('all');
+  const [search, setSearch] = useState('');
+  const [branchFilter, setBranchFilter] = useState(isBranchManager ? String(userBranchId) : '');
+  const [showForm, setShowForm] = useState(false);
+  const [editing, setEditing] = useState(null);
+  const [form, setForm] = useState(() => emptyForm(isBranchManager ? userBranchId : ''));
+  const [errors, setErrors] = useState({});
+  const [submitting, setSubmitting] = useState(false);
 
-  const loadTerritories = async () => {
+  const lockedBranchId = isBranchManager ? userBranchId : null;
+
+  async function loadTerritories() {
     try {
       setLoading(true);
-      const data = await fetchTerritories({});
-      if (data.success) {
-        setTerritories(data.data || []);
-      }
+      const params = { status: 'all' };
+      if (canListAllBranches && branchFilter) params.branch_id = branchFilter;
+      const data = await fetchTerritories(params);
+      if (data.success) setTerritories(data.data || []);
+      else showToast?.(data.message || 'Failed to load territories', 'error');
     } catch (err) {
-      showToast(err.response?.data?.message || 'Failed to load territories', 'error');
+      showToast?.(err.response?.data?.message || 'Failed to load territories', 'error');
     } finally {
       setLoading(false);
     }
-  };
+  }
+
+  async function loadStaffForBranch(branchId) {
+    if (!branchId) {
+      setSalesAgents([]);
+      setCollectors([]);
+      return;
+    }
+    try {
+      const [saRes, colRes] = await Promise.all([
+        fetchAssignableUsers({ branch_id: branchId, role: 'sales_staff' }),
+        fetchAssignableUsers({ branch_id: branchId, role: 'collector' }),
+      ]);
+      setSalesAgents(saRes?.success ? (saRes.data || []) : []);
+      setCollectors(colRes?.success ? (colRes.data || []) : []);
+    } catch {
+      setSalesAgents([]);
+      setCollectors([]);
+    }
+  }
 
   useEffect(() => {
     loadTerritories();
-  }, []);
+  }, [branchFilter]);
 
   useEffect(() => {
     let cancelled = false;
-    async function loadLookups() {
+    async function loadBranches() {
+      if (!canListAllBranches) return;
       try {
         const branchesRes = await apiClient.get('/branches');
         if (!cancelled && branchesRes.data?.success) {
           setBranches(branchesRes.data.data || []);
         }
       } catch {
-        /* Branch managers / OM still work from territory branch_name values */
-      }
-
-      try {
-        if (canListAllUsers) {
-          const usersRes = await apiClient.get('/users', { params: { limit: 200, status: 'Active' } });
-          if (!cancelled && usersRes.data?.success) {
-            setUsers(usersRes.data.data || []);
-          }
-        } else {
-          const data = await fetchAssignableUsers();
-          if (!cancelled && data?.success) {
-            setUsers(data.data || []);
-          }
-        }
-      } catch (err) {
-        const status = err.response?.status;
-        if (status === 404) {
-          showToast?.('Restart the API server (port 5000) to load territory user lookup.', 'error');
-        }
-        /* Assignable users are optional; territory rows still include assigned names */
+        /* optional for BM */
       }
     }
-    loadLookups();
+    loadBranches();
     return () => { cancelled = true; };
-  }, []);
+  }, [canListAllBranches]);
 
   useEffect(() => {
-    const onDocClick = (event) => {
-      if (searchRef.current && !searchRef.current.contains(event.target)) {
-        setBranchSuggestionsOpen(false);
-      }
-      if (branchFieldRef.current && !branchFieldRef.current.contains(event.target)) {
-        setBranchMenuOpen(false);
-      }
-      if (userFieldRef.current && !userFieldRef.current.contains(event.target)) {
-        setUserMenuOpen(false);
-      }
+    const branchId = form.branch_id || lockedBranchId;
+    loadStaffForBranch(branchId);
+  }, [form.branch_id, lockedBranchId]);
+
+  const filtered = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    return (territories || []).filter((row) => {
+      if (statusFilter !== 'all' && String(row.status || 'Active') !== statusFilter) return false;
+      if (!q) return true;
+      const hay = [
+        row.territory_name,
+        row.branch_name,
+        row.default_sales_agent_name,
+        row.default_collector_name,
+        row.coverage_area,
+      ].map((v) => String(v || '').toLowerCase()).join(' ');
+      return hay.includes(q);
+    });
+  }, [territories, search, statusFilter]);
+
+  const pagination = usePagination(filtered);
+
+  const formBranchId = Number(form.branch_id || lockedBranchId) || null;
+  const hasPin = Number.isFinite(Number(form.latitude)) && Number.isFinite(Number(form.longitude));
+  const mapCenter = hasPin ? [Number(form.latitude), Number(form.longitude)] : DEFAULT_CENTER;
+  const mapMarkers = hasPin
+    ? [{ id: 'territory-pin', position: mapCenter, label: 'T', color: '#1A4162', popup: form.territory_name || 'Territory center' }]
+    : [];
+  const mapCircles = hasPin
+    ? [{
+      id: 'territory-radius',
+      center: mapCenter,
+      radius: Number(form.radius_meters) || DEFAULT_RADIUS,
+      color: '#1A4162',
+      fillOpacity: 0.14,
+      popup: 'Approximate Territory Coverage',
+    }]
+    : [];
+
+  function openCreate() {
+    setEditing(null);
+    setErrors({});
+    setForm(emptyForm(lockedBranchId || branchFilter || ''));
+    setShowForm(true);
+  }
+
+  function openEdit(row) {
+    setEditing(row);
+    setErrors({});
+    setForm({
+      territory_name: row.territory_name || '',
+      branch_id: row.branch_id || '',
+      status: row.status || 'Active',
+      notes: row.coverage_area || '',
+      latitude: row.latitude != null ? String(row.latitude) : '',
+      longitude: row.longitude != null ? String(row.longitude) : '',
+      radius_meters: String(row.radius_meters || DEFAULT_RADIUS),
+      default_sales_agent_id: row.default_sales_agent_id != null ? String(row.default_sales_agent_id) : '',
+      default_collector_id: row.default_collector_id != null ? String(row.default_collector_id) : '',
+    });
+    setShowForm(true);
+  }
+
+  function validateClient() {
+    const next = {};
+    if (!String(form.territory_name || '').trim()) next.territory_name = 'Required';
+    const branchId = lockedBranchId || form.branch_id;
+    if (!branchId) next.branch_id = 'Required';
+    if (form.status === 'Active') {
+      if (!Number.isFinite(Number(form.latitude))) next.latitude = 'Required for Active territories';
+      if (!Number.isFinite(Number(form.longitude))) next.longitude = 'Required for Active territories';
+      if (!form.default_sales_agent_id) next.default_sales_agent_id = 'Required for Active territories';
+      if (!form.default_collector_id) next.default_collector_id = 'Required for Active territories';
+    }
+    const radius = Number(form.radius_meters);
+    if (!Number.isFinite(radius) || radius < 100 || radius > 20000) {
+      next.radius_meters = 'Radius must be 100–20000 meters';
+    }
+    setErrors(next);
+    return Object.keys(next).length === 0;
+  }
+
+  async function handleSubmit() {
+    if (!validateClient()) {
+      showToast?.('Complete the required territory fields.', 'error');
+      return;
+    }
+    const payload = {
+      territory_name: form.territory_name.trim(),
+      branch_id: Number(lockedBranchId || form.branch_id),
+      status: form.status,
+      notes: form.notes.trim() || null,
+      coverage_area: form.notes.trim() || null,
+      latitude: form.latitude === '' ? null : Number(form.latitude),
+      longitude: form.longitude === '' ? null : Number(form.longitude),
+      radius_meters: Number(form.radius_meters) || DEFAULT_RADIUS,
+      default_sales_agent_id: form.default_sales_agent_id ? Number(form.default_sales_agent_id) : null,
+      default_collector_id: form.default_collector_id ? Number(form.default_collector_id) : null,
     };
-    document.addEventListener('mousedown', onDocClick);
-    return () => document.removeEventListener('mousedown', onDocClick);
-  }, []);
 
-  const branchOptions = useMemo(() => {
-    const map = new Map();
-    branches.forEach((b) => {
-      const id = getBranchId(b);
-      const name = getBranchLabel(b);
-      if (id != null && name) map.set(String(id), { branch_id: Number(id), branch_name: name });
-    });
-    territories.forEach((t) => {
-      if (t.branch_id == null) return;
-      const key = String(t.branch_id);
-      if (!map.has(key) && t.branch_name) {
-        map.set(key, { branch_id: Number(t.branch_id), branch_name: t.branch_name });
-      }
-    });
-    return [...map.values()].sort((a, b) => a.branch_name.localeCompare(b.branch_name));
-  }, [branches, territories]);
-
-  const branchNameSuggestions = useMemo(() => {
-    const query = search.trim().toLowerCase();
-    const names = branchOptions.map((b) => b.branch_name);
-    if (!query) return names.slice(0, 8);
-    return names.filter((name) => name.toLowerCase().includes(query)).slice(0, 8);
-  }, [branchOptions, search]);
-
-  const filteredTerritories = useMemo(() => {
-    const query = search.trim().toLowerCase();
-    if (!query) return territories;
-    return territories.filter((t) => {
-      const branch = String(t.branch_name || '').toLowerCase();
-      const territory = String(t.territory_name || '').toLowerCase();
-      const coverage = String(t.coverage_area || '').toLowerCase();
-      return branch.includes(query) || territory.includes(query) || coverage.includes(query);
-    });
-  }, [territories, search]);
-
-  const pagination = usePagination(filteredTerritories);
-  const paginatedTerritories = pagination.paginatedData;
-
-  const formBranchSuggestions = useMemo(() => {
-    const query = branchQuery.trim().toLowerCase();
-    if (!query) return branchOptions.slice(0, 8);
-    return branchOptions
-      .filter((b) => b.branch_name.toLowerCase().includes(query))
-      .slice(0, 8);
-  }, [branchOptions, branchQuery]);
-
-  const assignableUsers = useMemo(() => {
-    const map = new Map();
-    users.forEach((u) => {
-      const id = u.user_id ?? u.id;
-      const name = formatPersonName(u);
-      if (id == null || !name) return;
-      map.set(String(id), {
-        user_id: Number(id),
-        user_name: name,
-        role_name: u.role?.name || u.role_name || '—',
-      });
-    });
-    territories.forEach((t) => {
-      getAssignedUsers(t).forEach((u) => {
-        const id = u.user_id;
-        const name = formatPersonName(u);
-        if (id == null || !name || map.has(String(id))) return;
-        map.set(String(id), {
-          user_id: Number(id),
-          user_name: name,
-          role_name: u.role_name || '—',
-        });
-      });
-    });
-    return [...map.values()].sort((a, b) => a.user_name.localeCompare(b.user_name));
-  }, [users, territories]);
-
-  const userSuggestions = useMemo(() => {
-    const query = userQuery.trim().toLowerCase();
-    const selectedIds = new Set(selectedUsers.map((u) => String(u.user_id)));
-    return assignableUsers
-      .filter((u) => !selectedIds.has(String(u.user_id)))
-      .filter((u) => !query || u.user_name.toLowerCase().includes(query) || String(u.role_name || '').toLowerCase().includes(query))
-      .slice(0, 8);
-  }, [assignableUsers, selectedUsers, userQuery]);
-
-  const handleAdd = () => {
-    setForm({
-      territory_name: '',
-      branch_id: isBranchManager ? userBranchId : '',
-      coverage_area: '',
-    });
-    setBranchQuery(isBranchManager
-      ? (branchOptions.find((b) => Number(b.branch_id) === Number(userBranchId))?.branch_name || '')
-      : '');
-    setSelectedUsers([]);
-    setUserQuery('');
-    setEditing(null);
-    setErrors({});
-    setShowForm(true);
-  };
-
-  const handleEdit = (t) => {
-    const assigned = getAssignedUsers(t)
-      .map((u) => ({
-        user_id: Number(u.user_id),
-        user_name: formatPersonName(u) || 'Unnamed user',
-        role_name: u.role_name || '—',
-      }))
-      .filter((u) => Number.isFinite(u.user_id));
-
-    setForm({
-      territory_name: t.territory_name,
-      branch_id: t.branch_id,
-      coverage_area: t.coverage_area || '',
-    });
-    setBranchQuery(t.branch_name || '');
-    setSelectedUsers(assigned);
-    setUserQuery('');
-    setEditing(t);
-    setErrors({});
-    setShowForm(true);
-  };
-
-  const closeForm = () => {
-    if (submitting) return;
-    setShowForm(false);
-    setEditing(null);
-    setErrors({});
-    setBranchMenuOpen(false);
-    setUserMenuOpen(false);
-  };
-
-  const updateFormField = (field, value) => {
-    setForm((current) => ({ ...current, [field]: value }));
-    setErrors((current) => {
-      if (!current[field] && !current.submit) return current;
-      const next = { ...current };
-      delete next[field];
-      delete next.submit;
-      return next;
-    });
-  };
-
-  const selectBranch = (branch) => {
-    updateFormField('branch_id', String(branch.branch_id));
-    setBranchQuery(branch.branch_name);
-    setBranchMenuOpen(false);
-  };
-
-  const resolveBranchFromQuery = (queryValue = branchQuery) => {
-    const query = String(queryValue || '').trim().toLowerCase();
-    if (!query) return null;
-    const exact = branchOptions.find((b) => b.branch_name.toLowerCase() === query);
-    return exact || null;
-  };
-
-  const addAssignedUser = (user) => {
-    setSelectedUsers((current) => {
-      if (current.some((u) => Number(u.user_id) === Number(user.user_id))) return current;
-      return [...current, user];
-    });
-    setUserQuery('');
-    setUserMenuOpen(false);
-    setErrors((current) => {
-      if (!current.assigned_users && !current.submit) return current;
-      const next = { ...current };
-      delete next.assigned_users;
-      delete next.submit;
-      return next;
-    });
-  };
-
-  const removeAssignedUser = (userId) => {
-    setSelectedUsers((current) => current.filter((u) => Number(u.user_id) !== Number(userId)));
-  };
-
-  const validateForm = () => {
-    const nextErrors = {};
-    const territoryName = form.territory_name.trim();
-    const matchedBranch = !isBranchManager ? resolveBranchFromQuery() : null;
-    const branchId = isBranchManager ? form.branch_id : (matchedBranch?.branch_id || form.branch_id);
-
-    if (!territoryName) {
-      nextErrors.territory_name = 'Territory name is required.';
-    }
-
-    if (!isBranchManager && !branchId) {
-      nextErrors.branch_id = 'Select a branch by name.';
-    } else if (!isBranchManager && (!Number.isInteger(Number(branchId)) || Number(branchId) <= 0)) {
-      nextErrors.branch_id = 'Select a valid branch from the suggestions.';
-    }
-
-    setErrors(nextErrors);
-    return Object.keys(nextErrors).length === 0 ? { branchId } : null;
-  };
-
-  const handleArchive = async (id) => {
-    if (!window.confirm('Archive this territory? The record is preserved. Related customer history is not removed.')) return;
+    setSubmitting(true);
     try {
-      await deleteTerritory(id);
-      showToast('Territory archived successfully', 'success');
-      loadTerritories();
-    } catch (err) {
-      showToast(err.response?.data?.message || 'Failed to archive territory', 'error');
-    }
-  };
-
-  const handleSubmit = async (e) => {
-    e.preventDefault();
-    const validation = validateForm();
-    if (!validation) return;
-
-    try {
-      setSubmitting(true);
-      const payload = {
-        territory_name: form.territory_name.trim(),
-        branch_id: Number(validation.branchId),
-        coverage_area: form.coverage_area.trim(),
-        assigned_users: selectedUsers.map((u) => u.user_id),
-      };
-      if (editing) {
-        await updateTerritory(editing.territory_id, payload);
-        showToast('Territory updated successfully', 'success');
-      } else {
-        await createTerritory(payload);
-        showToast('Territory created successfully', 'success');
+      const result = editing
+        ? await updateTerritory(editing.territory_id, payload)
+        : await createTerritory(payload);
+      if (!result.success) {
+        showToast?.(result.message || 'Failed to save territory.', 'error');
+        return;
       }
+      showToast?.(result.message || (editing ? 'Territory updated.' : 'Territory created.'), 'success');
       setShowForm(false);
       setEditing(null);
-      setErrors({});
-      loadTerritories();
+      await loadTerritories();
     } catch (err) {
-      const message = err.response?.data?.message || 'Failed to save territory.';
-      setErrors({ submit: message });
-      showToast(message, 'error');
+      showToast?.(err.response?.data?.message || 'Failed to save territory.', 'error');
     } finally {
       setSubmitting(false);
     }
-  };
+  }
 
-  const applyBranchSuggestion = (name) => {
-    setSearch(name);
-    setBranchSuggestionsOpen(false);
-  };
+  async function handleDeactivate(row) {
+    if (!window.confirm(`Deactivate “${row.territory_name}”? It will leave historical records intact but cannot receive new assignments.`)) {
+      return;
+    }
+    try {
+      const result = await deleteTerritory(row.territory_id);
+      if (!result.success) {
+        showToast?.(result.message || 'Failed to deactivate territory.', 'error');
+        return;
+      }
+      showToast?.(result.message || 'Territory deactivated.', 'success');
+      await loadTerritories();
+    } catch (err) {
+      showToast?.(err.response?.data?.message || 'Failed to deactivate territory.', 'error');
+    }
+  }
+
+  function openCustomers(row) {
+    if (!navigate || !opsBase) return;
+    navigate(`${opsBase}/customers?territory=${encodeURIComponent(row.territory_id)}`);
+  }
 
   return (
     <div className="page">
-      <section className="panel content-panel relative overflow-hidden">
+      <section className="panel content-panel relative overflow-hidden mb-4">
         <div className="list-section-header">
-          <h3>Territories</h3>
-        </div>
-        <div className="list-section-toolbar">
-          <p className="list-section-subtitle">Manage sales territories and coverage areas</p>
-          <div className="list-section-actions territory-toolbar-actions">
-            <div className="search-bar territory-branch-search" ref={searchRef}>
-              <NavIcon name="search" />
-              <input
-                className="search-input"
-                type="search"
-                placeholder="Search by branch name..."
-                value={search}
-                onChange={(e) => {
-                  setSearch(e.target.value);
-                  setBranchSuggestionsOpen(true);
-                }}
-                onFocus={() => setBranchSuggestionsOpen(true)}
-                aria-label="Search territories by branch name"
-                aria-autocomplete="list"
-                aria-expanded={branchSuggestionsOpen && branchNameSuggestions.length > 0}
-                autoComplete="off"
-              />
-              {branchSuggestionsOpen && branchNameSuggestions.length > 0 ? (
-                <ul className="search-suggestions" role="listbox">
-                  {branchNameSuggestions.map((name) => (
-                    <li key={name} role="option">
-                      <button
-                        type="button"
-                        className="search-suggestion-item"
-                        onMouseDown={(e) => e.preventDefault()}
-                        onClick={() => applyBranchSuggestion(name)}
-                      >
-                        <NavIcon name="search" />
-                        <span>{name}</span>
-                      </button>
-                    </li>
-                  ))}
-                </ul>
-              ) : null}
-            </div>
-            <button className="button" type="button" onClick={handleAdd}>Add Territory</button>
+          <div>
+            <h3>Branch Territories</h3>
+            <p className="muted" style={{ marginTop: 4, marginBottom: 0 }}>
+              Define your branch&apos;s permanent coverage zones and their assigned Sales Agents and Collectors.
+            </p>
           </div>
+          <button className="button" type="button" onClick={openCreate}>
+            New Territory
+          </button>
         </div>
 
-        <div className="corvex-table-wrapper">
-          <table className="corvex-table">
-            <thead>
-              <tr>
-                <th>ID</th>
-                <th>Territory Name</th>
-                <th>Branch</th>
-                <th>Assigned User</th>
-                <th>Role</th>
-                <th>Coverage Area</th>
-                <th>Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {loading ? (
-                <tr><td colSpan="7" style={{ textAlign: 'center' }}>Loading...</td></tr>
-              ) : filteredTerritories.length === 0 ? (
-                <tr><td colSpan="7" style={{ textAlign: 'center' }}><EmptyState title="No territories found" /></td></tr>
-              ) : (
-                paginatedTerritories.map((t) => {
-                  const assigned = getAssignedUsers(t);
-                  return (
-                    <tr key={t.territory_id}>
-                      <td>{t.territory_id}</td>
-                      <td>{t.territory_name}</td>
-                      <td>{t.branch_name || `Branch #${t.branch_id}`}</td>
-                      <td>
-                        {assigned.length > 0 ? (
-                          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px' }}>
-                            {assigned.map((u) => {
-                              const name = formatPersonName(u);
-                              return (
-                                <span key={u.user_id || name} className="text-blue font-medium text-xs">
-                                  {name || 'Unnamed user'}
-                                </span>
-                              );
-                            })}
-                          </div>
-                        ) : (
-                          <span className="text-ink/50">Unassigned</span>
-                        )}
-                      </td>
-                      <td>
-                        {assigned.length > 0 ? (
-                          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px' }}>
-                            {assigned.map((u) => (
-                              <span key={`role-${u.user_id}`} className="text-xs">
-                                {u.role_name || '—'}
-                              </span>
-                            ))}
-                          </div>
-                        ) : (
-                          <span className="text-ink/50">—</span>
-                        )}
-                      </td>
-                      <td>{t.coverage_area || '—'}</td>
-                      <td className="table-actions">
-                        <button className="icon-action-button" type="button" title="Edit" onClick={() => handleEdit(t)}>
-                          <NavIcon name="edit" />
-                        </button>
-                        <button className="icon-action-button danger" type="button" title="Archive" onClick={() => handleArchive(t.territory_id)}>
-                          <NavIcon name="archive" />
-                        </button>
-                      </td>
-                    </tr>
-                  );
-                })
-              )}
-            </tbody>
-          </table>
+        <div className="list-section-controls" style={{ flexWrap: 'wrap', gap: 8 }}>
+          <input
+            className="filter-input"
+            type="search"
+            placeholder="Search territory, staff, notes…"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+          />
+          <select
+            className="filter-select"
+            value={statusFilter}
+            onChange={(e) => setStatusFilter(e.target.value)}
+            aria-label="Status filter"
+          >
+            <option value="all">All statuses</option>
+            <option value="Active">Active</option>
+            <option value="Inactive">Inactive</option>
+          </select>
+          {canListAllBranches ? (
+            <select
+              className="filter-select"
+              value={branchFilter}
+              onChange={(e) => setBranchFilter(e.target.value)}
+              aria-label="Branch filter"
+            >
+              <option value="">All branches</option>
+              {branches.map((branch) => (
+                <option key={getBranchId(branch)} value={getBranchId(branch)}>
+                  {getBranchLabel(branch)}
+                </option>
+              ))}
+            </select>
+          ) : null}
         </div>
-        <Pagination {...pagination} />
       </section>
 
-      {showForm && (
-        <div className="modal-overlay" onClick={closeForm}>
-          <div
-            className="modal-content"
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="territory-form-title"
-            onClick={(e) => e.stopPropagation()}
-            style={{ maxWidth: 500 }}
-          >
-            <h3 id="territory-form-title">{editing ? 'Edit Territory' : 'Add Territory'}</h3>
-            <form onSubmit={handleSubmit} noValidate>
-              <div className="form-group">
-                <label htmlFor="territory-name">Territory Name <span aria-hidden="true">*</span></label>
+      {showForm ? (
+        <section className="panel content-panel relative overflow-hidden mb-4">
+          <div className="list-section-header">
+            <div>
+              <h3>{editing ? 'Edit Territory' : 'Create Territory'}</h3>
+              <p className="muted" style={{ marginTop: 4 }}>
+                Permanent coverage zone — not a daily dispatch schedule.
+              </p>
+            </div>
+            <button className="button secondary" type="button" onClick={() => setShowForm(false)}>Cancel</button>
+          </div>
+
+          <h4 className="subsection-title">Territory Information</h4>
+          <div className="account-detail-grid two-up">
+            <div className="form-group">
+              <label htmlFor="terr-name">Territory Name *</label>
+              <input
+                id="terr-name"
+                value={form.territory_name}
+                onChange={(e) => setForm((prev) => ({ ...prev, territory_name: e.target.value }))}
+              />
+              {errors.territory_name ? <p className="form-error">{errors.territory_name}</p> : null}
+            </div>
+            <div className="form-group">
+              <label htmlFor="terr-branch">Branch *</label>
+              {isBranchManager ? (
                 <input
-                  id="territory-name"
-                  type="text"
-                  value={form.territory_name}
-                  onChange={(e) => updateFormField('territory_name', e.target.value)}
-                  placeholder="e.g. North District"
-                  aria-invalid={Boolean(errors.territory_name)}
-                  aria-describedby={errors.territory_name ? 'territory-name-error' : undefined}
-                  autoFocus
+                  id="terr-branch"
+                  value={currentUser?.branch?.name || `Branch #${userBranchId}`}
+                  disabled
                 />
-                {errors.territory_name && <p id="territory-name-error" className="form-error">{errors.territory_name}</p>}
-              </div>
-
-              {!isBranchManager && (
-                <div className="form-group" ref={branchFieldRef}>
-                  <label htmlFor="territory-branch">Branch <span aria-hidden="true">*</span></label>
-                  <div className="search-bar territory-inline-search">
-                    <NavIcon name="search" />
-                    <input
-                      id="territory-branch"
-                      className="search-input"
-                      type="text"
-                      value={branchQuery}
-                      onChange={(e) => {
-                        setBranchQuery(e.target.value);
-                        updateFormField('branch_id', '');
-                        setBranchMenuOpen(true);
-                      }}
-                      onFocus={() => setBranchMenuOpen(true)}
-                      placeholder="Search by branch name..."
-                      aria-invalid={Boolean(errors.branch_id)}
-                      aria-describedby={errors.branch_id ? 'territory-branch-error' : undefined}
-                      aria-autocomplete="list"
-                      autoComplete="off"
-                    />
-                    {branchMenuOpen && formBranchSuggestions.length > 0 ? (
-                      <ul className="search-suggestions" role="listbox">
-                        {formBranchSuggestions.map((branch) => (
-                          <li key={branch.branch_id} role="option">
-                            <button
-                              type="button"
-                              className="search-suggestion-item"
-                              onMouseDown={(e) => e.preventDefault()}
-                              onClick={() => selectBranch(branch)}
-                            >
-                              <span>{branch.branch_name}</span>
-                            </button>
-                          </li>
-                        ))}
-                      </ul>
-                    ) : null}
-                  </div>
-                  {errors.branch_id && <p id="territory-branch-error" className="form-error">{errors.branch_id}</p>}
-                </div>
+              ) : (
+                <select
+                  id="terr-branch"
+                  className="filter-select"
+                  value={form.branch_id}
+                  onChange={(e) => setForm((prev) => ({
+                    ...prev,
+                    branch_id: e.target.value,
+                    default_sales_agent_id: '',
+                    default_collector_id: '',
+                  }))}
+                >
+                  <option value="">Select branch</option>
+                  {branches.map((branch) => (
+                    <option key={getBranchId(branch)} value={getBranchId(branch)}>
+                      {getBranchLabel(branch)}
+                    </option>
+                  ))}
+                </select>
               )}
+              {errors.branch_id ? <p className="form-error">{errors.branch_id}</p> : null}
+            </div>
+            <div className="form-group">
+              <label htmlFor="terr-status">Status *</label>
+              <select
+                id="terr-status"
+                className="filter-select"
+                value={form.status}
+                onChange={(e) => setForm((prev) => ({ ...prev, status: e.target.value }))}
+              >
+                <option value="Active">Active</option>
+                <option value="Inactive">Inactive</option>
+              </select>
+            </div>
+            <div className="form-group">
+              <label htmlFor="terr-notes">Notes</label>
+              <textarea
+                id="terr-notes"
+                rows={2}
+                value={form.notes}
+                onChange={(e) => setForm((prev) => ({ ...prev, notes: e.target.value }))}
+                placeholder="Operational instructions for this coverage zone"
+              />
+            </div>
+          </div>
 
-              <div className="form-group" ref={userFieldRef}>
-                <label htmlFor="territory-users">Assigned User (Optional)</label>
-                {selectedUsers.length > 0 ? (
-                  <div className="territory-user-chips">
-                    {selectedUsers.map((u) => (
-                      <span key={u.user_id} className="territory-user-chip">
-                        {u.user_name}
-                        <button
-                          type="button"
-                          className="territory-user-chip-remove"
-                          aria-label={`Remove ${u.user_name}`}
-                          onClick={() => removeAssignedUser(u.user_id)}
-                        >
-                          ×
-                        </button>
-                      </span>
-                    ))}
-                  </div>
-                ) : null}
-                <div className="search-bar territory-inline-search">
-                  <NavIcon name="search" />
-                  <input
-                    id="territory-users"
-                    className="search-input"
-                    type="text"
-                    value={userQuery}
-                    onChange={(e) => {
-                      setUserQuery(e.target.value);
-                      setUserMenuOpen(true);
-                    }}
-                    onFocus={() => setUserMenuOpen(true)}
-                    placeholder="Search by user name..."
-                    aria-invalid={Boolean(errors.assigned_users)}
-                    aria-describedby={errors.assigned_users ? 'territory-users-error' : undefined}
-                    aria-autocomplete="list"
-                    autoComplete="off"
-                  />
-                  {userMenuOpen && userSuggestions.length > 0 ? (
-                    <ul className="search-suggestions" role="listbox">
-                      {userSuggestions.map((user) => (
-                        <li key={user.user_id} role="option">
+          <h4 className="subsection-title">Geographic Coverage</h4>
+          <p className="muted" style={{ marginTop: 0 }}>
+            Click the map to set the territory center. The circle is approximate operational coverage — not a surveyed boundary.
+          </p>
+          <div style={{ height: 320, marginBottom: 12, borderRadius: 8, overflow: 'hidden' }}>
+            <LeafletMap
+              center={mapCenter}
+              zoom={hasPin ? 14 : 12}
+              markers={mapMarkers}
+              circles={mapCircles}
+              onMapClick={({ lat, lng }) => {
+                setForm((prev) => ({
+                  ...prev,
+                  latitude: String(Number(lat.toFixed(7))),
+                  longitude: String(Number(lng.toFixed(7))),
+                }));
+              }}
+            />
+          </div>
+          <div className="account-detail-grid two-up">
+            <div className="form-group">
+              <label htmlFor="terr-lat">Latitude *</label>
+              <input
+                id="terr-lat"
+                value={form.latitude}
+                onChange={(e) => setForm((prev) => ({ ...prev, latitude: e.target.value }))}
+              />
+              {errors.latitude ? <p className="form-error">{errors.latitude}</p> : null}
+            </div>
+            <div className="form-group">
+              <label htmlFor="terr-lng">Longitude *</label>
+              <input
+                id="terr-lng"
+                value={form.longitude}
+                onChange={(e) => setForm((prev) => ({ ...prev, longitude: e.target.value }))}
+              />
+              {errors.longitude ? <p className="form-error">{errors.longitude}</p> : null}
+            </div>
+            <div className="form-group">
+              <label htmlFor="terr-radius">Coverage Radius (meters) *</label>
+              <input
+                id="terr-radius"
+                type="number"
+                min={100}
+                max={20000}
+                step={50}
+                value={form.radius_meters}
+                onChange={(e) => setForm((prev) => ({ ...prev, radius_meters: e.target.value }))}
+              />
+              {errors.radius_meters ? <p className="form-error">{errors.radius_meters}</p> : null}
+            </div>
+          </div>
+
+          <h4 className="subsection-title">Default Personnel</h4>
+          <div className="account-detail-grid two-up">
+            <div className="form-group">
+              <label htmlFor="terr-sa">Default Sales Agent *</label>
+              <select
+                id="terr-sa"
+                className="filter-select"
+                value={form.default_sales_agent_id}
+                onChange={(e) => setForm((prev) => ({ ...prev, default_sales_agent_id: e.target.value }))}
+                disabled={!formBranchId}
+              >
+                <option value="">Select Sales Agent</option>
+                {salesAgents.map((user) => (
+                  <option key={user.user_id} value={user.user_id}>
+                    {formatPersonName(user) || `User #${user.user_id}`}
+                  </option>
+                ))}
+              </select>
+              {errors.default_sales_agent_id ? <p className="form-error">{errors.default_sales_agent_id}</p> : null}
+            </div>
+            <div className="form-group">
+              <label htmlFor="terr-col">Default Collector *</label>
+              <select
+                id="terr-col"
+                className="filter-select"
+                value={form.default_collector_id}
+                onChange={(e) => setForm((prev) => ({ ...prev, default_collector_id: e.target.value }))}
+                disabled={!formBranchId}
+              >
+                <option value="">Select Collector</option>
+                {collectors.map((user) => (
+                  <option key={user.user_id} value={user.user_id}>
+                    {formatPersonName(user) || `User #${user.user_id}`}
+                  </option>
+                ))}
+              </select>
+              {errors.default_collector_id ? <p className="form-error">{errors.default_collector_id}</p> : null}
+            </div>
+          </div>
+
+          <div className="flex gap-2" style={{ marginTop: 16 }}>
+            <button className="button" type="button" disabled={submitting} onClick={handleSubmit}>
+              {submitting ? 'Saving…' : (editing ? 'Save Changes' : 'Create Territory')}
+            </button>
+            <button className="button secondary" type="button" onClick={() => setShowForm(false)}>Cancel</button>
+          </div>
+        </section>
+      ) : null}
+
+      <section className="panel content-panel relative overflow-hidden">
+        {loading ? (
+          <p className="muted">Loading territories…</p>
+        ) : !filtered.length ? (
+          <EmptyState
+            title="No territories found"
+            description="Create an Active territory with a map pin, coverage radius, and default Sales Agent / Collector."
+            actionLabel="New Territory"
+            onAction={openCreate}
+          />
+        ) : (
+          <>
+            <div className="corvex-table-wrapper">
+              <table className="corvex-table">
+                <thead>
+                  <tr>
+                    <th>Territory</th>
+                    {canListAllBranches ? <th>Branch</th> : null}
+                    <th>Default Sales Agent</th>
+                    <th>Default Collector</th>
+                    <th>Customers</th>
+                    <th>Coverage</th>
+                    <th>Map Location</th>
+                    <th>Status</th>
+                    <th>Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {pagination.paginatedData.map((row) => (
+                    <tr key={row.territory_id}>
+                      <td>
+                        <strong>{row.territory_name}</strong>
+                        {row.coverage_area ? (
+                          <div className="text-ink/70" style={{ fontSize: '0.85rem' }}>{row.coverage_area}</div>
+                        ) : null}
+                      </td>
+                      {canListAllBranches ? <td>{row.branch_name || '—'}</td> : null}
+                      <td>{row.default_sales_agent_name || '—'}</td>
+                      <td>{row.default_collector_name || '—'}</td>
+                      <td>
+                        {navigate && opsBase ? (
                           <button
                             type="button"
-                            className="search-suggestion-item"
-                            onMouseDown={(e) => e.preventDefault()}
-                            onClick={() => addAssignedUser(user)}
+                            className="button ghost"
+                            style={{ padding: 0 }}
+                            onClick={() => openCustomers(row)}
                           >
-                            <span>{user.user_name}</span>
-                            <span className="search-suggestion-meta">{user.role_name}</span>
+                            {row.customer_count ?? 0}
                           </button>
-                        </li>
-                      ))}
-                    </ul>
-                  ) : null}
-                </div>
-                {errors.assigned_users && <p id="territory-users-error" className="form-error">{errors.assigned_users}</p>}
-              </div>
-
-              <div className="form-group">
-                <label htmlFor="territory-coverage">Coverage Area (Optional)</label>
-                <textarea
-                  id="territory-coverage"
-                  value={form.coverage_area}
-                  onChange={(e) => updateFormField('coverage_area', e.target.value)}
-                  placeholder="e.g. Specific barangays or zip codes"
-                  rows={3}
-                />
-              </div>
-
-              {errors.submit && <p className="form-error" role="alert">{errors.submit}</p>}
-
-              <div className="modal-actions">
-                <button type="button" className="button ghost" onClick={closeForm} disabled={submitting}>Cancel</button>
-                <button type="submit" className="button" disabled={submitting}>
-                  {submitting ? 'Saving...' : editing ? 'Save Changes' : 'Add Territory'}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
+                        ) : (row.customer_count ?? 0)}
+                      </td>
+                      <td>{row.radius_meters ? `${row.radius_meters} m` : '—'}</td>
+                      <td>{row.map_location || (row.latitude != null ? 'Pin Set' : 'Missing')}</td>
+                      <td><StatusBadge status={row.status || 'Active'} /></td>
+                      <td>
+                        <div className="flex flex-wrap gap-2">
+                          <button className="button secondary" type="button" onClick={() => openEdit(row)}>Edit</button>
+                          {String(row.status || 'Active') === 'Active' ? (
+                            <button className="button ghost" type="button" onClick={() => handleDeactivate(row)}>
+                              Deactivate
+                            </button>
+                          ) : null}
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <Pagination {...pagination} />
+          </>
+        )}
+      </section>
     </div>
   );
 }

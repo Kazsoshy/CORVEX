@@ -58,7 +58,7 @@ export function summarizeChanges(before = {}, after = {}, fields = []) {
 
 function actorFromReq(req) {
   const u = req?.currentUser;
-  if (!u) return { userId: null, userName: null, roleName: null };
+  if (!u) return { userId: null, userName: null, roleName: null, branchId: null };
   const name = u.fullName || u.full_name
     || [u.first_name, u.last_name].filter(Boolean).join(' ')
     || u.email
@@ -67,6 +67,7 @@ function actorFromReq(req) {
     userId: u.id ?? null,
     userName: name,
     roleName: u.roleName || u.role_name || u.role?.name || null,
+    branchId: u.branchId ?? u.branch_id ?? null,
   };
 }
 
@@ -125,6 +126,7 @@ export async function writeAuditLog(db, entry = {}) {
     status = AUDIT_STATUS.SUCCESS,
     ipAddress = 'unknown',
     affectedRecord = null,
+    branchId = null,
     req = null,
   } = entry;
 
@@ -146,15 +148,19 @@ export async function writeAuditLog(db, entry = {}) {
   const finalDesc = String(description || '').slice(0, 2000);
   const legacyDetail = finalDesc.slice(0, 500) || finalStatus;
   const finalModule = module ? String(module).slice(0, 100) : 'System';
+  const rawBranch = branchId ?? actor?.branchId ?? null;
+  const finalBranchId = Number.isFinite(Number(rawBranch)) && Number(rawBranch) > 0
+    ? Number(rawBranch)
+    : null;
 
   try {
     await db.query(
       `INSERT INTO audit_logs (
          user_id, user_name, action, ip_address, status_details,
-         role_name, module, activity, description, status, affected_record
+         role_name, module, activity, description, status, affected_record, branch_id
        ) VALUES (
          $1, $2, $3, $4, $5,
-         $6, $7, $8, $9, $10, $11
+         $6, $7, $8, $9, $10, $11, $12
        )`,
       [
         finalUserId,
@@ -168,10 +174,42 @@ export async function writeAuditLog(db, entry = {}) {
         finalDesc || null,
         finalStatus,
         affectedRecord ? String(affectedRecord).slice(0, 200) : null,
+        finalBranchId,
       ]
     );
   } catch (err) {
     if (err.code === '42703') {
+      // Fall back if branch_id (or enrichment) columns are missing.
+      try {
+        await db.query(
+          `INSERT INTO audit_logs (
+             user_id, user_name, action, ip_address, status_details,
+             role_name, module, activity, description, status, affected_record
+           ) VALUES (
+             $1, $2, $3, $4, $5,
+             $6, $7, $8, $9, $10, $11
+           )`,
+          [
+            finalUserId,
+            finalUserName,
+            finalAction,
+            finalIp,
+            legacyDetail,
+            finalRole,
+            finalModule,
+            finalActivity,
+            finalDesc || null,
+            finalStatus,
+            affectedRecord ? String(affectedRecord).slice(0, 200) : null,
+          ]
+        );
+        return;
+      } catch (enrichedFallbackErr) {
+        if (enrichedFallbackErr.code !== '42703') {
+          console.error('[AuditLog] enriched fallback failed:', enrichedFallbackErr.message);
+          return;
+        }
+      }
       try {
         await db.query(
           `INSERT INTO audit_logs (user_id, user_name, action, ip_address, status_details)

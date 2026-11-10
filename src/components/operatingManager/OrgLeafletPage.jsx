@@ -9,31 +9,19 @@ import { NavIcon } from '../../navIcons';
 import { getBranchMap, getSawMapRoads } from '../../api/branchManagerService.js';
 import { formatCurrency, formatDisplayDate } from '../../utils/formatters.js';
 import {
-  LAYER_OPTIONS,
+  MAP_MODES,
   PERIOD_OPTIONS,
+  STAFF_TYPE_OPTIONS,
+  STANDING_OPTIONS,
   buildBranchLeafletView,
-  defaultLayersForPage,
+  defaultModeForPage,
   hasCoords,
   manilaMapDate,
 } from '../../utils/branchLeafletLayers.js';
 
-const STAFF_TYPE_OPTIONS = [
-  { value: 'all', label: 'All Roles' },
-  { value: 'collectors', label: 'Collectors' },
-  { value: 'sales', label: 'Sales Agents' },
-];
-
-const PAYMENT_OPTIONS = [
-  { value: 'all', label: 'All Accounts' },
-  { value: 'Overdue', label: 'Overdue Only' },
-  { value: 'Current', label: 'Current Only' },
-];
-
 function titleForPage(pageType) {
-  if (pageType === 'leafletDelinquency') return 'Delinquency Heatmap';
-  if (pageType === 'leafletProfitability') return 'Profitability Analysis';
-  if (pageType === 'leafletTerritory') return 'Territory Analysis';
-  return 'Enterprise Map Intelligence';
+  if (pageType === 'leafletTerritory') return 'Coverage Map';
+  return 'Organization Field Map';
 }
 
 export function OrgLeafletPage({
@@ -42,22 +30,22 @@ export function OrgLeafletPage({
   showToast,
 }) {
   const opsBase = '/operating-manager/operations';
-  const [period, setPeriod] = useState('month');
+  const [period, setPeriod] = useState('today');
   const [branchId, setBranchId] = useState('all');
   const [staffType, setStaffType] = useState('all');
   const [staffId, setStaffId] = useState('all');
   const [paymentStatus, setPaymentStatus] = useState('all');
   const [search, setSearch] = useState('');
-  const [layers, setLayers] = useState(() => defaultLayersForPage(pageType));
+  const [mode, setMode] = useState(() => defaultModeForPage(pageType));
   const [payload, setPayload] = useState(null);
   const [loading, setLoading] = useState(true);
   const [filtersOpen, setFiltersOpen] = useState(true);
   const [sawRoads, setSawRoads] = useState([]);
   const [sawRoadDate, setSawRoadDate] = useState('');
-  const roadsEnabled = layers.includes('Collector Routes') || layers.includes('Route Efficiency Layer');
+  const roadsEnabled = mode === 'routes' && staffType !== 'sales';
 
   useEffect(() => {
-    setLayers(defaultLayersForPage(pageType));
+    setMode(defaultModeForPage(pageType));
   }, [pageType]);
 
   useEffect(() => {
@@ -97,19 +85,20 @@ export function OrgLeafletPage({
     if (staffId !== 'all') params.collector_id = staffId;
     getSawMapRoads(params).then((result) => {
       if (cancelled) return;
-      setSawRoads(result.success ? result.data || [] : []);
+      const roads = (result.success ? result.data || [] : []).filter((road) => road.listSource === 'assigned');
+      setSawRoads(roads);
       setSawRoadDate(result.meta?.scheduledDate || date);
-      if (!result.success) showToast?.(result.message || 'SAW road routes are unavailable.', 'error');
+      if (!result.success) showToast?.(result.message || 'Planned collection routes are unavailable.', 'error');
     });
     return () => {
       cancelled = true;
     };
-  }, [roadsEnabled, staffType, branchId, staffId]);
+  }, [roadsEnabled, staffType, branchId, staffId, showToast]);
 
   const view = useMemo(
     () => buildBranchLeafletView({
       payload,
-      layers,
+      mode,
       staffId,
       navigate,
       opsBase,
@@ -119,7 +108,7 @@ export function OrgLeafletPage({
       search,
       sawRoads,
     }),
-    [payload, layers, staffId, navigate, branchId, staffType, paymentStatus, search, sawRoads]
+    [payload, mode, staffId, navigate, branchId, staffType, paymentStatus, search, sawRoads]
   );
 
   const branches = payload?.branches || [];
@@ -138,19 +127,14 @@ export function OrgLeafletPage({
     Boolean(search.trim()),
   ].filter(Boolean).length;
 
-  const toggleLayer = (layer) => {
-    setLayers((current) => (
-      current.includes(layer) ? current.filter((item) => item !== layer) : [...current, layer]
-    ));
-  };
-
   const resetFilters = () => {
     setBranchId('all');
     setStaffType('all');
     setStaffId('all');
     setPaymentStatus('all');
     setSearch('');
-    setPeriod('month');
+    setPeriod('today');
+    setMode(defaultModeForPage(pageType));
   };
 
   if (loading && !payload) return <LoadingState variant="map" message="Loading organization map..." />;
@@ -217,9 +201,9 @@ export function OrgLeafletPage({
               </select>
             </label>
             <label className="org-leaflet-field">
-              <span>Payment Health</span>
+              <span>Customer Standing</span>
               <select className="filter-select" value={paymentStatus} onChange={(e) => setPaymentStatus(e.target.value)}>
-                {PAYMENT_OPTIONS.map((option) => (
+                {STANDING_OPTIONS.map((option) => (
                   <option key={option.value} value={option.value}>{option.label}</option>
                 ))}
               </select>
@@ -261,12 +245,16 @@ export function OrgLeafletPage({
           ))}
         </div>
 
-        <div className="layer-toggles org-leaflet-layers">
-          {LAYER_OPTIONS.map((layer) => (
-            <label key={layer} className={`toggle-label${layers.includes(layer) ? ' active' : ''}`}>
-              <input type="checkbox" checked={layers.includes(layer)} onChange={() => toggleLayer(layer)} />
-              {layer}
-            </label>
+        <div className="segmented-control org-leaflet-layers" style={{ marginBottom: 12 }}>
+          {MAP_MODES.map((item) => (
+            <button
+              key={item.key}
+              type="button"
+              className={mode === item.key ? 'segment active' : 'segment'}
+              onClick={() => setMode(item.key)}
+            >
+              {item.label}
+            </button>
           ))}
         </div>
 
@@ -281,9 +269,9 @@ export function OrgLeafletPage({
           </div>
         ) : null}
 
-        {sawRoads.length ? (
+        {mode === 'routes' && sawRoads.length ? (
           <p className="text-ink/70" style={{ margin: '0 0 10px', fontSize: '0.85rem' }}>
-            {sawRoads.length} collector SAW road{sawRoads.length === 1 ? '' : 's'} for {formatDisplayDate(sawRoadDate)}. Stop numbers are SAW ranks.
+            {sawRoads.length} planned collection route{sawRoads.length === 1 ? '' : 's'} for {formatDisplayDate(sawRoadDate)}. Routes are planned schedules, not live GPS.
           </p>
         ) : null}
         <div className="org-leaflet-map-shell">

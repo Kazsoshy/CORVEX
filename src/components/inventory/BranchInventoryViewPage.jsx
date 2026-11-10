@@ -36,10 +36,12 @@ export function BranchInventoryViewPage({
   showToast,
   branchName,
   navigate,
+  opsBase = '/branch-manager',
   mode = 'readonly',
   initialStockFilter = 'All',
 }) {
   const isWarehouse = mode === 'warehouse';
+  const isOversight = !isWarehouse;
   const user = getCurrentUser();
   const [records, setRecords] = useState([]);
   const [catalogExtras, setCatalogExtras] = useState([]);
@@ -220,12 +222,39 @@ export function BranchInventoryViewPage({
           <div>
             <h3 style={{ margin: 0 }}>Branch Stock</h3>
             <p className="text-ink/70" style={{ margin: '4px 0 0', fontSize: '0.85rem' }}>
-              On-hand inventory at {resolvedBranch}. Open a product for details
-              {isWarehouse ? ', or start restock, transfer, or stock count from here.' : '.'}
+              On-hand inventory at {resolvedBranch}.
+              {isWarehouse
+                ? ' Start restock, transfer, or stock count from here.'
+                : ' Monitor stock health and open approval queues for inventory decisions.'}
             </p>
           </div>
           <div className="flex flex-wrap gap-2 items-center">
-            {!isWarehouse ? <StatusBadge status="View only" /> : null}
+            {isOversight ? <StatusBadge status="View only" /> : null}
+            {isOversight && navigate ? (
+              <>
+                <button
+                  className="button secondary"
+                  type="button"
+                  onClick={() => navigate(`${opsBase}/approval-center?tab=transfers`)}
+                >
+                  Transfer Approvals
+                </button>
+                <button
+                  className="button"
+                  type="button"
+                  onClick={() => navigate(`${opsBase}/approval-center?tab=restocks`)}
+                >
+                  Restock Approvals
+                </button>
+                <button
+                  className="button ghost"
+                  type="button"
+                  onClick={() => navigate(`${opsBase}/approval-center?tab=stock-counts`)}
+                >
+                  Stock Count Approvals
+                </button>
+              </>
+            ) : null}
             {isWarehouse && navigate ? (
               <>
                 <button

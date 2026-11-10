@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { submitSalesCreditInvestigation } from '../../api/salesService';
 import { CREDIT_REVIEW_REASONS } from '../../utils/creditReview';
 import { formatCustomerFullName, formatCustomerDisplayId } from '../../utils/customerDisplay';
@@ -14,6 +14,8 @@ export function CreditReviewRequestModal({
   onSubmitted,
   showToast,
   defaultReason = '',
+  resubmitCiId = null,
+  recommendationId = null,
 }) {
   const [reason, setReason] = useState(defaultReason);
   const [requestedLimit, setRequestedLimit] = useState('');
@@ -21,11 +23,20 @@ export function CreditReviewRequestModal({
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
 
+  useEffect(() => {
+    if (!open) return;
+    setReason(defaultReason || '');
+    setRequestedLimit('');
+    setRemarks('');
+    setError('');
+  }, [open, defaultReason, customer?.customer_id, customer?.customerId, recommendationId, resubmitCiId]);
+
   if (!open || !customer) return null;
 
   const customerId = customer.customer_id || customer.customerId;
   const name = formatCustomerFullName(customer);
   const code = formatCustomerDisplayId(customer);
+  const isResubmit = Boolean(resubmitCiId);
 
   const handleSubmit = async () => {
     if (!reason) {
@@ -39,6 +50,8 @@ export function CreditReviewRequestModal({
       request_reason: reason,
       requested_credit_limit: requestedLimit !== '' ? Number(requestedLimit) : null,
       request_remarks: remarks.trim() || null,
+      resubmit_ci_id: resubmitCiId || undefined,
+      recommendation_id: recommendationId || customer?._recommendationId || undefined,
     });
     setSubmitting(false);
 
@@ -52,8 +65,14 @@ export function CreditReviewRequestModal({
       return;
     }
 
-    showToast?.(result.message || 'Credit review submitted for Branch Manager decision.', 'success');
-    onSubmitted?.(result.data?.ci_id);
+    showToast?.(
+      result.message
+        || (isResubmit
+          ? 'Revised credit review resubmitted for Branch Manager decision.'
+          : 'Credit review submitted for Branch Manager decision.'),
+      'success'
+    );
+    onSubmitted?.(result.data?.ci_id, { resubmitted: Boolean(result.data?.resubmitted) });
     onClose?.();
     setReason(defaultReason);
     setRequestedLimit('');
@@ -64,13 +83,18 @@ export function CreditReviewRequestModal({
     <div className="modal-overlay" role="dialog" aria-modal="true" aria-labelledby="credit-review-request-title" onClick={onClose}>
       <div className="modal-content" style={{ maxWidth: 480 }} onClick={(e) => e.stopPropagation()}>
         <div className="modal-header">
-          <h3 id="credit-review-request-title">Request Credit Review</h3>
+          <h3 id="credit-review-request-title">
+            {isResubmit ? 'Resubmit Credit Review' : 'Request Credit Review'}
+          </h3>
           <p className="muted" style={{ margin: '4px 0 0' }}>
             {name}{code !== '—' ? ` · ${code}` : ''}
+            {isResubmit ? ` · CI #${resubmitCiId}` : ''}
           </p>
         </div>
         <p className="muted">
-          Branch Manager decides the credit limit. The system attaches payment history, balances, and risk indicators automatically.
+          {isResubmit
+            ? 'Update the request using the Branch Manager revision instructions. The same investigation record will return to Pending with a refreshed financial snapshot.'
+            : 'Branch Manager decides the credit limit. The system attaches payment history, balances, and risk indicators automatically.'}
         </p>
 
         <div className="form-group">
@@ -119,7 +143,7 @@ export function CreditReviewRequestModal({
             Cancel
           </button>
           <button className="button" type="button" onClick={handleSubmit} disabled={submitting}>
-            {submitting ? 'Submitting…' : 'Submit for BM'}
+            {submitting ? 'Submitting…' : (isResubmit ? 'Resubmit for BM' : 'Submit for BM')}
           </button>
         </div>
       </div>

@@ -223,7 +223,16 @@ export async function createRestock(body) {
     const response = await apiClient.post('/inventory/restocks', body);
     return response.data;
   } catch (err) {
-    return { success: false, message: err.response?.data?.message || 'Failed to record restock.' };
+    return { success: false, message: err.response?.data?.message || 'Failed to save restock.' };
+  }
+}
+
+export async function submitRestock(id) {
+  try {
+    const response = await apiClient.post(`/inventory/restocks/${id}/submit`);
+    return response.data;
+  } catch (err) {
+    return { success: false, message: err.response?.data?.message || 'Failed to submit restock.' };
   }
 }
 

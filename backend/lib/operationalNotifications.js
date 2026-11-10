@@ -1,5 +1,9 @@
 import { insertUserNotification } from './creditInvestigationNotifications.js';
 import { manilaDateString } from './sawCollection.js';
+import {
+  upsertOpenOperationalAlert,
+  resolveAlertsBySourceKey,
+} from './operationalAlerts.js';
 
 function guard(label, work) {
   return async (...args) => {
@@ -135,7 +139,40 @@ export const notifyStockThreshold = guard('stock threshold', async (pool, {
 
   const crossedOut = prev > 0 && next <= 0;
   const crossedReorder = reorder > 0 && prev > reorder && next <= reorder && next > 0;
+  const recoveredFromOut = prev <= 0 && next > 0;
+  const stockoutKey = productId != null ? `stockout:${branchId}:${productId}` : null;
+
+  // Stock recovered: close open stockout exception (preserve history; recurrence can open a new row).
+  if (recoveredFromOut && stockoutKey) {
+    await resolveAlertsBySourceKey(pool, stockoutKey, {
+      resolutionNote: 'Auto-resolved: branch stock restored above zero.',
+    });
+  }
+
   if (!crossedOut && !crossedReorder) return;
+
+  let name = productName;
+  if (!name && productId) {
+    const product = await pool.query(`SELECT name FROM products WHERE id = $1`, [productId]);
+    name = product.rows[0]?.name || 'A product';
+  }
+  name = name || 'A product';
+
+  // Critical stockout → operational alert for BM exception desk (deduped while Open).
+  // Routine low-stock remains a warehouse notification only.
+  if (crossedOut && stockoutKey) {
+    await upsertOpenOperationalAlert(pool, {
+      branchId,
+      alertType: 'Inventory Stockout',
+      severity: 'Critical',
+      title: `${name} out of stock`,
+      message: `${name} reached zero available units at this branch. Reorder level is ${reorder}.`,
+      sourceKey: stockoutKey,
+      entityType: 'product',
+      entityId: productId,
+      linkPath: 'branch-inventory',
+    });
+  }
 
   const staff = await pool.query(
     `SELECT u.id
@@ -147,13 +184,6 @@ export const notifyStockThreshold = guard('stock threshold', async (pool, {
     [branchId]
   );
   if (!staff.rows.length) return;
-
-  let name = productName;
-  if (!name && productId) {
-    const product = await pool.query(`SELECT name FROM products WHERE id = $1`, [productId]);
-    name = product.rows[0]?.name || 'A product';
-  }
-  name = name || 'A product';
 
   const title = crossedOut ? 'Inventory out of stock' : 'Inventory reached reorder level';
   const message = crossedOut

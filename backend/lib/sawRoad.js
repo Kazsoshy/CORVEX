@@ -1,8 +1,5 @@
 import { osrmDrivingRoute } from './osrm.js';
-import {
-  computeAssignedSawRoute,
-  computeCollectorSawPriority,
-} from './sawCollectionData.js';
+import { computeAssignedSawRoute } from './sawCollectionData.js';
 
 function finiteCoord(value) {
   const n = Number(value);
@@ -46,17 +43,11 @@ export async function buildCollectorSawRoad(pool, {
     asOfDate: scheduledDate,
   });
 
-  let rows = assigned.ranked;
-  let listSource = 'assigned';
-  if (!rows.length) {
-    const full = await computeCollectorSawPriority(pool, {
-      collectorId,
-      branchId,
-      asOfDate: scheduledDate,
-    });
-    rows = full.ranked;
-    listSource = 'saw';
-  }
+  // Field Map planned routes must match published Collection visits only.
+  // Do not fall back to the eligible priority ranking as if it were today's route.
+  const rows = assigned.ranked;
+  const listSource = 'assigned';
+  if (!rows.length) return null;
 
   const stops = rows
     .map(stopFromRow)

@@ -1,9 +1,11 @@
 import { useEffect, useState } from 'react';
 import { useLocation } from 'react-router-dom';
 import {
+  convertSalesCreditRecommendation,
   fetchCustomerById,
   fetchSalesCreditInvestigationById,
   fetchSalesCreditInvestigations,
+  fetchSalesCreditRecommendations,
 } from '../../api/salesService';
 import { formatCurrency, formatDisplayDate, formatDisplayDateTime } from '../../data/salesMockData';
 import { usePagination } from '../../hooks/usePagination';
@@ -254,6 +256,16 @@ function SnapshotSections({ review }) {
   );
 }
 
+const REC_REASON_MAP = {
+  'First Limit': 'First installment',
+  'Limit Increase': 'Need higher limit',
+  Delinquency: 'Customer over limit but wants another sale',
+  'Initial CI': 'First installment',
+  KYC: 'Other',
+  Exposure: 'Customer over limit but wants another sale',
+  'Collector Flag': 'Other',
+};
+
 export function SalesCreditReviewsPage({ navigate, showToast }) {
   const location = useLocation();
   const initialFilter = (() => {
@@ -264,6 +276,11 @@ export function SalesCreditReviewsPage({ navigate, showToast }) {
   const [filter, setFilter] = useState(initialFilter);
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [recommendations, setRecommendations] = useState([]);
+  const [recLoading, setRecLoading] = useState(true);
+  const [requestCustomer, setRequestCustomer] = useState(null);
+  const [requestReason, setRequestReason] = useState('');
+  const [convertingId, setConvertingId] = useState(null);
 
   useEffect(() => {
     const raw = new URLSearchParams(location.search || '').get('filter');
@@ -294,17 +311,130 @@ export function SalesCreditReviewsPage({ navigate, showToast }) {
     setLoading(false);
   };
 
+  const reloadRecommendations = async () => {
+    setRecLoading(true);
+    const res = await fetchSalesCreditRecommendations({ status: 'New', limit: 50 });
+    if (res.success) setRecommendations(res.data || []);
+    else setRecommendations([]);
+    setRecLoading(false);
+  };
+
   useEffect(() => {
     reload();
   }, [filter]);
 
+  useEffect(() => {
+    reloadRecommendations();
+  }, []);
+
   const pagination = usePagination(items);
   const rows = pagination.paginatedData;
+
+  async function openRequestFromRecommendation(row) {
+    setConvertingId(row.recommendation_id);
+    const customerRes = await fetchCustomerById(row.customer_id);
+    setConvertingId(null);
+    if (!customerRes.success || !customerRes.data) {
+      showToast?.(customerRes.message || 'Customer not found.', 'error');
+      return;
+    }
+    setRequestReason(REC_REASON_MAP[row.recommendation_type] || 'Other');
+    setRequestCustomer({
+      ...customerRes.data,
+      _recommendationId: row.recommendation_id,
+      _recommendationTrigger: row.trigger_reason,
+    });
+  }
+
+  async function convertRecommendationDirect(row) {
+    if (!window.confirm(`Submit a formal credit review for ${row.customer_name}?`)) return;
+    setConvertingId(row.recommendation_id);
+    const res = await convertSalesCreditRecommendation(row.recommendation_id, {
+      request_reason: REC_REASON_MAP[row.recommendation_type] || 'Other',
+      request_remarks: row.trigger_reason || undefined,
+    });
+    setConvertingId(null);
+    if (!res.success) {
+      showToast?.(res.message || 'Conversion failed.', 'error');
+      if (res.data?.ci_id) navigate(`/sales/credit-investigations/${res.data.ci_id}`);
+      return;
+    }
+    showToast?.(res.message || 'Credit review submitted.', 'success');
+    navigate(`/sales/credit-investigations/${res.data?.ci_id}`);
+  }
 
   if (loading && !items.length) return <LoadingState message="Loading credit reviews…" />;
 
   return (
     <div className="page">
+      <section className="panel content-panel">
+        <div className="list-section-header">
+          <h3>Recommended for Credit Review</h3>
+          <p className="muted">
+            System and collector flags for your assigned customers. These are not formal applications until you submit a credit review.
+          </p>
+        </div>
+        {recLoading ? (
+          <LoadingState message="Loading recommendations…" />
+        ) : recommendations.length ? (
+          <div className="corvex-table-wrapper">
+            <table className="corvex-table">
+              <thead>
+                <tr>
+                  <th>Customer</th>
+                  <th>Recommendation</th>
+                  <th>Trigger</th>
+                  <th>Credit Limit</th>
+                  <th>Outstanding</th>
+                  <th>Suggested Action</th>
+                  <th>Status</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {recommendations.map((row) => (
+                  <tr key={row.recommendation_id}>
+                    <td>
+                      <strong>{row.customer_name}</strong>
+                      {row.customer_code ? <div className="muted" style={{ fontSize: '0.78rem' }}>{row.customer_code}</div> : null}
+                    </td>
+                    <td>{row.recommendation_type}</td>
+                    <td>{row.trigger_reason || '—'}</td>
+                    <td>{formatMoneyOrNA(row.credit_limit)}</td>
+                    <td>{formatCurrency(row.outstanding_balance || 0)}</td>
+                    <td>{row.suggested_action || '—'}</td>
+                    <td><StatusBadge status={row.status} /></td>
+                    <td className="table-actions">
+                      <button
+                        className="button ghost"
+                        type="button"
+                        disabled={convertingId === row.recommendation_id}
+                        onClick={() => openRequestFromRecommendation(row)}
+                      >
+                        View / Prefill
+                      </button>
+                      <button
+                        className="button secondary"
+                        type="button"
+                        disabled={convertingId === row.recommendation_id}
+                        onClick={() => convertRecommendationDirect(row)}
+                      >
+                        Request Credit Review
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : (
+          <EmptyState
+            title="No recommendations"
+            description="When utilization, delinquency, KYC, or collector flags apply to your customers, they appear here."
+          />
+        )}
+      </section>
+
       <section className="panel content-panel">
         <div className="list-section-header">
           <h3>Credit Reviews</h3>
@@ -385,6 +515,21 @@ export function SalesCreditReviewsPage({ navigate, showToast }) {
           />
         )}
       </section>
+
+      <CreditReviewRequestModal
+        customer={requestCustomer}
+        open={Boolean(requestCustomer)}
+        defaultReason={requestReason}
+        recommendationId={requestCustomer?._recommendationId || null}
+        showToast={showToast}
+        onClose={() => setRequestCustomer(null)}
+        onSubmitted={(ciId) => {
+          setRequestCustomer(null);
+          reloadRecommendations();
+          reload();
+          if (ciId) navigate(`/sales/credit-investigations/${ciId}`);
+        }}
+      />
     </div>
   );
 }
@@ -437,6 +582,14 @@ export function SalesCreditReviewDetailPage({ ciId, navigate, showToast }) {
             { label: 'Risk', value: <StatusBadge status={review.riskLevel || '—'} /> },
             { label: 'Requested Limit', value: formatMoneyOrNA(review.requestedLimit) },
             { label: 'Remarks', value: review.requestRemarks || '—' },
+            ...(review.status === 'Revision Requested' ? [{
+              label: 'BM Revision Instructions',
+              value: review.decisionRemarks || review.rejectionReason || '—',
+            }] : []),
+            ...(review.status === 'Rejected' ? [{
+              label: 'Rejection Reason',
+              value: review.rejectionReason || review.decisionRemarks || '—',
+            }] : []),
           ]}
         />
       </section>
@@ -489,6 +642,7 @@ export function SalesCreditReviewDetailPage({ ciId, navigate, showToast }) {
         onClose={() => setRequestOpen(false)}
         showToast={showToast}
         defaultReason={review.reason || ''}
+        resubmitCiId={review.status === 'Revision Requested' ? review.ciId : null}
         onSubmitted={(newId) => {
           setRequestOpen(false);
           if (newId) navigate(`/sales/credit-investigations/${newId}`);

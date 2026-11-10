@@ -195,7 +195,10 @@ export function FieldActivityReportsPage({ navigate, showToast }) {
 
     if (result.success) {
       const reportId = result.data?.report_id;
-      showToast(result.message || 'Report submitted.', 'success');
+      showToast(
+        result.message || 'Field activity report submitted successfully. Your Branch Manager can now review this report.',
+        'success'
+      );
       setForm({
         visit_id: form.visit_id,
         activity_type: '',
@@ -221,7 +224,9 @@ export function FieldActivityReportsPage({ navigate, showToast }) {
   const filteredReports = useMemo(() => {
     if (listScope === 'all') return reports;
     return reports.filter((report) => {
-      const dateKey = manilaDateKey(report.created_at);
+      // Operational date = visit scheduled_date (same rule as BM Today filter).
+      const workDate = String(report.scheduled_date || '').slice(0, 10);
+      const dateKey = workDate || manilaDateKey(report.created_at);
       if (listScope === 'today') return dateKey === today;
       return dateKey && dateKey < today;
     });
