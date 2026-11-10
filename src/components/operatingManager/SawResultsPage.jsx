@@ -318,7 +318,7 @@ export function SawResultsPage({ navigate, showToast, scope = 'organization', br
         id: row.result_id || row.customer_id,
         position: [Number(row.latitude), Number(row.longitude)],
         label: String(row.ranking || '#'),
-        color: scoreTone(row.score) === 'high' ? '#b91c1c' : scoreTone(row.score) === 'mid' ? '#c2410c' : '#1A4162',
+        color: scoreTone(row.score) === 'high' ? '#b91c1c' : scoreTone(row.score) === 'mid' ? '#c2410c' : '#153450',
         popup: `#${row.ranking} · ${row.customer_name} · ${Number(row.score).toFixed(3)} · ${row.branch_name || ''}`,
       })),
     [sorted]
@@ -571,7 +571,7 @@ export function SawResultsPage({ navigate, showToast, scope = 'organization', br
                   });
                 }}
               >
-                <CartesianGrid strokeDasharray="3 3" stroke="#BADBE9" />
+                <CartesianGrid strokeDasharray="3 3" stroke="#E2E8F0" />
                 <XAxis dataKey="name" tick={{ fontSize: 12 }} />
                 <YAxis allowDecimals={false} tick={{ fontSize: 12 }} />
                 <Tooltip
@@ -632,11 +632,11 @@ export function SawResultsPage({ navigate, showToast, scope = 'organization', br
                   });
                 }}
               >
-                <CartesianGrid strokeDasharray="3 3" stroke="#BADBE9" />
+                <CartesianGrid strokeDasharray="3 3" stroke="#E2E8F0" />
                 <XAxis dataKey="name" tick={{ fontSize: 11 }} />
                 <YAxis allowDecimals={false} tick={{ fontSize: 12 }} />
                 <Tooltip />
-                <Bar dataKey="count" name="Customers" fill="#1A4162" radius={[4, 4, 0, 0]} />
+                <Bar dataKey="count" name="Customers" fill="#153450" radius={[4, 4, 0, 0]} />
               </BarChart>
             </ResponsiveContainer>
           ) : (

@@ -1,4 +1,4 @@
-import { getCIById, getCollectorById, getMapAccountById, getSalesAgentById } from '../data/branchManagerMockData';
+import { getCIById, getCollectorById, getSalesAgentById } from '../data/branchManagerMockData';
 
 const ROUTE_DEFINITIONS = [
   { pattern: /^\/branch-manager\/dashboard$/, pageType: 'dashboard' },
@@ -9,6 +9,7 @@ const ROUTE_DEFINITIONS = [
   { pattern: /^\/branch-manager\/customers\/([^/]+)$/, pageType: 'customerDetail', params: ['customerId'] },
   { pattern: /^\/branch-manager\/territories$/, pageType: 'territories' },
   { pattern: /^\/branch-manager\/field-activity-reports$/, pageType: 'fieldActivityReports' },
+  { pattern: /^\/branch-manager\/field-activity-reports\/([^/]+)$/, pageType: 'fieldActivityReportDetail', params: ['reportId'] },
   { pattern: /^\/branch-manager\/branch-inventory$/, pageType: 'branchInventory' },
   { pattern: /^\/branch-manager\/field-operations$/, pageType: 'fieldOperations' },
   { pattern: /^\/branch-manager\/field-operations\/performance$/, pageType: 'routePerformance' },
@@ -20,15 +21,18 @@ const ROUTE_DEFINITIONS = [
   { pattern: /^\/branch-manager\/ci-approvals\/([^/]+)$/, pageType: 'ciDetail', params: ['ciId'] },
   { pattern: /^\/branch-manager\/leaflet$/, pageType: 'leafletMap' },
   { pattern: /^\/branch-manager\/leaflet\/territory$/, pageType: 'leafletTerritory' },
-  { pattern: /^\/branch-manager\/leaflet\/delinquency$/, pageType: 'leafletDelinquency' },
-  { pattern: /^\/branch-manager\/leaflet\/profitability$/, pageType: 'leafletProfitability' },
-  { pattern: /^\/branch-manager\/leaflet\/account\/([^/]+)$/, pageType: 'accountLocationDetail', params: ['accountId'] },
+  // Legacy analytics URLs redirect to Field Map modes via resolveBranchManagerPage.
+  { pattern: /^\/branch-manager\/leaflet\/delinquency$/, pageType: 'leafletMap' },
+  { pattern: /^\/branch-manager\/leaflet\/profitability$/, pageType: 'leafletMap' },
+  // Thin map-only detail is retired — open the real customer record.
+  { pattern: /^\/branch-manager\/leaflet\/account\/([^/]+)$/, pageType: 'customerDetail', params: ['customerId'] },
   { pattern: /^\/branch-manager\/reports$/, pageType: 'reports' },
   { pattern: /^\/branch-manager\/reports\/collection$/, pageType: 'reportCollection' },
   { pattern: /^\/branch-manager\/reports\/sales$/, pageType: 'reportSales' },
   { pattern: /^\/branch-manager\/reports\/inventory$/, pageType: 'reportInventory' },
   { pattern: /^\/branch-manager\/reports\/delinquency$/, pageType: 'reportDelinquency' },
   { pattern: /^\/branch-manager\/saw-results$/, pageType: 'sawResults' },
+  { pattern: /^\/branch-manager\/reports\/invoices$/, pageType: 'reportInvoices' },
   { pattern: /^\/branch-manager\/staff-performance$/, pageType: 'staffPerformance' },
   { pattern: /^\/branch-manager\/staff-performance\/collectors$/, pageType: 'staffCollectors' },
   { pattern: /^\/branch-manager\/staff-performance\/sales$/, pageType: 'staffSales' },
@@ -58,14 +62,12 @@ export function buildBranchManagerBreadcrumbs(pageType, params = {}) {
   const collector = params.collectorId ? getCollectorById(params.collectorId) : null;
   const agent = params.agentId ? getSalesAgentById(params.agentId) : null;
   const ci = params.ciId ? getCIById(params.ciId) : null;
-  const account = params.accountId ? getMapAccountById(params.accountId) : null;
-
   const fieldOps = [{ label: 'Routes & Schedules', to: '/branch-manager/field-operations' }];
-  const ciCrumbs = [{ label: 'Credit Reviews', to: '/branch-manager/ci-approvals' }];
+  const ciCrumbs = [{ label: 'Credit Investigation', to: '/branch-manager/ci-approvals' }];
   const leafletCrumbs = [{ label: 'Field Map', to: '/branch-manager/leaflet' }];
   const reportsCrumbs = [{ label: 'Reports & Analytics', to: '/branch-manager/reports' }];
-  const staffCrumbs = [{ label: 'Team Scorecards', to: '/branch-manager/staff-performance' }];
-  const creditCrumbs = [{ label: 'Credit History', to: '/branch-manager/credit-history' }];
+  const staffCrumbs = [{ label: 'Staff Performance', to: '/branch-manager/staff-performance?period=week&tab=collectors' }];
+  const creditCrumbs = [{ label: 'Payment History', to: '/branch-manager/credit-history' }];
 
   switch (pageType) {
     case 'dashboard': return [{ label: 'Dashboard', to: '/branch-manager/dashboard' }];
@@ -76,11 +78,12 @@ export function buildBranchManagerBreadcrumbs(pageType, params = {}) {
     case 'customerDetail': return [...crumbs, { label: 'Customers', to: '/branch-manager/customers' }, { label: 'Customer Detail', to: `/branch-manager/customers/${params.customerId}` }];
     case 'territories': return [...crumbs, { label: 'Territories', to: '/branch-manager/territories' }];
     case 'creditHistory': return [...crumbs, ...creditCrumbs];
-    case 'creditDetail': return [...crumbs, ...creditCrumbs, { label: 'Credit Record', to: `/branch-manager/credit-history/${params.creditId}` }];
+    case 'creditDetail': return [...crumbs, ...creditCrumbs, { label: 'Payment Details', to: `/branch-manager/credit-history/${params.creditId}` }];
     case 'fieldActivityReports': return [...crumbs, { label: 'Field Activity Reports', to: '/branch-manager/field-activity-reports' }];
+    case 'fieldActivityReportDetail': return [...crumbs, { label: 'Field Activity Reports', to: '/branch-manager/field-activity-reports' }, { label: 'Report Detail', to: `/branch-manager/field-activity-reports/${params.reportId}` }];
     case 'branchInventory': return [...crumbs, { label: 'Branch Inventory', to: '/branch-manager/branch-inventory' }];
     case 'fieldOperations': return [...crumbs, ...fieldOps];
-    case 'routePerformance': return [...crumbs, ...fieldOps, { label: 'Route Performance', to: '/branch-manager/field-operations/performance' }];
+    case 'routePerformance': return [...crumbs, ...fieldOps, { label: "Today's Routes", to: '/branch-manager/field-operations/performance' }];
     case 'collectorRoutes': return [...crumbs, ...fieldOps, { label: 'Collectors', to: '/branch-manager/field-operations/collectors' }];
     case 'collectorDetail': return [...crumbs, ...fieldOps, { label: 'Collectors', to: '/branch-manager/field-operations/collectors' }, { label: collector?.name ?? 'Collector Detail', to: `/branch-manager/field-operations/collectors/${params.collectorId}` }];
     case 'salesSchedules': return [...crumbs, ...fieldOps, { label: 'Sales Agents', to: '/branch-manager/field-operations/sales' }];
@@ -88,16 +91,14 @@ export function buildBranchManagerBreadcrumbs(pageType, params = {}) {
     case 'ciQueue': return [...crumbs, ...ciCrumbs];
     case 'ciDetail': return [...crumbs, ...ciCrumbs, { label: ci?.customerName ?? 'CI Detail', to: `/branch-manager/ci-approvals/${params.ciId}` }];
     case 'leafletMap': return [...crumbs, ...leafletCrumbs];
-    case 'leafletTerritory': return [...crumbs, ...leafletCrumbs, { label: 'Territory Map', to: '/branch-manager/leaflet/territory' }];
-    case 'leafletDelinquency': return [...crumbs, ...leafletCrumbs, { label: 'Delinquency Heatmap', to: '/branch-manager/leaflet/delinquency' }];
-    case 'leafletProfitability': return [...crumbs, ...leafletCrumbs, { label: 'Profitability Zones', to: '/branch-manager/leaflet/profitability' }];
-    case 'accountLocationDetail': return [...crumbs, ...leafletCrumbs, { label: account?.customerName ?? 'Account Location', to: `/branch-manager/leaflet/account/${params.accountId}` }];
+    case 'leafletTerritory': return [...crumbs, ...leafletCrumbs, { label: 'Coverage', to: '/branch-manager/leaflet/territory' }];
     case 'reports': return [...crumbs, ...reportsCrumbs];
     case 'reportCollection': return [...crumbs, ...reportsCrumbs, { label: 'Collection Reports', to: '/branch-manager/reports/collection' }];
     case 'reportSales': return [...crumbs, ...reportsCrumbs, { label: 'Sales Reports', to: '/branch-manager/reports/sales' }];
     case 'reportInventory': return [...crumbs, ...reportsCrumbs, { label: 'Inventory Reports', to: '/branch-manager/reports/inventory' }];
     case 'reportDelinquency': return [...crumbs, ...reportsCrumbs, { label: 'Delinquency Reports', to: '/branch-manager/reports/delinquency' }];
     case 'sawResults': return [...crumbs, { label: 'SAW Results', to: '/branch-manager/saw-results' }];
+    case 'reportInvoices': return [...crumbs, ...reportsCrumbs, { label: 'Sales Invoices', to: '/branch-manager/reports/invoices' }];
     case 'staffPerformance': return [...crumbs, ...staffCrumbs];
     case 'staffCollectors': return [...crumbs, ...staffCrumbs, { label: 'Collectors', to: '/branch-manager/staff-performance/collectors' }];
     case 'staffSales': return [...crumbs, ...staffCrumbs, { label: 'Sales Agents', to: '/branch-manager/staff-performance/sales' }];
@@ -122,32 +123,31 @@ export function resolveBranchManagerPage(pathname) {
     customerDetail: 'Customer Detail',
     territories: 'Territories',
     fieldActivityReports: 'Field Activity Reports',
+    fieldActivityReportDetail: 'Field Activity Report',
     branchInventory: 'Branch Inventory',
     fieldOperations: 'Routes & Schedules',
-    routePerformance: 'Route Performance',
+    routePerformance: "Today's Routes",
     collectorRoutes: 'Collectors',
     collectorDetail: 'Collector Detail',
     salesSchedules: 'Sales Agents',
     salesAgentDetail: 'Sales Agent Detail',
-    ciQueue: 'Credit Reviews',
-    ciDetail: 'Credit Review Detail',
+    ciQueue: 'Credit Investigation',
+    ciDetail: 'Credit Investigation Detail',
     leafletMap: 'Field Map',
-    leafletTerritory: 'Territory Map',
-    leafletDelinquency: 'Delinquency Heatmap',
-    leafletProfitability: 'Profitability Zones',
-    accountLocationDetail: 'Account Location Detail',
+    leafletTerritory: 'Coverage',
     reports: 'Reports & Analytics',
     reportCollection: 'Collection Reports',
     reportSales: 'Sales Reports',
     reportInventory: 'Inventory Reports',
     reportDelinquency: 'Delinquency Reports',
     sawResults: 'SAW Results',
-    staffPerformance: 'Team Scorecards',
-    staffCollectors: 'Collector Scorecards',
-    staffSales: 'Sales Agent Scorecards',
-    staffScorecards: 'Performance Scorecards',
-    creditHistory: 'Credit History',
-    creditDetail: 'Credit Record',
+    reportInvoices: 'Sales Invoices',
+    staffPerformance: 'Staff Performance',
+    staffCollectors: 'Staff Performance · Collectors',
+    staffSales: 'Staff Performance · Sales Agents',
+    staffScorecards: 'Staff Performance',
+    creditHistory: 'Payment History',
+    creditDetail: 'Payment Details',
     alerts: 'Alerts & Exceptions',
     notifications: 'Notifications',
     profile: 'Profile',

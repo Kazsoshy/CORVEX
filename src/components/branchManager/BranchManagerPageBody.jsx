@@ -6,22 +6,14 @@ import { confirmAction } from '../shared/confirmAction.jsx';
 import { Link } from 'react-router-dom';
 import { AreaChart, Area, BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
 import { formatCurrency, formatDisplayDate, formatDisplayDateTime, formatPhone } from '../../data/branchManagerMockData';
+import { ApprovalCenterPage } from './ApprovalCenterPage.jsx';
 import {
-  fetchCreditInvestigations,
-  fetchCreditInvestigationById,
-  patchCreditInvestigation,
-  fetchSpecialCollectionRequests,
-  patchSpecialCollectionRequest,
-  fetchPendingSalesInvoices,
-  patchSalesInvoiceReview,
-  fetchCollectionsForReview,
-  patchCollectionReview,
-  mapCreditInvestigationRow,
-  mapSpecialCollectionRow,
-} from '../../api/approvalsService.js';
-import { fetchOperationalAlerts, patchOperationalAlert, mapOperationalAlertRow } from '../../api/operationalAlertsService.js';
+  fetchOperationalAlerts,
+  patchOperationalAlert,
+  mapOperationalAlertRow,
+  alertDeepLink,
+} from '../../api/operationalAlertsService.js';
 import { fetchNotifications, markNotificationRead, markAllNotificationsRead, mapNotificationRow } from '../../api/notificationService.js';
-import { fetchInventoryTransfers, fetchInventoryTransferById, patchInventoryTransfer, mapInventoryTransferRow } from '../../api/inventoryService.js';
 import { BranchInventoryViewPage } from '../inventory/BranchInventoryViewPage.jsx';
 import { SawResultsPage } from '../operatingManager/SawResultsPage.jsx';
 import { EmptyState } from '../shared/EmptyState';
@@ -33,32 +25,23 @@ import LeafletMap from '../common/LeafletMap';
 import { StatusBadge } from '../StatusBadge';
 import { requestLogout, getCurrentUser } from '../../api/authService.js';
 import {
-  CREDIT_REVIEW_FILTERS,
-  formatMoneyOrNA,
-  mapCreditReviewRow,
-} from '../../utils/creditReview';
-import {
   getBranchAnalytics,
   getBranchStaff,
+  getStaffPerformance,
   getBranchCustomers,
-  getBranchCustomerById,
   getBranchAlerts,
   getBranchAuditLogs,
-  getBranchCollectorDetail,
-  getBranchSalesAgentDetail,
-  getFieldActivityReports,
-  getFieldActivityReport,
-  fetchCollectorSawPriority,
-  assignCollectorCollectionRoute,
-  getSalesAgentAreaAssignments,
-  assignSalesAgentArea,
 } from '../../api/branchManagerService.js';
-import { fetchTerritories } from '../../api/territoriesService.js';
 import { getReportCollection, getReportSales, getReportInventory, getReportDelinquency, getReportCompliance, getReportKPI, getReportInvoices } from '../../api/reportsService.js';
 import { CreditHistoryListPage, CreditHistoryDetailPage } from '../shared/CreditHistoryPages';
 import { TerritoriesPage } from '../territories/TerritoriesPage';
 import { InvoiceDetailsPage } from '../sales/InvoiceDetailsPage';
 import { BranchLeafletPage } from './BranchLeafletPage';
+import { FieldActivityReportsPage, FieldActivityReportDetailPage } from './FieldActivityReportsPages.jsx';
+import { CollectorsDispatchRoster, CollectorDispatchDetailPage } from './CollectorsDispatchPages.jsx';
+import { SalesAgentsDispatchRoster, SalesAgentDispatchDetailPage } from './SalesAgentsDispatchPages.jsx';
+import { BranchCustomersPage, BranchCustomerDetailPage } from './BranchCustomersPages.jsx';
+import { CreditInvestigationQueuePage, CreditInvestigationDetailPage } from './CreditInvestigationPages.jsx';
 import { formatMiddleNameDisplay } from '../../utils/customerDisplay.js';
 import { downloadPdf, exportRows } from '../../utils/dataExport.js';
 import { UserSettingsPanel } from '../shared/UserSettingsPanel';
@@ -66,6 +49,7 @@ import { chartSeries } from '../../theme/palette.js';
 import { ChartDrilldownModal } from '../shared/ChartDrilldownModal.jsx';
 import { useChartDrilldown } from '../../hooks/useChartDrilldown.js';
 import { formatCurrency as formatMoney } from '../../utils/formatters.js';
+import { BranchManagerDashboardPage } from './BranchManagerDashboardPage.jsx';
 
 // Re-export for use in other components
 export { getBranchAnalytics, getBranchStaff, getBranchCustomers, getBranchAlerts };
@@ -92,244 +76,8 @@ function Card({
 }
 
 // ── Dashboard ─────────────────────────────────────────────────────────────────
-function DashboardPage({
-  navigate,
-  branchName,
-  opsBase,
-  showToast
-}) {
-  const currentUser = getCurrentUser();
-  const userName = currentUser?.fullName || 'User';
-  const userBranch = currentUser?.branch?.name || branchName || 'Branch';
-  const { drilldown, closeDrilldown, openApiDrilldown } = useChartDrilldown({ showToast });
-  const [analytics, setAnalytics] = useState(null);
-  const [alerts, setAlerts] = useState([]);
-  const [staff, setStaff] = useState({
-    collectors: [],
-    salesAgents: []
-  });
-  const [customers, setCustomers] = useState({
-    mapAccounts: []
-  });
-  const [collectionData, setCollectionData] = useState(null);
-  const [salesData, setSalesData] = useState(null);
-  const [delinquencyData, setDelinquencyData] = useState(null);
-  const [kpi, setKpi] = useState(null);
-  const [loading, setLoading] = useState(true);
-  const [unread, setUnread] = useState(0);
-  const [recentNotifications, setRecentNotifications] = useState([]);
-  useEffect(() => {
-    async function fetchData() {
-      setLoading(true);
-      const [analyticsData, alertsData, staffData, customersData, reportCollection, reportSales, reportDelinquency, reportKpi, notifData] = await Promise.all([
-        getBranchAnalytics(),
-        getBranchAlerts(),
-        getBranchStaff(),
-        getBranchCustomers(),
-        getReportCollection(),
-        getReportSales(),
-        getReportDelinquency(),
-        getReportKPI(),
-        fetchNotifications(),
-      ]);
-      if (analyticsData.success) setAnalytics(analyticsData.data);
-      if (alertsData.success) setAlerts(alertsData.data.alerts || []);
-      if (staffData.success) setStaff(staffData.data);
-      if (customersData.success) setCustomers(customersData.data);
-      if (reportCollection.success) setCollectionData(reportCollection.data);
-      if (reportSales.success) setSalesData(reportSales.data);
-      if (reportDelinquency.success) setDelinquencyData(reportDelinquency.data);
-      if (reportKpi.success) setKpi(reportKpi.data);
-      if (notifData.success) {
-        const rows = notifData.data || [];
-        setUnread(rows.filter(n => n.status !== 'Read').length);
-        setRecentNotifications(rows.slice(0, 5));
-      }
-      setLoading(false);
-    }
-    fetchData();
-  }, []);
-  const critical = alerts.filter(a => a.severity === 'Critical');
-  if (loading) return <LoadingState variant="dashboard" message="Loading dashboard..." />;
-  return <div className="page">
-      <section className="panel dashboard-greeting">
-        <div className="flex flex-col gap-1">
-          <p className="text-[0.82rem] font-bold tracking-widest uppercase text-navy/60 m-0">{userBranch}</p>
-          <h2>{userName}</h2>
-          <p className="text-ink/70">Branch Health: <strong>{analytics?.healthScore || 0}/100</strong></p>
-        </div>
-        <Link to={`${opsBase}/notifications`} className="relative p-2 text-ink/70 hover:text-blue hover:bg-blue/5 rounded-full transition-colors cursor-pointer" aria-label={`${unread} unread`}>
-          <NavIcon name="bell" />{unread > 0 && <span className="absolute top-0 right-0 min-w-[18px] h-[18px] px-1 flex justify-center items-center rounded-full bg-red text-white text-[0.7rem] font-bold border-2 border-mint">{unread}</span>}
-        </Link>
-      </section>
-
-      <Stats stats={[{
-      label: 'Collection Rate',
-      value: `${analytics?.collectionRateToday || kpi?.collectionRate || 0}%`
-    }, {
-      label: 'Route Compliance',
-      value: `${analytics?.routeCompliance || 0}%`
-    }, {
-      label: 'Sales Visit Completion',
-      value: `${analytics?.salesVisitCompletion || 0}%`
-    }, {
-      label: 'Overdue Accounts',
-      value: String(kpi?.overdueCount || 0),
-      title: 'Customers with an invoice past its due date.'
-    }, {
-      label: 'Stock Alerts',
-      value: String(kpi?.stockAlertsCount || analytics?.stockAlertsCount || 0)
-    }]} />
-
-      {recentNotifications.length ? (
-        <section className="panel content-panel relative overflow-hidden">
-          <div className="list-section-header">
-            <h3 style={{ margin: 0 }}>Operational Updates</h3>
-            <button className="button secondary" type="button" onClick={() => navigate(`${opsBase}/notifications`)}>
-              Open inbox
-            </button>
-          </div>
-          <ul className="notification-list" style={{ margin: 0 }}>
-            {recentNotifications.map((n) => (
-              <li key={n.notification_id} className={`notification-item${n.status === 'Read' ? '' : ' unread'}`}>
-                <div>
-                  <strong>{n.title}</strong>
-                  <p className="muted">{n.message}</p>
-                </div>
-              </li>
-            ))}
-          </ul>
-        </section>
-      ) : null}
-
-      <div className="grid two-up">
-        <Card title="Daily Collection vs Target" sub="This week · click a point for payment records">
-          <ResponsiveContainer width="100%" height={220}>
-            <AreaChart
-              data={collectionData?.daily || []}
-              style={{ cursor: 'pointer' }}
-              onClick={(state) => {
-                const day = state?.activeLabel;
-                if (!day) return;
-                openApiDrilldown(
-                  { type: 'collection_day', day },
-                  {
-                    title: 'Daily collections',
-                    category: `Day: ${day}`,
-                    dateRange: 'Last 7 days',
-                    columnSet: 'collection',
-                    legend: [
-                      { label: 'Day', value: day },
-                      { label: 'Collected', value: formatMoney(state?.activePayload?.find((p) => p.dataKey === 'amount')?.value || 0) },
-                    ],
-                    filenameBase: `collections-${day}`,
-                  }
-                );
-              }}
-            >
-              <CartesianGrid strokeDasharray="3 3" stroke="#BADBE9" />
-              <XAxis dataKey="day" tick={{
-              fontSize: 12
-            }} />
-              <YAxis tick={{
-              fontSize: 11
-            }} tickFormatter={v => `${(v / 1000).toFixed(0)}k`} />
-              <Tooltip formatter={v => formatCurrency(v)} />
-              <Legend />
-              <Area type="monotone" dataKey="target" name="Target" stroke="#BADBE9" fill="#BADBE9" strokeWidth={2} strokeDasharray="5 5" />
-              <Area type="monotone" dataKey="amount" name="Collected" stroke="#1A4162" fill="#1A4162" fillOpacity={0.12} strokeWidth={2} />
-            </AreaChart>
-          </ResponsiveContainer>
-        </Card>
-        <Card title="Sales vs Target" sub="This week · click a bar for invoices">
-          <ResponsiveContainer width="100%" height={220}>
-            <BarChart
-              data={salesData?.weekly || []}
-              style={{ cursor: 'pointer' }}
-              onClick={(state) => {
-                const day = state?.activeLabel;
-                if (!day) return;
-                openApiDrilldown(
-                  { type: 'sales_day', day },
-                  {
-                    title: 'Daily sales invoices',
-                    category: `Day: ${day}`,
-                    dateRange: 'Last 7 days',
-                    columnSet: 'sales',
-                    legend: [
-                      { label: 'Day', value: day },
-                      { label: 'Actual', value: formatMoney(state?.activePayload?.find((p) => p.dataKey === 'actual')?.value || 0) },
-                    ],
-                    filenameBase: `sales-${day}`,
-                  }
-                );
-              }}
-            >
-              <CartesianGrid strokeDasharray="3 3" stroke="#BADBE9" />
-              <XAxis dataKey="day" tick={{
-              fontSize: 12
-            }} />
-              <YAxis tick={{
-              fontSize: 11
-            }} tickFormatter={v => `${(v / 1000).toFixed(0)}k`} />
-              <Tooltip formatter={v => formatCurrency(v)} /><Legend />
-              <Bar dataKey="target" name="Target" fill="#BADBE9" radius={[4, 4, 0, 0]} />
-              <Bar dataKey="actual" name="Actual" fill="#1A4162" radius={[4, 4, 0, 0]} />
-            </BarChart>
-          </ResponsiveContainer>
-        </Card>
-      </div>
-
-      <div className="grid two-up">
-        <Card title="Delinquency Trend" sub="Weekly overdue accounts · click for current overdue list">
-          <ResponsiveContainer width="100%" height={200}>
-            <AreaChart
-              data={delinquencyData?.delinquency || []}
-              style={{ cursor: 'pointer' }}
-              onClick={() => openApiDrilldown(
-                { type: 'delinquency' },
-                {
-                  title: 'Overdue accounts',
-                  category: 'Delinquency',
-                  dateRange: 'Current',
-                  columnSet: 'customers',
-                  filenameBase: 'delinquency',
-                }
-              )}
-            >
-              <CartesianGrid strokeDasharray="3 3" stroke="#BADBE9" /><XAxis dataKey="week" tick={{
-              fontSize: 12
-            }} /><YAxis tick={{
-              fontSize: 12
-            }} /><Tooltip /><Legend />
-              <Area type="monotone" dataKey="accounts" name="Overdue" stroke="#ef4444" fill="#ef4444" fillOpacity={0.1} strokeWidth={2} />
-              <Area type="monotone" dataKey="rate" name="Rate %" stroke="#f59e0b" fill="#f59e0b" fillOpacity={0.08} strokeWidth={2} />
-            </AreaChart>
-          </ResponsiveContainer>
-        </Card>
-        <section className="panel content-panel relative overflow-hidden">
-          <div className="flex flex-col md:flex-row justify-between gap-4 items-start md:items-center mb-4">
-            <h3>Critical Alerts</h3>
-            <button className="button ghost" type="button" onClick={() => navigate(`${opsBase}/alerts`)}>View All</button>
-          </div>
-          <ul className="list-none p-0 m-0 flex flex-col gap-3">
-            {critical.slice(0, 4).map(a => <li key={a.id}><div><strong>{a.title}</strong><span className="text-ink/70">{a.category}</span></div><Severity severity={a.severity} /></li>)}
-            {!critical.length ? <li className="text-ink/70">No critical alerts right now.</li> : null}
-          </ul>
-        </section>
-      </div>
-
-      <div className="flex flex-wrap gap-2 mt-2">
-        <button className="button" type="button" onClick={() => navigate(`${opsBase}/leaflet`)}>Field Map</button>
-        <button className="button secondary" type="button" onClick={() => navigate(`${opsBase}/field-operations/collectors`)}>Collectors</button>
-        <button className="button secondary" type="button" onClick={() => navigate(`${opsBase}/field-operations/sales`)}>Sales Agents</button>
-        <button className="button secondary" type="button" onClick={() => navigate(`${opsBase}/field-activity-reports`)}>Field Reports</button>
-        <button className="button secondary" type="button" onClick={() => navigate(`${opsBase}/customers`)}>Customers</button>
-        <button className="button secondary" type="button" onClick={() => navigate(`${opsBase}/ci-approvals`)}>Credit Reviews</button>
-        <button className="button secondary" type="button" onClick={() => navigate(`${opsBase}/reports`)}>Reports</button>
-      </div>
-      <ChartDrilldownModal {...drilldown} onClose={closeDrilldown} showToast={showToast} />
-    </div>;
+function DashboardPage(props) {
+  return <BranchManagerDashboardPage {...props} />;
 }
 
 // ── Field Operations (combined hub + tab navigation) ─────────────────────────
@@ -337,141 +85,157 @@ function FieldOperationsHub({
   navigate,
   showToast,
   pageType,
-  opsBase
+  opsBase,
+  branchName,
 }) {
   const { drilldown, closeDrilldown, openLocalDrilldown } = useChartDrilldown({ showToast });
-  const initialTab = pageType === 'collectorRoutes' ? 'collectors'
-    : pageType === 'salesSchedules' ? 'sales'
-      : pageType === 'routePerformance' ? 'performance'
-        : 'overview';
+  const initialTab = pageType === 'routePerformance' ? 'performance' : 'overview';
   const [tab, setTab] = useState(initialTab);
   useEffect(() => {
     setTab(initialTab);
   }, [initialTab]);
   const [staff, setStaff] = useState({
     collectors: [],
-    salesAgents: []
+    salesAgents: [],
+    dispatchDate: null,
   });
-  const [analytics, setAnalytics] = useState(null);
   const [loading, setLoading] = useState(true);
   const tabs = [{
     key: 'overview',
     label: 'Overview',
     path: `${opsBase}/field-operations`,
   }, {
-    key: 'collectors',
-    label: 'Collectors',
-    path: `${opsBase}/field-operations/collectors`,
-  }, {
-    key: 'sales',
-    label: 'Sales Agents',
-    path: `${opsBase}/field-operations/sales`,
-  }, {
     key: 'performance',
-    label: 'Route Performance',
+    label: 'Today\'s Routes',
     path: `${opsBase}/field-operations/performance`,
   }];
   useEffect(() => {
     async function fetchData() {
       setLoading(true);
-      const [staffData, analyticsData] = await Promise.all([getBranchStaff(), getBranchAnalytics()]);
-      if (staffData.success) setStaff(staffData.data);
-      if (analyticsData.success) setAnalytics(analyticsData.data);
+      const staffData = await getBranchStaff();
+      if (staffData.success) setStaff(staffData.data || { collectors: [], salesAgents: [] });
+      else {
+        setStaff({ collectors: [], salesAgents: [] });
+        showToast?.(staffData.message || 'Failed to load field staff.', 'error');
+      }
       setLoading(false);
     }
     fetchData();
-  }, []);
-  const collectorChart = staff.collectors.map(c => ({
+  }, [showToast]);
+
+  const activeCollectors = (staff.collectors || []).filter((c) => c.status !== 'Inactive');
+  const activeAgents = (staff.salesAgents || []).filter((a) => a.status !== 'Inactive');
+  const collectorsOnRoute = activeCollectors.filter((c) => (c.todayStops || 0) > 0).length;
+  const agentsAssigned = activeAgents.filter((a) => (a.areasAssignedToday || 0) > 0).length;
+
+  const collectorDispatchChart = activeCollectors.map((c) => ({
     name: c.name.split(' ')[0],
-    compliance: c.complianceScore,
-    recovery: c.recoveryRate
+    stops: c.todayStops || 0,
+    completed: c.todayCompleted || 0,
   }));
-  const salesChart = staff.salesAgents.map(a => ({
+  const salesChart = activeAgents.map((a) => ({
     name: a.name.split(' ')[0],
-    visits: a.visitCompletionRate,
-    conversion: a.conversionRate
+    areas: a.areasAssignedToday || 0,
+    salesToday: a.salesTodayCount || 0,
   }));
-  const pagination_staff_collectors = usePagination(staff.collectors);
-  const paginated_staff_collectors = pagination_staff_collectors.paginatedData;
-  const pagination_staff_sales = usePagination(staff.salesAgents);
-  const paginated_staff_sales = pagination_staff_sales.paginatedData;
+
   const routePerformanceRows = useMemo(() => [
-    ...(staff.collectors || []).map((c) => ({
+    ...activeCollectors.map((c) => ({
       id: `collector-${c.id}`,
+      staffId: c.id,
       name: c.name,
       type: 'Collector',
-      compliance: `${c.complianceScore}%`,
-      recoveryOrRevenue: `${c.recoveryRate}%`,
-      missed: c.missedVisits,
+      detailPath: `${opsBase}/field-operations/collectors/${c.id}`,
+      status: c.todayRouteStatus || 'No Route',
+      progress: `${c.todayCompleted || 0}/${c.todayStops || 0} stops`,
+      remaining: c.todayRemaining ?? 0,
     })),
-    ...(staff.salesAgents || []).map((a) => ({
+    ...activeAgents.map((a) => ({
       id: `sales-${a.id}`,
+      staffId: a.id,
       name: a.name,
       type: 'Sales',
-      compliance: `${a.visitCompletionRate}%`,
-      recoveryOrRevenue: formatCurrency(a.totalSalesAmount),
-      missed: '—',
+      detailPath: `${opsBase}/field-operations/sales/${a.id}`,
+      status: a.workStatus || 'No Assignment',
+      progress: `${a.areasDoneToday || 0}/${a.areasAssignedToday || 0} areas`,
+      remaining: Math.max(0, (a.areasAssignedToday || 0) - (a.areasDoneToday || 0)),
     })),
-  ], [staff.collectors, staff.salesAgents]);
+  ], [activeCollectors, activeAgents, opsBase]);
   const pagination_route_performance = usePagination(routePerformanceRows);
   const paginated_route_performance = pagination_route_performance.paginatedData;
   if (loading) return <LoadingState variant="dashboard" message="Loading routes and schedules..." />;
   return <div className="page">
+      <section className="panel content-panel" style={{ marginBottom: 12 }}>
+        <h3 style={{ margin: 0 }}>Field Operations</h3>
+        <p className="muted" style={{ margin: '4px 0 0' }}>
+          Assign, dispatch, and monitor today’s field work for {branchName || 'your branch'}.
+          {staff.dispatchDate ? ` · Dispatch date ${formatDisplayDate(staff.dispatchDate)}` : ''}
+        </p>
+      </section>
       <div className="segmented-control">
         {tabs.map(t => <button key={t.key} className={tab === t.key ? 'segment active' : 'segment'} type="button" onClick={() => { setTab(t.key); navigate(t.path); }}>{t.label}</button>)}
+      </div>
+      <div className="flex flex-wrap gap-2 mb-4">
+        <button className="button secondary" type="button" onClick={() => navigate(`${opsBase}/field-operations/collectors`)}>
+          Open Collector Dispatch
+        </button>
+        <button className="button secondary" type="button" onClick={() => navigate(`${opsBase}/field-operations/sales`)}>
+          Open Sales Agent Dispatch
+        </button>
+        <button className="button ghost" type="button" onClick={() => navigate(`${opsBase}/staff-performance?period=week&tab=collectors`)}>
+          Staff Performance
+        </button>
       </div>
 
       {tab === 'overview' && <>
         <Stats stats={[{
         label: 'Active Collectors',
-        value: String(staff.collectors.length)
+        value: String(activeCollectors.length)
       }, {
         label: 'Active Sales Agents',
-        value: String(staff.salesAgents.length)
+        value: String(activeAgents.length)
       }, {
-        label: 'Route Compliance',
-        value: `${analytics?.routeCompliance || 0}%`
+        label: 'Collectors On Route Today',
+        value: String(collectorsOnRoute)
       }, {
-        label: 'Sales Completion',
-        value: `${analytics?.salesVisitCompletion || 0}%`
+        label: 'Agents With Areas Today',
+        value: String(agentsAssigned)
       }]} />
         <div className="grid two-up">
-          <Card title="Collector Performance" sub="Compliance & recovery · click a bar">
+          <Card title="Collector Routes Today" sub="Stops assigned vs completed today">
             <ResponsiveContainer width="100%" height={220}>
               <BarChart
-                data={collectorChart}
+                data={collectorDispatchChart}
                 style={{ cursor: 'pointer' }}
                 onClick={(state) => {
                   const label = state?.activeLabel;
                   if (!label) return;
-                  const match = staff.collectors.filter((c) => String(c.name || '').split(' ')[0] === label);
+                  const match = activeCollectors.filter((c) => String(c.name || '').split(' ')[0] === label);
                   openLocalDrilldown({
-                    title: 'Collector performance',
+                    title: 'Collector route today',
                     category: label,
                     columnSet: 'staff',
                     rows: match.map((c) => ({
                       name: c.name,
-                      complianceScore: c.complianceScore,
-                      recoveryRate: c.recoveryRate,
-                      status: c.status || 'Active',
+                      todayStops: c.todayStops,
+                      todayCompleted: c.todayCompleted,
+                      status: c.todayRouteStatus || 'No Route',
                     })),
                     totals: [{ label: 'Collectors', value: match.length }],
-                    filenameBase: `collector-${label}`,
+                    filenameBase: `collector-route-${label}`,
                   });
                 }}
               >
-                <CartesianGrid strokeDasharray="3 3" stroke="#BADBE9" />
-                <XAxis dataKey="name" tick={{
-                fontSize: 12
-              }} /><YAxis domain={[0, 100]} unit="%" tick={{
-                fontSize: 12
-              }} /><Tooltip formatter={v => `${v}%`} /><Legend />
-                <Bar dataKey="compliance" name="Compliance" fill="#1A4162" radius={[4, 4, 0, 0]} />
-                <Bar dataKey="recovery" name="Recovery" fill="#0B1E30" radius={[4, 4, 0, 0]} />
+                <CartesianGrid strokeDasharray="3 3" stroke="#E2E8F0" />
+                <XAxis dataKey="name" tick={{ fontSize: 12 }} />
+                <YAxis allowDecimals={false} tick={{ fontSize: 12 }} />
+                <Tooltip /><Legend />
+                <Bar dataKey="stops" name="Stops Assigned" fill="#153450" radius={[4, 4, 0, 0]} />
+                <Bar dataKey="completed" name="Stops Completed" fill="#0B2133" radius={[4, 4, 0, 0]} />
               </BarChart>
             </ResponsiveContainer>
           </Card>
-          <Card title="Sales Agent Performance" sub="Visit completion & conversion · click a bar">
+          <Card title="Sales Agent Areas Today" sub="Assigned areas & sales logged today">
             <ResponsiveContainer width="100%" height={220}>
               <BarChart
                 data={salesChart}
@@ -479,155 +243,82 @@ function FieldOperationsHub({
                 onClick={(state) => {
                   const label = state?.activeLabel;
                   if (!label) return;
-                  const match = staff.salesAgents.filter((a) => String(a.name || '').split(' ')[0] === label);
+                  const match = activeAgents.filter((a) => String(a.name || '').split(' ')[0] === label);
                   openLocalDrilldown({
-                    title: 'Sales agent performance',
+                    title: 'Sales agent dispatch',
                     category: label,
                     columnSet: 'staff',
                     rows: match.map((a) => ({
                       name: a.name,
-                      visitCompletionRate: a.visitCompletionRate,
-                      conversionRate: a.conversionRate,
-                      status: a.status || 'Active',
+                      areasAssignedToday: a.areasAssignedToday,
+                      salesTodayCount: a.salesTodayCount,
+                      status: a.workStatus || a.status || 'Active',
                     })),
                     totals: [{ label: 'Agents', value: match.length }],
                     filenameBase: `agent-${label}`,
                   });
                 }}
               >
-                <CartesianGrid strokeDasharray="3 3" stroke="#BADBE9" />
-                <XAxis dataKey="name" tick={{
-                fontSize: 12
-              }} /><YAxis domain={[0, 100]} unit="%" tick={{
-                fontSize: 12
-              }} /><Tooltip formatter={v => `${v}%`} /><Legend />
-                <Bar dataKey="visits" name="Visit Completion" fill="#1A4162" radius={[4, 4, 0, 0]} />
-                <Bar dataKey="conversion" name="Conversion" fill="#0B1E30" radius={[4, 4, 0, 0]} />
+                <CartesianGrid strokeDasharray="3 3" stroke="#E2E8F0" />
+                <XAxis dataKey="name" tick={{ fontSize: 12 }} />
+                <YAxis allowDecimals={false} tick={{ fontSize: 12 }} />
+                <Tooltip /><Legend />
+                <Bar dataKey="areas" name="Areas Assigned" fill="#153450" radius={[4, 4, 0, 0]} />
+                <Bar dataKey="salesToday" name="Sales Today" fill="#0B2133" radius={[4, 4, 0, 0]} />
               </BarChart>
             </ResponsiveContainer>
           </Card>
         </div>
-        <Card title="Collector Performance Summary" sub="Current branch metrics">
-          <div style={{
-          display: 'grid',
-          gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
-          gap: 16,
-          padding: '12px 0'
-        }}>
-            {staff.collectors.slice(0, 4).map(c => <div key={c.id} style={{
-            background: '#eef0f4',
-            padding: 12,
-            borderRadius: 8,
-            border: '1px solid #BADBE9'
-          }}>
-                <strong style={{
-              fontSize: '0.9rem'
-            }}>{c.name}</strong>
-                <div style={{
-              marginTop: 8,
-              display: 'flex',
-              flexDirection: 'column',
-              gap: 4,
-              fontSize: '0.85rem',
-              color: '#5F7385'
-            }}>
-                  <span>Assigned: {c.accountsAssigned}</span>
-                  <span>Visited: {c.accountsVisited}</span>
-                  <span>Pending: {c.accountsPending}</span>
-                  <span>Compliance: {c.complianceScore}%</span>
-                  <span>Collected: {formatCurrency(c.collectionAmount)}</span>
-                </div>
-              </div>)}
+        <Card title="Dispatch shortcuts" sub="Planning happens on the dedicated dispatch pages">
+          <p className="muted">Collectors get collection routes. Sales Agents get canvassing areas. Period rankings live under Staff Performance.</p>
+          <div className="flex flex-wrap gap-2">
+            <button className="button" type="button" onClick={() => navigate(`${opsBase}/field-operations/collectors`)}>
+              Collector Dispatch
+            </button>
+            <button className="button secondary" type="button" onClick={() => navigate(`${opsBase}/field-operations/sales`)}>
+              Sales Agent Dispatch
+            </button>
           </div>
         </Card>
       </>}
 
-      {tab === 'collectors' && <section className="panel content-panel relative overflow-hidden">
-          <div className="list-section-header"><h3>Collectors <span className="text-ink/70">({staff.collectors.length})</span></h3></div>
-          {staff.collectors.length ? <>
-            <div className="corvex-table-wrapper">
-              <table className="corvex-table">
-                <thead>
-                  <tr>
-                    <th>Name</th>
-                    <th>Assigned</th>
-                    <th>Visited</th>
-                    <th>Pending</th>
-                    <th>Compliance</th>
-                    <th>Collected</th>
-                    <th>Actions</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {paginated_staff_collectors.map(c => <tr key={c.id} className="clickable-row" onClick={() => navigate(`${opsBase}/field-operations/collectors/${c.id}`)}>
-                      <td><strong>{c.name}</strong></td>
-                      <td>{c.accountsAssigned}</td>
-                      <td>{c.accountsVisited}</td>
-                      <td>{c.accountsPending}</td>
-                      <td>{c.complianceScore}%</td>
-                      <td>{formatCurrency(c.collectionAmount)}</td>
-                      <td className="table-actions" onClick={e => e.stopPropagation()}>
-                        <button className="icon-action-button" type="button" title="Expand Route" onClick={() => navigate(`${opsBase}/field-operations/collectors/${c.id}`)}><NavIcon name="view" /></button>
-                        <button className="icon-action-button" type="button" title="View on Field Map" onClick={() => navigate(`${opsBase}/leaflet?staff=${encodeURIComponent(c.id)}`)}><NavIcon name="map" /></button>
-                      </td>
-                    </tr>)}
-                </tbody>
-              </table>
-            </div>
-            <Pagination {...pagination_staff_collectors} />
-          </> : <EmptyState title="No collectors" description="Collectors assigned to this branch will appear here." />}
-        </section>}
-
-      {tab === 'sales' && <section className="panel content-panel relative overflow-hidden">
-          <div className="list-section-header"><h3>Sales Agents <span className="text-ink/70">({staff.salesAgents.length})</span></h3></div>
-          {staff.salesAgents.length ? <>
-            <div className="corvex-table-wrapper">
-              <table className="corvex-table">
-                <thead>
-                  <tr>
-                    <th>Name</th>
-                    <th>Customers</th>
-                    <th>Visits</th>
-                    <th>Sales</th>
-                    <th>Revenue</th>
-                    <th>Actions</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {paginated_staff_sales.map(a => <tr key={a.id} className="clickable-row" onClick={() => navigate(`${opsBase}/field-operations/sales/${a.id}`)}>
-                      <td><strong>{a.name}</strong></td>
-                      <td>{a.customersAssigned}</td>
-                      <td>{a.visitsCompleted}</td>
-                      <td>{a.salesLogged}</td>
-                      <td>{formatCurrency(a.totalSalesAmount)}</td>
-                      <td className="table-actions" onClick={e => e.stopPropagation()}>
-                        <button className="icon-action-button" type="button" title="Expand Schedule" onClick={() => navigate(`${opsBase}/field-operations/sales/${a.id}`)}><NavIcon name="view" /></button>
-                        <button className="icon-action-button" type="button" title="View on Field Map" onClick={() => navigate(`${opsBase}/leaflet?staff=${encodeURIComponent(a.id)}`)}><NavIcon name="map" /></button>
-                      </td>
-                    </tr>)}
-                </tbody>
-              </table>
-            </div>
-            <Pagination {...pagination_staff_sales} />
-          </> : <EmptyState title="No sales agents" description="Sales agents assigned to this branch will appear here." />}
-        </section>}
-
       {tab === 'performance' && <section className="panel content-panel relative overflow-hidden">
-          <div className="flex flex-col md:flex-row justify-between gap-4 items-start md:items-center mb-4"><h3>Route Performance Summary</h3></div>
+          <div className="flex flex-col md:flex-row justify-between gap-4 items-start md:items-center mb-4">
+            <div>
+              <h3 style={{ margin: 0 }}>Today&apos;s operational snapshot</h3>
+              <p className="muted" style={{ margin: '4px 0 0' }}>
+                Live dispatch status only. Open Staff Performance for period rankings.
+              </p>
+            </div>
+          </div>
           {!routePerformanceRows.length ? (
-            <EmptyState title="No route performance data" description="Collectors and sales agents assigned to this branch will appear here." />
+            <EmptyState title="No operational data" description="Collectors and sales agents assigned to this branch will appear here." />
           ) : <>
             <div className="corvex-table-wrapper">
               <table className="corvex-table">
-                <thead><tr><th>Staff</th><th>Type</th><th>Compliance</th><th>Recovery / Revenue</th><th>Missed</th></tr></thead>
+                <thead>
+                  <tr>
+                    <th>Staff</th>
+                    <th>Type</th>
+                    <th>Today Status</th>
+                    <th>Progress</th>
+                    <th>Remaining</th>
+                    <th>Actions</th>
+                  </tr>
+                </thead>
                 <tbody>
                   {paginated_route_performance.map((row) => (
-                    <tr key={row.id}>
-                      <td>{row.name}</td>
+                    <tr key={row.id} className="clickable-row" onClick={() => navigate(row.detailPath)}>
+                      <td><strong>{row.name}</strong></td>
                       <td>{row.type}</td>
-                      <td>{row.compliance}</td>
-                      <td>{row.recoveryOrRevenue}</td>
-                      <td>{row.missed}</td>
+                      <td><StatusBadge status={row.status} /></td>
+                      <td>{row.progress}</td>
+                      <td>{row.remaining}</td>
+                      <td className="table-actions" onClick={(e) => e.stopPropagation()}>
+                        <button className="button ghost" type="button" onClick={() => navigate(row.detailPath)}>
+                          Open
+                        </button>
+                      </td>
                     </tr>
                   ))}
                 </tbody>
@@ -639,497 +330,31 @@ function FieldOperationsHub({
       <ChartDrilldownModal {...drilldown} onClose={closeDrilldown} showToast={showToast} />
     </div>;
 }
-function manilaDateInputValue() {
-  return new Intl.DateTimeFormat('en-CA', {
-    timeZone: 'Asia/Manila',
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-  }).format(new Date());
-}
-
-function CollectorDetailPage({
-  collectorId,
-  navigate,
-  opsBase,
-  showToast,
-}) {
-  const [staff, setStaff] = useState({
-    collectors: [],
-    salesAgents: []
-  });
-  const [routeDetail, setRouteDetail] = useState(null);
-  const [sawRows, setSawRows] = useState([]);
-  const [sawMeta, setSawMeta] = useState(null);
-  const [assignedIds, setAssignedIds] = useState(() => new Set());
-  const [selectedIds, setSelectedIds] = useState(() => new Set());
-  const [scheduledDate, setScheduledDate] = useState(manilaDateInputValue);
-  const [assignBusy, setAssignBusy] = useState(false);
-  const assignLock = useRef(false);
-  const [loading, setLoading] = useState(true);
-  async function reloadSaw(date) {
-    const sawRes = await fetchCollectorSawPriority(collectorId, { scheduled_date: date });
-    if (sawRes.success) {
-      setSawRows(sawRes.data || []);
-      setSawMeta(sawRes.meta || null);
-      setAssignedIds(new Set((sawRes.meta?.assignedCustomerIds || []).map(String)));
-    }
-  }
-  useEffect(() => {
-    async function load() {
-      setLoading(true);
-      const date = scheduledDate;
-      const [staffResult, detailResult, sawRes] = await Promise.all([
-        getBranchStaff(),
-        getBranchCollectorDetail(collectorId),
-        fetchCollectorSawPriority(collectorId, { scheduled_date: date }),
-      ]);
-      if (staffResult.success) setStaff(staffResult.data);
-      if (detailResult.success) setRouteDetail(detailResult.data);
-      if (sawRes.success) {
-        setSawRows(sawRes.data || []);
-        setSawMeta(sawRes.meta || null);
-        setAssignedIds(new Set((sawRes.meta?.assignedCustomerIds || []).map(String)));
-      }
-      setLoading(false);
-    }
-    load();
-  }, [collectorId, scheduledDate]);
-  const c = staff.collectors.find(x => x.id === String(collectorId));
-  const route = routeDetail?.route || c?.route || [];
-  const pagination_c_route = usePagination(route);
-  const paginated_c_route = pagination_c_route.paginatedData;
-  const pagination_saw = usePagination(sawRows);
-  const paginated_saw = pagination_saw.paginatedData;
-  const mapCenter = routeDetail?.mapMarkers?.[0]?.position || [7.1907, 125.4553];
-
-  function toggleSelected(customerId) {
-    const id = String(customerId);
-    setSelectedIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
-  }
-
-  async function submitAssignment(payload) {
-    if (assignBusy || assignLock.current) return;
-    assignLock.current = true;
-    const stopCount = payload.assign_top_n
-      ? `the top ${payload.assign_top_n} SAW stops`
-      : `${payload.customer_ids?.length || 0} selected customer${payload.customer_ids?.length === 1 ? '' : 's'}`;
-    const confirmed = await confirmAction({
-      title: 'Assign collection route',
-      message: `This schedules collection visits for ${stopCount} on ${scheduledDate}.`,
-      detail: c?.name || 'Collector',
-      confirmLabel: 'Assign route',
-    });
-    if (!confirmed) {
-      assignLock.current = false;
-      return;
-    }
-    setAssignBusy(true);
-    try {
-      const res = await assignCollectorCollectionRoute(collectorId, {
-        scheduled_date: scheduledDate,
-        ...payload,
-      });
-      if (res.success) {
-        showToast?.(res.message || 'Collection visits scheduled.', 'success');
-        setSelectedIds(new Set());
-        await reloadSaw(scheduledDate);
-        const detailResult = await getBranchCollectorDetail(collectorId);
-        if (detailResult.success) setRouteDetail(detailResult.data);
-      } else {
-        showToast?.(res.message || 'Could not assign visits.', 'error');
-      }
-    } finally {
-      setAssignBusy(false);
-      assignLock.current = false;
-    }
-  }
-
-  if (loading) return <LoadingState variant="detail" message="Loading collector details..." />;
-  if (!c) return <EmptyState title="Collector not found" actionLabel="Back" onAction={() => navigate(`${opsBase}/field-operations/collectors`)} />;
-  return <div className="page">
-      <Stats stats={[{
-      label: 'Compliance',
-      value: `${c.complianceScore}%`
-    }, {
-      label: 'Success Rate',
-      value: `${c.collectionSuccessRate}%`
-    }, {
-      label: 'Avg Visit',
-      value: c.avgVisitDuration
-    }, {
-      label: 'Recovery',
-      value: `${c.recoveryRate}%`
-    }]} />
-      <section className="panel content-panel relative overflow-hidden">
-        <div className="flex flex-col md:flex-row justify-between gap-4 items-start md:items-center mb-4">
-          <div>
-            <h3>Assign today&apos;s collection route</h3>
-            <p className="muted" style={{ marginTop: 4, marginBottom: 0 }}>
-              SAW ranking (balance 40%, overdue 30%, distance 30%) · {sawMeta?.stats?.ranked ?? sawRows.length} eligible
-            </p>
-          </div>
-          <div className="flex flex-wrap gap-2 items-center">
-            <label className="flex items-center gap-2 text-sm">
-              Date
-              <input
-                type="date"
-                className="input"
-                value={scheduledDate}
-                onChange={(e) => setScheduledDate(e.target.value)}
-              />
-            </label>
-            <button
-              className="button secondary"
-              type="button"
-              disabled={assignBusy}
-              onClick={() => submitAssignment({ assign_top_n: 5 })}
-            >
-              Assign top 5
-            </button>
-            <button
-              className="button"
-              type="button"
-              disabled={assignBusy || selectedIds.size === 0}
-              onClick={() => submitAssignment({ customer_ids: [...selectedIds].map(Number) })}
-            >
-              Assign selected ({selectedIds.size})
-            </button>
-          </div>
-        </div>
-        {sawRows.length ? (
-          <>
-            <div className="corvex-table-wrapper">
-              <table className="corvex-table">
-                <thead>
-                  <tr>
-                    <th aria-label="Select" />
-                    <th>Rank</th>
-                    <th>Customer</th>
-                    <th>Balance</th>
-                    <th>Days overdue</th>
-                    <th>Distance</th>
-                    <th>SAW</th>
-                    <th>Scheduled</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {paginated_saw.map((row) => {
-                    const id = String(row.customer_id);
-                    const already = assignedIds.has(id);
-                    return (
-                      <tr key={id}>
-                        <td>
-                          <input
-                            type="checkbox"
-                            checked={selectedIds.has(id)}
-                            disabled={already}
-                            onChange={() => toggleSelected(id)}
-                            aria-label={`Select ${row.customer_name}`}
-                          />
-                        </td>
-                        <td><strong>#{row.rank}</strong></td>
-                        <td>{row.customer_name}</td>
-                        <td>{formatCurrency(row.outstanding_balance || 0)}</td>
-                        <td>{row.days_overdue ?? 0}</td>
-                        <td>{Number(row.distance_km) ? `${Number(row.distance_km).toFixed(1)} km` : '—'}</td>
-                        <td>{row.score != null ? Number(row.score).toFixed(3) : '—'}</td>
-                        <td>{already ? <StatusBadge status="Pending" /> : '—'}</td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-            <Pagination {...pagination_saw} />
-          </>
-        ) : (
-          <EmptyState
-            title="No SAW-eligible customers"
-            description="Active accounts with balance, coordinates, and open invoices will appear here."
-          />
-        )}
-      </section>
-      <section className="panel content-panel relative overflow-hidden">
-        <div className="flex flex-col md:flex-row justify-between gap-4 items-start md:items-center mb-4"><h3>Route Timeline</h3><span className="text-ink/70">GPS: {routeDetail?.gpsAttendance ?? c.gpsAttendance ? 'Active' : 'Off'}</span></div>
-        {route.length ? <><div className="corvex-table-wrapper"><table className="corvex-table"><thead><tr><th>Account</th><th>Status</th><th>Time</th><th>Amount</th></tr></thead><tbody>{paginated_c_route.map(r => <tr key={`${r.account}-${r.time}`}><td>{r.account}</td><td><StatusBadge status={r.status} /></td><td>{formatDisplayDate(r.time)}</td><td>{r.amount ? formatCurrency(r.amount) : '—'}</td></tr>)}</tbody></table></div><Pagination {...pagination_c_route} /></> : <EmptyState title="No route data" description="Collection visits will appear here once scheduled." />}
-        <div style={{
-        marginTop: 16
-      }}>
-          <LeafletMap center={mapCenter} zoom={13} height={400} polylines={routeDetail?.polylines || []} markers={routeDetail?.mapMarkers || []} />
-        </div>
-      </section>
-      <div className="flex justify-end gap-2 mt-4">
-        <button className="button ghost" type="button" onClick={() => navigate(`${opsBase}/field-operations/collectors`)}>Back to Collectors</button>
-        <button className="button secondary" type="button" onClick={() => navigate(`${opsBase}/leaflet?staff=${encodeURIComponent(collectorId)}`)}>View on Field Map</button>
-      </div>
-    </div>;
-}
-function manilaTodayInput() {
-  return new Intl.DateTimeFormat('en-CA', {
-    timeZone: 'Asia/Manila',
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-  }).format(new Date());
-}
-
-function SalesAgentDetailPage({
-  agentId,
-  navigate,
-  opsBase,
-  showToast,
-}) {
-  const [staff, setStaff] = useState({
-    collectors: [],
-    salesAgents: []
-  });
-  const [detail, setDetail] = useState({ customers: [], productPerformance: [] });
-  const [assignments, setAssignments] = useState([]);
-  const [territories, setTerritories] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [assigning, setAssigning] = useState(false);
-  const [form, setForm] = useState({
-    territory_id: '',
-    area_name: '',
-    work_date: manilaTodayInput(),
-    coverage_notes: '',
-  });
-
-  async function reloadAssignments() {
-    const result = await getSalesAgentAreaAssignments(agentId);
-    if (result.success) setAssignments(result.data || []);
-  }
-
-  useEffect(() => {
-    async function load() {
-      setLoading(true);
-      const [staffResult, detailResult, assignmentResult, territoryResult] = await Promise.all([
-        getBranchStaff(),
-        getBranchSalesAgentDetail(agentId),
-        getSalesAgentAreaAssignments(agentId),
-        fetchTerritories(),
-      ]);
-      if (staffResult.success) setStaff(staffResult.data);
-      if (detailResult.success && detailResult.data) setDetail(detailResult.data);
-      if (assignmentResult.success) setAssignments(assignmentResult.data || []);
-      if (territoryResult?.success) setTerritories(territoryResult.data || []);
-      else if (Array.isArray(territoryResult)) setTerritories(territoryResult);
-      else setTerritories([]);
-      setLoading(false);
-    }
-    load();
-  }, [agentId]);
-
-  const a = staff.salesAgents.find(x => x.id === String(agentId));
-  const customers = detail.customers?.length ? detail.customers : a?.customers || [];
-  const productPerformance = detail.productPerformance?.length ? detail.productPerformance : a?.productPerformance || [];
-  const pagination_customers = usePagination(customers);
-  const pagination_products = usePagination(productPerformance);
-  const pagination_assignments = usePagination(assignments);
-
-  const handleTerritoryChange = (territoryId) => {
-    const territory = territories.find((t) => String(t.territory_id) === String(territoryId));
-    setForm((prev) => ({
-      ...prev,
-      territory_id: territoryId,
-      area_name: territory?.territory_name || prev.area_name,
-      coverage_notes: territory?.coverage_area || prev.coverage_notes,
-    }));
-  };
-
-  const handleAssign = async () => {
-    if (!form.work_date) {
-      showToast?.('Work date is required.', 'error');
-      return;
-    }
-    if (!form.territory_id && !form.area_name.trim()) {
-      showToast?.('Choose a territory or enter an area name.', 'error');
-      return;
-    }
-    setAssigning(true);
-    const result = await assignSalesAgentArea(agentId, {
-      territory_id: form.territory_id ? Number(form.territory_id) : undefined,
-      area_name: form.area_name.trim() || undefined,
-      work_date: form.work_date,
-      coverage_notes: form.coverage_notes.trim() || undefined,
-    });
-    setAssigning(false);
-    if (!result.success) {
-      showToast?.(result.message || 'Failed to assign area.', 'error');
-      return;
-    }
-    showToast?.(result.message || 'Area assigned.', 'success');
-    setForm((prev) => ({
-      ...prev,
-      coverage_notes: '',
-      area_name: prev.territory_id
-        ? (territories.find((t) => String(t.territory_id) === String(prev.territory_id))?.territory_name || '')
-        : '',
-    }));
-    await reloadAssignments();
-  };
-
-  if (loading) return <LoadingState variant="detail" message="Loading agent details..." />;
-  if (!a) return <EmptyState title="Agent not found" actionLabel="Back" onAction={() => navigate(`${opsBase}/field-operations`)} />;
-  return <div className="page">
-      <Stats stats={[{
-      label: 'Visit Completion',
-      value: `${a.visitCompletionRate}%`
-    }, {
-      label: 'Conversion',
-      value: `${a.conversionRate}%`
-    }, {
-      label: 'Avg Sale',
-      value: formatCurrency(a.avgSaleValue)
-    }, {
-      label: 'New Customers',
-      value: String(a.newCustomersAcquired)
-    }]} />
-
-      <section className="panel content-panel relative overflow-hidden">
-        <div className="list-section-header">
-          <div>
-            <h3>Assign canvass area</h3>
-            <p className="muted" style={{ marginTop: 4 }}>
-              Tell this sales agent where to work. They will see it on Today&apos;s Schedule — not a customer stop list.
-            </p>
-          </div>
-        </div>
-        <div className="list-section-toolbar">
-          <div className="list-section-controls" style={{ flexWrap: 'wrap', gap: 8 }}>
-            <select
-              className="filter-select"
-              value={form.territory_id}
-              onChange={(e) => handleTerritoryChange(e.target.value)}
-              aria-label="Territory"
-            >
-              <option value="">Select territory (optional)</option>
-              {territories.map((t) => (
-                <option key={t.territory_id} value={t.territory_id}>{t.territory_name}</option>
-              ))}
-            </select>
-            <input
-              className="filter-input"
-              type="text"
-              placeholder="Area / location name"
-              value={form.area_name}
-              onChange={(e) => setForm((prev) => ({ ...prev, area_name: e.target.value }))}
-              aria-label="Area name"
-            />
-            <input
-              className="filter-input"
-              type="date"
-              value={form.work_date}
-              onChange={(e) => setForm((prev) => ({ ...prev, work_date: e.target.value }))}
-              aria-label="Work date"
-            />
-          </div>
-        </div>
-        <div className="form-group" style={{ marginTop: 8 }}>
-          <label htmlFor={`area-notes-${agentId}`}>Instructions / notes</label>
-          <textarea
-            id={`area-notes-${agentId}`}
-            rows={2}
-            placeholder="Focus barangay, landmark, products to emphasize…"
-            value={form.coverage_notes}
-            onChange={(e) => setForm((prev) => ({ ...prev, coverage_notes: e.target.value }))}
-          />
-        </div>
-        <div className="flex justify-end mt-2">
-          <button className="button" type="button" disabled={assigning} onClick={handleAssign}>
-            {assigning ? 'Assigning…' : 'Assign area'}
-          </button>
-        </div>
-
-        <div className="list-section-header" style={{ marginTop: 20 }}>
-          <h3>Area assignments <span className="text-ink/70">({assignments.length})</span></h3>
-        </div>
-        {assignments.length ? <>
-          <div className="corvex-table-wrapper">
-            <table className="corvex-table">
-              <thead>
-                <tr>
-                  <th>Area</th>
-                  <th>Work Date</th>
-                  <th>Status</th>
-                  <th>Notes</th>
-                </tr>
-              </thead>
-              <tbody>
-                {pagination_assignments.paginatedData.map((row) => (
-                  <tr key={row.assignment_id}>
-                    <td><strong>{row.area_name}</strong></td>
-                    <td>{row.work_date ? formatDisplayDate(row.work_date) : '—'}</td>
-                    <td><StatusBadge status={row.status} /></td>
-                    <td style={{ maxWidth: 240, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={row.coverage_notes || ''}>
-                      {row.coverage_notes || '—'}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-          <Pagination {...pagination_assignments} />
-        </> : <EmptyState title="No area assignments yet" description="Assign a territory and work date so this agent can canvass." />}
-      </section>
-
-      <section className="panel content-panel relative overflow-hidden">
-        {customers.length ? <>
-          <div className="list-section-header"><h3>Customers <span className="text-ink/70">({customers.length})</span></h3></div>
-          <div className="corvex-table-wrapper">
-            <table className="corvex-table">
-              <thead><tr><th>Customer</th></tr></thead>
-              <tbody>
-                {pagination_customers.paginatedData.map(c => <tr key={c}><td>{c}</td></tr>)}
-              </tbody>
-            </table>
-          </div>
-          <Pagination {...pagination_customers} />
-        </> : null}
-        {productPerformance.length ? <>
-          <div className="list-section-header" style={{ marginTop: customers.length ? 16 : 0 }}>
-            <h3>Product Performance <span className="text-ink/70">({productPerformance.length})</span></h3>
-          </div>
-          <div className="corvex-table-wrapper">
-            <table className="corvex-table">
-              <thead><tr><th>Product</th><th>Units</th></tr></thead>
-              <tbody>
-                {pagination_products.paginatedData.map(p => <tr key={p.product}><td><strong>{p.product}</strong></td><td>{p.units} units</td></tr>)}
-              </tbody>
-            </table>
-          </div>
-          <Pagination {...pagination_products} />
-        </> : null}
-        {!customers.length && !productPerformance.length ? <EmptyState title="No activity yet" description="Customers and sales mix will appear after visits and invoices are logged." /> : null}
-      </section>
-      <div className="flex justify-end gap-2 mt-4">
-        <button className="button ghost" type="button" onClick={() => navigate(`${opsBase}/field-operations/sales`)}>Back to Sales Agents</button>
-        <button className="button secondary" type="button" onClick={() => navigate(`${opsBase}/leaflet?staff=${encodeURIComponent(agentId)}`)}>View on Field Map</button>
-      </div>
-    </div>;
-}
 
 // ── Reports & Analytics (combined with tab nav) ───────────────────────────────
 function ReportsHubPage({
   navigate,
   showToast,
-  pageType
+  pageType,
+  opsBase,
+  branchName,
 }) {
   const { drilldown, closeDrilldown, openApiDrilldown, openLocalDrilldown } = useChartDrilldown({ showToast });
   const initialTab = pageType === 'reportSales' ? 'sales'
     : pageType === 'reportInventory' ? 'inventory'
       : pageType === 'reportDelinquency' ? 'delinquency'
-        : 'collection';
+        : pageType === 'reportInvoices' ? 'invoices'
+          : pageType === 'reportCollection' ? 'collection'
+            : 'collection';
   const [tab, setTab] = useState(initialTab);
   useEffect(() => {
     setTab(initialTab);
   }, [initialTab]);
+  useEffect(() => {
+    if (pageType === 'reports') {
+      navigate(`${opsBase}/reports/collection`, { replace: true });
+    }
+  }, [pageType, opsBase, navigate]);
   const [staff, setStaff] = useState({
     collectors: [],
     salesAgents: []
@@ -1141,99 +366,247 @@ function ReportsHubPage({
   const [complianceData, setComplianceData] = useState(null);
   const [kpi, setKpi] = useState(null);
   const [invoices, setInvoices] = useState([]);
+  const [invoiceSummary, setInvoiceSummary] = useState(null);
+  const [invoicePagination, setInvoicePagination] = useState({ page: 1, limit: 50, total: 0, totalPages: 1 });
+  const [invoicePage, setInvoicePage] = useState(1);
+  const [loadErrors, setLoadErrors] = useState({});
   const [viewingInvoiceId, setViewingInvoiceId] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [exportingInvoices, setExportingInvoices] = useState(false);
+
   const tabs = [{
     key: 'collection',
-    label: 'Collections'
+    label: 'Collections',
+    path: `${opsBase}/reports/collection`,
   }, {
     key: 'sales',
-    label: 'Sales'
+    label: 'Sales',
+    path: `${opsBase}/reports/sales`,
   }, {
     key: 'inventory',
-    label: 'Inventory'
+    label: 'Inventory',
+    path: `${opsBase}/reports/inventory`,
   }, {
     key: 'delinquency',
-    label: 'Delinquency'
+    label: 'Delinquency',
+    path: `${opsBase}/reports/delinquency`,
   }, {
     key: 'invoices',
-    label: 'Sales Invoices'
+    label: 'Sales Invoices',
+    path: `${opsBase}/reports/invoices`,
   }];
-  useEffect(() => {
-    async function load() {
-      setLoading(true);
-      const [staffResult, collectionResult, salesResult, inventoryResult, delinquencyResult, complianceResult, kpiResult, invoiceResult] = await Promise.all([getBranchStaff(), getReportCollection(), getReportSales(), getReportInventory(), getReportDelinquency(), getReportCompliance(), getReportKPI(), getReportInvoices()]);
-      if (staffResult.success) setStaff(staffResult.data || {
-        collectors: [],
-        salesAgents: []
-      });
-      if (collectionResult.success) setCollectionData(collectionResult.data);
-      if (salesResult.success) setSalesData(salesResult.data);
-      if (inventoryResult.success) setInventoryData(inventoryResult.data);
-      if (delinquencyResult.success) setDelinquencyData(delinquencyResult.data);
-      if (complianceResult.success) setComplianceData(complianceResult.data);
-      if (kpiResult.success) setKpi(kpiResult.data);
-      if (invoiceResult.success) setInvoices(invoiceResult.data || []);
-      setLoading(false);
+
+  const reloadCore = async () => {
+    setLoading(true);
+    setLoadErrors({});
+    const [
+      staffResult,
+      collectionResult,
+      salesResult,
+      inventoryResult,
+      delinquencyResult,
+      complianceResult,
+      kpiResult,
+    ] = await Promise.all([
+      getBranchStaff(),
+      getReportCollection(),
+      getReportSales(),
+      getReportInventory(),
+      getReportDelinquency(),
+      getReportCompliance(),
+      getReportKPI(),
+    ]);
+    const nextErrors = {};
+    if (staffResult.success) setStaff(staffResult.data || { collectors: [], salesAgents: [] });
+    else nextErrors.staff = true;
+    if (collectionResult.success) setCollectionData(collectionResult.data);
+    else { setCollectionData(null); nextErrors.collection = true; }
+    if (salesResult.success) setSalesData(salesResult.data);
+    else { setSalesData(null); nextErrors.sales = true; }
+    if (inventoryResult.success) setInventoryData(inventoryResult.data);
+    else { setInventoryData(null); nextErrors.inventory = true; }
+    if (delinquencyResult.success) setDelinquencyData(delinquencyResult.data);
+    else { setDelinquencyData(null); nextErrors.delinquency = true; }
+    if (complianceResult.success) setComplianceData(complianceResult.data);
+    else { setComplianceData(null); nextErrors.compliance = true; }
+    if (kpiResult.success) setKpi(kpiResult.data);
+    else { setKpi(null); nextErrors.kpi = true; }
+    setLoadErrors(nextErrors);
+    setLoading(false);
+  };
+
+  const reloadInvoices = async (page = invoicePage) => {
+    const invoiceResult = await getReportInvoices({ page, limit: 50 });
+    if (invoiceResult.success) {
+      setInvoices(invoiceResult.data || []);
+      setInvoiceSummary(invoiceResult.summary || null);
+      setInvoicePagination(invoiceResult.pagination || { page, limit: 50, total: (invoiceResult.data || []).length, totalPages: 1 });
+      setLoadErrors((prev) => ({ ...prev, invoices: false }));
+    } else {
+      setInvoices([]);
+      setInvoiceSummary(null);
+      setLoadErrors((prev) => ({ ...prev, invoices: true }));
     }
-    load();
+  };
+
+  useEffect(() => {
+    reloadCore();
   }, []);
+
+  useEffect(() => {
+    if (tab === 'invoices') reloadInvoices(invoicePage);
+  }, [tab, invoicePage]);
+
   const collectorAmt = (staff?.collectors || []).map(c => ({
     name: c.name.split(' ')[0],
-    amount: c.collectionAmount,
-    compliance: c.complianceScore
+    amount: c.collectionAmount || 0,
+    visitCompletion: c.complianceScore,
   }));
   const agentRev = (staff?.salesAgents || []).map(a => ({
     name: a.name.split(' ')[0],
-    revenue: a.totalSalesAmount,
-    visits: a.visitCompletionRate
+    revenue: a.totalSalesAmount || 0,
+    visits: a.visitCompletionRate,
   }));
   const pagination_inventoryData_lowStockItems = usePagination(inventoryData?.lowStockItems || []);
   const paginated_inventoryData_lowStockItems = pagination_inventoryData_lowStockItems.paginatedData;
-  const pagination_invoices = usePagination(invoices || []);
-  const paginated_invoices = pagination_invoices.paginatedData;
+
+  const periodHint = collectionData?.periodLabel
+    || salesData?.periodLabel
+    || kpi?.periodLabel
+    || 'Last 7 days';
+  const rangeHint = collectionData?.dateFrom && collectionData?.dateTo
+    ? `${formatDisplayDate(collectionData.dateFrom)} – ${formatDisplayDate(collectionData.dateTo)}`
+    : null;
+
+  const selectTab = (nextTab) => {
+    const match = tabs.find((t) => t.key === nextTab);
+    setViewingInvoiceId(null);
+    if (match) navigate(match.path);
+    else setTab(nextTab);
+  };
+
   if (loading) return <LoadingState message="Loading reports..." />;
-  const exportBranchReport = (format) => {
+
+  const exportBranchReport = async (format) => {
     let rows = [];
-    if (tab === 'collection') rows = (collectionData?.daily || []).map((row) => ({ day: row.day, collected: row.amount, target: row.target }));
-    else if (tab === 'sales') rows = (salesData?.weekly || []).map((row) => ({ day: row.day, actual: row.actual, target: row.target, invoices: row.invoices }));
-    else if (tab === 'inventory') rows = (inventoryData?.lowStockItems || []).map((row) => ({ product: row.product_name, sku: row.sku, stock: row.available_stock, status: row.status }));
-    else if (tab === 'delinquency') rows = (delinquencyData?.delinquency || []).map((row) => ({ week: row.week, accounts: row.accounts, rate: row.rate }));
-    else rows = (invoices || []).map((row) => ({ invoice: row.invoice_number, customer: row.customer_name, amount: row.total_amount, date: row.invoices_date, status: row.status }));
-    const ok = exportRows(rows, { format, filename: `branch-${tab}-report`, title: `Branch ${tab} Report` });
+    let title = `Branch ${tab} Report`;
+    let filename = `branch-${tab}-report`;
+    if (tab === 'collection') {
+      if (loadErrors.collection || !collectionData) {
+        showToast('Collections report is unavailable. Retry before exporting.', 'error');
+        return;
+      }
+      rows = (collectionData?.daily || []).map((row) => ({ day: row.day, collected: row.amount, target: row.target }));
+      title = `Collections vs Target (${periodHint}) — ${branchName || 'Branch'}`;
+    } else if (tab === 'sales') {
+      if (loadErrors.sales || !salesData) {
+        showToast('Sales report is unavailable. Retry before exporting.', 'error');
+        return;
+      }
+      rows = (salesData?.weekly || []).map((row) => ({ day: row.day, actual: row.actual, target: row.target, invoices: row.invoices }));
+      title = `Sales Revenue vs Target (${periodHint}) — ${branchName || 'Branch'}`;
+    } else if (tab === 'inventory') {
+      if (loadErrors.inventory || !inventoryData) {
+        showToast('Inventory report is unavailable. Retry before exporting.', 'error');
+        return;
+      }
+      rows = (inventoryData?.lowStockItems || []).map((row) => ({ product: row.product_name, sku: row.sku, stock: row.available_stock, status: row.status }));
+      title = `Inventory Alerts — ${branchName || 'Branch'}`;
+    } else if (tab === 'delinquency') {
+      if (loadErrors.delinquency || !delinquencyData) {
+        showToast('Delinquency report is unavailable. Retry before exporting.', 'error');
+        return;
+      }
+      rows = (delinquencyData?.delinquency || []).map((row) => ({ asOf: row.week || row.asOf, accounts: row.accounts, rate: row.rate }));
+      title = `Overdue Accounts Trend — ${branchName || 'Branch'}`;
+    } else {
+      if (loadErrors.invoices) {
+        showToast('Invoice report is unavailable. Retry before exporting.', 'error');
+        return;
+      }
+      setExportingInvoices(true);
+      const all = [];
+      const limit = 200;
+      let page = 1;
+      let totalPages = 1;
+      do {
+        const res = await getReportInvoices({ page, limit });
+        if (!res.success) {
+          setExportingInvoices(false);
+          showToast(res.message || 'Failed to load invoices for export.', 'error');
+          return;
+        }
+        all.push(...(res.data || []));
+        totalPages = Number(res.pagination?.totalPages) || 1;
+        page += 1;
+      } while (page <= totalPages);
+      setExportingInvoices(false);
+      rows = all.map((row) => ({
+        invoice: row.invoice_number,
+        customer: row.customer_name,
+        amount: row.total_amount,
+        date: row.invoices_date,
+        status: row.status,
+      }));
+      title = `Sales Invoices (complete filtered set) — ${branchName || 'Branch'}`;
+      filename = 'branch-invoices-report';
+    }
+    const ok = exportRows(rows, { format, filename, title });
     if (ok) showToast(format === 'pdf' ? 'Report exported as PDF.' : 'Excel file downloaded.', 'success');
     else showToast('Nothing to export.', 'error');
   };
+
   return <div className="page">
+      <section className="panel content-panel" style={{ marginBottom: 12 }}>
+        <div className="flex flex-col md:flex-row justify-between gap-3 items-start md:items-center">
+          <div>
+            <h3 style={{ margin: 0 }}>Reports</h3>
+            <p className="muted" style={{ margin: '4px 0 0' }}>
+              Analyze and export branch performance in greater detail than the Dashboard.
+            </p>
+            <p className="muted" style={{ margin: '4px 0 0', fontSize: '0.85rem' }}>
+              {branchName === 'All Branches' ? 'Organization-wide view' : (branchName || 'Branch')}
+              {rangeHint ? ` · ${periodHint}: ${rangeHint}` : ` · ${periodHint}`}
+            </p>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <button className="button ghost" type="button" onClick={() => { reloadCore(); if (tab === 'invoices') reloadInvoices(invoicePage); }}>
+              Retry / Refresh
+            </button>
+            <button className="button secondary" type="button" disabled={exportingInvoices} onClick={() => exportBranchReport('pdf')}>
+              {exportingInvoices ? 'Preparing…' : 'Export PDF'}
+            </button>
+            <button className="button secondary" type="button" disabled={exportingInvoices} onClick={() => exportBranchReport('excel')}>
+              {exportingInvoices ? 'Preparing…' : 'Export Excel'}
+            </button>
+          </div>
+        </div>
+      </section>
       <div className="segmented-control">
-        {tabs.map(t => <button key={t.key} className={tab === t.key ? 'segment active' : 'segment'} type="button" onClick={() => { setTab(t.key); setViewingInvoiceId(null); }}>{t.label}</button>)}
-      </div>
-      <div style={{
-      display: 'flex',
-      justifyContent: 'flex-end',
-      gap: 8,
-      marginBottom: 20
-    }}>
-        <button className="button secondary" type="button" onClick={() => exportBranchReport('pdf')}>Export PDF</button>
-        <button className="button secondary" type="button" onClick={() => exportBranchReport('excel')}>Export Excel</button>
+        {tabs.map(t => <button key={t.key} className={tab === t.key ? 'segment active' : 'segment'} type="button" onClick={() => selectTab(t.key)}>{t.label}</button>)}
       </div>
 
       {tab === 'collection' && <>
+          {loadErrors.collection ? (
+            <EmptyState title="Collections report unavailable" description="The collections API failed. Use Retry / Refresh." />
+          ) : !collectionData?.daily?.length ? (
+            <EmptyState title="No collection records" description="No confirmed collections found for this reporting period." />
+          ) : null}
           <Stats stats={[{
         label: 'Collections (7 days)',
         value: formatCurrency(collectionData?.summary?.totalCollected || 0)
       }, {
-        label: 'Collection Rate',
-        value: `${collectionData?.summary?.collectionRate || 0}%`
+        label: 'Collection Rate vs Target',
+        value: `${collectionData?.summary?.collectionRate ?? 0}%`
       }, {
-        label: 'Target',
+        label: 'Period Target',
         value: formatCurrency(collectionData?.summary?.totalTarget || 0)
       }, {
         label: 'Active Days',
         value: String(collectionData?.summary?.daysWithCollections || 0)
       }]} />
           <div className="grid two-up">
-            <Card title="Daily Collection vs Target" sub="Last 7 days · click for payment records">
+            <Card title="Daily Collection vs Target" sub={`${periodHint} · confirmed collections vs daily target × days`}>
               <ResponsiveContainer width="100%" height={220}>
                 <AreaChart
                   data={collectionData?.daily || []}
@@ -1247,7 +620,7 @@ function ReportsHubPage({
                     );
                   }}
                 >
-                  <CartesianGrid strokeDasharray="3 3" stroke="#BADBE9" />
+                  <CartesianGrid strokeDasharray="3 3" stroke="#E2E8F0" />
                   <XAxis dataKey="day" tick={{
                 fontSize: 12
               }} />
@@ -1256,12 +629,12 @@ function ReportsHubPage({
               }} tickFormatter={v => `${(v / 1000).toFixed(0)}k`} />
                   <Tooltip formatter={v => formatCurrency(v)} />
                   <Legend />
-                  <Area type="monotone" dataKey="target" name="Target" stroke="#BADBE9" fill="#BADBE9" strokeWidth={2} strokeDasharray="5 5" />
-                  <Area type="monotone" dataKey="amount" name="Collected" stroke="#1A4162" fill="#1A4162" fillOpacity={0.12} strokeWidth={2} />
+                  <Area type="monotone" dataKey="target" name="Target" stroke="#E2E8F0" fill="#E2E8F0" strokeWidth={2} strokeDasharray="5 5" />
+                  <Area type="monotone" dataKey="amount" name="Collected" stroke="#153450" fill="#153450" fillOpacity={0.12} strokeWidth={2} />
                 </AreaChart>
               </ResponsiveContainer>
             </Card>
-            <Card title="Collector Amounts" sub="Click a bar for collector summary">
+            <Card title="Collector Amounts" sub="Confirmed collections (₱) and visit completion (%) use separate axes">
               <ResponsiveContainer width="100%" height={220}>
                 <BarChart
                   data={collectorAmt}
@@ -1273,12 +646,11 @@ function ReportsHubPage({
                     openLocalDrilldown({
                       title: 'Collector performance',
                       category: label,
-                      dateRange: 'Current branch metrics',
+                      dateRange: 'Branch staff metrics',
                       columnSet: 'staff',
                       rows: (match.length ? match : collectorAmt.filter((r) => r.name === label)).map((c) => ({
                         name: c.name,
-                        complianceScore: c.complianceScore ?? c.compliance,
-                        recoveryRate: c.recoveryRate ?? c.recovery,
+                        complianceScore: c.complianceScore ?? c.visitCompletion,
                         status: c.status || 'Active',
                       })),
                       totals: [{ label: 'Collectors', value: match.length || 1 }],
@@ -1286,17 +658,14 @@ function ReportsHubPage({
                     });
                   }}
                 >
-                  <CartesianGrid strokeDasharray="3 3" stroke="#BADBE9" />
-                  <XAxis dataKey="name" tick={{
-                fontSize: 12
-              }} />
-                  <YAxis tick={{
-                fontSize: 11
-              }} tickFormatter={v => `${(v / 1000).toFixed(0)}k`} />
+                  <CartesianGrid strokeDasharray="3 3" stroke="#E2E8F0" />
+                  <XAxis dataKey="name" tick={{ fontSize: 12 }} />
+                  <YAxis yAxisId="l" tick={{ fontSize: 11 }} tickFormatter={v => `${(v / 1000).toFixed(0)}k`} />
+                  <YAxis yAxisId="r" orientation="right" domain={[0, 100]} unit="%" tick={{ fontSize: 12 }} />
                   <Tooltip />
                   <Legend />
-                  <Bar dataKey="amount" name="Collected (₱)" fill="#1A4162" radius={[4, 4, 0, 0]} />
-                  <Bar dataKey="compliance" name="Compliance %" fill="#0B1E30" radius={[4, 4, 0, 0]} />
+                  <Bar yAxisId="l" dataKey="amount" name="Collected (₱)" fill="#153450" radius={[4, 4, 0, 0]} />
+                  <Bar yAxisId="r" dataKey="visitCompletion" name="Visit Completion %" fill="#0B2133" radius={[4, 4, 0, 0]} />
                 </BarChart>
               </ResponsiveContainer>
             </Card>
@@ -1304,21 +673,24 @@ function ReportsHubPage({
         </>}
 
       {tab === 'sales' && <>
+          {loadErrors.sales ? (
+            <EmptyState title="Sales report unavailable" description="The sales API failed. Use Retry / Refresh." />
+          ) : null}
           <Stats stats={[{
         label: 'Sales (7 days)',
         value: formatCurrency(salesData?.summary?.totalActual || 0)
       }, {
-        label: 'Sales Efficiency',
-        value: `${salesData?.summary?.salesEfficiency || 0}%`
+        label: 'Sales Revenue vs Target',
+        value: `${salesData?.summary?.salesEfficiency ?? 0}%`
       }, {
         label: 'Invoices',
         value: String(salesData?.summary?.totalInvoices || 0)
       }, {
-        label: 'Target',
+        label: 'Period Target',
         value: formatCurrency(salesData?.summary?.totalTarget || 0)
       }]} />
           <div className="grid two-up">
-            <Card title="Sales vs Target" sub="Last 7 days · click for invoices">
+            <Card title="Sales Revenue vs Target" sub={`${periodHint} · qualifying invoices vs daily target × days`}>
               <ResponsiveContainer width="100%" height={220}>
                 <BarChart
                   data={salesData?.weekly || []}
@@ -1332,7 +704,7 @@ function ReportsHubPage({
                     );
                   }}
                 >
-                  <CartesianGrid strokeDasharray="3 3" stroke="#BADBE9" />
+                  <CartesianGrid strokeDasharray="3 3" stroke="#E2E8F0" />
                   <XAxis dataKey="day" tick={{
                 fontSize: 12
               }} />
@@ -1341,8 +713,8 @@ function ReportsHubPage({
               }} tickFormatter={v => `${(v / 1000).toFixed(0)}k`} />
                   <Tooltip formatter={v => formatCurrency(v)} />
                   <Legend />
-                  <Bar dataKey="target" name="Target" fill="#BADBE9" radius={[4, 4, 0, 0]} />
-                  <Bar dataKey="actual" name="Actual" fill="#1A4162" radius={[4, 4, 0, 0]} />
+                  <Bar dataKey="target" name="Target" fill="#E2E8F0" radius={[4, 4, 0, 0]} />
+                  <Bar dataKey="actual" name="Actual" fill="#153450" radius={[4, 4, 0, 0]} />
                 </BarChart>
               </ResponsiveContainer>
             </Card>
@@ -1371,7 +743,7 @@ function ReportsHubPage({
                     });
                   }}
                 >
-                  <CartesianGrid strokeDasharray="3 3" stroke="#BADBE9" />
+                  <CartesianGrid strokeDasharray="3 3" stroke="#E2E8F0" />
                   <XAxis dataKey="name" tick={{
                 fontSize: 12
               }} />
@@ -1383,8 +755,8 @@ function ReportsHubPage({
               }} />
                   <Tooltip />
                   <Legend />
-                  <Bar yAxisId="l" dataKey="revenue" name="Revenue" fill="#1A4162" radius={[4, 4, 0, 0]} />
-                  <Bar yAxisId="r" dataKey="visits" name="Visit %" fill="#0B1E30" radius={[4, 4, 0, 0]} />
+                  <Bar yAxisId="l" dataKey="revenue" name="Revenue" fill="#153450" radius={[4, 4, 0, 0]} />
+                  <Bar yAxisId="r" dataKey="visits" name="Visit Completion %" fill="#0B2133" radius={[4, 4, 0, 0]} />
                 </BarChart>
               </ResponsiveContainer>
             </Card>
@@ -1392,50 +764,41 @@ function ReportsHubPage({
         </>}
 
       {tab === 'inventory' && <>
+          {loadErrors.inventory ? (
+            <EmptyState title="Inventory report unavailable" description="The inventory API failed. Use Retry / Refresh." />
+          ) : !inventoryData?.totalProducts ? (
+            <EmptyState title="No inventory records" description="No monitored stock products for this branch." />
+          ) : null}
           <Stats stats={[{
-        label: 'Inventory Health',
-        value: `${inventoryData?.healthPct || 0}%`
+        label: 'Healthy Stock Rate',
+        value: `${inventoryData?.healthPct ?? 0}%`
       }, {
         label: 'Stock Alerts',
         value: String(inventoryData?.alertsCount || 0)
       }, {
-        label: 'Total Products',
+        label: 'Monitored Products',
         value: String(inventoryData?.totalProducts || 0)
       }, {
         label: 'Out of Stock',
         value: String(inventoryData?.summary?.outOfStock || 0)
       }]} />
           <div className="grid two-up">
-            <Card title="Inventory Status" sub="Click a segment for matching stock rows">
+            <Card title="Inventory Status" sub="Sufficient / Low / Critical / Out — mutually exclusive bands">
               <ResponsiveContainer width="100%" height={220}>
                 <PieChart>
                   <Pie
-                    data={[{
-                name: 'Sufficient',
-                value: inventoryData?.summary?.sufficient || 0,
-                color: '#1A4162'
-              }, {
-                name: 'Low Stock',
-                value: inventoryData?.summary?.low || 0,
-                color: '#f59e0b'
-              }, {
-                name: 'Critical',
-                value: inventoryData?.summary?.critical || 0,
-                color: '#ef4444'
-              }, {
-                name: 'Out of Stock',
-                value: inventoryData?.summary?.outOfStock || 0,
-                color: '#5F7385'
-              }]}
+                    data={[
+                      { name: 'Sufficient', value: inventoryData?.summary?.sufficient || 0, color: '#153450' },
+                      { name: 'Low Stock', value: inventoryData?.summary?.low || 0, color: '#f59e0b' },
+                      { name: 'Critical Stock', value: inventoryData?.summary?.critical || 0, color: '#ef4444' },
+                      { name: 'Out of Stock', value: inventoryData?.summary?.outOfStock || 0, color: '#5F7385' },
+                    ].filter((d) => d.value > 0)}
                     dataKey="value"
                     nameKey="name"
                     cx="50%"
                     cy="50%"
                     outerRadius={80}
-                    label={({
-                name,
-                value
-              }) => `${name}: ${value}`}
+                    label={({ name, value }) => `${name}: ${value}`}
                     style={{ cursor: 'pointer' }}
                     onClick={(slice) => {
                       const status = slice?.name;
@@ -1446,19 +809,12 @@ function ReportsHubPage({
                       );
                     }}
                   >
-                    {[{
-                  name: 'Sufficient',
-                  color: '#1A4162'
-                }, {
-                  name: 'Low Stock',
-                  color: '#f59e0b'
-                }, {
-                  name: 'Critical',
-                  color: '#ef4444'
-                }, {
-                  name: 'Out of Stock',
-                  color: '#5F7385'
-                }].map(entry => <Cell key={entry.name} fill={entry.color} />)}
+                    {[
+                      { name: 'Sufficient', color: '#153450' },
+                      { name: 'Low Stock', color: '#f59e0b' },
+                      { name: 'Critical Stock', color: '#ef4444' },
+                      { name: 'Out of Stock', color: '#5F7385' },
+                    ].map((entry) => <Cell key={entry.name} fill={entry.color} />)}
                   </Pie>
                   <Tooltip />
                   <Legend />
@@ -1484,67 +840,90 @@ function ReportsHubPage({
         </>}
 
       {tab === 'delinquency' && <>
+          {loadErrors.delinquency ? (
+            <EmptyState title="Delinquency report unavailable" description="The delinquency API failed. Use Retry / Refresh." />
+          ) : !delinquencyData?.delinquency?.length ? (
+            <EmptyState title="No delinquency data" description="No overdue snapshot data for this reporting window." />
+          ) : null}
           <Stats stats={[{
-        label: 'Overdue Accounts',
-        value: String(delinquencyData?.summary?.totalOverdue || 0)
+        label: 'Current Overdue Accounts',
+        value: String(delinquencyData?.summary?.currentOverdue ?? delinquencyData?.summary?.totalOverdue ?? 0),
+        title: 'Distinct customers with at least one unpaid past-due invoice today.',
       }, {
-        label: 'Avg Rate',
-        value: `${delinquencyData?.summary?.avgRate || 0}%`
+        label: 'Current Overdue Rate',
+        value: `${delinquencyData?.summary?.avgRate || 0}%`,
       }, {
-        label: 'Trend',
-        value: delinquencyData?.summary?.trend || 'stable'
+        label: 'Trend vs prior week',
+        value: delinquencyData?.summary?.trend || 'stable',
       }, {
-        label: 'Branch Health',
-        value: `${kpi?.healthScore || 0}/100`
+        label: 'Healthy Stock Rate',
+        value: `${kpi?.inventoryHealth ?? 0}%`,
       }]} />
           <div className="grid two-up">
-            <Card title="Delinquency Trend" sub="Weekly overdue accounts · click for overdue list">
+            <Card title="Overdue Accounts Trend" sub="Historical week-end snapshots · click a week for that population">
               <ResponsiveContainer width="100%" height={220}>
                 <AreaChart
                   data={delinquencyData?.delinquency || []}
                   style={{ cursor: 'pointer' }}
-                  onClick={() => openApiDrilldown(
-                    { type: 'delinquency' },
-                    { title: 'Overdue accounts', category: 'Delinquency', dateRange: 'Current', columnSet: 'customers', filenameBase: 'delinquency' }
-                  )}
+                  onClick={(state) => {
+                    const asOf = state?.activeLabel;
+                    openApiDrilldown(
+                      { type: 'delinquency', ...(asOf ? { asOf } : {}) },
+                      {
+                        title: 'Overdue accounts',
+                        category: asOf ? `As of ${asOf}` : 'Current overdue',
+                        dateRange: asOf || 'Current',
+                        columnSet: 'customers',
+                        filenameBase: asOf ? `delinquency-${asOf}` : 'delinquency',
+                      }
+                    );
+                  }}
                 >
-                  <CartesianGrid strokeDasharray="3 3" stroke="#BADBE9" />
-                  <XAxis dataKey="week" tick={{
-                fontSize: 12
-              }} />
-                  <YAxis tick={{
-                fontSize: 12
-              }} />
+                  <CartesianGrid strokeDasharray="3 3" stroke="#E2E8F0" />
+                  <XAxis dataKey="week" tick={{ fontSize: 12 }} />
+                  <YAxis yAxisId="l" tick={{ fontSize: 12 }} allowDecimals={false} />
+                  <YAxis yAxisId="r" orientation="right" domain={[0, 100]} unit="%" tick={{ fontSize: 12 }} />
                   <Tooltip />
                   <Legend />
-                  <Area type="monotone" dataKey="accounts" name="Overdue" stroke="#ef4444" fill="#ef4444" fillOpacity={0.1} strokeWidth={2} />
-                  <Area type="monotone" dataKey="rate" name="Rate %" stroke="#f59e0b" fill="#f59e0b" fillOpacity={0.08} strokeWidth={2} />
+                  <Area yAxisId="l" type="monotone" dataKey="accounts" name="Overdue accounts" stroke="#ef4444" fill="#ef4444" fillOpacity={0.1} strokeWidth={2} />
+                  <Area yAxisId="r" type="monotone" dataKey="rate" name="Overdue rate %" stroke="#f59e0b" fill="#f59e0b" fillOpacity={0.08} strokeWidth={2} />
                 </AreaChart>
               </ResponsiveContainer>
             </Card>
-            <Card title="Route Compliance Trend" sub="Weekly per collector">
+            <Card title="Visit Completion Rate" sub="Completed ÷ valid assigned collection visits · N/A when none assigned">
+              {loadErrors.compliance ? (
+                <EmptyState title="Visit completion unavailable" description="The compliance API failed." />
+              ) : (
               <ResponsiveContainer width="100%" height={220}>
                 <LineChart data={complianceData?.compliance?.[0]?.data?.map((d, i) => {
               const point = {
                 week: d.week
               };
               complianceData.compliance.forEach(c => {
-                point[c.name] = c.data[i]?.rate || 0;
+                const rate = c.data[i]?.rate;
+                point[c.name] = rate == null ? null : rate;
               });
               return point;
             }) || []}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#BADBE9" />
-                  <XAxis dataKey="week" tick={{
-                fontSize: 12
-              }} />
-                  <YAxis domain={[80, 100]} unit="%" tick={{
-                fontSize: 12
-              }} />
-                  <Tooltip formatter={v => `${v}%`} />
+                  <CartesianGrid strokeDasharray="3 3" stroke="#E2E8F0" />
+                  <XAxis dataKey="week" tick={{ fontSize: 12 }} />
+                  <YAxis domain={[0, 100]} unit="%" tick={{ fontSize: 12 }} />
+                  <Tooltip formatter={(v) => (v == null ? 'N/A' : `${v}%`)} />
                   <Legend />
-                  {complianceData?.compliance?.map((c, i) => <Line key={c.name} type="monotone" dataKey={c.name} stroke={['#1A4162', '#0B1E30', '#5F7385', '#f59e0b', '#ef4444'][i % 5]} strokeWidth={2} dot={false} />)}
+                  {complianceData?.compliance?.map((c, i) => (
+                    <Line
+                      key={c.name}
+                      type="monotone"
+                      dataKey={c.name}
+                      stroke={['#153450', '#0B2133', '#5F7385', '#f59e0b', '#ef4444'][i % 5]}
+                      strokeWidth={2}
+                      dot={false}
+                      connectNulls={false}
+                    />
+                  ))}
                 </LineChart>
               </ResponsiveContainer>
+              )}
             </Card>
           </div>
         </>}
@@ -1556,7 +935,9 @@ function ReportsHubPage({
             <h3>Sales Invoices</h3>
           </div>
 
-          {invoices.length ? <>
+          {loadErrors.invoices ? (
+            <EmptyState title="Invoice report unavailable" description="The invoices API failed. Use Retry / Refresh." />
+          ) : invoices.length ? <>
               <div style={{
           display: 'grid',
           gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))',
@@ -1565,20 +946,20 @@ function ReportsHubPage({
         }}>
                 {[{
             label: 'Total Invoices',
-            value: String(invoices.length)
+            value: String(invoiceSummary?.total ?? invoicePagination.total ?? 0)
           }, {
             label: 'Confirmed',
-            value: String(invoices.filter(i => i.status === 'Confirmed').length)
+            value: String(invoiceSummary?.confirmed ?? 0)
           }, {
             label: 'Pending Review',
-            value: String(invoices.filter(i => i.status === 'Pending Review').length)
+            value: String(invoiceSummary?.pendingReview ?? 0)
           }, {
             label: 'Total Value',
-            value: formatCurrency(invoices.reduce((s, i) => s + Number(i.total_amount || 0), 0))
+            value: formatCurrency(invoiceSummary?.totalValue ?? 0)
           }].map(s => <div key={s.label} style={{
             padding: 14,
             background: '#eef0f4',
-            border: '1px solid #BADBE9',
+            border: '1px solid #E2E8F0',
             borderRadius: 8
           }}>
                     <span style={{
@@ -1596,12 +977,13 @@ function ReportsHubPage({
                   </div>)}
               </div>
 
-              <><div className="corvex-table-wrapper">
+              <div className="corvex-table-wrapper">
                 <table className="corvex-table">
                   <thead>
                     <tr>
                       <th>Invoice #</th>
                       <th>Customer</th>
+                      {branchName === 'All Branches' ? <th>Branch</th> : null}
                       <th>Invoice Date</th>
                       <th>Total Amount</th>
                       <th>Status</th>
@@ -1609,7 +991,7 @@ function ReportsHubPage({
                     </tr>
                   </thead>
                   <tbody>
-                    {paginated_invoices.map(inv => {
+                    {invoices.map(inv => {
                   const invoiceKey = inv.invoice_number || inv.sales_invoices_id;
                   return <tr
                     key={inv.sales_invoices_id}
@@ -1621,6 +1003,7 @@ function ReportsHubPage({
                       fontSize: '0.82rem'
                     }}>{inv.invoice_number}</td>
                           <td>{inv.customer_name || '—'}</td>
+                          {branchName === 'All Branches' ? <td>{inv.branch_name || '—'}</td> : null}
                           <td>{formatDisplayDate(inv.invoices_date)}</td>
                           <td style={{
                       fontWeight: 600
@@ -1642,8 +1025,19 @@ function ReportsHubPage({
                 })}
                   </tbody>
                 </table>
-              </div><Pagination {...pagination_invoices} /></>
-            </> : <EmptyState title="No invoices found" description="No sales invoices exist for this branch yet." />}
+              </div>
+              <Pagination
+                currentPage={invoicePagination.page || invoicePage}
+                totalPages={invoicePagination.totalPages || 1}
+                totalRecords={invoicePagination.total || 0}
+                pageSize={invoicePagination.limit || 50}
+                startRecord={((invoicePagination.page || invoicePage) - 1) * (invoicePagination.limit || 50) + 1}
+                endRecord={Math.min((invoicePagination.page || invoicePage) * (invoicePagination.limit || 50), invoicePagination.total || 0)}
+                nextPage={() => setInvoicePage((p) => Math.min((invoicePagination.totalPages || 1), p + 1))}
+                prevPage={() => setInvoicePage((p) => Math.max(1, p - 1))}
+                goToPage={(page) => setInvoicePage(page)}
+              />
+            </> : <EmptyState title="No invoices found" description="No sales invoices exist for this scope yet." />}
         </section>}
 
       {viewingInvoiceId ? <div
@@ -1676,10 +1070,22 @@ function ReportsHubPage({
       {tab !== 'invoices' && <div style={{
       marginTop: 24
     }}>
-          <Card title="Overall KPI Summary">
+          <Card title="Overall KPI Summary" sub={loadErrors.kpi ? 'KPI API unavailable — figures below may be incomplete.' : periodHint}>
             <Stats stats={[{
-              label: 'Health Score',
-              value: `${kpi?.healthScore || 0}/100`
+              label: 'Collection Rate vs Target',
+              value: `${kpi?.collectionRate ?? 0}%`,
+              title: 'Confirmed collections ÷ (daily target × period days).',
+            }, {
+              label: 'Healthy Stock Rate',
+              value: `${kpi?.inventoryHealth ?? 0}%`,
+              title: 'Sufficient products ÷ monitored products × 100.',
+            }, {
+              label: 'Overdue Accounts',
+              value: String(kpi?.overdueCount ?? 0),
+              title: 'Distinct customers with unpaid past-due invoices.',
+            }, {
+              label: 'Stock Alerts',
+              value: String(kpi?.stockAlertsCount || 0),
             }, {
               label: 'Active Collectors',
               value: String(kpi?.activeCollectors || 0)
@@ -1710,10 +1116,6 @@ function ReportsHubPage({
             }, {
               label: 'Sales (7d)',
               value: formatCurrency(kpi?.totalSalesAmount || 0)
-            }, {
-              label: 'Inventory Health',
-              value: `${kpi?.inventoryHealth || 0}%`,
-              title: 'In-stock items ÷ monitored items × 100.'
             }]} />
           </Card>
         </div>}
@@ -1722,915 +1124,332 @@ function ReportsHubPage({
 }
 
 // ── Staff Performance (improved) ──────────────────────────────────────────────
+function parseStaffPerformanceQuery() {
+  try {
+    const q = new URLSearchParams(window.location.search);
+    const periodRaw = String(q.get('period') || 'week').toLowerCase();
+    const period = periodRaw === 'month' ? 'month' : 'week';
+    const tabRaw = String(q.get('tab') || '').toLowerCase();
+    const tab = tabRaw === 'sales' ? 'sales' : 'collectors';
+    return { period, tab };
+  } catch {
+    return { period: 'week', tab: 'collectors' };
+  }
+}
+
+function formatVisitCompletion(value) {
+  if (value == null || !Number.isFinite(Number(value))) return 'N/A';
+  return `${Number(value)}%`;
+}
+
 function StaffPerformancePage({
   navigate,
-  pageType
-}) {
-  const initialTab = pageType === 'staffCollectors' ? 'collectors'
-    : pageType === 'staffSales' ? 'sales'
-      : pageType === 'staffScorecards' ? 'scorecards'
-        : 'overview';
-  const [tab, setTab] = useState(initialTab);
-  useEffect(() => {
-    setTab(initialTab);
-  }, [initialTab]);
-  const [period, setPeriod] = useState('Daily');
-  const [staff, setStaff] = useState({
-    collectors: [],
-    salesAgents: []
-  });
-  const [complianceData, setComplianceData] = useState(null);
-  const tabs = [{
-    key: 'overview',
-    label: 'Overview'
-  }, {
-    key: 'collectors',
-    label: 'Collectors'
-  }, {
-    key: 'sales',
-    label: 'Sales Agents'
-  }, {
-    key: 'scorecards',
-    label: 'Scorecards'
-  }];
-  useEffect(() => {
-    async function load() {
-      const [staffResult, complianceResult] = await Promise.all([getBranchStaff(), getReportCompliance()]);
-      if (staffResult.success) setStaff(staffResult.data);
-      if (complianceResult.success) setComplianceData(complianceResult.data);
-    }
-    load();
-  }, []);
-  const topCollector = [...staff.collectors].sort((a, b) => b.complianceScore - a.complianceScore)[0];
-  const topAgent = [...staff.salesAgents].sort((a, b) => b.totalSalesAmount - a.totalSalesAmount)[0];
-  const combined = [...staff.collectors.map(c => ({
-    name: c.name,
-    role: 'Collector',
-    score: c.complianceScore,
-    metric: `${c.recoveryRate}% recovery`
-  })), ...staff.salesAgents.map(a => ({
-    name: a.name,
-    role: 'Sales',
-    score: a.visitCompletionRate,
-    metric: formatCurrency(a.totalSalesAmount)
-  }))].sort((a, b) => b.score - a.score);
-  const collectorBar = staff.collectors.map(c => ({
-    name: c.name.split(' ')[0],
-    score: c.complianceScore,
-    recovery: c.recoveryRate,
-    missed: c.missedVisits
-  }));
-  const salesBar = staff.salesAgents.map(a => ({
-    name: a.name.split(' ')[0],
-    visits: a.visitCompletionRate,
-    conversion: a.conversionRate,
-    newCustomers: a.newCustomersAcquired
-  }));
-  const complianceChartData = complianceData?.compliance?.[0]?.data?.map((d, i) => {
-    const point = {
-      week: d.week
-    };
-    complianceData.compliance.forEach(c => {
-      point[c.name] = c.data[i]?.rate || 0;
-    });
-    return point;
-  }) || [];
-  const pagination_____staff_collectors__sort__a_b___b_complianceScore_a_complianceScore_ = usePagination([...staff.collectors].sort((a, b) => b.complianceScore - a.complianceScore));
-  const paginated_____staff_collectors__sort__a_b___b_complianceScore_a_complianceScore_ = pagination_____staff_collectors__sort__a_b___b_complianceScore_a_complianceScore_.paginatedData;
-  const pagination_____staff_salesAgents__sort__a_b___b_totalSalesAmount_a_totalSalesAmount_ = usePagination([...staff.salesAgents].sort((a, b) => b.totalSalesAmount - a.totalSalesAmount));
-  const paginated_____staff_salesAgents__sort__a_b___b_totalSalesAmount_a_totalSalesAmount_ = pagination_____staff_salesAgents__sort__a_b___b_totalSalesAmount_a_totalSalesAmount_.paginatedData;
-  const pagination_scorecards = usePagination(combined);
-  const paginated_scorecards = pagination_scorecards.paginatedData;
-  return <div className="page">
-      <div className="segmented-control">
-        {tabs.map(t => <button key={t.key} className={tab === t.key ? 'segment active' : 'segment'} type="button" onClick={() => setTab(t.key)}>{t.label}</button>)}
-      </div>
-
-      {tab === 'overview' && <>
-        <Stats stats={[{
-        label: 'Active Collectors',
-        value: String(staff.collectors.length)
-      }, {
-        label: 'Active Sales Agents',
-        value: String(staff.salesAgents.length)
-      }, {
-        label: 'Top Collector',
-        value: topCollector ? topCollector.name.split(' ')[0] : '—'
-      }, {
-        label: 'Top Sales Agent',
-        value: topAgent ? topAgent.name.split(' ')[0] : '—'
-      }]} />
-        <div className="grid two-up">
-          <Card title="Collector Scorecard" sub="Compliance & recovery rates">
-            <ResponsiveContainer width="100%" height={220}>
-              <BarChart data={collectorBar}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#BADBE9" /><XAxis dataKey="name" tick={{
-                fontSize: 12
-              }} /><YAxis domain={[0, 100]} unit="%" tick={{
-                fontSize: 12
-              }} /><Tooltip formatter={v => `${v}%`} /><Legend />
-                <Bar dataKey="score" name="Compliance" fill="#1A4162" radius={[4, 4, 0, 0]} />
-                <Bar dataKey="recovery" name="Recovery" fill="#0B1E30" radius={[4, 4, 0, 0]} />
-              </BarChart>
-            </ResponsiveContainer>
-          </Card>
-          <Card title="Sales Agent Scorecard" sub="Visit completion & conversion">
-            <ResponsiveContainer width="100%" height={220}>
-              <BarChart data={salesBar}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#BADBE9" /><XAxis dataKey="name" tick={{
-                fontSize: 12
-              }} /><YAxis domain={[0, 100]} unit="%" tick={{
-                fontSize: 12
-              }} /><Tooltip formatter={v => `${v}%`} /><Legend />
-                <Bar dataKey="visits" name="Visit Completion" fill="#1A4162" radius={[4, 4, 0, 0]} />
-                <Bar dataKey="conversion" name="Conversion" fill="#0B1E30" radius={[4, 4, 0, 0]} />
-              </BarChart>
-            </ResponsiveContainer>
-          </Card>
-        </div>
-        <Card title="Route Compliance Trend" sub="Weekly per collector">
-          <ResponsiveContainer width="100%" height={200}>
-            <LineChart data={complianceChartData}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#BADBE9" /><XAxis dataKey="week" tick={{
-              fontSize: 12
-            }} /><YAxis domain={[80, 100]} unit="%" tick={{
-              fontSize: 12
-            }} /><Tooltip formatter={v => `${v}%`} /><Legend />
-              {complianceData?.compliance?.map((c, i) => <Line key={c.name} type="monotone" dataKey={c.name} stroke={['#1A4162', '#0B1E30', '#5F7385', '#f59e0b', '#ef4444'][i % 5]} strokeWidth={2} dot={false} />)}
-            </LineChart>
-          </ResponsiveContainer>
-        </Card>
-      </>}
-
-      {tab === 'collectors' && <section className="panel content-panel relative overflow-hidden">
-          <div className="flex flex-col md:flex-row justify-between gap-4 items-start md:items-center mb-4">
-            <h3>Collector Rankings</h3>
-            <div className="segmented-control">
-              {['Daily', 'Weekly', 'Monthly'].map(p => <button key={p} className={period === p ? 'segment active' : 'segment'} type="button" onClick={() => setPeriod(p)}>{p}</button>)}
-            </div>
-          </div>
-          <><div className="corvex-table-wrapper">
-            <table className="corvex-table">
-              <thead><tr><th>#</th><th>Collector</th><th>Compliance</th><th>Collections</th><th>Recovery</th><th>Missed</th></tr></thead>
-              <tbody>
-                {paginated_____staff_collectors__sort__a_b___b_complianceScore_a_complianceScore_.map((c, i) => <tr key={c.id}><td>{i + 1}</td><td>{c.name}</td><td>{c.complianceScore}%</td><td>{formatCurrency(c.collectionAmount)}</td><td>{c.recoveryRate}%</td><td>{c.missedVisits}</td></tr>)}
-              </tbody>
-            </table>
-          </div><Pagination {...pagination_____staff_collectors__sort__a_b___b_complianceScore_a_complianceScore_} /></>
-        </section>}
-
-      {tab === 'sales' && <section className="panel content-panel relative overflow-hidden">
-          <div className="flex flex-col md:flex-row justify-between gap-4 items-start md:items-center mb-4">
-            <h3>Sales Agent Rankings</h3>
-            <div className="segmented-control">
-              {['Daily', 'Weekly', 'Monthly'].map(p => <button key={p} className={period === p ? 'segment active' : 'segment'} type="button" onClick={() => setPeriod(p)}>{p}</button>)}
-            </div>
-          </div>
-          <><div className="corvex-table-wrapper">
-            <table className="corvex-table">
-              <thead><tr><th>#</th><th>Agent</th><th>Visit Completion</th><th>Revenue</th><th>New Customers</th><th>Sales</th></tr></thead>
-              <tbody>
-                {paginated_____staff_salesAgents__sort__a_b___b_totalSalesAmount_a_totalSalesAmount_.map((a, i) => <tr key={a.id}><td>{i + 1}</td><td>{a.name}</td><td>{a.visitCompletionRate}%</td><td>{formatCurrency(a.totalSalesAmount)}</td><td>{a.newCustomersAcquired}</td><td>{a.salesLogged}</td></tr>)}
-              </tbody>
-            </table>
-          </div><Pagination {...pagination_____staff_salesAgents__sort__a_b___b_totalSalesAmount_a_totalSalesAmount_} /></>
-        </section>}
-
-      {tab === 'scorecards' && <section className="panel content-panel relative overflow-hidden">
-          <div className="list-section-header"><h3>Overall Rankings <span className="text-ink/70">({combined.length})</span></h3></div>
-          {combined.length ? <>
-            <div className="corvex-table-wrapper">
-              <table className="corvex-table">
-                <thead>
-                  <tr>
-                    <th>Rank</th>
-                    <th>Name</th>
-                    <th>Role</th>
-                    <th>Score</th>
-                    <th>Metric</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {paginated_scorecards.map((s, i) => <tr key={`${s.role}-${s.name}`}>
-                      <td>#{(pagination_scorecards.currentPage - 1) * 10 + i + 1}</td>
-                      <td><strong>{s.name}</strong></td>
-                      <td>{s.role}</td>
-                      <td>{s.score}%</td>
-                      <td>{s.metric}</td>
-                    </tr>)}
-                </tbody>
-              </table>
-            </div>
-            <Pagination {...pagination_scorecards} />
-          </> : <EmptyState title="No rankings yet" description="Staff scorecards will appear once performance data is available." />}
-        </section>}
-    </div>;
-}
-
-// ── Credit Reviews (BM) ───────────────────────────────────────────────────────
-function CIQueuePage({
-  navigate,
+  pageType,
+  opsBase,
+  branchName,
   showToast,
-  opsBase
 }) {
-  const [filter, setFilter] = useState('Needs BM');
-  const [items, setItems] = useState([]);
+  const pathTab = pageType === 'staffSales' ? 'sales' : 'collectors';
+  const initialQuery = parseStaffPerformanceQuery();
+  const [tab, setTab] = useState(pageType === 'staffPerformance' ? initialQuery.tab : pathTab);
+  const [period, setPeriod] = useState(initialQuery.period);
+  const [payload, setPayload] = useState(null);
   const [loading, setLoading] = useState(true);
-  const reload = async () => {
-    setLoading(true);
-    // API stores Pending/Revision Requested; UI label is "Needs BM"
-    const apiStatus = filter === 'All'
-      ? undefined
-      : filter === 'Needs BM'
-        ? 'Pending'
-        : filter;
-    const res = await fetchCreditInvestigations({ status: apiStatus });
-    if (res.success) {
-      const mapped = (res.data || []).map(mapCreditReviewRow);
-      setItems(
-        filter === 'Needs BM'
-          ? mapped.filter((row) => row.status === 'Pending' || row.status === 'Revision Requested')
-          : mapped
-      );
-    }
-    setLoading(false);
-  };
-  useEffect(() => {
-    reload();
-  }, [filter]);
-  const pagination = usePagination(items);
-  const rows = pagination.paginatedData;
-  if (loading && !items.length) return <LoadingState message="Loading credit reviews…" />;
-  return (
-    <div className="page">
-      <section className="panel content-panel relative overflow-hidden">
-        <div className="list-section-header">
-          <h3>Credit Reviews</h3>
-          <p className="muted">
-            Review system-prepared credit cases. Approving sets or updates the customer&apos;s credit limit.
-          </p>
-        </div>
-        <div className="list-section-toolbar" style={{ marginBottom: 12 }}>
-          <div className="segmented-control">
-            {CREDIT_REVIEW_FILTERS.map((option) => (
-              <button
-                key={option}
-                className={filter === option ? 'segment active' : 'segment'}
-                type="button"
-                onClick={() => setFilter(option)}
-              >
-                {option}
-              </button>
-            ))}
-          </div>
-        </div>
-        {items.length ? (
-          <>
-            <div className="corvex-table-wrapper">
-              <table className="corvex-table">
-                <thead>
-                  <tr>
-                    <th>Customer</th>
-                    <th>Why / Trigger</th>
-                    <th>Risk</th>
-                    <th>Requested / Current</th>
-                    <th>Status</th>
-                    <th>Updated</th>
-                    <th>Actions</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {rows.map((review) => (
-                    <tr
-                      key={review.id}
-                      className="clickable-row"
-                      onClick={() => navigate(`${opsBase}/ci-approvals/${review.ciId}`)}
-                    >
-                      <td>
-                        <div>{review.customerName}</div>
-                        {review.customerCode ? <div className="muted">{review.customerCode}</div> : null}
-                      </td>
-                      <td>{review.reason || '—'}</td>
-                      <td><StatusBadge status={review.riskLevel || '—'} /></td>
-                      <td>
-                        {[
-                          review.requestedLimit != null ? `Req ${formatCurrency(review.requestedLimit)}` : null,
-                          review.currentLimit != null && review.currentLimit > 0
-                            ? `Cur ${formatCurrency(review.currentLimit)}`
-                            : null,
-                        ].filter(Boolean).join(' · ') || 'Not available'}
-                      </td>
-                      <td><StatusBadge status={review.displayStatus} /></td>
-                      <td>{formatDisplayDate(review.updatedAt || review.submissionDate)}</td>
-                      <td className="table-actions" onClick={(e) => e.stopPropagation()}>
-                        <button
-                          className="icon-action-button"
-                          type="button"
-                          title="Open review"
-                          onClick={() => navigate(`${opsBase}/ci-approvals/${review.ciId}`)}
-                        >
-                          <NavIcon name="view" />
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-            <Pagination {...pagination} />
-          </>
-        ) : (
-          <EmptyState title="No credit reviews" description="No items match this filter." />
-        )}
-      </section>
-    </div>
-  );
-}
-
-function CIDetailPage({
-  ciId,
-  navigate,
-  showToast,
-  opsBase
-}) {
-  const [review, setReview] = useState(null);
-  const [loading, setLoading] = useState(true);
-  const [rejectReason, setRejectReason] = useState('');
-  const [decisionRemarks, setDecisionRemarks] = useState('');
-  const [approvedLimit, setApprovedLimit] = useState('');
-  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState(null);
 
   useEffect(() => {
+    if (pageType === 'staffSales') setTab('sales');
+    else if (pageType === 'staffCollectors' || pageType === 'staffScorecards') setTab('collectors');
+  }, [pageType]);
+
+  useEffect(() => {
+    let cancelled = false;
     async function load() {
       setLoading(true);
-      const res = await fetchCreditInvestigationById(ciId);
-      if (res.success && res.data) {
-        const mapped = mapCreditReviewRow(res.data);
-        setReview(mapped);
-        const suggested = mapped.suggestion?.suggested_limit
-          || mapped.requestedLimit
-          || mapped.currentLimit
-          || '';
-        setApprovedLimit(suggested !== '' && suggested != null ? String(suggested) : '');
-        setDecisionRemarks('');
-        setRejectReason('');
+      setError(null);
+      const result = await getStaffPerformance({ period });
+      if (cancelled) return;
+      if (result.success && result.data) {
+        setPayload(result.data);
       } else {
-        setReview(null);
+        setPayload(null);
+        setError(result.message || 'Failed to load staff performance.');
+        showToast?.(result.message || 'Failed to load staff performance.', 'error');
       }
       setLoading(false);
     }
     load();
-  }, [ciId]);
+    return () => { cancelled = true; };
+  }, [period, showToast]);
 
-  const applyDecision = async (status) => {
-    if (status === 'Approved' && !(Number(approvedLimit) > 0)) {
-      showToast('Enter the approved credit limit.', 'error');
-      return;
-    }
-    if (status === 'Rejected' && !rejectReason.trim() && !decisionRemarks.trim()) {
-      showToast('Rejection reason is required.', 'error');
-      return;
-    }
-    if (submitting) return;
-    const decisionCopy = status === 'Approved'
-      ? {
-          title: 'Approve credit review',
-          message: `This sets the customer's credit limit to ${formatCurrency(Number(approvedLimit))}.`,
-          confirmLabel: 'Approve',
-          tone: 'default',
-        }
-      : status === 'Revision Requested'
-        ? {
-            title: 'Request revision',
-            message: 'This sends the credit review back for revision. The credit limit stays unchanged.',
-            confirmLabel: 'Request revision',
-            tone: 'default',
-          }
-        : {
-            title: 'Reject credit review',
-            message: 'This rejects the credit review. The customer limit is not increased.',
-            confirmLabel: 'Reject',
-            tone: 'danger',
-          };
-    setSubmitting(true);
-    const confirmed = await confirmAction({
-      title: decisionCopy.title,
-      message: decisionCopy.message,
-      detail: review?.customerName || `Review ${ciId}`,
-      confirmLabel: decisionCopy.confirmLabel,
-      tone: decisionCopy.tone,
-    });
-    if (!confirmed) {
-      setSubmitting(false);
-      return;
-    }
-    const result = await patchCreditInvestigation(ciId, {
-      status,
-      approved_credit_limit: status === 'Approved' ? Number(approvedLimit) : undefined,
-      rejection_reason: status === 'Rejected' ? (rejectReason.trim() || decisionRemarks.trim()) : undefined,
-      decision_remarks: decisionRemarks.trim() || rejectReason.trim() || undefined,
-    });
-    setSubmitting(false);
-    if (result.success) {
-      showToast(result.message || `Credit review ${status.toLowerCase()}.`, status === 'Rejected' ? 'error' : 'success');
-      navigate(`${opsBase}/ci-approvals`);
-    } else {
-      showToast(result.message || 'Action failed.', 'error');
-    }
+  const syncUrl = (nextPeriod, nextTab) => {
+    const params = new URLSearchParams();
+    params.set('period', nextPeriod);
+    params.set('tab', nextTab);
+    navigate(`${opsBase}/staff-performance?${params.toString()}`);
   };
 
-  if (loading) return <LoadingState message="Loading credit review…" />;
-  if (!review) {
-    return <EmptyState title="Credit review not found" actionLabel="Back" onAction={() => navigate(`${opsBase}/ci-approvals`)} />;
-  }
+  const changePeriod = (next) => {
+    setPeriod(next);
+    syncUrl(next, tab);
+  };
 
-  const snap = review.snapshot || {};
-  const financial = snap.financial || {};
-  const customer = snap.customer || {};
-  const liveFinancial = review.live?.financial;
-  const payments = financial.payment_history || review.paymentHistory || [];
-  const canDecide = review.status === 'Pending' || review.status === 'Revision Requested';
+  const changeTab = (next) => {
+    setTab(next);
+    syncUrl(period, next);
+  };
+
+  const collectors = payload?.collectors || [];
+  const salesAgents = payload?.salesAgents || [];
+  const showBranchCol = Boolean(payload && payload.branchScoped === false);
+  const paginationCollectors = usePagination(collectors);
+  const paginationSales = usePagination(salesAgents);
+
+  const periodLabel = payload?.periodLabel
+    || (period === 'month' ? 'This Month' : 'This Week');
+  const rangeLabel = payload?.dateFrom && payload?.dateTo
+    ? `${formatDisplayDate(payload.dateFrom)} – ${formatDisplayDate(payload.dateTo)}`
+    : '—';
+
+  const openCollector = (id) => {
+    navigate(`${opsBase}/field-operations/collectors/${id}?period=${period}`);
+  };
+  const openSalesAgent = (id) => {
+    navigate(`${opsBase}/field-operations/sales/${id}?period=${period}`);
+  };
+
+  if (loading && !payload) {
+    return <LoadingState message="Loading staff performance…" />;
+  }
 
   return (
     <div className="page">
-      <Stats stats={[
-        { label: 'Customer', value: review.customerName },
-        { label: 'Risk', value: review.riskLevel || '—' },
-        { label: 'Status', value: review.displayStatus },
-        { label: 'Requested Limit', value: formatMoneyOrNA(review.requestedLimit) },
-      ]} />
-
-      <section className="panel content-panel">
-        <div className="panel-section-header">
-          <h3>Request</h3>
+      <section className="panel content-panel" style={{ marginBottom: 12 }}>
+        <div className="flex flex-col md:flex-row justify-between gap-4 items-start md:items-center">
+          <div>
+            <h3 style={{ margin: 0 }}>Staff Performance</h3>
+            <p className="muted" style={{ margin: '4px 0 0' }}>
+              Review collection and sales performance for {branchName || 'your branch'}.
+            </p>
+            <p className="muted" style={{ margin: '4px 0 0', fontSize: '0.85rem' }}>
+              {periodLabel}: {rangeLabel}
+              {showBranchCol ? ' · Organization-wide view (branch shown per staff)' : ''}
+            </p>
+          </div>
+          <div className="segmented-control">
+            {[
+              { key: 'week', label: 'This Week' },
+              { key: 'month', label: 'This Month' },
+            ].map((p) => (
+              <button
+                key={p.key}
+                className={period === p.key ? 'segment active' : 'segment'}
+                type="button"
+                disabled={loading}
+                onClick={() => changePeriod(p.key)}
+              >
+                {p.label}
+              </button>
+            ))}
+          </div>
         </div>
-        <DetailRowsTable
-          rows={[
-            { label: 'Why / Trigger', value: review.reason || '—' },
-            { label: 'Submitted By', value: review.submittedBy || '—' },
-            { label: 'Submitted', value: formatDisplayDateTime(review.submissionDate) },
-            { label: 'Remarks', value: review.requestRemarks || '—' },
-            { label: 'Customer Code', value: review.customerCode || customer.customer_code || '—' },
-            { label: 'Account Status', value: customer.status || '—' },
-            { label: 'ID / KYC', value: customer.id_verification_status || '—' },
-          ]}
-        />
       </section>
 
-      <section className="panel content-panel">
-        <div className="panel-section-header">
-          <h3>Credit Snapshot</h3>
-          <p className="muted">Frozen at request time</p>
-        </div>
-        <DetailRowsTable
-          rows={[
-            { label: 'Outstanding', value: formatMoneyOrNA(financial.outstanding_balance) },
-            { label: 'Current Limit', value: formatMoneyOrNA(financial.credit_limit) },
-            { label: 'Remaining', value: formatMoneyOrNA(financial.remaining_credit) },
-            {
-              label: 'Utilization',
-              value: financial.utilization_pct != null ? `${financial.utilization_pct}%` : 'Not available',
-            },
-            {
-              label: 'Overdue',
-              value: financial.overdue_count
-                ? `${financial.overdue_count} · ${formatMoneyOrNA(financial.overdue_amount)}`
-                : 'None detected',
-            },
-          ]}
-        />
-        {liveFinancial && canDecide ? (
-          <div style={{ marginTop: 16 }}>
-            <h4 className="subsection-title">Live updates since request</h4>
-            <DetailRowsTable
-              rows={[
-                { label: 'Live Outstanding', value: formatMoneyOrNA(liveFinancial.outstanding_balance) },
-                { label: 'Live Limit', value: formatMoneyOrNA(liveFinancial.credit_limit) },
-                { label: 'Live Remaining', value: formatMoneyOrNA(liveFinancial.remaining_credit) },
-              ]}
-            />
-          </div>
-        ) : null}
-      </section>
+      <div className="segmented-control" style={{ marginBottom: 12 }}>
+        <button
+          className={tab === 'collectors' ? 'segment active' : 'segment'}
+          type="button"
+          onClick={() => changeTab('collectors')}
+        >
+          Collectors ({collectors.length})
+        </button>
+        <button
+          className={tab === 'sales' ? 'segment active' : 'segment'}
+          type="button"
+          onClick={() => changeTab('sales')}
+        >
+          Sales Agents ({salesAgents.length})
+        </button>
+      </div>
 
-      <section className="panel content-panel">
-        <div className="panel-section-header">
-          <h3>Payment History</h3>
-          <p className="muted">From recorded collections</p>
-        </div>
-        {payments.length ? (
-          <div className="corvex-table-wrapper">
-            <table className="corvex-table">
-              <thead>
-                <tr><th>Date</th><th>Paid</th><th>Remaining</th><th>Status</th><th>Receipt / Invoice</th></tr>
-              </thead>
-              <tbody>
-                {payments.slice(0, 5).map((payment, index) => (
-                  <tr key={payment.credit_id || payment.collection_id || index}>
-                    <td>{formatDisplayDate(payment.payment_date || payment.date)}</td>
-                    <td>{formatCurrency(payment.amount || payment.amount_paid)}</td>
-                    <td>{payment.remaining_balance != null ? formatCurrency(payment.remaining_balance) : '—'}</td>
-                    <td><StatusBadge status={payment.payment_status || payment.status || '—'} /></td>
-                    <td>
-                      {[payment.receipt_number, payment.invoice_number, payment.reference_number]
-                        .filter(Boolean)
-                        .filter((value, idx, arr) => arr.indexOf(value) === idx)
-                        .join(' · ') || '—'}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        ) : (
-          <EmptyState title="No payment history" description="No collection payments were on file for this snapshot." />
-        )}
-      </section>
+      {error && !payload ? (
+        <EmptyState title="Could not load performance" description={error} />
+      ) : null}
 
-      <section className="panel content-panel">
-        <div className="panel-section-header">
-          <h3>Risk Assessment</h3>
-        </div>
-        <DetailRowsTable
-          rows={[
-            { label: 'Risk', value: <StatusBadge status={review.riskLevel || '—'} /> },
-            { label: 'Score', value: review.riskScore != null ? String(review.riskScore) : '—' },
-          ]}
-        />
-        {review.riskReasons?.length ? (
-          <ul style={{ marginTop: 12, paddingLeft: 18 }}>
-            {review.riskReasons.map((reason) => <li key={reason} className="muted">{reason}</li>)}
-          </ul>
-        ) : null}
-        {review.suggestion?.message ? (
-          <p style={{ marginTop: 12 }}><strong>Suggestion:</strong> {review.suggestion.message}</p>
-        ) : null}
-      </section>
-
-      {canDecide ? (
-        <section className="panel form-panel content-panel">
-          <div className="panel-section-header">
-            <h3>Branch Manager Decision</h3>
-            <p className="muted">Approval writes the credit limit to the customer credit record.</p>
+      {tab === 'collectors' ? (
+        <section className="panel content-panel relative overflow-hidden">
+          <div className="list-section-header">
+            <h3 style={{ margin: 0 }}>Collector rankings</h3>
+            <p className="list-section-subtitle">
+              Ranked by visit completion, then confirmed collections. Visit Completion = completed ÷ valid assigned visits in the period (N/A when none assigned).
+            </p>
           </div>
-          <div className="form-group">
-            <label htmlFor="bm-approved-limit">Approved credit limit (₱) *</label>
-            <input
-              id="bm-approved-limit"
-              type="number"
-              min="0"
-              step="0.01"
-              value={approvedLimit}
-              onChange={(e) => setApprovedLimit(e.target.value)}
-            />
-          </div>
-          <div className="form-group">
-            <label htmlFor="bm-decision-remarks">Decision remarks</label>
-            <textarea
-              id="bm-decision-remarks"
-              rows={3}
-              value={decisionRemarks}
-              onChange={(e) => setDecisionRemarks(e.target.value)}
-              placeholder="Optional notes for Sales Agent"
-            />
-          </div>
-          <div className="form-group">
-            <label htmlFor="bm-reject-reason">Rejection reason (required when rejecting)</label>
-            <textarea
-              id="bm-reject-reason"
-              rows={2}
-              value={rejectReason}
-              onChange={(e) => setRejectReason(e.target.value)}
-              placeholder="Why this review is rejected"
-            />
-          </div>
-          <div className="flex flex-wrap justify-end gap-2 mt-4">
-            <button className="button ghost" type="button" onClick={() => navigate(`${opsBase}/ci-approvals`)} disabled={submitting}>
-              Back
-            </button>
-            <button className="button secondary" type="button" onClick={() => applyDecision('Revision Requested')} disabled={submitting}>
-              Request Revision
-            </button>
-            <button className="button secondary" type="button" onClick={() => applyDecision('Rejected')} disabled={submitting}>
-              Reject
-            </button>
-            <button className="button" type="button" onClick={() => applyDecision('Approved')} disabled={submitting}>
-              {submitting ? 'Saving…' : 'Approve & Set Limit'}
-            </button>
-          </div>
+          {!collectors.length ? (
+            <EmptyState title="No collectors" description="Active collectors for this scope will appear here." />
+          ) : (
+            <>
+              <div className="corvex-table-wrapper">
+                <table className="corvex-table">
+                  <thead>
+                    <tr>
+                      <th>Rank</th>
+                      <th>Collector</th>
+                      {showBranchCol ? <th>Branch</th> : null}
+                      <th>Visit Completion</th>
+                      <th>Collected</th>
+                      <th>Missed Visits</th>
+                      <th>Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {paginationCollectors.paginatedData.map((c) => (
+                      <tr
+                        key={c.id}
+                        className="clickable-row"
+                        onClick={() => openCollector(c.id)}
+                      >
+                        <td>#{c.rank}</td>
+                        <td><strong>{c.name}</strong></td>
+                        {showBranchCol ? <td>{c.branchName || '—'}</td> : null}
+                        <td>{formatVisitCompletion(c.visitCompletion)}</td>
+                        <td style={{ fontWeight: 600 }}>{formatCurrency(c.collectedAmount || 0)}</td>
+                        <td>{c.missedVisits ?? 0}</td>
+                        <td className="table-actions" onClick={(e) => e.stopPropagation()}>
+                          <button className="button ghost" type="button" onClick={() => openCollector(c.id)}>
+                            Open details
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              <Pagination {...paginationCollectors} />
+            </>
+          )}
         </section>
-      ) : (
-        <section className="panel content-panel">
-          <div className="panel-section-header">
-            <h3>Decision</h3>
+      ) : null}
+
+      {tab === 'sales' ? (
+        <section className="panel content-panel relative overflow-hidden">
+          <div className="list-section-header">
+            <h3 style={{ margin: 0 }}>Sales Agent rankings</h3>
+            <p className="list-section-subtitle">
+              Ranked by confirmed invoice revenue, then visit completion, then new customers created in the period.
+            </p>
           </div>
-          <DetailRowsTable
-            rows={[
-              { label: 'Status', value: <StatusBadge status={review.displayStatus} /> },
-              { label: 'Decided By', value: review.approvedBy || '—' },
-              { label: 'Decided At', value: review.decidedAt ? formatDisplayDateTime(review.decidedAt) : '—' },
-              { label: 'Approved Limit', value: formatMoneyOrNA(review.approvedLimit) },
-              { label: 'Remarks', value: review.decisionRemarks || review.rejectionReason || '—' },
-            ]}
-          />
-          <div className="flex justify-end gap-2 mt-4">
-            <button className="button ghost" type="button" onClick={() => navigate(`${opsBase}/ci-approvals`)}>Back</button>
-          </div>
+          {!salesAgents.length ? (
+            <EmptyState title="No sales agents" description="Active sales agents for this scope will appear here." />
+          ) : (
+            <>
+              <div className="corvex-table-wrapper">
+                <table className="corvex-table">
+                  <thead>
+                    <tr>
+                      <th>Rank</th>
+                      <th>Sales Agent</th>
+                      {showBranchCol ? <th>Branch</th> : null}
+                      <th>Visit Completion</th>
+                      <th>Confirmed Revenue</th>
+                      <th>New Customers</th>
+                      <th>Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {paginationSales.paginatedData.map((a) => (
+                      <tr
+                        key={a.id}
+                        className="clickable-row"
+                        onClick={() => openSalesAgent(a.id)}
+                      >
+                        <td>#{a.rank}</td>
+                        <td><strong>{a.name}</strong></td>
+                        {showBranchCol ? <td>{a.branchName || '—'}</td> : null}
+                        <td>{formatVisitCompletion(a.visitCompletion)}</td>
+                        <td style={{ fontWeight: 600 }}>{formatCurrency(a.confirmedRevenue || 0)}</td>
+                        <td>{a.newCustomers ?? 0}</td>
+                        <td className="table-actions" onClick={(e) => e.stopPropagation()}>
+                          <button className="button ghost" type="button" onClick={() => openSalesAgent(a.id)}>
+                            Open details
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              <Pagination {...paginationSales} />
+            </>
+          )}
         </section>
-      )}
+      ) : null}
     </div>
   );
 }
 
-// ── Customers ─────────────────────────────────────────────────────────────────
-function CustomersPage({
-  navigate,
-  opsBase,
-  showToast
-}) {
-  const [search, setSearch] = useState('');
-  const [statusFilter, setStatusFilter] = useState('All');
-  const [paymentFilter, setPaymentFilter] = useState('All');
-  const [customers, setCustomers] = useState([]);
-  const [loading, setLoading] = useState(true);
-  useEffect(() => {
-    async function load() {
-      setLoading(true);
-      const result = await getBranchCustomers();
-      if (result.success) setCustomers(result.data.customers || []);
-      setLoading(false);
-    }
-    load();
-  }, []);
-  const filtered = useMemo(() => {
-    const q = search.trim().toLowerCase();
-    return customers.filter(c => {
-      const matchSearch = !q || c.customerName.toLowerCase().includes(q) || (c.address || '').toLowerCase().includes(q) || (c.contact_phone || '').includes(q);
-      const matchStatus = statusFilter === 'All' || c.status === statusFilter;
-      const matchPayment = paymentFilter === 'All' || c.paymentStatus === paymentFilter;
-      return matchSearch && matchStatus && matchPayment;
-    });
-  }, [search, statusFilter, paymentFilter, customers]);
-  const totalOutstanding = customers.reduce((sum, c) => sum + (c.outstanding_balance || 0), 0);
-  const pagination_filtered = usePagination(filtered);
-  const paginated_filtered = pagination_filtered.paginatedData;
-  if (loading) return <LoadingState message="Loading customers..." />;
-  return <div className="page">
-      <Stats stats={[{
-      label: 'Total Customers',
-      value: String(customers.length)
-    }, {
-      label: 'Active',
-      value: String(customers.filter(c => c.status === 'Active').length)
-    }, {
-      label: 'With Balance',
-      value: String(customers.filter(c => c.outstanding_balance > 0).length)
-    }, {
-      label: 'Total Outstanding',
-      value: formatCurrency(totalOutstanding)
-    }]} />
-
-      <section className="panel content-panel relative overflow-hidden">
-        <div className="list-section-header">
-          <h3>Branch Customers</h3>
-        </div>
-        <div className="list-section-toolbar suppliers-toolbar audit-logs-toolbar">
-          <div className="list-section-controls audit-logs-filters">
-            <input
-              className="filter-input search"
-              type="search"
-              placeholder="Search by customer name, address, or phone"
-              value={search}
-              onChange={e => setSearch(e.target.value)}
-              aria-label="Search customers"
-            />
-            <select className="filter-select" value={statusFilter} onChange={e => setStatusFilter(e.target.value)} aria-label="Filter by status">
-              {['All', 'Active', 'Inactive'].map(s => <option key={s} value={s}>{s === 'All' ? 'All Statuses' : s}</option>)}
-            </select>
-            <select className="filter-select" value={paymentFilter} onChange={e => setPaymentFilter(e.target.value)} aria-label="Filter by payment status">
-              {['All', 'Current', 'Overdue'].map(s => <option key={s} value={s}>{s === 'All' ? 'All Payment Status' : s}</option>)}
-            </select>
-          </div>
-          <div className="list-section-actions suppliers-toolbar-actions">
-            <button className="button secondary whitespace-nowrap" type="button" onClick={() => {
-              const rows = filtered.map((c) => ({
-                customer: c.customerName,
-                address: c.address || '',
-                phone: c.contact_phone || '',
-                outstanding: c.outstanding_balance || 0,
-                payment: c.paymentStatus || '',
-                status: c.status || '',
-              }));
-              if (downloadPdf(rows, { filename: 'branch-customers.pdf', title: 'Branch Customers' })) showToast('Customer list exported as PDF.', 'success');
-              else showToast('Nothing to export.', 'error');
-            }}>Export PDF</button>
-          </div>
-        </div>
-        {filtered.length ? <><div className="corvex-table-wrapper">
-            <table className="corvex-table">
-              <thead>
-                <tr>
-                  <th>Customer</th>
-                  <th>Address</th>
-                  <th>Contact</th>
-                  <th>Outstanding</th>
-                  <th>Payment</th>
-                  <th>Status</th>
-                  <th>Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {paginated_filtered.map(c => <tr key={c.id}>
-                    <td><strong>{c.customerName}</strong></td>
-                    <td>{c.address || '—'}</td>
-                    <td>{formatPhone(c.contact_phone)}</td>
-                    <td>{formatCurrency(c.outstanding_balance || 0)}</td>
-                    <td><StatusBadge status={c.paymentStatus} /></td>
-                    <td><StatusBadge status={c.status} /></td>
-                    <td className="table-actions">
-                      <button className="icon-action-button" type="button" title="View" onClick={() => navigate(`${opsBase}/customers/${c.id}`)}>
-                        <NavIcon name="view" />
-                      </button>
-                    </td>
-                  </tr>)}
-              </tbody>
-            </table>
-          </div><Pagination {...pagination_filtered} /></>
-        : <EmptyState title="No customers found" description="Adjust your search or filters, or add customers through the system." />}
-      </section>
-    </div>;
-}
-function CustomerDetailPage({
-  customerId,
-  navigate,
-  branchName,
-  opsBase
-}) {
-  const [customer, setCustomer] = useState(null);
-  const [loading, setLoading] = useState(true);
-  const [detailTab, setDetailTab] = useState('contact');
-  useEffect(() => {
-    async function load() {
-      setLoading(true);
-      const result = await getBranchCustomerById(customerId);
-      if (result.success) setCustomer(result.data);
-      setLoading(false);
-    }
-    load();
-  }, [customerId]);
-  if (loading) return <LoadingState message="Loading customer..." />;
-  if (!customer) {
-    return <EmptyState title="Customer not found" description="This customer may not belong to your branch or no longer exists." actionLabel="Back to Customers" onAction={() => navigate(`${opsBase}/customers`)} />;
-  }
-  const name = `${customer.first_name} ${customer.last_name}`;
-  const paymentStatus = Number(customer.activity?.outstanding_balance || 0) > 0 ? 'Overdue' : 'Current';
-  const customerSince = customer.created_at ? formatDisplayDate(customer.created_at) : '—';
-  const detailTabs = [
-    { key: 'contact', label: 'Contact Information' },
-    { key: 'activity', label: 'Account Activity' },
-    { key: 'credit', label: 'Credit Information' },
-  ];
-  const activeDetailTab = detailTabs.find((tab) => tab.key === detailTab) || detailTabs[0];
-  return <div className="page">
-      <section className="panel dashboard-greeting">
-        <div className="flex flex-col gap-1">
-          <p className="text-[0.82rem] font-bold tracking-widest uppercase text-navy/60 m-0">{customer.branch_name || branchName}</p>
-          <h2>{name}</h2>
-          <p className="text-ink/70">{customer.address || 'No address on file'}</p>
-        </div>
-      </section>
-
-      <Stats stats={[{
-      label: 'Status',
-      value: <StatusBadge status={customer.status || '—'} />
-    }, {
-      label: 'Payment Status',
-      value: <StatusBadge status={paymentStatus} />
-    }, {
-      label: 'Outstanding',
-      value: formatCurrency(Number(customer.activity?.outstanding_balance || 0))
-    }, {
-      label: 'Purchase Volume',
-      value: formatCurrency(Number(customer.activity?.purchase_volume || 0))
-    }, {
-      label: 'Account Manager',
-      value: customer.account_manager_name || '—'
-    }, {
-      label: 'Customer Since',
-      value: customerSince
-    }]} />
-
-      <section className="panel content-panel relative overflow-hidden">
-        <div className="segmented-control" style={{ marginBottom: 16 }}>
-          {detailTabs.map((tab) => (
-            <button
-              key={tab.key}
-              className={detailTab === tab.key ? 'segment active' : 'segment'}
-              type="button"
-              onClick={() => setDetailTab(tab.key)}
-            >
-              {tab.label}
-            </button>
-          ))}
-        </div>
-
-        <div className="flex flex-col md:flex-row justify-between gap-4 items-start md:items-center mb-4">
-          <h3>{activeDetailTab.label}</h3>
-        </div>
-
-        {detailTab === 'contact' && (
-          <DetailRowsTable rows={[
-            { label: 'Customer Name', value: name },
-            { label: 'Middle Name', value: formatMiddleNameDisplay(customer.middle_name) },
-            { label: 'Branch', value: customer.branch_name || branchName },
-            { label: 'Address', value: customer.address || '—' },
-            { label: 'Contact Phone', value: formatPhone(customer.contact_phone) },
-            { label: 'Contact Person', value: [customer.contact_person_fname, customer.contact_person_lname].filter(Boolean).join(' ') || '—' },
-            { label: 'Contact Person Middle Name', value: formatMiddleNameDisplay(customer.contact_person_mname) },
-            { label: 'Contact Person Phone', value: customer.contact_person_phone || '—' },
-            { label: 'Account Manager', value: customer.account_manager_name || '—' },
-            { label: 'Customer Since', value: customerSince },
-          ]} />
-        )}
-
-        {detailTab === 'activity' && (
-          <DetailRowsTable
-            fieldHeader="Activity"
-            detailsHeader="Details"
-            rows={[
-              { label: 'Outstanding Balance', value: formatCurrency(Number(customer.activity?.outstanding_balance || 0)) },
-              { label: 'Purchase Volume', value: formatCurrency(Number(customer.activity?.purchase_volume || 0)) },
-              { label: 'Last Collection', value: customer.activity?.last_collection_date ? formatDisplayDate(customer.activity.last_collection_date) : '—' },
-              { label: 'Last Sales Visit', value: customer.activity?.last_sales_visit ? formatDisplayDate(customer.activity.last_sales_visit) : '—' },
-            ]}
-          />
-        )}
-
-        {detailTab === 'credit' && (
-          customer.creditInfo ? (
-            <DetailRowsTable rows={[
-              { label: 'Credit Limit', value: formatCurrency(Number(customer.creditInfo.credit_limit || 0)) },
-              { label: 'Monthly Income', value: formatCurrency(Number(customer.creditInfo.monthly_income || 0)) },
-              { label: 'Credit Score', value: customer.creditInfo.credit_score || '—' },
-              { label: 'Employment Status', value: customer.creditInfo.employment_status || '—' },
-              { label: 'Approved By', value: customer.creditInfo.approved_by_name || '—' },
-              { label: 'Approved Date', value: customer.creditInfo.approved_date ? formatDisplayDate(customer.creditInfo.approved_date) : '—' },
-            ]} />
-          ) : (
-            <EmptyState title="No credit information" description="This customer has no credit record on file." />
-          )
-        )}
-      </section>
-
-      {customer.latitude && customer.longitude ? <section className="panel content-panel relative overflow-hidden">
-          <div className="flex flex-col md:flex-row justify-between gap-4 items-start md:items-center mb-4"><h3>Location</h3></div>
-          <div style={{
-        minHeight: 220,
-        borderRadius: 8,
-        overflow: 'hidden'
-      }}>
-            <LeafletMap center={[Number(customer.latitude), Number(customer.longitude)]} zoom={15} height={220} markers={[{
-          id: customer.customer_id,
-          position: [Number(customer.latitude), Number(customer.longitude)],
-          label: name.substring(0, 2).toUpperCase(),
-          color: paymentStatus === 'Overdue' ? '#ef4444' : '#0B1E30',
-          popup: name
-        }]} />
-          </div>
-        </section> : null}
-
-      <div className="flex justify-end gap-2 mt-4">
-        <button className="button ghost" type="button" onClick={() => navigate(`${opsBase}/customers`)}>Back to Customers</button>
-        <button className="button secondary" type="button" onClick={() => navigate(`${opsBase}/leaflet`)}>View on Map</button>
-      </div>
-    </div>;
-}
-
-// ── Alerts, Notifications, Profile, Audit ────────────────────────────────────
+// ── Alerts & Exceptions (BM exception desk) ───────────────────────────────────
 function AlertsPage({
   navigate,
   showToast,
-  currentUser
+  currentUser,
+  opsBase,
+  branchName,
 }) {
-  const [filter, setFilter] = useState('All');
+  const [view, setView] = useState('open'); // open | mine | resolved
+  const [category, setCategory] = useState('All');
+  const [severity, setSeverity] = useState('All');
+  const [search, setSearch] = useState('');
   const [alerts, setAlerts] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState('');
+  const [resolveTarget, setResolveTarget] = useState(null);
+  const [resolveNote, setResolveNote] = useState('');
+  const [escalateTarget, setEscalateTarget] = useState(null);
+  const [escalateReason, setEscalateReason] = useState('');
+  const [saving, setSaving] = useState(false);
+
   const load = async () => {
     setLoading(true);
-    const res = await fetchOperationalAlerts({ status: 'Open' });
-    if (res.success) setAlerts((res.data || []).map(mapOperationalAlertRow));
+    setLoadError('');
+    const params = { limit: 200 };
+    if (view === 'open') params.status = 'Open';
+    else if (view === 'mine') {
+      params.mine = '1';
+      params.status = 'Open';
+    } else if (view === 'resolved') params.status = 'Resolved';
+    if (category !== 'All') params.category = category;
+    if (severity !== 'All') params.severity = severity;
+    if (search.trim()) params.search = search.trim();
+
+    const res = await fetchOperationalAlerts(params);
+    if (res.success) {
+      setAlerts((res.data || []).map(mapOperationalAlertRow));
+    } else {
+      setAlerts([]);
+      setLoadError(res.message || 'Failed to load alerts.');
+    }
     setLoading(false);
   };
+
   useEffect(() => {
     load();
-  }, []);
+  }, [view, category, severity]);
+
   const filtered = useMemo(() => {
-    if (filter === 'All') return alerts;
-    return alerts.filter(a => (a.category || '').toLowerCase().includes(filter.toLowerCase()));
-  }, [alerts, filter]);
+    const q = search.trim().toLowerCase();
+    if (!q) return alerts;
+    return alerts.filter((a) => (
+      String(a.title || '').toLowerCase().includes(q)
+      || String(a.message || '').toLowerCase().includes(q)
+      || String(a.category || '').toLowerCase().includes(q)
+      || String(a.assignedToName || '').toLowerCase().includes(q)
+    ));
+  }, [alerts, search]);
+
   const pagination = usePagination(filtered);
   const rows = pagination.paginatedData;
   const alertLock = useRef(false);
+
   const assignAlert = async (alertId) => {
     if (alertLock.current) return;
     alertLock.current = true;
@@ -2648,75 +1467,280 @@ function AlertsPage({
     const result = await patchOperationalAlert(alertId, { assigned_to: currentUser?.id });
     alertLock.current = false;
     if (result.success) {
-      showToast('Follow-up assigned to you.', 'success');
+      showToast('Assigned to you.', 'success');
       load();
     } else showToast(result.message || 'Assign failed.', 'error');
   };
-  const resolveAlert = async (alertId) => {
-    if (alertLock.current) return;
-    alertLock.current = true;
-    const alert = alerts.find((item) => item.id === alertId);
-    const confirmed = await confirmAction({
-      title: 'Resolve alert',
-      message: 'This marks the alert as resolved.',
-      detail: alert?.title || alert?.message || `Alert ${alertId}`,
-      confirmLabel: 'Resolve',
-    });
-    if (!confirmed) {
-      alertLock.current = false;
+
+  const submitResolve = async () => {
+    if (!resolveTarget) return;
+    const note = resolveNote.trim();
+    if (!note) {
+      showToast('Resolution note is required.', 'error');
       return;
     }
-    const result = await patchOperationalAlert(alertId, { status: 'Resolved' });
-    alertLock.current = false;
+    setSaving(true);
+    const result = await patchOperationalAlert(resolveTarget.id, {
+      status: 'Resolved',
+      resolution_note: note,
+    });
+    setSaving(false);
     if (result.success) {
-      showToast('Resolved.', 'success');
+      showToast('Exception resolved.', 'success');
+      setResolveTarget(null);
+      setResolveNote('');
       load();
     } else showToast(result.message || 'Resolve failed.', 'error');
   };
-  if (loading && !alerts.length) return <LoadingState message="Loading alerts..." />;
+
+  const submitEscalate = async () => {
+    if (!escalateTarget) return;
+    const reason = escalateReason.trim();
+    if (!reason) {
+      showToast('Escalation reason is required.', 'error');
+      return;
+    }
+    setSaving(true);
+    const result = await patchOperationalAlert(escalateTarget.id, {
+      escalate: true,
+      escalation_reason: reason,
+    });
+    setSaving(false);
+    if (result.success) {
+      showToast('Escalated to organization review.', 'success');
+      setEscalateTarget(null);
+      setEscalateReason('');
+      load();
+    } else showToast(result.message || 'Escalate failed.', 'error');
+  };
+
+  if (loading && !alerts.length && !loadError) return <LoadingState message="Loading alerts..." />;
+
+  const emptyTitle = view === 'resolved'
+    ? 'No resolved exceptions yet'
+    : view === 'mine'
+      ? 'Nothing assigned to you'
+      : 'No open exceptions';
+  const emptyDesc = loadError
+    ? loadError
+    : view === 'resolved'
+      ? 'Resolved exceptions will appear here with their resolution notes.'
+      : view === 'mine'
+        ? 'Assign an open exception to yourself to track ownership.'
+        : category !== 'All' || severity !== 'All' || search.trim()
+          ? 'No alerts match the selected filters.'
+          : 'Branch exceptions that need follow-up will appear here.';
+
   return <div className="page">
-      <section className="panel content-panel relative overflow-hidden">
-        <div className="list-section-header"><h3>Alerts <span className="text-ink/70">({filtered.length})</span></h3></div>
-        <div className="list-section-toolbar" style={{ marginBottom: 12 }}>
-          <div className="segmented-control">
-            {['All', 'Collection', 'Sales', 'Inventory', 'Route'].map(f => <button key={f} className={filter === f ? 'segment active' : 'segment'} type="button" onClick={() => setFilter(f)}>{f}</button>)}
+      <section className="panel content-panel" style={{ marginBottom: 12 }}>
+        <div className="flex flex-col md:flex-row justify-between gap-3 items-start md:items-center">
+          <div>
+            <h3 style={{ margin: 0 }}>Alerts & Exceptions</h3>
+            <p className="muted" style={{ margin: '4px 0 0' }}>
+              Open branch exceptions — assign ownership and resolve after follow-up.
+            </p>
+            <p className="muted" style={{ margin: '4px 0 0', fontSize: '0.85rem' }}>
+              {branchName === 'All Branches' ? 'Organization-wide view' : (branchName || 'Branch')}
+              {` · ${filtered.length} shown`}
+            </p>
           </div>
+          <button className="button ghost" type="button" onClick={load}>Retry / Refresh</button>
         </div>
-        {filtered.length ? <>
+      </section>
+
+      <section className="panel content-panel relative overflow-hidden">
+        <div className="list-section-toolbar" style={{ marginBottom: 12, gap: 12, flexWrap: 'wrap' }}>
+          <div className="segmented-control">
+            {[
+              { key: 'open', label: 'Open' },
+              { key: 'mine', label: 'Assigned to Me' },
+              { key: 'resolved', label: 'Resolved' },
+            ].map((v) => (
+              <button
+                key={v.key}
+                className={view === v.key ? 'segment active' : 'segment'}
+                type="button"
+                onClick={() => setView(v.key)}
+              >
+                {v.label}
+              </button>
+            ))}
+          </div>
+          <div className="segmented-control">
+            {['All', 'Field Incident', 'Inventory', 'Collection', 'Delinquency', 'Route Operations'].map((f) => (
+              <button
+                key={f}
+                className={category === f ? 'segment active' : 'segment'}
+                type="button"
+                onClick={() => setCategory(f)}
+              >
+                {f === 'Route Operations' ? 'Route' : f}
+              </button>
+            ))}
+          </div>
+          <div className="segmented-control">
+            {['All', 'Critical', 'Warning', 'Informational'].map((s) => (
+              <button
+                key={s}
+                className={severity === s ? 'segment active' : 'segment'}
+                type="button"
+                onClick={() => setSeverity(s)}
+              >
+                {s}
+              </button>
+            ))}
+          </div>
+          <input
+            className="input"
+            style={{ minWidth: 200, flex: '1 1 200px' }}
+            placeholder="Search title, message, owner…"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            onKeyDown={(e) => { if (e.key === 'Enter') load(); }}
+          />
+        </div>
+
+        {loadError && !filtered.length ? (
+          <EmptyState title="Alerts unavailable" description={loadError} />
+        ) : filtered.length ? <>
           <div className="corvex-table-wrapper">
             <table className="corvex-table">
               <thead>
                 <tr>
                   <th>Title</th>
                   <th>Category</th>
-                  <th>Message</th>
                   <th>Severity</th>
-                  <th>Date</th>
+                  <th>Created</th>
+                  <th>Age</th>
+                  <th>Owner</th>
                   <th>Status</th>
                   <th>Actions</th>
                 </tr>
               </thead>
               <tbody>
-                {rows.map(a => <tr key={a.id}>
-                    <td><strong>{a.title}</strong></td>
-                    <td>{a.category || a.type || '—'}</td>
-                    <td>{a.message}</td>
-                    <td><Severity severity={a.severity} /></td>
-                    <td>{formatDisplayDateTime(a.time || a.date)}</td>
-                    <td><StatusBadge status={a.resolved || a.status === 'Resolved' ? 'Resolved' : (a.status || 'Open')} /></td>
-                    <td className="table-actions">
-                      {!a.resolved && a.status !== 'Resolved' ? <>
-                        <button className="icon-action-button" type="button" title="Assign" onClick={() => assignAlert(a.id)}><NavIcon name="user" /></button>
-                        <button className="icon-action-button" type="button" title="Resolve" onClick={() => resolveAlert(a.id)}><NavIcon name="check" /></button>
-                      </> : <span className="muted">—</span>}
-                    </td>
-                  </tr>)}
+                {rows.map((a) => {
+                  const deep = alertDeepLink(a, opsBase);
+                  return (
+                    <tr key={a.id}>
+                      <td>
+                        <strong>{a.title}</strong>
+                        <div className="muted" style={{ fontSize: '0.85rem', marginTop: 2, maxWidth: 360 }}>
+                          {a.message}
+                        </div>
+                        {a.escalated ? (
+                          <div className="muted" style={{ fontSize: '0.78rem', marginTop: 2 }}>Escalated</div>
+                        ) : null}
+                        {a.resolved && a.resolutionNote ? (
+                          <div className="muted" style={{ fontSize: '0.78rem', marginTop: 2 }}>
+                            Resolution: {a.resolutionNote}
+                          </div>
+                        ) : null}
+                      </td>
+                      <td>{a.category || a.type || '—'}</td>
+                      <td><Severity severity={a.severity} /></td>
+                      <td>{formatDisplayDateTime(a.time || a.date)}</td>
+                      <td>{a.resolved ? '—' : a.ageLabel}</td>
+                      <td>{a.assignedToName || 'Unassigned'}</td>
+                      <td>
+                        <StatusBadge status={a.resolved ? 'Resolved' : (a.escalated ? 'Escalated' : (a.status || 'Open'))} />
+                      </td>
+                      <td className="table-actions">
+                        {deep ? (
+                          <button
+                            className="icon-action-button"
+                            type="button"
+                            title="Open related record"
+                            onClick={() => navigate(deep)}
+                          >
+                            <NavIcon name="view" />
+                          </button>
+                        ) : null}
+                        {!a.resolved ? <>
+                          <button
+                            className="icon-action-button"
+                            type="button"
+                            title={a.assignedTo === currentUser?.id ? 'Assigned to you' : 'Assign to Me'}
+                            onClick={() => assignAlert(a.id)}
+                          >
+                            <NavIcon name="user" />
+                          </button>
+                          <button
+                            className="icon-action-button"
+                            type="button"
+                            title="Resolve"
+                            onClick={() => { setResolveTarget(a); setResolveNote(''); }}
+                          >
+                            <NavIcon name="check" />
+                          </button>
+                          {!a.escalated ? (
+                            <button
+                              className="icon-action-button"
+                              type="button"
+                              title="Escalate"
+                              onClick={() => { setEscalateTarget(a); setEscalateReason(''); }}
+                            >
+                              <NavIcon name="alert" />
+                            </button>
+                          ) : null}
+                        </> : <span className="muted">—</span>}
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>
           <Pagination {...pagination} />
-        </> : <EmptyState title="No alerts" description="No alerts match this filter." />}
+        </> : <EmptyState title={emptyTitle} description={emptyDesc} />}
       </section>
+
+      {resolveTarget ? (
+        <div className="modal-overlay" role="dialog" aria-modal="true" aria-label="Resolve exception" onClick={() => !saving && setResolveTarget(null)}>
+          <div className="modal-content" style={{ maxWidth: 480 }} onClick={(e) => e.stopPropagation()}>
+            <h3 style={{ marginTop: 0 }}>Resolve exception</h3>
+            <p className="muted">{resolveTarget.title}</p>
+            <label className="field-label" htmlFor="resolve-note">Resolution note</label>
+            <textarea
+              id="resolve-note"
+              className="input"
+              rows={4}
+              value={resolveNote}
+              onChange={(e) => setResolveNote(e.target.value)}
+              placeholder="Describe the follow-up completed…"
+            />
+            <div className="flex gap-2 justify-end" style={{ marginTop: 12 }}>
+              <button className="button ghost" type="button" disabled={saving} onClick={() => setResolveTarget(null)}>Cancel</button>
+              <button className="button" type="button" disabled={saving} onClick={submitResolve}>
+                {saving ? 'Saving…' : 'Resolve'}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {escalateTarget ? (
+        <div className="modal-overlay" role="dialog" aria-modal="true" aria-label="Escalate exception" onClick={() => !saving && setEscalateTarget(null)}>
+          <div className="modal-content" style={{ maxWidth: 480 }} onClick={(e) => e.stopPropagation()}>
+            <h3 style={{ marginTop: 0 }}>Escalate to organization</h3>
+            <p className="muted">{escalateTarget.title}</p>
+            <label className="field-label" htmlFor="escalate-reason">Reason</label>
+            <textarea
+              id="escalate-reason"
+              className="input"
+              rows={4}
+              value={escalateReason}
+              onChange={(e) => setEscalateReason(e.target.value)}
+              placeholder="Why does this need OM / org-level intervention?"
+            />
+            <div className="flex gap-2 justify-end" style={{ marginTop: 12 }}>
+              <button className="button ghost" type="button" disabled={saving} onClick={() => setEscalateTarget(null)}>Cancel</button>
+              <button className="button" type="button" disabled={saving} onClick={submitEscalate}>
+                {saving ? 'Saving…' : 'Escalate'}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </div>;
 }
 function NotificationsPage({
@@ -2778,7 +1802,6 @@ function ProfilePage({
   return <AccountProfilePanel
     showToast={showToast}
     title="Branch profile"
-    subtitle="Your name, contact details, and sign-in for this CORVEX account."
     extraActions={<>
       <button className="button ghost" type="button" onClick={() => navigate(`${opsBase}/audit-log`)}>Audit log</button>
       <button className="button ghost" type="button" onClick={() => navigate(`${opsBase}/approval-center`)}>Approval center</button>
@@ -2786,612 +1809,299 @@ function ProfilePage({
     settings={<SettingsPage embedded navigate={navigate} opsBase={opsBase} />}
   />;
 }
-function ApprovalCenterPage({
+function branchActivityLabel(log) {
+  return String(log?.activity_label || log?.activity || log?.action || '—').trim() || '—';
+}
+
+function branchActivityDetailRows(log) {
+  if (!log) return [];
+  return [
+    { key: 'timestamp', label: 'Date & Time', value: formatDisplayDateTime(log.created_at) },
+    { key: 'user', label: 'User', value: log.user_name || (log.user_id ? `User #${log.user_id}` : 'System') },
+    { key: 'role', label: 'Role', value: log.role_name || '—' },
+    { key: 'module', label: 'Module', value: log.module || '—' },
+    { key: 'activity', label: 'Activity', value: branchActivityLabel(log) },
+    { key: 'status', label: 'Status', value: <StatusBadge status={log.status || log.status_details || '—'} /> },
+    { key: 'reference', label: 'Reference', value: log.affected_record || '—' },
+    { key: 'branch', label: 'Affected Branch', value: log.branch_name || '—' },
+    { key: 'description', label: 'Details', value: String(log.description || log.status_details || '—') },
+    { key: 'ip', label: 'IP Address', value: log.ip_address || '—' },
+  ];
+}
+
+function referenceDeepLink(log, opsBase) {
+  const ref = String(log?.affected_record || '');
+  const [kind, id] = ref.split(':');
+  if (!kind || !id) return null;
+  if (kind === 'credit_investigation') return `${opsBase}/ci-approvals/${id}`;
+  if (kind === 'invoice') return `${opsBase}/reports/invoices`;
+  if (kind === 'customer') return `${opsBase}/customers/${id}`;
+  if (kind === 'alert') return `${opsBase}/alerts`;
+  if (kind === 'collection_payment' || kind === 'payment') return `${opsBase}/credit-history`;
+  if (kind === 'restock' || kind === 'stock_count' || kind === 'transfer') return `${opsBase}/approval-center`;
+  return null;
+}
+
+function AuditLogPage({
   navigate,
   showToast,
-  opsBase
-}) {
-  const [tab, setTab] = useState('ci');
-  const [ciList, setCiList] = useState([]);
-  const [transferList, setTransferList] = useState([]);
-  const [transferDetail, setTransferDetail] = useState(null);
-  const [transferDetailLoading, setTransferDetailLoading] = useState(false);
-  const [specialList, setSpecialList] = useState([]);
-  const [invoiceList, setInvoiceList] = useState([]);
-  const [collectionList, setCollectionList] = useState([]);
-  const [confirmedCollections, setConfirmedCollections] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const reload = async () => {
-    setLoading(true);
-    const [ciRes, trRes, scRes, invRes, pendingPayRes, confirmedPayRes] = await Promise.all([
-      fetchCreditInvestigations(),
-      fetchInventoryTransfers(),
-      fetchSpecialCollectionRequests(),
-      fetchPendingSalesInvoices(),
-      fetchCollectionsForReview('Pending'),
-      fetchCollectionsForReview('Completed'),
-    ]);
-    if (ciRes.success) setCiList((ciRes.data || []).map(mapCreditInvestigationRow));
-    if (trRes.success) {
-      const pending = (trRes.data || []).filter(t => ['Pending Approval', 'Submitted'].includes(t.status));
-      setTransferList(pending.map(mapInventoryTransferRow));
-    }
-    if (scRes.success) setSpecialList((scRes.data || []).map(mapSpecialCollectionRow));
-    if (invRes.success) setInvoiceList(invRes.data || []);
-    if (pendingPayRes.success) setCollectionList(pendingPayRes.data || []);
-    if (confirmedPayRes.success) setConfirmedCollections(confirmedPayRes.data || []);
-    setLoading(false);
-  };
-  useEffect(() => {
-    reload();
-  }, []);
-  const tabs = [{
-    key: 'ci',
-    label: `Credit Reviews (${ciList.filter(c => c.status === 'Pending' || c.status === 'Revision Requested').length})`
-  }, {
-    key: 'transfers',
-    label: `Inventory Transfers (${transferList.filter(t => t.status === 'Pending Approval').length})`
-  }, {
-    key: 'special',
-    label: `Special Collections (${specialList.filter(s => s.status === 'Pending').length})`
-  }, {
-    key: 'invoices',
-    label: `Sales Invoices (${invoiceList.length})`
-  }, {
-    key: 'collections',
-    label: `Collections (${collectionList.length})`
-  }];
-  const totalPending = ciList.filter(c => c.status === 'Pending' || c.status === 'Revision Requested').length + transferList.filter(t => t.status === 'Pending Approval').length + specialList.filter(s => s.status === 'Pending').length + invoiceList.length + collectionList.length;
-  const openTransferDetail = async (transferId) => {
-    setTransferDetailLoading(true);
-    setTransferDetail(null);
-    const result = await fetchInventoryTransferById(transferId);
-    if (result.success) setTransferDetail(result.data);
-    else showToast(result.message || 'Could not load transfer lines.', 'error');
-    setTransferDetailLoading(false);
-  };
-  const actionLock = useRef(false);
-  const withAction = async (work) => {
-    if (actionLock.current) return;
-    actionLock.current = true;
-    try {
-      await work();
-    } finally {
-      actionLock.current = false;
-    }
-  };
-  const approveTransfer = (transferId) => withAction(async () => {
-    const row = transferList.find((item) => String(item.id) === String(transferId));
-    const label = row?.ref || transferDetail?.transfer_ref || `Transfer ${transferId}`;
-    const confirmed = await confirmAction({
-      title: 'Approve transfer',
-      message: 'The source branch can ship after approval. Stock does not move until they confirm shipment.',
-      detail: label,
-      confirmLabel: 'Approve',
-    });
-    if (!confirmed) return;
-    const result = await patchInventoryTransfer(transferId, { status: 'Approved' });
-    if (result.success) {
-      showToast('Transfer approved. Source warehouse can confirm shipment.', 'success');
-      setTransferDetail(null);
-      reload();
-    } else showToast(result.message || 'Approve failed.', 'error');
-  });
-  const rejectTransfer = (transferId) => withAction(async () => {
-    const reason = window.prompt('Rejection reason (required):');
-    if (!reason?.trim()) {
-      showToast('Reason required.', 'error');
-      return;
-    }
-    const row = transferList.find((item) => String(item.id) === String(transferId));
-    const label = row?.ref || transferDetail?.transfer_ref || `Transfer ${transferId}`;
-    const confirmed = await confirmAction({
-      title: 'Reject transfer',
-      message: 'This rejects the transfer request. Stock is not moved.',
-      detail: `${label} · ${reason.trim()}`,
-      confirmLabel: 'Reject',
-      tone: 'danger',
-    });
-    if (!confirmed) return;
-    const result = await patchInventoryTransfer(transferId, {
-      status: 'Rejected',
-      approval_info: reason.trim(),
-    });
-    if (result.success) {
-      showToast('Transfer rejected.', 'success');
-      setTransferDetail(null);
-      reload();
-    } else showToast(result.message || 'Reject failed.', 'error');
-  });
-  const approveSpecial = (requestId) => withAction(async () => {
-    const row = specialList.find((item) => String(item.requestId) === String(requestId));
-    const confirmed = await confirmAction({
-      title: 'Approve special collection',
-      message: 'This approves the special collection request.',
-      detail: [row?.customerName, row?.amount != null ? formatCurrency(row.amount) : ''].filter(Boolean).join(' · ') || `Request ${requestId}`,
-      confirmLabel: 'Approve',
-    });
-    if (!confirmed) return;
-    const result = await patchSpecialCollectionRequest(requestId, { status: 'Approved' });
-    if (result.success) {
-      showToast('Special collection approved.', 'success');
-      reload();
-    } else showToast(result.message || 'Approve failed.', 'error');
-  });
-  const rejectSpecial = (requestId) => withAction(async () => {
-    const row = specialList.find((item) => String(item.requestId) === String(requestId));
-    const confirmed = await confirmAction({
-      title: 'Reject special collection',
-      message: 'This rejects the special collection request.',
-      detail: row?.customerName || `Request ${requestId}`,
-      confirmLabel: 'Reject',
-      tone: 'danger',
-    });
-    if (!confirmed) return;
-    const result = await patchSpecialCollectionRequest(requestId, { status: 'Rejected' });
-    if (result.success) {
-      showToast('Special collection rejected.', 'success');
-      reload();
-    } else showToast(result.message || 'Reject failed.', 'error');
-  });
-  const confirmInvoice = (invoiceId) => withAction(async () => {
-    const invoice = invoiceList.find((item) => String(item.sales_invoices_id) === String(invoiceId));
-    const confirmed = await confirmAction({
-      title: 'Acknowledge invoice',
-      message: 'This confirms the sales invoice.',
-      detail: [invoice?.invoice_number, invoice?.customer_name].filter(Boolean).join(' · ') || `Invoice ${invoiceId}`,
-      confirmLabel: 'Acknowledge',
-    });
-    if (!confirmed) return;
-    const result = await patchSalesInvoiceReview(invoiceId, { status: 'Confirmed' });
-    if (result.success) {
-      showToast(result.message || 'Invoice acknowledged.', 'success');
-      reload();
-    } else showToast(result.message || 'Acknowledge failed.', 'error');
-  });
-  const rejectInvoice = (invoiceId) => withAction(async () => {
-    const reason = window.prompt('Rejection reason (required):');
-    if (!reason?.trim()) {
-      showToast('Reason required.', 'error');
-      return;
-    }
-    const invoice = invoiceList.find((item) => String(item.sales_invoices_id) === String(invoiceId));
-    const confirmed = await confirmAction({
-      title: 'Reject invoice',
-      message: 'This cancels the sales invoice.',
-      detail: [invoice?.invoice_number || `Invoice ${invoiceId}`, reason.trim()].join(' · '),
-      confirmLabel: 'Reject',
-      tone: 'danger',
-      warning: 'The invoice will be cancelled.',
-    });
-    if (!confirmed) return;
-    const result = await patchSalesInvoiceReview(invoiceId, { status: 'Cancelled', review_note: reason.trim() });
-    if (result.success) {
-      showToast(result.message || 'Invoice rejected.', 'success');
-      reload();
-    } else showToast(result.message || 'Reject failed.', 'error');
-  });
-  const confirmCollection = (paymentId) => withAction(async () => {
-    const payment = collectionList.find((item) => String(item.collectionpayment_id) === String(paymentId));
-    const confirmed = await confirmAction({
-      title: 'Confirm collection',
-      message: 'This accepts the pending collection.',
-      detail: [payment?.receipt_number, payment?.customer_name].filter(Boolean).join(' · ') || `Collection ${paymentId}`,
-      confirmLabel: 'Confirm collection',
-    });
-    if (!confirmed) return;
-    const result = await patchCollectionReview(paymentId, { action: 'confirm' });
-    if (result.success) {
-      showToast(result.message || 'Collection confirmed.', 'success');
-      reload();
-    } else showToast(result.message || 'Confirm failed.', 'error');
-  });
-  const rejectCollection = (paymentId) => withAction(async () => {
-    const reason = window.prompt('Rejection reason (required):');
-    if (!reason?.trim()) {
-      showToast('Reason required.', 'error');
-      return;
-    }
-    const payment = collectionList.find((item) => String(item.collectionpayment_id) === String(paymentId));
-    const confirmed = await confirmAction({
-      title: 'Reject collection',
-      message: 'This rejects the pending collection.',
-      detail: [payment?.receipt_number || `Collection ${paymentId}`, reason.trim()].filter(Boolean).join(' · '),
-      confirmLabel: 'Reject',
-      tone: 'danger',
-    });
-    if (!confirmed) return;
-    const result = await patchCollectionReview(paymentId, { action: 'reject', review_note: reason.trim() });
-    if (result.success) {
-      showToast(result.message || 'Collection rejected.', 'success');
-      reload();
-    } else showToast(result.message || 'Reject failed.', 'error');
-  });
-  const reverseCollection = (paymentId) => withAction(async () => {
-    const reason = window.prompt('Reversal reason (required):');
-    if (!reason?.trim()) {
-      showToast('Reason required.', 'error');
-      return;
-    }
-    const payment = confirmedCollections.find((item) => String(item.collectionpayment_id) === String(paymentId));
-    const confirmed = await confirmAction({
-      title: 'Reverse collection',
-      message: 'This reverses a collection that was already confirmed.',
-      detail: [payment?.receipt_number || `Collection ${paymentId}`, reason.trim()].filter(Boolean).join(' · '),
-      confirmLabel: 'Reverse',
-      tone: 'danger',
-      warning: 'The recorded collection will be reversed.',
-    });
-    if (!confirmed) return;
-    const result = await patchCollectionReview(paymentId, { action: 'reverse', review_note: reason.trim() });
-    if (result.success) {
-      showToast(result.message || 'Collection reversed.', 'success');
-      reload();
-    } else showToast(result.message || 'Reverse failed.', 'error');
-  });
-  const RiskBadge = ({
-    score
-  }) => {
-    const color = score >= 70 ? '#dc2626' : score >= 40 ? '#d97706' : '#2A9B6A';
-    const label = score >= 70 ? 'High Risk' : score >= 40 ? 'Medium' : 'Low Risk';
-    return <span style={{
-      fontWeight: 600,
-      color,
-      whiteSpace: 'nowrap'
-    }}>{label} ({score})</span>;
-  };
-  const pagination_ciList = usePagination(ciList);
-  const paginated_ciList = pagination_ciList.paginatedData;
-  const pagination_transferList = usePagination(transferList);
-  const paginated_transferList = pagination_transferList.paginatedData;
-  const pagination_specialList = usePagination(specialList);
-  const paginated_specialList = pagination_specialList.paginatedData;
-  const pagination_invoiceList = usePagination(invoiceList);
-  const paginated_invoiceList = pagination_invoiceList.paginatedData;
-  const pagination_collectionList = usePagination(collectionList);
-  const paginated_collectionList = pagination_collectionList.paginatedData;
-  const pagination_confirmedCollections = usePagination(confirmedCollections);
-  const paginated_confirmedCollections = pagination_confirmedCollections.paginatedData;
-  if (loading && !ciList.length && !transferList.length && !specialList.length && !invoiceList.length && !collectionList.length && !confirmedCollections.length) {
-    return <LoadingState message="Loading approval center..." />;
-  }
-  return <div className="page">
-      {/* Summary bar */}
-      <Stats stats={[{
-        label: 'Total Pending',
-        value: String(totalPending),
-      }, {
-        label: 'CI Approvals',
-        value: String(ciList.filter(c => c.status === 'Pending').length),
-      }, {
-        label: 'Transfer Approvals',
-        value: String(transferList.filter(t => t.status === 'Pending Approval').length),
-      }, {
-        label: 'Special Collections',
-        value: String(specialList.filter(s => s.status === 'Pending').length),
-      }, {
-        label: 'Sales Invoices',
-        value: String(invoiceList.length),
-      }, {
-        label: 'Collections',
-        value: String(collectionList.length),
-      }]} />
-
-      {/* Tab navigation */}
-      <div className="segmented-control">
-        {tabs.map(t => <button key={t.key} className={tab === t.key ? 'segment active' : 'segment'} type="button" onClick={() => setTab(t.key)}>{t.label}</button>)}
-      </div>
-
-      {/* ── Credit Reviews ── */}
-      {tab === 'ci' && <section className="panel content-panel relative overflow-hidden">
-          <div className="flex flex-col md:flex-row justify-between gap-4 items-start md:items-center mb-4">
-            <h3>Credit Reviews</h3>
-            <button className="button ghost" type="button" onClick={() => navigate(`${opsBase}/ci-approvals`)}>Open Full Queue</button>
-          </div>
-          {ciList.length ? <><div className="corvex-table-wrapper">
-              <table className="corvex-table">
-                <thead>
-                  <tr><th>Customer</th><th>Submitted By</th><th>Why / Trigger</th><th>Risk</th><th>Requested</th><th>Status</th><th>Actions</th></tr>
-                </thead>
-                <tbody>
-                  {paginated_ciList.map(ci => <tr key={ci.id} className="clickable-row" onClick={() => navigate(`${opsBase}/ci-approvals/${ci.ciId || ci.id}`)}>
-                      <td><strong>{ci.customerName}</strong>{ci.customerCode ? <span className="text-ink/70" style={{
-                    display: 'block',
-                    fontSize: '0.8rem'
-                  }}>{ci.customerCode}</span> : null}</td>
-                      <td>{ci.submittedBy}<span className="text-ink/70" style={{
-                    display: 'block',
-                    fontSize: '0.8rem'
-                  }}>{formatDisplayDate(ci.submissionDate)}</span></td>
-                      <td>{ci.purpose || ci.requestReason || '—'}</td>
-                      <td><StatusBadge status={ci.riskLevel || '—'} /></td>
-                      <td>{ci.requestedLimit != null ? formatCurrency(ci.requestedLimit) : '—'}</td>
-                      <td><StatusBadge status={ci.displayStatus || ci.status} /></td>
-                      <td className="table-actions" onClick={(e) => e.stopPropagation()}>
-                        <button className="icon-action-button" type="button" title="Decide" onClick={() => navigate(`${opsBase}/ci-approvals/${ci.ciId || ci.id}`)}><NavIcon name="view" /></button>
-                      </td>
-                    </tr>)}
-                </tbody>
-              </table>
-            </div><Pagination {...pagination_ciList} /></> : <EmptyState title="No credit reviews" description="No credit review cases on file." />}
-        </section>}
-
-      {/* ── Inventory Transfers (multi-line documents) ── */}
-      {tab === 'transfers' && <section className="panel content-panel relative overflow-hidden">
-          <div className="flex flex-col md:flex-row justify-between gap-4 items-start md:items-center mb-4">
-            <h3>Inventory Transfer Requests</h3>
-            <p className="text-ink/70" style={{
-          margin: 0,
-          fontSize: '0.85rem'
-        }}>Approve or reject the whole document once. Stock moves only after warehouse confirms shipment.</p>
-          </div>
-          {transferList.length ? <><div className="corvex-table-wrapper">
-              <table className="corvex-table">
-                <thead>
-                  <tr><th>Ref</th><th>Products</th><th>Lines</th><th>Total qty</th><th>From</th><th>To</th><th>Requested By</th><th>Date</th><th>Status</th><th>Actions</th></tr>
-                </thead>
-                <tbody>
-                  {paginated_transferList.map(t => <tr key={t.id} className="clickable-row" onClick={() => openTransferDetail(t.id)}>
-                      <td><strong>{t.ref || t.id}</strong></td>
-                      <td>{t.product}</td>
-                      <td>{t.lineCount || 1}</td>
-                      <td>{t.qty} units</td>
-                      <td style={{
-                  fontSize: '0.85rem'
-                }}>{String(t.from || '').replace(' Branch', '')}</td>
-                      <td style={{
-                  fontSize: '0.85rem'
-                }}>{String(t.to || '').replace(' Branch', '')}</td>
-                      <td>{t.requestedBy}</td>
-                      <td>{formatDisplayDate(t.date)}</td>
-                      <td><StatusBadge status={t.status} /></td>
-                      <td className="table-actions" onClick={(e) => e.stopPropagation()}>
-                        <button className="icon-action-button" type="button" title="View lines" onClick={() => openTransferDetail(t.id)}><NavIcon name="view" /></button>
-                        {['Pending Approval', 'Submitted'].includes(t.status) && <>
-                          <button className="icon-action-button" type="button" title="Approve" onClick={() => approveTransfer(t.id)}><NavIcon name="check" /></button>
-                          <button className="icon-action-button danger" type="button" title="Reject" onClick={() => rejectTransfer(t.id)}><NavIcon name="close" /></button>
-                        </>}
-                      </td>
-                    </tr>)}
-                </tbody>
-              </table>
-            </div><Pagination {...pagination_transferList} /></> : <EmptyState title="No transfer requests" description="All transfers have been processed." />}
-
-          {(transferDetailLoading || transferDetail) ? (
-            <div className="panel content-panel" style={{ marginTop: 16 }}>
-              {transferDetailLoading ? <LoadingState message="Loading transfer lines…" /> : null}
-              {transferDetail ? (
-                <>
-                  <div className="flex flex-col md:flex-row justify-between gap-4 items-start md:items-center mb-4">
-                    <div>
-                      <h3 style={{ margin: 0 }}>{transferDetail.transfer_ref}</h3>
-                      <p className="text-ink/70" style={{ margin: '4px 0 0', fontSize: '0.85rem' }}>
-                        {transferDetail.source_branch} → {transferDetail.destination_branch}
-                        {' · '}{transferDetail.line_count ?? transferDetail.lines?.length ?? 0} product(s)
-                        {' · '}{transferDetail.total_quantity ?? transferDetail.quantity} units
-                        {' · '}{transferDetail.submitted_by_name || '—'}
-                      </p>
-                    </div>
-                    <button className="button ghost" type="button" onClick={() => setTransferDetail(null)}>Close</button>
-                  </div>
-                  {transferDetail.notes ? <p className="muted">Notes: {transferDetail.notes}</p> : null}
-                  <div className="corvex-table-wrapper">
-                    <table className="corvex-table">
-                      <thead>
-                        <tr><th>SKU</th><th>Product</th><th>Qty</th></tr>
-                      </thead>
-                      <tbody>
-                        {(transferDetail.lines || []).map((line) => (
-                          <tr key={line.line_id || line.product_id}>
-                            <td><span className="mono-cell">{line.sku || '—'}</span></td>
-                            <td><strong>{line.product_name}</strong></td>
-                            <td>{line.quantity}</td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                  {['Pending Approval', 'Submitted'].includes(transferDetail.status) ? (
-                    <div className="flex justify-end gap-2 mt-4">
-                      <button className="button secondary" type="button" onClick={() => rejectTransfer(transferDetail.transfer_id)}>Reject</button>
-                      <button className="button" type="button" onClick={() => approveTransfer(transferDetail.transfer_id)}>Approve document</button>
-                    </div>
-                  ) : null}
-                </>
-              ) : null}
-            </div>
-          ) : null}
-        </section>}
-
-      {/* ── Special Collections ── */}
-      {tab === 'special' && <section className="panel content-panel relative overflow-hidden">
-          <div className="list-section-header">
-            <h3>Special Collection Requests <span className="text-ink/70">({specialList.length})</span></h3>
-            <p className="list-section-subtitle">Extended terms and partial collection approvals submitted by field collectors.</p>
-          </div>
-          {specialList.length ? <>
-            <div className="corvex-table-wrapper">
-              <table className="corvex-table">
-                <thead>
-                  <tr>
-                    <th>Customer</th>
-                    <th>Account</th>
-                    <th>Requested By</th>
-                    <th>Date</th>
-                    <th>Request Type</th>
-                    <th>Amount</th>
-                    <th>Notes</th>
-                    <th>Status</th>
-                    <th>Actions</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {paginated_specialList.map(s => <tr key={s.id}>
-                      <td><strong>{s.customerName}</strong></td>
-                      <td><span style={{ fontFamily: 'monospace', fontSize: '0.82rem' }}>{s.accountNumber || '—'}</span></td>
-                      <td>{s.requestedBy || '—'}</td>
-                      <td>{formatDisplayDate(s.date)}</td>
-                      <td>{s.requestType || '—'}</td>
-                      <td style={{ fontWeight: 600 }}>{formatCurrency(s.amount)}</td>
-                      <td>{s.notes || '—'}</td>
-                      <td><StatusBadge status={s.status} /></td>
-                      <td className="table-actions">
-                        {s.status === 'Pending' ? <>
-                          <button className="icon-action-button" type="button" title="Approve" onClick={() => approveSpecial(s.requestId)}><NavIcon name="check" /></button>
-                          <button className="icon-action-button danger" type="button" title="Reject" onClick={() => rejectSpecial(s.requestId)}><NavIcon name="close" /></button>
-                        </> : <span className="muted">—</span>}
-                      </td>
-                    </tr>)}
-                </tbody>
-              </table>
-            </div>
-            <Pagination {...pagination_specialList} />
-          </> : <EmptyState title="No special collection requests" description="All requests have been processed." />}
-        </section>}
-
-      {tab === 'invoices' && <section className="panel content-panel relative overflow-hidden">
-          <div className="list-section-header">
-            <h3>Sales invoices waiting for review <span className="text-ink/70">({invoiceList.length})</span></h3>
-            <p className="list-section-subtitle">Acknowledge a sale logged by a sales agent, or reject it to return the stock and reopen the purchase request. Acknowledgement does not assign a collector.</p>
-          </div>
-          {invoiceList.length ? <>
-            <div className="corvex-table-wrapper">
-              <table className="corvex-table">
-                <thead>
-                  <tr>
-                    <th>Invoice</th>
-                    <th>Customer</th>
-                    <th>Sales Agent</th>
-                    <th>Items</th>
-                    <th>Amount</th>
-                    <th>Date</th>
-                    <th>Actions</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {paginated_invoiceList.map((inv) => {
-                    let items = inv.items;
-                    if (typeof items === 'string') {
-                      try { items = JSON.parse(items); } catch { items = []; }
-                    }
-                    if (!Array.isArray(items)) items = [];
-                    return <tr key={inv.sales_invoices_id}>
-                      <td><strong>{inv.invoice_number}</strong></td>
-                      <td>{inv.customer_name}</td>
-                      <td>{inv.sales_agent_name}</td>
-                      <td>{items.map((item) => `${item.product_name} × ${item.quantity}`).join(', ') || '—'}</td>
-                      <td style={{ fontWeight: 600 }}>{formatCurrency(Number(inv.total_amount))}</td>
-                      <td>{formatDisplayDate(inv.invoices_date)}</td>
-                      <td className="table-actions">
-                        <button className="icon-action-button" type="button" title="Acknowledge" onClick={() => confirmInvoice(inv.sales_invoices_id)}><NavIcon name="check" /></button>
-                        <button className="icon-action-button danger" type="button" title="Reject" onClick={() => rejectInvoice(inv.sales_invoices_id)}><NavIcon name="close" /></button>
-                      </td>
-                    </tr>;
-                  })}
-                </tbody>
-              </table>
-            </div>
-            <Pagination {...pagination_invoiceList} />
-          </> : <EmptyState title="No sales invoices to review" description="Invoices logged by sales agents will appear here until you acknowledge or reject them." />}
-        </section>}
-
-      {tab === 'collections' && <section className="panel content-panel relative overflow-hidden">
-          <div className="list-section-header">
-            <h3>Collections waiting for review <span className="text-ink/70">({collectionList.length})</span></h3>
-            <p className="list-section-subtitle">Confirm a collection to lower the balance. Reject it to leave the balance unchanged.</p>
-          </div>
-          {collectionList.length ? <>
-            <div className="corvex-table-wrapper">
-              <table className="corvex-table">
-                <thead>
-                  <tr>
-                    <th>Receipt</th>
-                    <th>Customer</th>
-                    <th>Collector</th>
-                    <th>Branch</th>
-                    <th>Method</th>
-                    <th>Amount</th>
-                    <th>Date</th>
-                    <th>Actions</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {paginated_collectionList.map((payment) => <tr key={payment.collectionpayment_id}>
-                      <td><strong>{payment.receipt_number}</strong></td>
-                      <td>{payment.customer_name}</td>
-                      <td>{payment.collector_name}</td>
-                      <td>{payment.branch_name || '—'}</td>
-                      <td>{payment.payment_method}</td>
-                      <td style={{ fontWeight: 600 }}>{formatCurrency(Number(payment.amount))}</td>
-                      <td>{formatDisplayDate(payment.payment_date)}</td>
-                      <td className="table-actions">
-                        <button className="icon-action-button" type="button" title="Confirm" onClick={() => confirmCollection(payment.collectionpayment_id)}><NavIcon name="check" /></button>
-                        <button className="icon-action-button danger" type="button" title="Reject" onClick={() => rejectCollection(payment.collectionpayment_id)}><NavIcon name="close" /></button>
-                      </td>
-                    </tr>)}
-                </tbody>
-              </table>
-            </div>
-            <Pagination {...pagination_collectionList} />
-          </> : <EmptyState title="No collections to review" description="Collections logged by collectors will appear here until you confirm or reject them." />}
-
-          <div className="list-section-header" style={{ marginTop: 28 }}>
-            <h3>Confirmed collections <span className="text-ink/70">({confirmedCollections.length})</span></h3>
-            <p className="list-section-subtitle">Reverse a confirmed collection to put the amount back on the balance.</p>
-          </div>
-          {confirmedCollections.length ? <>
-            <div className="corvex-table-wrapper">
-              <table className="corvex-table">
-                <thead>
-                  <tr>
-                    <th>Receipt</th>
-                    <th>Customer</th>
-                    <th>Collector</th>
-                    <th>Amount</th>
-                    <th>Date</th>
-                    <th>Actions</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {paginated_confirmedCollections.map((payment) => <tr key={payment.collectionpayment_id}>
-                      <td><strong>{payment.receipt_number}</strong></td>
-                      <td>{payment.customer_name}</td>
-                      <td>{payment.collector_name}</td>
-                      <td style={{ fontWeight: 600 }}>{formatCurrency(Number(payment.amount))}</td>
-                      <td>{formatDisplayDate(payment.payment_date)}</td>
-                      <td className="table-actions">
-                        <button className="button ghost" type="button" onClick={() => reverseCollection(payment.collectionpayment_id)}>Reverse</button>
-                      </td>
-                    </tr>)}
-                </tbody>
-              </table>
-            </div>
-            <Pagination {...pagination_confirmedCollections} />
-          </> : <EmptyState title="No confirmed collections" description="Confirmed collections can be reversed from here." />}
-        </section>}
-    </div>;
-}
-function AuditLogPage({
-  navigate
+  opsBase,
+  branchName,
 }) {
   const [logs, setLogs] = useState([]);
   const [loading, setLoading] = useState(true);
-  useEffect(() => {
-    async function load() {
-      setLoading(true);
-      const result = await getBranchAuditLogs({ limit: 200 });
-      if (result.success) setLogs(result.data || []);
-      setLoading(false);
+  const [error, setError] = useState('');
+  const [moduleGroup, setModuleGroup] = useState('all');
+  const [search, setSearch] = useState('');
+  const [actor, setActor] = useState('');
+  const [dateFrom, setDateFrom] = useState('');
+  const [dateTo, setDateTo] = useState('');
+  const [viewingLog, setViewingLog] = useState(null);
+
+  const load = async () => {
+    setLoading(true);
+    setError('');
+    const result = await getBranchAuditLogs({
+      limit: 300,
+      module: moduleGroup,
+      search: search.trim() || undefined,
+      actor: actor.trim() || undefined,
+      date_from: dateFrom || undefined,
+      date_to: dateTo || undefined,
+    });
+    if (result.success) setLogs(result.data || []);
+    else {
+      setLogs([]);
+      setError(result.message || 'Failed to load branch activity.');
     }
+    setLoading(false);
+  };
+
+  useEffect(() => {
     load();
-  }, []);
-  const pagination_AUDIT_LOGS = usePagination(logs);
-  const paginated_AUDIT_LOGS = pagination_AUDIT_LOGS.paginatedData;
+  }, [moduleGroup, dateFrom, dateTo]);
+
+  const filtered = useMemo(() => {
+    // Server already filters; keep lightweight client search for typing without reload.
+    const q = search.trim().toLowerCase();
+    const a = actor.trim().toLowerCase();
+    return logs.filter((l) => {
+      if (a && !String(l.user_name || '').toLowerCase().includes(a)) return false;
+      if (!q) return true;
+      return (
+        String(l.user_name || '').toLowerCase().includes(q)
+        || String(l.module || '').toLowerCase().includes(q)
+        || String(branchActivityLabel(l)).toLowerCase().includes(q)
+        || String(l.description || l.status_details || '').toLowerCase().includes(q)
+        || String(l.affected_record || '').toLowerCase().includes(q)
+      );
+    });
+  }, [logs, search, actor]);
+
+  const pagination = usePagination(filtered);
+  const rows = pagination.paginatedData;
+
+  const resetFilters = () => {
+    setModuleGroup('all');
+    setSearch('');
+    setActor('');
+    setDateFrom('');
+    setDateTo('');
+  };
+
+  const exportActivity = (format) => {
+    const exportRowsData = filtered.map((l) => ({
+      timestamp: formatDisplayDateTime(l.created_at),
+      user: l.user_name || 'System',
+      module: l.module || '—',
+      activity: branchActivityLabel(l),
+      reference: l.affected_record || '—',
+      details: l.description || l.status_details || '—',
+      branch: l.branch_name || branchName || '—',
+    }));
+    const ok = exportRows(exportRowsData, {
+      format,
+      filename: 'branch-activity',
+      title: `Branch Activity — ${branchName || 'Branch'}`,
+    });
+    if (ok) showToast?.(format === 'pdf' ? 'Branch activity exported as PDF.' : 'Excel downloaded.', 'success');
+    else showToast?.('Nothing to export.', 'error');
+  };
+
+  if (loading && !logs.length && !error) return <LoadingState message="Loading branch activity…" />;
+
   return <div className="page">
-      <section className="panel content-panel relative overflow-hidden">
-        <div className="flex flex-col md:flex-row justify-between gap-4 items-start md:items-center mb-4"><h3>Audit Log</h3></div>
-        {loading ? <LoadingState message="Loading audit log…" /> : <><div className="corvex-table-wrapper"><table className="corvex-table"><thead><tr><th>User</th><th>Action</th><th>Details</th><th>IP</th><th>Timestamp</th></tr></thead><tbody>{paginated_AUDIT_LOGS.length ? paginated_AUDIT_LOGS.map(l => <tr key={l.audit_id ?? l.id}><td>{l.user_name || '—'}</td><td>{l.action}</td><td>{l.status_details || l.detail || '—'}</td><td>{l.ip_address || '—'}</td><td>{formatDisplayDateTime(l.created_at || l.timestamp)}</td></tr>) : <tr><td colSpan={5}><EmptyState title="No audit entries" /></td></tr>}</tbody></table></div><Pagination {...pagination_AUDIT_LOGS} /></>}
+      <section className="panel content-panel" style={{ marginBottom: 12 }}>
+        <div className="flex flex-col md:flex-row justify-between gap-3 items-start md:items-center">
+          <div>
+            <h3 style={{ margin: 0 }}>Branch Activity</h3>
+            <p className="muted" style={{ margin: '4px 0 0' }}>
+              Review important financial and operational activities recorded within your branch.
+            </p>
+            <p className="muted" style={{ margin: '4px 0 0', fontSize: '0.85rem' }}>
+              {branchName === 'All Branches' ? 'Organization-wide operational activity' : (branchName || 'Branch')}
+              {` · ${filtered.length} shown`}
+            </p>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <button className="button ghost" type="button" onClick={load}>Retry / Refresh</button>
+            <button className="button secondary" type="button" onClick={() => exportActivity('pdf')}>Export PDF</button>
+            <button className="button secondary" type="button" onClick={() => exportActivity('excel')}>Export Excel</button>
+          </div>
+        </div>
       </section>
+
+      <section className="panel content-panel relative overflow-hidden">
+        <div className="list-section-toolbar" style={{ marginBottom: 12, gap: 12, flexWrap: 'wrap' }}>
+          <div className="segmented-control">
+            {[
+              { key: 'all', label: 'All' },
+              { key: 'credit', label: 'Credit' },
+              { key: 'approvals', label: 'Approvals' },
+              { key: 'collections', label: 'Collections' },
+              { key: 'invoices', label: 'Invoices' },
+              { key: 'inventory', label: 'Inventory' },
+            ].map((m) => (
+              <button
+                key={m.key}
+                className={moduleGroup === m.key ? 'segment active' : 'segment'}
+                type="button"
+                onClick={() => setModuleGroup(m.key)}
+              >
+                {m.label}
+              </button>
+            ))}
+          </div>
+          <input
+            className="input"
+            style={{ minWidth: 160, flex: '1 1 160px' }}
+            placeholder="Search activity, user, reference…"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            onKeyDown={(e) => { if (e.key === 'Enter') load(); }}
+          />
+          <input
+            className="input"
+            style={{ minWidth: 140 }}
+            placeholder="Actor"
+            value={actor}
+            onChange={(e) => setActor(e.target.value)}
+            onKeyDown={(e) => { if (e.key === 'Enter') load(); }}
+          />
+          <input className="input" type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} title="From date" />
+          <input className="input" type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} title="To date" />
+          <button className="button ghost" type="button" onClick={resetFilters}>Reset</button>
+        </div>
+
+        {error && !filtered.length ? (
+          <EmptyState title="Branch activity unavailable" description={error} />
+        ) : filtered.length ? <>
+          <div className="corvex-table-wrapper">
+            <table className="corvex-table">
+              <thead>
+                <tr>
+                  <th>Date & Time</th>
+                  <th>User</th>
+                  <th>Module</th>
+                  <th>Activity</th>
+                  <th>Reference</th>
+                  <th>Details</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map((l) => {
+                  const deep = referenceDeepLink(l, opsBase);
+                  return (
+                    <tr key={l.audit_id ?? l.log_id}>
+                      <td>{formatDisplayDateTime(l.created_at)}</td>
+                      <td>
+                        <strong>{l.user_name || 'System'}</strong>
+                        {l.role_name ? <div className="muted" style={{ fontSize: '0.78rem' }}>{l.role_name}</div> : null}
+                      </td>
+                      <td>{l.module || '—'}</td>
+                      <td>{branchActivityLabel(l)}</td>
+                      <td style={{ fontFamily: 'monospace', fontSize: '0.82rem' }}>{l.affected_record || '—'}</td>
+                      <td style={{ maxWidth: 280 }}>
+                        <span className="muted" style={{ fontSize: '0.85rem' }}>
+                          {String(l.description || l.status_details || '—').slice(0, 140)}
+                        </span>
+                      </td>
+                      <td className="table-actions">
+                        <button
+                          className="icon-action-button"
+                          type="button"
+                          title="View details"
+                          onClick={() => setViewingLog(l)}
+                        >
+                          <NavIcon name="view" />
+                        </button>
+                        {deep ? (
+                          <button
+                            className="button ghost"
+                            type="button"
+                            title="Open related record"
+                            style={{ fontSize: '0.78rem', padding: '4px 8px' }}
+                            onClick={() => navigate(deep)}
+                          >
+                            Open
+                          </button>
+                        ) : null}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+          <Pagination {...pagination} />
+        </> : (
+          <EmptyState
+            title="No branch activity"
+            description={moduleGroup !== 'all' || search || actor || dateFrom || dateTo
+              ? 'No records match the selected filters.'
+              : 'Important credit, approval, collection, and inventory actions will appear here.'}
+          />
+        )}
+      </section>
+
+      {viewingLog ? (
+        <div
+          className="modal-overlay"
+          role="dialog"
+          aria-modal="true"
+          aria-label="Branch activity details"
+          onClick={() => setViewingLog(null)}
+        >
+          <div className="modal-content" style={{ maxWidth: 560 }} onClick={(e) => e.stopPropagation()}>
+            <div className="flex justify-between gap-3 items-start">
+              <div>
+                <h3 style={{ margin: 0 }}>{branchActivityLabel(viewingLog)}</h3>
+                <p className="muted" style={{ margin: '4px 0 0' }}>{viewingLog.module || 'Branch Activity'}</p>
+              </div>
+              <button className="button ghost" type="button" onClick={() => setViewingLog(null)}>Close</button>
+            </div>
+            <div style={{ marginTop: 16 }}>
+              <DetailRowsTable rows={branchActivityDetailRows(viewingLog)} />
+            </div>
+            {referenceDeepLink(viewingLog, opsBase) ? (
+              <div className="flex justify-end" style={{ marginTop: 12 }}>
+                <button
+                  className="button secondary"
+                  type="button"
+                  onClick={() => {
+                    const to = referenceDeepLink(viewingLog, opsBase);
+                    setViewingLog(null);
+                    if (to) navigate(to);
+                  }}
+                >
+                  Open related record
+                </button>
+              </div>
+            ) : null}
+          </div>
+        </div>
+      ) : null}
     </div>;
 }
 
@@ -3411,257 +2121,6 @@ function SettingsPage({
       </div>
     </UserSettingsPanel>
   );
-}
-
-function AccountLocationDetailPage({
-  accountId,
-  navigate,
-  opsBase,
-  branchName
-}) {
-  const [customer, setCustomer] = useState(null);
-  const [loading, setLoading] = useState(true);
-  useEffect(() => {
-    async function load() {
-      setLoading(true);
-      const res = await getBranchCustomerById(accountId);
-      if (res.success) setCustomer(res.data);
-      setLoading(false);
-    }
-    load();
-  }, [accountId]);
-  if (loading) return <LoadingState message="Loading account location..." />;
-  if (!customer) {
-    return <EmptyState title="Account not found" actionLabel="Back to map" onAction={() => navigate(`${opsBase}/leaflet`)} />;
-  }
-  const name = `${customer.first_name} ${customer.last_name}`;
-  const lat = Number(customer.latitude);
-  const lng = Number(customer.longitude);
-  return <div className="page">
-      <Stats stats={[{
-      label: 'Customer',
-      value: name
-    }, {
-      label: 'Branch',
-      value: customer.branch_name || branchName
-    }, {
-      label: 'Outstanding',
-      value: formatCurrency(Number(customer.activity?.outstanding_balance || 0))
-    }]} />
-      {lat && lng ? <section className="panel content-panel relative overflow-hidden">
-          <LeafletMap center={[lat, lng]} zoom={15} height={360} markers={[{
-        id: customer.customer_id,
-        position: [lat, lng],
-        label: name.substring(0, 2).toUpperCase(),
-        color: '#0B1E30',
-        popup: name
-      }]} />
-        </section> : <EmptyState title="No coordinates" description="This customer has no map pin on file." />}
-      <div className="flex justify-end gap-2">
-        <button className="button ghost" type="button" onClick={() => navigate(`${opsBase}/leaflet`)}>Back to Map</button>
-        <button className="button" type="button" onClick={() => navigate(`${opsBase}/customers/${customer.customer_id}`)}>Open Customer</button>
-      </div>
-    </div>;
-}
-
-function reportPhotoSrc(photo) {
-  if (typeof photo !== 'string') return '';
-  if (photo.startsWith('data:image/') || photo.startsWith('http://') || photo.startsWith('https://')) return photo;
-  return '';
-}
-
-// ── Collector field activity reports ──────────────────────────────────────────
-function FieldActivityReportsPage({
-  showToast,
-  currentUser,
-}) {
-  const showBranch = currentUser?.role?.slug === 'operating_manager' || currentUser?.role?.slug === 'super_admin';
-  const [reports, setReports] = useState([]);
-  const [total, setTotal] = useState(0);
-  const [loading, setLoading] = useState(true);
-  const [search, setSearch] = useState('');
-  const [activityFilter, setActivityFilter] = useState('All');
-  const [syncFilter, setSyncFilter] = useState('All');
-  const [selected, setSelected] = useState(null);
-  const [detailLoading, setDetailLoading] = useState(false);
-
-  useEffect(() => {
-    async function load() {
-      setLoading(true);
-      const result = await getFieldActivityReports();
-      if (result.success) {
-        setReports(result.data || []);
-        setTotal(Number(result.total ?? result.data?.length ?? 0));
-      } else {
-        showToast?.(result.message || 'Failed to load field activity reports.', 'error');
-      }
-      setLoading(false);
-    }
-    load();
-  }, []);
-
-  const activityTypes = useMemo(() => {
-    const types = [...new Set(reports.map((r) => r.activity_type).filter(Boolean))].sort();
-    return ['All', ...types];
-  }, [reports]);
-
-  const filtered = useMemo(() => {
-    const q = search.trim().toLowerCase();
-    return reports.filter((r) => {
-      const matchActivity = activityFilter === 'All' || r.activity_type === activityFilter;
-      const matchSync = syncFilter === 'All' || r.sync_status === syncFilter;
-      const haystack = [r.collector_name, r.staff_role, r.customer_name, r.area_name, r.remarks, r.branch_name, r.activity_type, r.visit_type]
-        .filter(Boolean)
-        .join(' ')
-        .toLowerCase();
-      return matchActivity && matchSync && (!q || haystack.includes(q));
-    });
-  }, [reports, search, activityFilter, syncFilter]);
-
-  const pagination = usePagination(filtered);
-  const rows = pagination.paginatedData;
-  const collectorCount = new Set(reports.map((r) => String(r.collector_id))).size;
-
-  async function openReport(report) {
-    setSelected(report);
-    setDetailLoading(true);
-    const result = await getFieldActivityReport(report.report_id);
-    setDetailLoading(false);
-    if (result.success && result.data) setSelected(result.data);
-    else showToast?.(result.message || 'Could not open this report.', 'error');
-  }
-
-  if (loading) return <LoadingState message="Loading field activity reports..." />;
-
-  const photoSrc = reportPhotoSrc(selected?.photo);
-
-  return <div className="page">
-      <Stats stats={[{
-        label: 'Reports',
-        value: String(total || reports.length),
-      }, {
-        label: 'Pending Sync',
-        value: String(reports.filter((r) => r.sync_status === 'Pending').length),
-      }, {
-        label: 'With Photo',
-        value: String(reports.filter((r) => r.has_photo).length),
-      }, {
-        label: 'Staff',
-        value: String(collectorCount),
-      }]} />
-      <section className="panel content-panel relative overflow-hidden">
-        <div className="list-section-header">
-          <div>
-            <h3>Field Activity Reports</h3>
-            <p className="text-ink/70" style={{ margin: '4px 0 0', fontSize: '0.82rem' }}>
-              {`Field reports from collectors (customer visits) and sales agents (assigned areas)${showBranch ? ' across branches' : ''}.${total > reports.length ? ` Showing the ${reports.length} most recent of ${total}.` : ''}`}
-            </p>
-          </div>
-        </div>
-        <div className="list-section-toolbar">
-          <div className="list-section-controls">
-            <input
-              className="filter-input search"
-              type="search"
-              placeholder="Search staff, area, customer, or remarks"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-            />
-            <select className="filter-select" value={activityFilter} onChange={(e) => setActivityFilter(e.target.value)}>
-              {activityTypes.map((type) => <option key={type} value={type}>{type === 'All' ? 'All Activities' : type}</option>)}
-            </select>
-            <select className="filter-select" value={syncFilter} onChange={(e) => setSyncFilter(e.target.value)}>
-              {['All', 'Pending', 'Synced', 'Failed'].map((status) => <option key={status} value={status}>{status === 'All' ? 'All Sync Status' : status}</option>)}
-            </select>
-          </div>
-        </div>
-        {filtered.length ? <>
-          <div className="corvex-table-wrapper">
-            <table className="corvex-table">
-              <thead>
-                <tr>
-                  <th>Staff</th>
-                  {showBranch ? <th>Branch</th> : null}
-                  <th>Area / Customer</th>
-                  <th>Activity</th>
-                  <th>Date</th>
-                  <th>Sync</th>
-                  <th>Submitted</th>
-                  <th>Remarks</th>
-                  <th>Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {rows.map((r) => <tr key={r.report_id}>
-                    <td><strong>{r.collector_name}</strong>{r.staff_role ? <div className="muted">{r.staff_role}</div> : null}</td>
-                    {showBranch ? <td>{r.branch_name || '—'}</td> : null}
-                    <td>
-                      {r.area_name ? <strong>{r.area_name}</strong> : null}
-                      {r.area_name && r.customer_name ? <div className="muted">{r.customer_name}</div> : null}
-                      {!r.area_name ? (r.customer_name || '—') : null}
-                    </td>
-                    <td>{r.activity_type}</td>
-                    <td>{formatDisplayDate(r.scheduled_date)}</td>
-                    <td><StatusBadge status={r.sync_status} /></td>
-                    <td>{formatDisplayDateTime(r.created_at)}</td>
-                    <td style={{ maxWidth: 220, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={r.remarks}>{r.remarks || '—'}</td>
-                    <td className="table-actions">
-                      <button className="icon-action-button" type="button" title="View report" onClick={() => openReport(r)}><NavIcon name="view" /></button>
-                    </td>
-                  </tr>)}
-              </tbody>
-            </table>
-          </div>
-          <Pagination {...pagination} />
-        </> : <EmptyState title="No field activity reports" description="Collector visit reports and sales area reports will appear here after they are filed." />}
-      </section>
-      {selected ? <div className="modal-overlay" onClick={() => setSelected(null)}>
-          <div className="modal-content" style={{ maxWidth: 640 }} onClick={(e) => e.stopPropagation()}>
-            <div className="flex flex-col md:flex-row justify-between gap-4 items-start md:items-center mb-4">
-              <div>
-                <h3 style={{ margin: 0 }}>Field Activity Report</h3>
-                <p className="text-ink/70" style={{ margin: '4px 0 0', fontSize: '0.82rem' }}>
-                  {selected.collector_name}
-                  {selected.area_name ? ` · ${selected.area_name}` : ''}
-                  {selected.customer_name ? ` · ${selected.customer_name}` : ''}
-                </p>
-              </div>
-              <StatusBadge status={selected.sync_status} />
-            </div>
-            {detailLoading ? <LoadingState message="Loading report..." /> : <div className="grid gap-3">
-                <div className="grid two-up">
-                  <p style={{ margin: 0 }}><span className="text-ink/70">Activity</span><br /><strong>{selected.activity_type || '—'}</strong></p>
-                  <p style={{ margin: 0 }}>
-                    <span className="text-ink/70">{selected.area_name ? 'Assigned Area' : 'Visit'}</span><br />
-                    <strong>
-                      {selected.area_name
-                        ? `${selected.area_name} · ${formatDisplayDate(selected.scheduled_date)}`
-                        : `${selected.visit_type || '—'} · ${formatDisplayDate(selected.scheduled_date)} · `}
-                      {!selected.area_name ? <StatusBadge status={selected.visit_status || '—'} /> : null}
-                    </strong>
-                  </p>
-                  {showBranch ? <p style={{ margin: 0 }}><span className="text-ink/70">Branch</span><br /><strong>{selected.branch_name || '—'}</strong></p> : null}
-                  <p style={{ margin: 0 }}><span className="text-ink/70">Submitted</span><br /><strong>{formatDisplayDateTime(selected.created_at)}</strong></p>
-                </div>
-                <div>
-                  <p className="text-ink/70" style={{ margin: '0 0 4px' }}>Remarks</p>
-                  <p style={{ margin: 0, whiteSpace: 'pre-wrap' }}>{selected.remarks || '—'}</p>
-                </div>
-                <div>
-                  <p className="text-ink/70" style={{ margin: '0 0 8px' }}>Photo evidence</p>
-                  {photoSrc ? (
-                    <a href={photoSrc} target="_blank" rel="noreferrer">
-                      <img src={photoSrc} alt="Report evidence" style={{ maxWidth: '100%', maxHeight: 320, borderRadius: 8, border: '1px solid #BADBE9' }} />
-                    </a>
-                  ) : <p style={{ margin: 0 }}>{selected.has_photo ? 'Photo could not be displayed.' : 'No photo attached.'}</p>}
-                </div>
-              </div>}
-            <div className="modal-actions">
-              <button className="button" type="button" onClick={() => setSelected(null)}>Close</button>
-            </div>
-          </div>
-        </div> : null}
-    </div>;
 }
 
 // ── Main export ───────────────────────────────────────────────────────────────
@@ -3685,8 +2144,8 @@ export function BranchManagerPageBody({
     collectorId: page.params?.collectorId,
     agentId: page.params?.agentId,
     ciId: page.params?.ciId,
-    accountId: page.params?.accountId,
-    customerId: page.params?.customerId,
+    customerId: page.params?.customerId || page.params?.accountId,
+    reportId: page.params?.reportId,
     pageType: page.pageType,
     navigate,
     showToast,
@@ -3700,40 +2159,51 @@ export function BranchManagerPageBody({
     case 'dashboard':
       return <DashboardPage {...p} />;
     case 'customers':
-      return <CustomersPage {...p} />;
+      return <BranchCustomersPage {...p} />;
     case 'customerDetail':
-      return <CustomerDetailPage {...p} />;
+      return <BranchCustomerDetailPage {...p} />;
     case 'territories':
       return <TerritoriesPage {...p} />;
     case 'fieldActivityReports':
       return <FieldActivityReportsPage {...p} />;
+    case 'fieldActivityReportDetail':
+      return <FieldActivityReportDetailPage {...p} />;
     case 'branchInventory':
-      return <BranchInventoryViewPage showToast={showToast} branchName={branchName} />;
+      return (
+        <BranchInventoryViewPage
+          showToast={showToast}
+          branchName={branchName}
+          navigate={navigate}
+          opsBase={opsBase}
+          mode="readonly"
+        />
+      );
     case 'fieldOperations':
-    case 'collectorRoutes':
-    case 'salesSchedules':
     case 'routePerformance':
       return <FieldOperationsHub {...p} />;
+    case 'collectorRoutes':
+      return <CollectorsDispatchRoster {...p} />;
     case 'collectorDetail':
-      return <CollectorDetailPage {...p} />;
+      return <CollectorDispatchDetailPage {...p} />;
+    case 'salesSchedules':
+      return <SalesAgentsDispatchRoster {...p} />;
     case 'salesAgentDetail':
-      return <SalesAgentDetailPage {...p} />;
+      return <SalesAgentDispatchDetailPage {...p} />;
     case 'ciQueue':
-      return <CIQueuePage {...p} />;
+      return <CreditInvestigationQueuePage {...p} />;
     case 'ciDetail':
-      return <CIDetailPage {...p} />;
+      return <CreditInvestigationDetailPage {...p} />;
     case 'leafletMap':
     case 'leafletTerritory':
     case 'leafletDelinquency':
     case 'leafletProfitability':
       return <BranchLeafletPage pageType={page.pageType} {...p} />;
-    case 'accountLocationDetail':
-      return <AccountLocationDetailPage {...p} />;
     case 'reports':
     case 'reportCollection':
     case 'reportSales':
     case 'reportInventory':
     case 'reportDelinquency':
+    case 'reportInvoices':
       return <ReportsHubPage {...p} />;
     case 'sawResults':
       return <SawResultsPage navigate={navigate} showToast={showToast} scope="branch" branchName={branchName} />;
@@ -3745,9 +2215,26 @@ export function BranchManagerPageBody({
     case 'alerts':
       return <AlertsPage {...p} />;
     case 'creditHistory':
-      return <CreditHistoryListPage navigate={navigate} showToast={showToast} basePath={`${opsBase}/credit-history`} userBranch={currentUser?.branch?.name} />;
+      return (
+        <CreditHistoryListPage
+          navigate={navigate}
+          showToast={showToast}
+          basePath={`${opsBase}/credit-history`}
+          customerBasePath={`${opsBase}/customers`}
+          variant="operations"
+        />
+      );
     case 'creditDetail':
-      return <CreditHistoryDetailPage creditId={page.params?.creditId} navigate={navigate} basePath={`${opsBase}/credit-history`} />;
+      return (
+        <CreditHistoryDetailPage
+          creditId={page.params?.creditId}
+          navigate={navigate}
+          showToast={showToast}
+          basePath={`${opsBase}/credit-history`}
+          customerBasePath={`${opsBase}/customers`}
+          variant="operations"
+        />
+      );
     case 'notifications':
       return <NotificationsPage {...p} />;
     case 'approvalCenter':

@@ -250,6 +250,29 @@ export async function fetchSalesCreditInvestigationById(id) {
   }
 }
 
+export async function fetchSalesCreditRecommendations(params = {}) {
+  try {
+    const response = await apiClient.get('/sales/credit-recommendations', { params });
+    return response.data;
+  } catch (error) {
+    console.error('Failed to fetch sales credit recommendations:', error);
+    return { success: false, data: [] };
+  }
+}
+
+export async function convertSalesCreditRecommendation(id, body = {}) {
+  try {
+    const response = await apiClient.post(`/sales/credit-recommendations/${id}/convert`, body);
+    return response.data;
+  } catch (error) {
+    return {
+      success: false,
+      message: error.response?.data?.message || 'Failed to convert recommendation.',
+      data: error.response?.data?.data,
+    };
+  }
+}
+
 export async function fetchSalesFieldReports() {
   try {
     const response = await apiClient.get('/sales/field-reports');

@@ -32,7 +32,7 @@ import { SalesHistoryPage } from '../sales/SalesPageBody';
 import { InvoiceDetailsPage } from '../sales/InvoiceDetailsPage';
 import { fetchDigitalReceipts } from '../../api/digitalReceiptsService';
 import { patchCollectionReview } from '../../api/approvalsService.js';
-const COLORS = ['#1A4162', '#0B1E30', '#ef4444', '#f59e0b'];
+const COLORS = ['#153450', '#0B2133', '#ef4444', '#f59e0b'];
 function actionButtonClass(v) {
   if (v === 'secondary') return 'button secondary';
   if (v === 'ghost') return 'button ghost';
@@ -201,7 +201,7 @@ function DashboardPage({
   // ── Derived values ────────────────────────────────────────────────────────
   const topBranch = data.branchSummary.length ? [...data.branchSummary].sort((a, b) => b.totalCollections - a.totalCollections)[0] : null;
   const bottomBranch = data.branchSummary.length ? [...data.branchSummary].sort((a, b) => a.totalCollections - b.totalCollections)[0] : null;
-  const BRANCH_PALETTE = ['#1A4162', '#0B1E30', '#ef4444', '#f59e0b'];
+  const BRANCH_PALETTE = ['#153450', '#0B2133', '#ef4444', '#f59e0b'];
   return <div className="page">
       <AnalyticsFilterBar
         filters={filters}
@@ -217,17 +217,6 @@ function DashboardPage({
           <h2>{currentUser?.fullName || 'Operating Manager'}</h2>
           <p className="muted">{formatDisplayDate(new Date())}</p>
         </div>
-        <Link to="/operating-manager/notifications" className="notification-bell relative" aria-label={`${unreadCount} unread notifications`} style={{
-        flexShrink: 0,
-        alignSelf: 'flex-start'
-      }}>
-          <NavIcon name="bell" />
-          {unreadCount > 0 ? (
-            <span className="absolute top-0 right-0 min-w-[18px] h-[18px] px-1 flex justify-center items-center rounded-full bg-red text-white text-[0.7rem] font-bold border-2 border-mint">
-              {unreadCount}
-            </span>
-          ) : null}
-        </Link>
       </section>
 
       {/* ── Operational updates (FR-38) ── */}
@@ -356,7 +345,7 @@ function DashboardPage({
           padding: 16,
           background: '#eef0f4',
           borderRadius: 10,
-          border: '1px solid #BADBE9'
+          border: '1px solid #E2E8F0'
         }}>
             <span style={{
             fontSize: '0.78rem',
@@ -371,7 +360,7 @@ function DashboardPage({
             fontSize: '1.6rem',
             fontWeight: 800,
             margin: '6px 0 4px',
-            color: '#0B1E30'
+            color: '#0B2133'
           }}>
               {data.salesGrowthRate !== null ? `${data.salesGrowthRate >= 0 ? '+' : ''}${data.salesGrowthRate}%` : '—'}
             </div>
@@ -388,7 +377,7 @@ function DashboardPage({
           padding: 16,
           background: '#eef0f4',
           borderRadius: 10,
-          border: '1px solid #BADBE9'
+          border: '1px solid #E2E8F0'
         }}>
             <span style={{
             fontSize: '0.78rem',
@@ -403,7 +392,7 @@ function DashboardPage({
             fontSize: '1.6rem',
             fontWeight: 800,
             margin: '6px 0 4px',
-            color: '#0B1E30'
+            color: '#0B2133'
           }}>
               {data.collectionGrowthRate !== null ? `${data.collectionGrowthRate >= 0 ? '+' : ''}${data.collectionGrowthRate}%` : '—'}
             </div>
@@ -420,7 +409,7 @@ function DashboardPage({
           padding: 16,
           background: '#eef0f4',
           borderRadius: 10,
-          border: '1px solid #BADBE9'
+          border: '1px solid #E2E8F0'
         }}>
             <span style={{
             fontSize: '0.78rem',
@@ -435,7 +424,7 @@ function DashboardPage({
             fontSize: '1.6rem',
             fontWeight: 800,
             margin: '6px 0 4px',
-            color: '#0B1E30'
+            color: '#0B2133'
           }}>
               {data.totalCustomers}
             </div>
@@ -456,7 +445,7 @@ function DashboardPage({
           padding: 16,
           background: '#eef0f4',
           borderRadius: 10,
-          border: '1px solid #BADBE9'
+          border: '1px solid #E2E8F0'
         }}>
             <span style={{
             fontSize: '0.78rem',
@@ -471,7 +460,7 @@ function DashboardPage({
             fontSize: '1.6rem',
             fontWeight: 800,
             margin: '6px 0 4px',
-            color: '#0B1E30'
+            color: '#0B2133'
           }}>
               {data.inventoryHealth}%
             </div>
@@ -495,7 +484,7 @@ function DashboardPage({
         <ChartCard title={`Collection Trend (${data.filters?.label || 'Selected period'})`} subtitle="TC = SUM(Ci) — Source: collection_payment">
           <ResponsiveContainer width="100%" height={220}>
             <AreaChart data={data.collectionTrend}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#BADBE9" />
+              <CartesianGrid strokeDasharray="3 3" stroke="#E2E8F0" />
               <XAxis dataKey="label" tick={{
               fontSize: 12
             }} />
@@ -504,8 +493,8 @@ function DashboardPage({
             }} tickFormatter={v => `${(v / 1000).toFixed(0)}k`} />
               <Tooltip formatter={v => formatCurrency(v)} />
               <Legend />
-              <Area type="monotone" dataKey="target" name="Target" stroke="#BADBE9" fill="#BADBE9" strokeWidth={2} strokeDasharray="5 5" />
-              <Area type="monotone" dataKey="amount" name="Collected" stroke="#1A4162" fill="#1A4162" fillOpacity={0.12} strokeWidth={2} />
+              <Area type="monotone" dataKey="target" name="Target" stroke="#E2E8F0" fill="#E2E8F0" strokeWidth={2} strokeDasharray="5 5" />
+              <Area type="monotone" dataKey="amount" name="Collected" stroke="#153450" fill="#153450" fillOpacity={0.12} strokeWidth={2} />
             </AreaChart>
           </ResponsiveContainer>
         </ChartCard>
@@ -513,7 +502,7 @@ function DashboardPage({
         <ChartCard title={`Sales Trend (${data.filters?.label || 'Selected period'})`} subtitle="TS = SUM(Si) — Source: sales_invoices">
           <ResponsiveContainer width="100%" height={220}>
             <AreaChart data={data.salesTrend}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#BADBE9" />
+              <CartesianGrid strokeDasharray="3 3" stroke="#E2E8F0" />
               <XAxis dataKey="label" tick={{
               fontSize: 12
             }} />
@@ -522,8 +511,8 @@ function DashboardPage({
             }} tickFormatter={v => `${(v / 1000).toFixed(0)}k`} />
               <Tooltip formatter={v => formatCurrency(v)} />
               <Legend />
-              <Area type="monotone" dataKey="target" name="Target" stroke="#BADBE9" fill="#BADBE9" strokeWidth={2} strokeDasharray="5 5" />
-              <Area type="monotone" dataKey="amount" name="Sales" stroke="#0B1E30" fill="#0B1E30" fillOpacity={0.12} strokeWidth={2} />
+              <Area type="monotone" dataKey="target" name="Target" stroke="#E2E8F0" fill="#E2E8F0" strokeWidth={2} strokeDasharray="5 5" />
+              <Area type="monotone" dataKey="amount" name="Sales" stroke="#0B2133" fill="#0B2133" fillOpacity={0.12} strokeWidth={2} />
             </AreaChart>
           </ResponsiveContainer>
         </ChartCard>
@@ -538,7 +527,7 @@ function DashboardPage({
           Sales: b.totalSales,
           Outstanding: b.totalOutstanding
         }))}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#BADBE9" />
+              <CartesianGrid strokeDasharray="3 3" stroke="#E2E8F0" />
               <XAxis dataKey="name" tick={{
             fontSize: 12
           }} />
@@ -547,8 +536,8 @@ function DashboardPage({
           }} tickFormatter={v => `${(v / 1000).toFixed(0)}k`} />
               <Tooltip formatter={v => formatCurrency(v)} />
               <Legend />
-              <Bar dataKey="Collections" fill="#1A4162" radius={[4, 4, 0, 0]} />
-              <Bar dataKey="Sales" fill="#0B1E30" radius={[4, 4, 0, 0]} />
+              <Bar dataKey="Collections" fill="#153450" radius={[4, 4, 0, 0]} />
+              <Bar dataKey="Sales" fill="#0B2133" radius={[4, 4, 0, 0]} />
               <Bar dataKey="Outstanding" fill="#ef4444" radius={[4, 4, 0, 0]} />
             </BarChart>
           </ResponsiveContainer>
@@ -705,7 +694,7 @@ function DashboardPage({
           padding: 14,
           background: '#eef0f4',
           borderRadius: 10,
-          border: '1px solid #BADBE9'
+          border: '1px solid #E2E8F0'
         }}>
               <span style={{
             fontSize: '0.75rem',
@@ -774,7 +763,7 @@ function PerformanceHistoryPanel() {
     });
   });
   const chartData = Object.values(periodMap);
-  const PALETTE = ['#1A4162', '#0B1E30', '#5F7385', '#ef4444', '#f59e0b', '#1A4162'];
+  const PALETTE = ['#153450', '#0B2133', '#5F7385', '#ef4444', '#f59e0b', '#153450'];
   const lineKeys = [];
   perfData.byBranch.forEach((branch, i) => {
     lineKeys.push({
@@ -800,7 +789,7 @@ function PerformanceHistoryPanel() {
       </div>
       <ResponsiveContainer width="100%" height={260}>
         <LineChart data={chartData}>
-          <CartesianGrid strokeDasharray="3 3" stroke="#BADBE9" />
+          <CartesianGrid strokeDasharray="3 3" stroke="#E2E8F0" />
           <XAxis dataKey="period" tick={{
           fontSize: 11
         }} />
@@ -883,7 +872,7 @@ function BranchPerformanceHub({
           {branchBarData.length > 0 && <ChartCard title="Branch Staff & Customer Overview" subtitle="Source: branches, users, customers, branch_inventory tables">
               <ResponsiveContainer width="100%" height={220}>
                 <BarChart data={branchBarData} barGap={4}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#BADBE9" />
+                  <CartesianGrid strokeDasharray="3 3" stroke="#E2E8F0" />
                   <XAxis dataKey="name" tick={{
               fontSize: 12
             }} />
@@ -892,8 +881,8 @@ function BranchPerformanceHub({
             }} />
                   <Tooltip />
                   <Legend />
-                  <Bar dataKey="Staff" fill="#1A4162" radius={[4, 4, 0, 0]} />
-                  <Bar dataKey="Customers" fill="#0B1E30" radius={[4, 4, 0, 0]} />
+                  <Bar dataKey="Staff" fill="#153450" radius={[4, 4, 0, 0]} />
+                  <Bar dataKey="Customers" fill="#0B2133" radius={[4, 4, 0, 0]} />
                   <Bar dataKey="LowStock" name="Low Stock Items" fill="#ef4444" radius={[4, 4, 0, 0]} />
                 </BarChart>
               </ResponsiveContainer>
@@ -1082,9 +1071,9 @@ function BranchDetailPage({
         <ChartCard title="KPI Profile" subtitle="Live metrics for the selected period">
           <ResponsiveContainer width="100%" height={240}>
             <RadarChart data={kpiData}>
-              <PolarGrid stroke="#BADBE9" />
+              <PolarGrid stroke="#E2E8F0" />
               <PolarAngleAxis dataKey="metric" tick={{ fontSize: 12 }} />
-              <Radar name={branchName} dataKey="value" stroke="#1A4162" fill="#1A4162" fillOpacity={0.18} />
+              <Radar name={branchName} dataKey="value" stroke="#153450" fill="#153450" fillOpacity={0.18} />
               <Tooltip formatter={(v) => `${v}%`} />
             </RadarChart>
           </ResponsiveContainer>
@@ -1097,7 +1086,7 @@ function BranchDetailPage({
               { name: 'Sales', amount: sales },
               { name: 'Outstanding', amount: outstanding },
             ]}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#BADBE9" />
+              <CartesianGrid strokeDasharray="3 3" stroke="#E2E8F0" />
               <XAxis dataKey="name" tick={{ fontSize: 12 }} />
               <YAxis tick={{ fontSize: 11 }} tickFormatter={(v) => `${(v / 1000).toFixed(0)}k`} />
               <Tooltip formatter={(v) => formatCurrency(v)} />
@@ -1447,7 +1436,6 @@ function ProfilePage({
   return <AccountProfilePanel
     showToast={showToast}
     title="Operating manager profile"
-    subtitle="Your name, contact details, and sign-in for this CORVEX account."
     settingsRole="personal"
   />;
 }
@@ -1861,7 +1849,7 @@ function LiveOperationsDashboardPage({
             <NavIcon name="layout-dashboard" style={{
             width: 20,
             height: 20,
-            color: '#0B1E30'
+            color: '#0B2133'
           }} />
             <div>
               <h3>Key Performance Indicators</h3>
@@ -1908,7 +1896,7 @@ function LiveOperationsDashboardPage({
             <NavIcon name="bar-chart-2" style={{
             width: 20,
             height: 20,
-            color: '#0B1E30'
+            color: '#0B2133'
           }} />
             <div>
               <h3>Period-over-Period Analysis</h3>
@@ -2005,7 +1993,7 @@ function LiveOperationsDashboardPage({
                   <NavIcon name={card.trendIcon} style={{
                 width: 16,
                 height: 16,
-                color: card.cardClass === 'good' ? '#1A4162' : card.cardClass === 'bad' ? '#ef4444' : '#5F7385'
+                color: card.cardClass === 'good' ? '#153450' : card.cardClass === 'bad' ? '#ef4444' : '#5F7385'
               }} />
                 </div>
                 <div className="pop-card-value">{card.value}</div>
@@ -2042,7 +2030,7 @@ function LiveOperationsDashboardPage({
               <NavIcon name="line-chart" style={{
               width: 18,
               height: 18,
-              color: '#0B1E30'
+              color: '#0B2133'
             }} />
               <div>
                 <h3>Collections Trend</h3>
@@ -2086,12 +2074,12 @@ function LiveOperationsDashboardPage({
                 );
               }}
             >
-              <CartesianGrid strokeDasharray="2 4" stroke="#BADBE9" vertical={false} />
+              <CartesianGrid strokeDasharray="2 4" stroke="#E2E8F0" vertical={false} />
               <XAxis dataKey="label" tick={{
               fill: '#5F7385',
               fontSize: 11
             }} axisLine={{
-              stroke: '#BADBE9'
+              stroke: '#E2E8F0'
             }} tickLine={false} minTickGap={28} />
               <YAxis tick={{
               fill: '#5F7385',
@@ -2099,17 +2087,17 @@ function LiveOperationsDashboardPage({
             }} tickFormatter={v => `${(v / 1000).toFixed(0)}k`} axisLine={false} tickLine={false} width={30} />
               <Tooltip contentStyle={{
               background: '#ffffff',
-              border: '1px solid #BADBE9',
+              border: '1px solid #E2E8F0',
               borderRadius: 4,
               fontSize: 12
             }} labelStyle={{
-              color: '#0B1E30'
+              color: '#0B2133'
             }} formatter={v => formatCurrency(v)} />
               <Legend wrapperStyle={{
               fontSize: 12,
               color: '#5F7385'
             }} />
-              <Line type="monotone" dataKey="amount" name="Current" stroke="#1A4162" strokeWidth={2} dot={{ r: 3 }} activeDot={{ r: 5 }} />
+              <Line type="monotone" dataKey="amount" name="Current" stroke="#153450" strokeWidth={2} dot={{ r: 3 }} activeDot={{ r: 5 }} />
               <Line type="monotone" dataKey="previous" name="Previous" stroke="#5F7385" strokeWidth={2} strokeDasharray="5 5" dot={false} />
             </LineChart>
           </ResponsiveContainer>
@@ -2137,7 +2125,7 @@ function LiveOperationsDashboardPage({
               <NavIcon name="line-chart" style={{
               width: 18,
               height: 18,
-              color: '#1A4162'
+              color: '#153450'
             }} />
               <div>
                 <h3>Sales Trend</h3>
@@ -2181,12 +2169,12 @@ function LiveOperationsDashboardPage({
                 );
               }}
             >
-              <CartesianGrid strokeDasharray="2 4" stroke="#BADBE9" vertical={false} />
+              <CartesianGrid strokeDasharray="2 4" stroke="#E2E8F0" vertical={false} />
               <XAxis dataKey="label" tick={{
               fill: '#5F7385',
               fontSize: 11
             }} axisLine={{
-              stroke: '#BADBE9'
+              stroke: '#E2E8F0'
             }} tickLine={false} minTickGap={28} />
               <YAxis tick={{
               fill: '#5F7385',
@@ -2194,17 +2182,17 @@ function LiveOperationsDashboardPage({
             }} tickFormatter={v => `${(v / 1000).toFixed(0)}k`} axisLine={false} tickLine={false} width={30} />
               <Tooltip contentStyle={{
               background: '#ffffff',
-              border: '1px solid #BADBE9',
+              border: '1px solid #E2E8F0',
               borderRadius: 4,
               fontSize: 12
             }} labelStyle={{
-              color: '#0B1E30'
+              color: '#0B2133'
             }} formatter={v => formatCurrency(v)} />
               <Legend wrapperStyle={{
               fontSize: 12,
               color: '#5F7385'
             }} />
-              <Line type="monotone" dataKey="amount" name="Current" stroke="#1A4162" strokeWidth={2} dot={{ r: 3 }} activeDot={{ r: 5 }} />
+              <Line type="monotone" dataKey="amount" name="Current" stroke="#153450" strokeWidth={2} dot={{ r: 3 }} activeDot={{ r: 5 }} />
               <Line type="monotone" dataKey="previous" name="Previous" stroke="#5F7385" strokeWidth={2} strokeDasharray="5 5" dot={false} />
             </LineChart>
           </ResponsiveContainer>
@@ -2233,7 +2221,7 @@ function LiveOperationsDashboardPage({
             <NavIcon name="bar-chart-3" style={{
             width: 18,
             height: 18,
-            color: '#0B1E30'
+            color: '#0B2133'
           }} />
             <div>
               <h3>Branch Comparison</h3>
@@ -2258,12 +2246,12 @@ function LiveOperationsDashboardPage({
           Sales: branch.totalSales,
           Balance: branch.totalOutstanding
         }))}>
-            <CartesianGrid strokeDasharray="2 4" stroke="#BADBE9" vertical={false} />
+            <CartesianGrid strokeDasharray="2 4" stroke="#E2E8F0" vertical={false} />
             <XAxis dataKey="name" tick={{
             fill: '#5F7385',
             fontSize: 11
           }} axisLine={{
-            stroke: '#BADBE9'
+            stroke: '#E2E8F0'
           }} tickLine={false} />
             <YAxis tick={{
             fill: '#5F7385',
@@ -2271,18 +2259,18 @@ function LiveOperationsDashboardPage({
           }} tickFormatter={v => `${(v / 1000).toFixed(0)}k`} axisLine={false} tickLine={false} width={28} />
             <Tooltip contentStyle={{
             background: '#ffffff',
-            border: '1px solid #BADBE9',
+            border: '1px solid #E2E8F0',
             borderRadius: 4,
             fontSize: 12
           }} labelStyle={{
-            color: '#0B1E30'
+            color: '#0B2133'
           }} formatter={v => formatCurrency(v)} />
             <Legend wrapperStyle={{
             fontSize: 12,
             color: '#5F7385'
           }} />
-            <Bar dataKey="Collections" fill="#1A4162" radius={[0, 0, 0, 0]} />
-            <Bar dataKey="Sales" fill="#0B1E30" radius={[0, 0, 0, 0]} />
+            <Bar dataKey="Collections" fill="#153450" radius={[0, 0, 0, 0]} />
+            <Bar dataKey="Sales" fill="#0B2133" radius={[0, 0, 0, 0]} />
             <Bar dataKey="Balance" fill="#ef4444" radius={[2, 2, 0, 0]} />
           </BarChart>
           </ResponsiveContainer>
@@ -2306,7 +2294,7 @@ function LiveOperationsDashboardPage({
               <NavIcon name="building-2" style={{
               width: 18,
               height: 18,
-              color: '#0B1E30'
+              color: '#0B2133'
             }} />
               <div>
                 <h3>Branch Summary</h3>
@@ -2417,7 +2405,7 @@ function LiveOperationsDashboardPage({
               <NavIcon name="users" style={{
               width: 18,
               height: 18,
-              color: '#0B1E30'
+              color: '#0B2133'
             }} />
               <div>
                 <h3>Top Customers</h3>
@@ -2466,7 +2454,7 @@ function LiveOperationsDashboardPage({
               <NavIcon name="package" style={{
               width: 18,
               height: 18,
-              color: '#1A4162'
+              color: '#153450'
             }} />
               <div>
                 <h3>Top Products</h3>
@@ -2578,7 +2566,7 @@ function LiveBranchComparisonPage({
                 if (name) openBranchMetric(name, 'Collections');
               }}
             >
-              <CartesianGrid strokeDasharray="3 3" stroke="#BADBE9" />
+              <CartesianGrid strokeDasharray="3 3" stroke="#E2E8F0" />
               <XAxis dataKey="name" tick={{
               fontSize: 12
             }} />
@@ -2586,7 +2574,7 @@ function LiveBranchComparisonPage({
               fontSize: 11
             }} tickFormatter={v => `${(v / 1000).toFixed(0)}k`} />
               <Tooltip formatter={v => formatCurrency(v)} />
-              <Bar dataKey="value" fill="#1A4162" radius={[4, 4, 0, 0]} />
+              <Bar dataKey="value" fill="#153450" radius={[4, 4, 0, 0]} />
             </BarChart>
           </ResponsiveContainer>
         </ChartCard>
@@ -2603,7 +2591,7 @@ function LiveBranchComparisonPage({
                 if (name) openBranchMetric(name, 'Sales');
               }}
             >
-              <CartesianGrid strokeDasharray="3 3" stroke="#BADBE9" />
+              <CartesianGrid strokeDasharray="3 3" stroke="#E2E8F0" />
               <XAxis dataKey="name" tick={{
               fontSize: 12
             }} />
@@ -2611,7 +2599,7 @@ function LiveBranchComparisonPage({
               fontSize: 11
             }} tickFormatter={v => `${(v / 1000).toFixed(0)}k`} />
               <Tooltip formatter={v => formatCurrency(v)} />
-              <Bar dataKey="value" fill="#1A4162" radius={[4, 4, 0, 0]} />
+              <Bar dataKey="value" fill="#153450" radius={[4, 4, 0, 0]} />
             </BarChart>
           </ResponsiveContainer>
         </ChartCard>
@@ -2906,7 +2894,7 @@ function LiveHistoricalTrendsPage() {
             ...point,
             previous: data.trends.collectionsPrevious[index]?.amount ?? 0
           }))}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#BADBE9" />
+              <CartesianGrid strokeDasharray="3 3" stroke="#E2E8F0" />
               <XAxis dataKey="label" tick={{
               fontSize: 12
             }} />
@@ -2915,7 +2903,7 @@ function LiveHistoricalTrendsPage() {
             }} tickFormatter={v => `${(v / 1000).toFixed(0)}k`} />
               <Tooltip formatter={v => formatCurrency(v)} />
               <Legend />
-              <Line type="monotone" dataKey="amount" name="Current" stroke="#1A4162" strokeWidth={2} dot={false} />
+              <Line type="monotone" dataKey="amount" name="Current" stroke="#153450" strokeWidth={2} dot={false} />
               <Line type="monotone" dataKey="previous" name="Previous" stroke="#5F7385" strokeWidth={2} strokeDasharray="5 5" dot={false} />
             </LineChart>
           </ResponsiveContainer>
@@ -2926,7 +2914,7 @@ function LiveHistoricalTrendsPage() {
             ...point,
             previous: data.trends.salesPrevious[index]?.amount ?? 0
           }))}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#BADBE9" />
+              <CartesianGrid strokeDasharray="3 3" stroke="#E2E8F0" />
               <XAxis dataKey="label" tick={{
               fontSize: 12
             }} />
@@ -2935,7 +2923,7 @@ function LiveHistoricalTrendsPage() {
             }} tickFormatter={v => `${(v / 1000).toFixed(0)}k`} />
               <Tooltip formatter={v => formatCurrency(v)} />
               <Legend />
-              <Line type="monotone" dataKey="amount" name="Current" stroke="#1A4162" strokeWidth={2} dot={false} />
+              <Line type="monotone" dataKey="amount" name="Current" stroke="#153450" strokeWidth={2} dot={false} />
               <Line type="monotone" dataKey="previous" name="Previous" stroke="#5F7385" strokeWidth={2} strokeDasharray="5 5" dot={false} />
             </LineChart>
           </ResponsiveContainer>
@@ -3242,7 +3230,7 @@ function PerformanceSummaryPage({
             }}>Sales Trend</h4>
                 <ResponsiveContainer width="100%" height={230}>
                   <AreaChart data={data}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="#BADBE9" />
+                    <CartesianGrid strokeDasharray="3 3" stroke="#E2E8F0" />
                     <XAxis dataKey="period" tick={{
                   fontSize: 11
                 }} />
@@ -3250,7 +3238,7 @@ function PerformanceSummaryPage({
                   fontSize: 11
                 }} tickFormatter={v => `${(v / 1000000).toFixed(1)}M`} />
                     <Tooltip formatter={v => formatCurrency(v)} />
-                    <Area type="monotone" dataKey="total_sales" name="Sales" stroke="#1A4162" fill="#1A4162" fillOpacity={0.08} strokeWidth={2} />
+                    <Area type="monotone" dataKey="total_sales" name="Sales" stroke="#153450" fill="#153450" fillOpacity={0.08} strokeWidth={2} />
                   </AreaChart>
                 </ResponsiveContainer>
               </div>
@@ -3260,7 +3248,7 @@ function PerformanceSummaryPage({
             }}>Collections Trend</h4>
                 <ResponsiveContainer width="100%" height={230}>
                   <AreaChart data={data}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="#BADBE9" />
+                    <CartesianGrid strokeDasharray="3 3" stroke="#E2E8F0" />
                     <XAxis dataKey="period" tick={{
                   fontSize: 11
                 }} />
@@ -3268,7 +3256,7 @@ function PerformanceSummaryPage({
                   fontSize: 11
                 }} tickFormatter={v => `${(v / 1000000).toFixed(1)}M`} />
                     <Tooltip formatter={v => formatCurrency(v)} />
-                    <Area type="monotone" dataKey="total_collections" name="Collections" stroke="#1A4162" fill="#1A4162" fillOpacity={0.08} strokeWidth={2} />
+                    <Area type="monotone" dataKey="total_collections" name="Collections" stroke="#153450" fill="#153450" fillOpacity={0.08} strokeWidth={2} />
                   </AreaChart>
                 </ResponsiveContainer>
               </div>

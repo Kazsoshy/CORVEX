@@ -9,15 +9,21 @@ import {
   readAvatarFile,
   saveAvatarFile,
 } from '../lib/avatars.js';
+import { recordAuthFailureEvent } from '../lib/security/detectors.js';
+import { inspectUpload } from '../lib/security/malwareScanner.js';
+import { AUDIT_STATUS, writeAuditLog, clientIp as auditClientIp } from '../lib/auditLog.js';
+import { resolvePermissionCodes } from '../lib/permissions.js';
 
 const router = express.Router();
 
+/** Unknown-email attempts still tracked in-memory by IP+email */
 const loginAttempts = new Map();
 const LOGIN_WINDOW_MS = 15 * 60 * 1000;
-const LOGIN_MAX_ATTEMPTS = 10;
+const LOGIN_MAX_ATTEMPTS = 5;
+const LOCKOUT_MINUTES = 15;
 
 function clientAddress(req) {
-  return req.ip || req.socket?.remoteAddress || 'unknown';
+  return auditClientIp(req);
 }
 
 function attemptKey(address, email) {
@@ -42,10 +48,82 @@ function recordAttempt(key) {
 function attemptNotice(attemptCount) {
   const remaining = LOGIN_MAX_ATTEMPTS - attemptCount;
   if (remaining <= 0) {
-    return 'Too many login attempts for this account. Try again in 15 minutes.';
+    return `Too many login attempts for this account. Try again in ${LOCKOUT_MINUTES} minutes.`;
   }
   const attemptsLabel = remaining === 1 ? '1 attempt' : `${remaining} attempts`;
-  return `${attemptsLabel} remaining before this account is locked for 15 minutes.`;
+  return `${attemptsLabel} remaining before this account is locked for ${LOCKOUT_MINUTES} minutes.`;
+}
+
+async function registerFailedLogin(pool, {
+  user = null,
+  email,
+  ip,
+  reason,
+  activity = 'Failed Login',
+  status = AUDIT_STATUS.FAILED_LOGIN,
+}) {
+  let attemptCount = user ? Number(user.failed_login_count || 0) + 1 : null;
+  let locked = false;
+
+  if (user) {
+    const result = await pool.query(
+      `UPDATE users
+       SET failed_login_count = failed_login_count + 1,
+           login_locked_until = CASE
+             WHEN failed_login_count + 1 >= $2 THEN NOW() + ($3 || ' minutes')::interval
+             ELSE login_locked_until
+           END,
+           updated_at = NOW()
+       WHERE id = $1
+       RETURNING failed_login_count, login_locked_until`,
+      [user.id, LOGIN_MAX_ATTEMPTS, String(LOCKOUT_MINUTES)]
+    );
+    attemptCount = result.rows[0]?.failed_login_count ?? attemptCount;
+    locked = result.rows[0]?.login_locked_until != null
+      && new Date(result.rows[0].login_locked_until).getTime() > Date.now();
+  }
+
+  await writeAuditLog(pool, {
+    userId: user?.id ?? null,
+    userName: user?.full_name || email || 'Unknown',
+    roleName: user?.role_name || null,
+    module: 'Authentication',
+    activity,
+    action: activity,
+    description: `${reason}. Attempt ${attemptCount ?? 'n/a'} of ${LOGIN_MAX_ATTEMPTS}.`,
+    status,
+    ipAddress: ip,
+    affectedRecord: email || null,
+  });
+
+  if (locked && user) {
+    await writeAuditLog(pool, {
+      userId: user.id,
+      userName: user.full_name,
+      roleName: user.role_name,
+      module: 'Authentication',
+      activity: 'Account Locked',
+      action: 'Account Locked',
+      description: `Account locked after ${LOGIN_MAX_ATTEMPTS} consecutive failed login attempts. Unlocks after ${LOCKOUT_MINUTES} minutes or admin unlock.`,
+      status: AUDIT_STATUS.ACCOUNT_LOCKED,
+      ipAddress: ip,
+      affectedRecord: `user:${user.id}`,
+    });
+  }
+
+  try {
+    await recordAuthFailureEvent(pool, {
+      userId: user?.id ?? null,
+      userName: user?.full_name || email,
+      email,
+      ip,
+      reason,
+      attemptCount,
+      locked,
+    });
+  } catch (_) { /* non-blocking */ }
+
+  return { attemptCount: attemptCount ?? 0, locked };
 }
 
 // POST /api/auth/login
@@ -59,19 +137,13 @@ router.post('/login', async (req, res) => {
     });
   }
 
-  const attempt = attemptKey(clientAddress(req), email);
-  if (tooManyAttempts(attempt)) {
-    return res.status(429).json({
-      success: false,
-      message: 'Too many login attempts for this account. Try again in 15 minutes.',
-      attemptsRemaining: 0,
-    });
-  }
+  const ip = clientAddress(req);
+  const attempt = attemptKey(ip, email);
 
   try {
     const pool = req.app.locals.pool;
 
-    // Fetch user with role info
+    // Fetch user with role info + lockout fields
     const result = await pool.query(
       `SELECT
          u.id,
@@ -82,6 +154,8 @@ router.post('/login', async (req, res) => {
          u.status,
          u.avatar_file,
          u.created_at,
+         COALESCE(u.failed_login_count, 0) AS failed_login_count,
+         u.login_locked_until,
          r.role_id,
          r.role_name,
          r.slug AS role_slug,
@@ -100,6 +174,30 @@ router.post('/login', async (req, res) => {
 
     if (result.rows.length === 0) {
       const attemptCount = recordAttempt(attempt);
+      await writeAuditLog(pool, {
+        userId: null,
+        userName: email,
+        module: 'Authentication',
+        activity: 'Failed Login',
+        action: 'Failed Login',
+        description: `Failed login for unknown or invalid account (${email}).`,
+        status: AUDIT_STATUS.FAILED_LOGIN,
+        ipAddress: ip,
+        affectedRecord: email,
+      });
+      if (tooManyAttempts(attempt)) {
+        await writeAuditLog(pool, {
+          userId: null,
+          userName: email,
+          module: 'Authentication',
+          activity: 'Account Locked',
+          action: 'Account Locked',
+          description: `Temporary lockout after ${LOGIN_MAX_ATTEMPTS} failed attempts for ${email}.`,
+          status: AUDIT_STATUS.ACCOUNT_LOCKED,
+          ipAddress: ip,
+          affectedRecord: email,
+        });
+      }
       return res.status(401).json({
         success: false,
         message: `Invalid email or password. ${attemptNotice(attemptCount)}`,
@@ -109,8 +207,31 @@ router.post('/login', async (req, res) => {
 
     const user = result.rows[0];
 
+    // Active lockout blocks authentication until unlock time or admin unlock
+    if (user.login_locked_until && new Date(user.login_locked_until).getTime() > Date.now()) {
+      await writeAuditLog(pool, {
+        userId: user.id,
+        userName: user.full_name,
+        roleName: user.role_name,
+        module: 'Authentication',
+        activity: 'Unauthorized Access Attempt',
+        action: 'Unauthorized Access Attempt',
+        description: `Login blocked while account is locked until ${new Date(user.login_locked_until).toISOString()}.`,
+        status: AUDIT_STATUS.UNAUTHORIZED,
+        ipAddress: ip,
+        affectedRecord: `user:${user.id}`,
+      });
+      return res.status(429).json({
+        success: false,
+        message: `Account is locked due to too many failed login attempts. Try again after ${LOCKOUT_MINUTES} minutes or contact an administrator.`,
+        attemptsRemaining: 0,
+      });
+    }
+
     if (user.status === 'Invited') {
-      const attemptCount = recordAttempt(attempt);
+      const { attemptCount } = await registerFailedLogin(pool, {
+        user, email, ip, reason: 'Portal account not activated',
+      });
       return res.status(403).json({
         success: false,
         message: `Your portal account is not activated yet. Use the activation link sent to your email. ${attemptNotice(attemptCount)}`,
@@ -119,7 +240,14 @@ router.post('/login', async (req, res) => {
     }
 
     if (user.status !== 'Active') {
-      const attemptCount = recordAttempt(attempt);
+      const { attemptCount } = await registerFailedLogin(pool, {
+        user,
+        email,
+        ip,
+        reason: `Login denied for non-active account (status: ${user.status})`,
+        activity: 'Unauthorized Access Attempt',
+        status: AUDIT_STATUS.UNAUTHORIZED,
+      });
       return res.status(401).json({
         success: false,
         message: `Invalid email or password. ${attemptNotice(attemptCount)}`,
@@ -130,29 +258,54 @@ router.post('/login', async (req, res) => {
     // Verify password
     const isValid = await bcrypt.compare(password, user.password_hash);
     if (!isValid) {
-      const attemptCount = recordAttempt(attempt);
-      await pool.query(
-        `INSERT INTO audit_logs (user_id, user_name, action, ip_address, status_details)
-         VALUES ($1, $2, 'Login Failed', $3, 'Invalid password')`,
-        [user.id, user.full_name, req.ip]
-      );
-      return res.status(401).json({
+      const { attemptCount, locked } = await registerFailedLogin(pool, {
+        user, email, ip, reason: 'Invalid password',
+      });
+      return res.status(locked ? 429 : 401).json({
         success: false,
-        message: `Invalid email or password. ${attemptNotice(attemptCount)}`,
+        message: locked
+          ? `Account locked after ${LOGIN_MAX_ATTEMPTS} failed login attempts. Try again in ${LOCKOUT_MINUTES} minutes.`
+          : `Invalid email or password. ${attemptNotice(attemptCount)}`,
         attemptsRemaining: Math.max(0, LOGIN_MAX_ATTEMPTS - attemptCount),
       });
     }
 
     loginAttempts.delete(attempt);
 
-    await pool.query(`UPDATE users SET last_login = NOW() WHERE id = $1`, [user.id]);
-
-    // Log successful login
     await pool.query(
-      `INSERT INTO audit_logs (user_id, user_name, action, ip_address, status_details)
-       VALUES ($1, $2, 'Login', $3, 'Successful login')`,
-      [user.id, user.full_name, req.ip]
+      `UPDATE users
+       SET last_login = NOW(),
+           failed_login_count = 0,
+           login_locked_until = NULL,
+           updated_at = NOW()
+       WHERE id = $1`,
+      [user.id]
     );
+
+    await writeAuditLog(pool, {
+      userId: user.id,
+      userName: user.full_name,
+      roleName: user.role_name,
+      module: 'Authentication',
+      activity: 'Successful Login',
+      action: 'Successful Login',
+      description: `User signed in successfully as ${user.role_name}.`,
+      status: AUDIT_STATUS.SUCCESSFUL_LOGIN,
+      ipAddress: ip,
+      affectedRecord: `user:${user.id}`,
+    });
+
+    let permissions = [];
+    try {
+      const codes = await resolvePermissionCodes(pool, {
+        userId: user.id,
+        roleId: user.role_id,
+        roleSlug: user.role_slug,
+      });
+      permissions = [...codes];
+    } catch (permErr) {
+      console.error('[Auth] Login permission resolve error:', permErr.message);
+    }
 
     // Return user info (never return password)
     return res.status(200).json({
@@ -176,6 +329,7 @@ router.post('/login', async (req, res) => {
         customerId: user.customer_id ?? null,
         customerCode: user.customer_code ?? null,
         hasAvatar: Boolean(user.avatar_file),
+        permissions,
       },
     });
   } catch (err) {
@@ -185,6 +339,11 @@ router.post('/login', async (req, res) => {
 });
 
 router.post('/touch', requireAuth, (req, res) => {
+  // Explicit user activity ping — refresh last-activity on the sliding session.
+  res.setHeader(
+    'X-Session-Token',
+    issueSessionToken(req.currentUser.id, req.currentUser.tokenIat || Date.now(), Date.now())
+  );
   res.json({ success: true });
 });
 
@@ -299,7 +458,7 @@ function isValidEmail(value) {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(value || '').trim());
 }
 
-// GET /api/auth/me — current user profile (including phone)
+// GET /api/auth/me — current user profile (including phone + permissions)
 router.get('/me', requireAuth, async (req, res) => {
   try {
     const pool = req.app.locals.pool;
@@ -308,13 +467,49 @@ router.get('/me', requireAuth, async (req, res) => {
     if (!result.rows.length) {
       return res.status(404).json({ success: false, message: 'User not found.' });
     }
+    const profile = formatProfileRow(result.rows[0]);
+    let permissions = [];
+    try {
+      const codes = req.currentUser.permissionCodes instanceof Set
+        ? req.currentUser.permissionCodes
+        : await resolvePermissionCodes(pool, {
+          userId,
+          roleId: result.rows[0].role_id,
+          roleSlug: result.rows[0].role_slug,
+        });
+      permissions = [...codes];
+    } catch (permErr) {
+      console.error('[Auth] GET /me permission resolve error:', permErr.message);
+    }
     return res.status(200).json({
       success: true,
-      data: formatProfileRow(result.rows[0]),
+      data: {
+        ...profile,
+        permissions,
+      },
     });
   } catch (err) {
     console.error('[Auth] GET /me error:', err.message);
     return res.status(500).json({ success: false, message: 'Failed to load profile.' });
+  }
+});
+
+// GET /api/auth/permissions — refresh effective permission codes for the session
+router.get('/permissions', requireAuth, async (req, res) => {
+  try {
+    const pool = req.app.locals.pool;
+    const codes = await resolvePermissionCodes(pool, {
+      userId: req.currentUser.id,
+      roleId: req.currentUser.roleId,
+      roleSlug: req.currentUser.roleSlug,
+    });
+    return res.status(200).json({
+      success: true,
+      data: { permissions: [...codes] },
+    });
+  } catch (err) {
+    console.error('[Auth] GET /permissions error:', err.message);
+    return res.status(500).json({ success: false, message: 'Failed to load permissions.' });
   }
 });
 
@@ -327,6 +522,66 @@ function readAvatarBody(req, res, next) {
     return next(error);
   });
 }
+
+function sanitizeUserPreferences(raw) {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
+  try {
+    return JSON.parse(JSON.stringify(raw));
+  } catch {
+    return null;
+  }
+}
+
+// GET /api/auth/me/preferences — signed-in user's UI preferences only
+router.get('/me/preferences', requireAuth, async (req, res) => {
+  try {
+    const pool = req.app.locals.pool;
+    const result = await pool.query(
+      `SELECT preferences FROM users WHERE id = $1`,
+      [req.currentUser.id]
+    );
+    if (!result.rows.length) {
+      return res.status(404).json({ success: false, message: 'User not found.' });
+    }
+    return res.status(200).json({
+      success: true,
+      data: result.rows[0].preferences || null,
+    });
+  } catch (err) {
+    console.error('[Auth] GET /me/preferences error:', err.message);
+    return res.status(500).json({ success: false, message: 'Failed to load preferences.' });
+  }
+});
+
+// PUT /api/auth/me/preferences — save UI preferences for the signed-in user only
+router.put('/me/preferences', requireAuth, async (req, res) => {
+  try {
+    const pool = req.app.locals.pool;
+    const preferences = sanitizeUserPreferences(req.body?.preferences ?? req.body);
+    if (!preferences) {
+      return res.status(400).json({ success: false, message: 'Preferences payload is required.' });
+    }
+    const result = await pool.query(
+      `UPDATE users
+          SET preferences = $1::jsonb,
+              updated_at = CURRENT_TIMESTAMP
+        WHERE id = $2
+      RETURNING preferences`,
+      [JSON.stringify(preferences), req.currentUser.id]
+    );
+    if (!result.rows.length) {
+      return res.status(404).json({ success: false, message: 'User not found.' });
+    }
+    return res.status(200).json({
+      success: true,
+      data: result.rows[0].preferences || preferences,
+      message: 'Preferences saved.',
+    });
+  } catch (err) {
+    console.error('[Auth] PUT /me/preferences error:', err.message);
+    return res.status(500).json({ success: false, message: 'Failed to save preferences.' });
+  }
+});
 
 // GET /api/auth/me/avatar — the signed-in user's profile photo
 router.get('/me/avatar', requireAuth, async (req, res) => {
@@ -357,6 +612,23 @@ router.post('/me/avatar', requireAuth, readAvatarBody, async (req, res) => {
     }
     const pool = req.app.locals.pool;
     const userId = req.currentUser.id;
+    try {
+      const scan = await inspectUpload(pool, req.body, {
+        fileName: `avatar-${userId}.${detected.ext}`,
+        mime: detected.mime,
+        userId,
+        userName: req.currentUser.fullName || req.currentUser.email || null,
+        sourceIp: clientAddress(req),
+      });
+      if (!scan.clean) {
+        return res.status(400).json({
+          success: false,
+          message: 'Upload blocked: malware or suspicious content detected. File quarantined for review.',
+        });
+      }
+    } catch (scanErr) {
+      console.error('[Auth] avatar malware scan failed:', scanErr.message);
+    }
     const fileName = await saveAvatarFile(userId, req.body, detected.ext);
     await pool.query(
       `UPDATE users SET avatar_file = $1, updated_at = NOW() WHERE id = $2`,
@@ -518,6 +790,28 @@ router.put('/me', requireAuth, async (req, res) => {
       params
     );
 
+    if (changingPassword) {
+      await writeAuditLog(pool, {
+        req,
+        module: 'Authentication',
+        activity: 'Password Changed',
+        action: 'Password Changed',
+        description: 'User changed their account password.',
+        status: AUDIT_STATUS.PASSWORD_CHANGED,
+        affectedRecord: `user:${userId}`,
+      });
+    } else if (changingIdentity || email !== undefined || phone !== undefined) {
+      await writeAuditLog(pool, {
+        req,
+        module: 'Authentication',
+        activity: 'Profile Updated',
+        action: 'Profile Updated',
+        description: 'User updated profile details.',
+        status: AUDIT_STATUS.UPDATED,
+        affectedRecord: `user:${userId}`,
+      });
+    }
+
     const result = await pool.query(PROFILE_SELECT, [userId]);
     return res.status(200).json({
       success: true,
@@ -534,6 +828,25 @@ router.put('/me', requireAuth, async (req, res) => {
     }
     console.error('[Auth] PUT /me error:', err.message);
     return res.status(500).json({ success: false, message: 'Failed to update profile.' });
+  }
+});
+
+// POST /api/auth/logout — record logout (client discards token)
+router.post('/logout', requireAuth, async (req, res) => {
+  try {
+    await writeAuditLog(req.app.locals.pool, {
+      req,
+      module: 'Authentication',
+      activity: 'Logout',
+      action: 'Logout',
+      description: 'User signed out.',
+      status: AUDIT_STATUS.LOGOUT,
+      affectedRecord: `user:${req.currentUser.id}`,
+    });
+    return res.status(200).json({ success: true, message: 'Logged out.' });
+  } catch (err) {
+    console.error('[Auth] POST /logout error:', err.message);
+    return res.status(500).json({ success: false, message: 'Failed to record logout.' });
   }
 });
 

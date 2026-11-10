@@ -21,6 +21,7 @@ import {
   fetchWarehouseAuditLogs,
   fetchWarehouseDashboard,
   patchInventoryTransfer,
+  submitRestock,
 } from '../../api/inventoryService';
 import { getCurrentUser } from '../../api/authService.js';
 import { AccountProfilePanel } from '../shared/AccountProfilePanel';
@@ -43,7 +44,8 @@ function transferWorkflowStepIndex(status) {
   if (status === 'Rejected') return -1;
   if (status === 'Pending Approval' || status === 'Submitted') return 0;
   if (status === 'Approved') return 2;
-  if (status === 'Completed') return 3;
+  if (status === 'Shipped') return 3;
+  if (status === 'Received' || status === 'Completed') return 4;
   return 0;
 }
 
@@ -110,7 +112,7 @@ function DashboardPage({
           {
             label: 'Ready to Ship',
             value: String(summary.readyToShip ?? 0),
-            title: 'Approved outbound transfers waiting for you to complete',
+            title: 'Approved outbound transfers waiting for you to ship',
             onClick: () => openTransferQueue('Action required'),
           },
           {
@@ -122,7 +124,7 @@ function DashboardPage({
           {
             label: 'Incoming',
             value: String(summary.incoming ?? 0),
-            title: 'Approved transfers headed to your branch',
+            title: 'Shipped transfers waiting for you to receive',
             onClick: () => openTransferQueue('Incoming'),
           },
           {
@@ -332,7 +334,7 @@ function InventoryPage({
       setLoading(true);
       try {
         // Catalog from /products; on-hand always merged from branch-inventory so it matches Branch Stock.
-        const branchId = user?.branch?.id;
+        const branchId = user?.branch?.id ?? user?.branchId;
         const [prodRes, invRes] = await Promise.all([
           apiClient.get('/products', {
             params: {
@@ -2031,18 +2033,25 @@ function transferTouchesBranch(t, branchId) {
 }
 
 function transferIsOpen(t) {
-  return isTransferPendingApproval(t.status) || t.status === 'Approved';
+  return isTransferPendingApproval(t.status)
+    || t.status === 'Approved'
+    || t.status === 'Shipped';
+}
+
+function transferIsFinalized(status) {
+  return status === 'Received' || status === 'Completed';
 }
 
 const TRANSFER_REQUEST_SEGMENTS = ['Action required', 'Awaiting approval', 'Incoming', 'All'];
 
 function TransfersPage({
   navigate,
+  showToast,
   transferTab: transferTabProp = 'requests',
   transferSegment: transferSegmentProp = 'Action required',
 }) {
   const user = getCurrentUser();
-  const branchId = user?.branch?.id;
+  const branchId = user?.branch?.id ?? user?.branchId;
   const branchName = user?.branch?.name || 'your branch';
   const mainTab = transferTabProp === 'history' ? 'history' : 'requests';
   const [requestSegment, setRequestSegment] = useState(
@@ -2068,12 +2077,18 @@ function TransfersPage({
     async function load() {
       setLoading(true);
       const result = await fetchInventoryTransfers();
-      if (!cancelled && result.success) setTransfers(result.data || []);
-      if (!cancelled) setLoading(false);
+      if (cancelled) return;
+      if (result.success) {
+        setTransfers(result.data || []);
+      } else {
+        setTransfers([]);
+        showToast?.(result.message || 'Failed to load transfers.', 'error');
+      }
+      setLoading(false);
     }
     load();
     return () => { cancelled = true; };
-  }, [reloadTick]);
+  }, [reloadTick, showToast]);
 
   useEffect(() => {
     const onFocus = () => setReloadTick((n) => n + 1);
@@ -2099,8 +2114,8 @@ function TransfersPage({
       && Number(t.source_branch_id) === Number(branchId)).length;
     const readyToShip = transfers.filter((t) => t.status === 'Approved'
       && Number(t.source_branch_id) === Number(branchId)).length;
-    // Incoming = approved inbound only (waiting for source to ship). Not pending approval.
-    const incoming = transfers.filter((t) => t.status === 'Approved'
+    // Incoming = shipped inbound waiting for destination receive.
+    const incoming = transfers.filter((t) => t.status === 'Shipped'
       && Number(t.destination_branch_id) === Number(branchId)
       && Number(t.source_branch_id) !== Number(branchId)).length;
     const openAll = transfers.filter((t) => transferTouchesBranch(t, branchId) && transferIsOpen(t)).length;
@@ -2115,13 +2130,15 @@ function TransfersPage({
   const requestsFiltered = useMemo(() => {
     let list = [];
     if (requestSegment === 'Action required') {
-      list = transfers.filter((t) => t.status === 'Approved'
-        && Number(t.source_branch_id) === Number(branchId));
+      list = transfers.filter((t) => (
+        (t.status === 'Approved' && Number(t.source_branch_id) === Number(branchId))
+        || (t.status === 'Shipped' && Number(t.destination_branch_id) === Number(branchId))
+      ));
     } else if (requestSegment === 'Awaiting approval') {
       list = transfers.filter((t) => isTransferPendingApproval(t.status)
         && Number(t.source_branch_id) === Number(branchId));
     } else if (requestSegment === 'Incoming') {
-      list = transfers.filter((t) => t.status === 'Approved'
+      list = transfers.filter((t) => t.status === 'Shipped'
         && Number(t.destination_branch_id) === Number(branchId)
         && Number(t.source_branch_id) !== Number(branchId));
     } else {
@@ -2143,13 +2160,15 @@ function TransfersPage({
   const historyFiltered = useMemo(() => {
     let list = transfers.filter((t) => transferTouchesBranch(t, branchId));
     if (statusFilter === 'Closed') {
-      list = list.filter((t) => t.status === 'Completed' || t.status === 'Rejected');
+      list = list.filter((t) => transferIsFinalized(t.status) || t.status === 'Rejected');
     } else if (statusFilter === 'Pending') {
       list = list.filter((t) => isTransferPendingApproval(t.status));
     } else if (statusFilter === 'Approved') {
       list = list.filter((t) => t.status === 'Approved');
+    } else if (statusFilter === 'Shipped') {
+      list = list.filter((t) => t.status === 'Shipped');
     } else if (statusFilter === 'Completed') {
-      list = list.filter((t) => t.status === 'Completed');
+      list = list.filter((t) => transferIsFinalized(t.status));
     } else if (statusFilter === 'Rejected') {
       list = list.filter((t) => t.status === 'Rejected');
     }
@@ -2181,8 +2200,8 @@ function TransfersPage({
     }
     if (requestSegment === 'Action required') {
       return {
-        title: 'No approved transfers waiting to ship',
-        description: 'When a manager approves your outbound request, confirm shipment here.',
+        title: 'Nothing to ship or receive',
+        description: 'Ship approved outbound transfers, or receive inbound transfers that the source already shipped.',
         actionLabel: undefined,
       };
     }
@@ -2195,8 +2214,8 @@ function TransfersPage({
     }
     if (requestSegment === 'Incoming') {
       return {
-        title: 'No inbound transfers right now',
-        description: 'Approved transfers coming to your branch appear here. You cannot approve—wait for the source warehouse to ship.',
+        title: 'No inbound transfers to receive',
+        description: 'After the source warehouse ships, confirm receipt here to add destination stock.',
         actionLabel: undefined,
       };
     }
@@ -2279,7 +2298,7 @@ function TransfersPage({
               onChange={(e) => setStatusFilter(e.target.value)}
               aria-label="Filter by status"
             >
-              {['Closed', 'All', 'Pending', 'Approved', 'Completed', 'Rejected'].map((s) => (
+              {['Closed', 'All', 'Pending', 'Approved', 'Shipped', 'Completed', 'Rejected'].map((s) => (
                 <option key={s} value={s}>{s === 'All' ? 'All statuses' : s}</option>
               ))}
             </select>
@@ -2402,7 +2421,7 @@ function TransferDetailPage({
     return <EmptyState title="Transfer not found" actionLabel="Back" onAction={() => navigate(backPath)} />;
   }
 
-  const workflowSteps = ['Submitted', 'Manager approval', 'Approved', 'Completed'];
+  const workflowSteps = ['Submitted', 'Manager approval', 'Approved', 'Shipped', 'Received'];
   const activeStep = transferWorkflowStepIndex(transfer.status);
   const isSourceBranch = currentUser?.branch?.id != null
     && Number(transfer.source_branch_id) === Number(currentUser.branch.id);
@@ -2417,9 +2436,10 @@ function TransferDetailPage({
   );
   const isRejected = transfer.status === 'Rejected';
   const isPending = isTransferPendingApproval(transfer.status);
-  const canComplete = transfer.status === 'Approved' && isSourceBranch && lines.length > 0;
+  const canShip = transfer.status === 'Approved' && isSourceBranch && lines.length > 0;
+  const canReceive = transfer.status === 'Shipped' && isDestinationBranch && lines.length > 0;
 
-  const confirmComplete = async () => {
+  const confirmShip = async () => {
     if (!lines.length) {
       showToast('This transfer has no product lines to ship. Contact support to repair the document.', 'error');
       return;
@@ -2428,21 +2448,42 @@ function TransferDetailPage({
     const preview = lines.slice(0, 4).map((line) => `${line.product_name} · ${line.quantity}`).join(', ');
     const extra = lines.length > 4 ? ` and ${lines.length - 4} more` : '';
     const confirmed = await confirmAction({
-      title: 'Complete transfer',
-      message: `This deducts stock at ${transfer.source_branch} and adds it at ${transfer.destination_branch}.`,
+      title: 'Ship transfer',
+      message: `This deducts stock at ${transfer.source_branch} only. ${transfer.destination_branch} receives the stock separately.`,
       detail: `${formatDocumentRef(transfer.transfer_ref)} · ${lineCount} product${lineCount === 1 ? '' : 's'} · ${totalQty} units${preview ? ` · ${preview}${extra}` : ''}`,
-      confirmLabel: 'Complete transfer',
-      warning: 'Stock quantities change as soon as you confirm.',
+      confirmLabel: 'Ship transfer',
+      warning: 'Source stock changes as soon as you confirm.',
     });
     if (!confirmed) return;
     setCompleting(true);
-    const result = await patchInventoryTransfer(transferId, { status: 'Completed' });
+    const result = await patchInventoryTransfer(transferId, { status: 'Shipped' });
     setCompleting(false);
     if (result.success) {
-      showToast(result.message || 'Transfer completed.', 'success');
+      showToast(result.message || 'Transfer shipped.', 'success');
       reload();
     } else {
-      showToast(result.message || 'Complete failed.', 'error');
+      showToast(result.message || 'Ship failed.', 'error');
+    }
+  };
+
+  const confirmReceive = async () => {
+    if (!lines.length) {
+      showToast('This transfer has no product lines to receive.', 'error');
+      return;
+    }
+    const ok = window.confirm(
+      `Confirm receipt for ${transfer.transfer_ref}?\n\n`
+      + `This adds stock at ${transfer.destination_branch} for ${lineCount} product(s), ${totalQty} units.`
+    );
+    if (!ok) return;
+    setCompleting(true);
+    const result = await patchInventoryTransfer(transferId, { status: 'Received' });
+    setCompleting(false);
+    if (result.success) {
+      showToast(result.message || 'Transfer received.', 'success');
+      reload();
+    } else {
+      showToast(result.message || 'Receive failed.', 'error');
     }
   };
 
@@ -2491,7 +2532,10 @@ function TransferDetailPage({
           { label: 'Submitted', value: formatDisplayDate(transfer.submitted_date) },
           ...(transfer.notes ? [{ label: 'Notes', value: transfer.notes }] : []),
           ...(transfer.approved_by_name ? [{ label: 'Approved by', value: transfer.approved_by_name }] : []),
-          ...(transfer.completed_date ? [{ label: 'Completed', value: formatDisplayDate(transfer.completed_date) }] : []),
+          ...(transfer.shipped_at ? [{ label: 'Shipped', value: formatDisplayDateTime(transfer.shipped_at) }] : []),
+          ...(transfer.completed_date || transfer.received_at
+            ? [{ label: 'Received', value: formatDisplayDate(transfer.completed_date || transfer.received_at) }]
+            : []),
           ...(transfer.approval_info && !isRejected ? [{ label: 'Approval note', value: transfer.approval_info }] : []),
         ]} />
       </section>
@@ -2538,7 +2582,7 @@ function TransferDetailPage({
       {transfer.status === 'Approved' && isSourceBranch && lines.length > 0 ? (
         <section className="panel content-panel">
           <p className="muted" style={{ margin: 0 }}>
-            Approved. Confirm shipment to move stock for all lines from {transfer.source_branch} to {transfer.destination_branch}.
+            Approved. Confirm shipment to deduct stock at {transfer.source_branch}. Destination receives separately.
           </p>
         </section>
       ) : null}
@@ -2555,7 +2599,23 @@ function TransferDetailPage({
       {transfer.status === 'Approved' && isDestinationBranch && !isSourceBranch ? (
         <section className="panel content-panel">
           <p className="muted" style={{ margin: 0 }}>
-            Waiting for <strong>{transfer.source_branch}</strong> to ship. You cannot complete this transfer from the destination branch.
+            Waiting for <strong>{transfer.source_branch}</strong> to ship. You cannot receive until it is Shipped.
+          </p>
+        </section>
+      ) : null}
+
+      {transfer.status === 'Shipped' && isDestinationBranch ? (
+        <section className="panel content-panel">
+          <p className="muted" style={{ margin: 0 }}>
+            Shipped from {transfer.source_branch}. Confirm receipt to add stock at {transfer.destination_branch}.
+          </p>
+        </section>
+      ) : null}
+
+      {transfer.status === 'Shipped' && isSourceBranch && !isDestinationBranch ? (
+        <section className="panel content-panel">
+          <p className="muted" style={{ margin: 0 }}>
+            Shipped. Waiting for <strong>{transfer.destination_branch}</strong> warehouse to confirm receipt.
           </p>
         </section>
       ) : null}
@@ -2564,7 +2624,7 @@ function TransferDetailPage({
         <button className="button ghost" type="button" onClick={() => navigate(backPath)}>
           Back to Transfers
         </button>
-        {transfer.status === 'Completed' ? (
+        {transferIsFinalized(transfer.status) ? (
           <button
             className="button secondary"
             type="button"
@@ -2573,9 +2633,14 @@ function TransferDetailPage({
             View related stock movements
           </button>
         ) : null}
-        {canComplete ? (
-          <button className="button" type="button" disabled={completing} onClick={confirmComplete}>
-            {completing ? 'Completing…' : 'Confirm shipment & complete'}
+        {canShip ? (
+          <button className="button" type="button" disabled={completing} onClick={confirmShip}>
+            {completing ? 'Shipping…' : 'Confirm shipment'}
+          </button>
+        ) : null}
+        {canReceive ? (
+          <button className="button" type="button" disabled={completing} onClick={confirmReceive}>
+            {completing ? 'Receiving…' : 'Confirm receipt'}
           </button>
         ) : null}
       </div>
@@ -2724,6 +2789,7 @@ function RestockHistoryPage({ navigate }) {
                     <th>Products</th>
                     <th>Total qty</th>
                     <th>Date received</th>
+                    <th>Status</th>
                     <th>Recorded by</th>
                     <th className="cell-actions">Actions</th>
                   </tr>
@@ -2757,6 +2823,7 @@ function RestockHistoryPage({ navigate }) {
                         </td>
                         <td style={{ color: '#2A9B6A', fontWeight: 600 }}>+{r.total_quantity ?? r.quantity ?? 0}</td>
                         <td>{formatDisplayDate(r.received_date)}</td>
+                        <td><StatusBadge status={r.status || 'Posted'} /></td>
                         <td>{r.recorded_by_name || '—'}</td>
                         <td className="cell-actions" onClick={(e) => e.stopPropagation()}>
                           <div className="table-actions">
@@ -2809,18 +2876,19 @@ function RestockNewPage({ navigate, showToast }) {
   );
 }
 
-function RestockDetailPage({ restockId, navigate }) {
+function RestockDetailPage({ restockId, navigate, showToast }) {
   const [restock, setRestock] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [submitting, setSubmitting] = useState(false);
+  const reload = async () => {
+    setLoading(true);
+    const res = await fetchRestockById(restockId);
+    if (res.success) setRestock(res.data);
+    else setRestock(null);
+    setLoading(false);
+  };
   useEffect(() => {
-    async function load() {
-      setLoading(true);
-      const res = await fetchRestockById(restockId);
-      if (res.success) setRestock(res.data);
-      else setRestock(null);
-      setLoading(false);
-    }
-    load();
+    reload();
   }, [restockId]);
   if (loading) return <LoadingState message="Loading restock…" />;
   if (!restock) {
@@ -2836,6 +2904,20 @@ function RestockDetailPage({ restockId, navigate }) {
   const lineCount = restock.line_count ?? lines.length;
   const totalQty = restock.total_quantity ?? restock.quantity ?? 0;
   const movementSearch = restock.restock_ref || restock.delivery_ref || '';
+  const canSubmitDraft = restock.status === 'Draft';
+  const isPosted = restock.status === 'Posted';
+
+  const handleSubmitDraft = async () => {
+    setSubmitting(true);
+    const result = await submitRestock(restockId);
+    setSubmitting(false);
+    if (result.success) {
+      showToast?.(result.message || 'Restock submitted for approval.', 'success');
+      reload();
+    } else {
+      showToast?.(result.message || 'Submit failed.', 'error');
+    }
+  };
 
   return (
     <div className="page">
@@ -2856,11 +2938,24 @@ function RestockDetailPage({ restockId, navigate }) {
               </p>
             ) : null}
           </div>
+          <StatusBadge status={restock.status || 'Posted'} />
         </div>
+        {restock.status === 'Pending Approval' ? (
+          <p className="muted" style={{ marginBottom: 12 }}>
+            Waiting for Branch Manager approval. On-hand stock is unchanged until posted.
+          </p>
+        ) : null}
+        {restock.status === 'Rejected' && restock.decision_remarks ? (
+          <p className="muted" style={{ marginBottom: 12, color: '#dc2626' }}>
+            Rejected: {restock.decision_remarks}
+          </p>
+        ) : null}
         <DetailRowsTable rows={[
           { label: 'Branch', value: restock.branch_name || '—' },
           { label: 'Date received', value: formatDisplayDate(restock.received_date) },
           { label: 'Recorded by', value: restock.recorded_by_name || '—' },
+          ...(restock.submitted_by_name ? [{ label: 'Submitted by', value: restock.submitted_by_name }] : []),
+          ...(restock.approved_by_name ? [{ label: 'Approved by', value: restock.approved_by_name }] : []),
           ...(restock.notes ? [{ label: 'Notes', value: restock.notes }] : []),
         ]} />
       </section>
@@ -2912,13 +3007,18 @@ function RestockDetailPage({ restockId, navigate }) {
         <button className="button ghost" type="button" onClick={() => navigate('/warehouse/restock-history')}>
           Back to Restock
         </button>
-        {movementSearch ? (
+        {isPosted && movementSearch ? (
           <button
             className="button secondary"
             type="button"
             onClick={() => navigate(`/warehouse/movements?search=${encodeURIComponent(movementSearch)}`)}
           >
             Related stock movements
+          </button>
+        ) : null}
+        {canSubmitDraft ? (
+          <button className="button" type="button" disabled={submitting} onClick={handleSubmitDraft}>
+            {submitting ? 'Submitting…' : 'Submit for approval'}
           </button>
         ) : null}
       </div>
@@ -2959,7 +3059,6 @@ function ProfilePage({
   return <AccountProfilePanel
     showToast={showToast}
     title="Warehouse profile"
-    subtitle="Your name, contact details, and sign-in for this CORVEX account."
     settingsRole="warehouse"
     extraActions={<>
       <button className="button ghost" type="button" onClick={() => navigate('/warehouse/audit-log')}>Audit log</button>

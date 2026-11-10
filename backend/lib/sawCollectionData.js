@@ -6,22 +6,24 @@ import {
   manilaDateString,
   runSawPipeline,
 } from './sawCollection.js';
+import { osrmDrivingTable } from './osrm.js';
+import { optimizePriorityAwareRoute } from './routeOrder.js';
 
 /**
  * Load invoice-level rows for SAW (ACM-shaped), scoped to one collector.
  */
+/**
+ * Candidate pool for collector priority ranking:
+ * - Same branch only
+ * - Permanent book = customers.account_manager_id = collector
+ * - Active territories where this collector is default_collector_id (unassigned AM only)
+ * - Never expands an empty book to the entire branch
+ * - Never silently includes another collector's permanent book
+ */
 export async function fetchSawSourceRows(pool, { collectorId, branchId }) {
   const result = await pool.query(
     `
-    WITH collector_portfolio AS (
-      SELECT DISTINCT customer_id
-      FROM (
-        SELECT customer_id FROM collection_payment WHERE collector_id = $1
-        UNION
-        SELECT customer_id FROM field_visits WHERE user_id = $1
-      ) p
-    ),
-    invoice_payments AS (
+    WITH invoice_payments AS (
       SELECT ch.sales_id, COALESCE(SUM(ch.payment_amount), 0) AS paid
       FROM credit_history ch
       WHERE ch.sales_id IS NOT NULL
@@ -45,7 +47,22 @@ export async function fetchSawSourceRows(pool, { collectorId, branchId }) {
     )
     SELECT
       c.customer_id,
+      c.customer_code,
       $1::INTEGER AS collector_id,
+      c.account_manager_id,
+      CASE
+        WHEN c.account_manager_id = $1 THEN 'own_book'
+        WHEN c.account_manager_id IS NULL
+          AND t.default_collector_id = $1
+          AND COALESCE(t.status, 'Active') = 'Active'
+          THEN 'territory_default'
+        WHEN c.account_manager_id IS NULL THEN 'unassigned'
+        ELSE 'other_book'
+      END AS book_status,
+      COALESCE(
+        NULLIF(TRIM(CONCAT_WS(' ', am.first_name, am.last_name)), ''),
+        NULL
+      ) AS account_manager_name,
       c.status,
       COALESCE(ca.outstanding_balance, 0)::FLOAT AS outstanding_balance,
       oi.invoice_status,
@@ -57,11 +74,16 @@ export async function fetchSawSourceRows(pool, { collectorId, branchId }) {
       c.first_name,
       c.last_name,
       c.address,
-      c.contact_phone
+      c.contact_phone,
+      t.territory_name,
+      t.default_collector_id,
+      COALESCE(t.status, 'Active') AS territory_status
     FROM customers c
     JOIN customer_activity ca ON ca.customer_id = c.customer_id
     JOIN branches b ON b.id = c.branch_id
     JOIN open_invoices oi ON oi.customer_id = c.customer_id
+    LEFT JOIN users am ON am.id = c.account_manager_id
+    LEFT JOIN territories t ON t.territory_id = c.territory_id
     WHERE c.branch_id = $2
       AND c.status = 'Active'
       AND COALESCE(ca.outstanding_balance, 0) > 0
@@ -71,8 +93,12 @@ export async function fetchSawSourceRows(pool, { collectorId, branchId }) {
       AND b.latitude IS NOT NULL
       AND b.longitude IS NOT NULL
       AND (
-        NOT EXISTS (SELECT 1 FROM collector_portfolio LIMIT 1)
-        OR c.customer_id IN (SELECT customer_id FROM collector_portfolio)
+        c.account_manager_id = $1
+        OR (
+          c.account_manager_id IS NULL
+          AND t.default_collector_id = $1
+          AND COALESCE(t.status, 'Active') = 'Active'
+        )
       )
     `,
     [collectorId, branchId]
@@ -80,15 +106,54 @@ export async function fetchSawSourceRows(pool, { collectorId, branchId }) {
   return result.rows;
 }
 
-export async function computeCollectorSawPriority(pool, { collectorId, branchId, asOfDate }) {
+export async function computeCollectorSawPriority(pool, { collectorId, branchId, asOfDate, scheduledDate }) {
   if (branchId == null) {
-    return { asOf: asOfDate || manilaDateString(), ranked: [], stats: { eligible: 0, ranked: 0 } };
+    return {
+      asOf: asOfDate || manilaDateString(),
+      ranked: [],
+      stats: { eligible: 0, ranked: 0, ownBook: 0, territoryDefault: 0, unassigned: 0 },
+      bookStats: { ownBook: 0, territoryDefault: 0, unassignedEligible: 0 },
+    };
   }
 
   const raw = await fetchSawSourceRows(pool, { collectorId, branchId });
   const eligible = filterEligibleRows(raw, collectorId);
   const asOf = asOfDate || manilaDateString();
-  const ranked = runSawPipeline(eligible, { asOfDate: asOf });
+  const date = scheduledDate || asOf;
+  let ranked = runSawPipeline(eligible, { asOfDate: asOf });
+
+  // Annotate same-day conflicts (any collector) for BM UI disable/reason.
+  if (ranked.length) {
+    const conflictRes = await pool.query(
+      `SELECT fv.customer_id, fv.user_id, fv.status,
+              COALESCE(NULLIF(TRIM(CONCAT_WS(' ', u.first_name, u.last_name)), ''), 'Collector') AS collector_name
+       FROM field_visits fv
+       JOIN users u ON u.id = fv.user_id
+       WHERE fv.visit_type = 'Collection'
+         AND fv.scheduled_date = $1::date
+         AND fv.status IN ('Pending', 'Completed')
+         AND fv.customer_id = ANY($2::int[])`,
+      [date, ranked.map((r) => Number(r.customer_id))]
+    );
+    const byCustomer = new Map(
+      conflictRes.rows.map((row) => [Number(row.customer_id), row])
+    );
+    ranked = ranked.map((row) => {
+      const hit = byCustomer.get(Number(row.customer_id));
+      if (!hit) return row;
+      const same = Number(hit.user_id) === Number(collectorId);
+      return {
+        ...row,
+        assignment_block: same ? 'already_scheduled' : 'assigned_to_other_collector',
+        assigned_collector_name: hit.collector_name,
+        assigned_visit_status: hit.status,
+      };
+    });
+  }
+
+  const ownBook = ranked.filter((r) => r.book_status === 'own_book').length;
+  const territoryDefault = ranked.filter((r) => r.book_status === 'territory_default').length;
+  const unassigned = ranked.filter((r) => r.book_status === 'unassigned').length;
 
   return {
     asOf,
@@ -97,6 +162,15 @@ export async function computeCollectorSawPriority(pool, { collectorId, branchId,
       sourceRows: raw.length,
       eligible: eligible.length,
       ranked: ranked.length,
+      ownBook,
+      territoryDefault,
+      unassigned,
+      blocked: ranked.filter((r) => r.assignment_block).length,
+    },
+    bookStats: {
+      ownBook,
+      territoryDefault,
+      unassignedEligible: unassigned,
     },
   };
 }
@@ -185,9 +259,17 @@ export function mapSawPriorityRow(row) {
   return {
     customer_id: row.customer_id,
     collector_id: row.collector_id,
+    customer_code: row.customer_code || null,
     customer_name: name,
     address: row.address || '',
     phone: row.contact_phone || '',
+    account_manager_id: row.account_manager_id ?? null,
+    account_manager_name: row.account_manager_name || null,
+    book_status: row.book_status || null,
+    territory_name: row.territory_name || null,
+    assignment_block: row.assignment_block || null,
+    assigned_collector_name: row.assigned_collector_name || null,
+    assigned_visit_status: row.assigned_visit_status || null,
     outstanding_balance: Number(row.outstanding_balance) || 0,
     invoice_status: row.invoice_status,
     due_date: row.due_date,
@@ -204,26 +286,46 @@ export function mapSawPriorityRow(row) {
     weight_distance: row.weight_distance,
     score: row.score,
     rank: row.rank,
+    route_sequence: row.route_sequence ?? row.routeIndex ?? row.rank ?? null,
+    leg_distance_km: row.legDistanceKm ?? null,
+    leg_duration_min: row.legDurationMin ?? null,
     generated_at: row.generated_at,
     latitude: row.cust_lat,
     longitude: row.cust_lon,
     visit_id: row.visit_id ?? null,
     visit_status: row.visit_status ?? null,
+    visit_outcome: row.visit_outcome ?? null,
+    visit_remarks: row.visit_remarks ?? null,
+    visited_at: row.visited_at ?? null,
   };
 }
 
 export async function getCollectionAssignmentsForDate(pool, collectorId, scheduledDate) {
   const date = scheduledDate || manilaDateString();
-  const result = await pool.query(
-    `SELECT fv.visit_id, fv.customer_id, fv.status, fv.scheduled_date
-     FROM field_visits fv
-     WHERE fv.user_id = $1
-       AND fv.visit_type = 'Collection'
-       AND fv.scheduled_date = $2::date
-     ORDER BY fv.visit_id ASC`,
-    [collectorId, date]
-  );
-  return result.rows;
+  try {
+    const result = await pool.query(
+      `SELECT fv.visit_id, fv.customer_id, fv.status, fv.scheduled_date,
+              fv.visit_outcome, fv.visit_remarks, fv.visited_at
+       FROM field_visits fv
+       WHERE fv.user_id = $1
+         AND fv.visit_type = 'Collection'
+         AND fv.scheduled_date = $2::date
+       ORDER BY fv.visit_id ASC`,
+      [collectorId, date]
+    );
+    return result.rows;
+  } catch {
+    const fallback = await pool.query(
+      `SELECT fv.visit_id, fv.customer_id, fv.status, fv.scheduled_date
+       FROM field_visits fv
+       WHERE fv.user_id = $1
+         AND fv.visit_type = 'Collection'
+         AND fv.scheduled_date = $2::date
+       ORDER BY fv.visit_id ASC`,
+      [collectorId, date]
+    );
+    return fallback.rows;
+  }
 }
 
 /**
@@ -241,6 +343,9 @@ export function orderAssignedSawStops(scoredRows, extraRows, visitByCustomer) {
       score: Number.isFinite(score) ? score : null,
       visit_id: visit?.visit_id ?? null,
       visit_status: visit?.status ?? null,
+      visit_outcome: visit?.visit_outcome ?? null,
+      visit_remarks: visit?.visit_remarks ?? null,
+      visited_at: visit?.visited_at ?? null,
     };
   });
 
@@ -251,9 +356,17 @@ export function orderAssignedSawStops(scoredRows, extraRows, visitByCustomer) {
 }
 
 /**
- * When the collector has Collection visits for scheduledDate, return only those customers in SAW rank order.
+ * When the collector has Collection visits for scheduledDate, return only those customers,
+ * ordered by Priority-Aware Route Optimization (combining SAW priority with road-network distances)
+ * while preserving original SAW scores and rankings.
  */
-export async function computeAssignedSawRoute(pool, { collectorId, branchId, scheduledDate, asOfDate }) {
+export async function computeAssignedSawRoute(pool, {
+  collectorId,
+  branchId,
+  scheduledDate,
+  asOfDate,
+  optimizeRoute = true,
+}) {
   const date = scheduledDate || manilaDateString();
   const assignments = await getCollectionAssignmentsForDate(pool, collectorId, date);
 
@@ -261,8 +374,9 @@ export async function computeAssignedSawRoute(pool, { collectorId, branchId, sch
     return {
       asOf: asOfDate || manilaDateString(),
       ranked: [],
-      stats: { assigned: 0, onRoute: 0 },
+      stats: { assigned: 0, onRoute: 0, completed: 0, pending: 0 },
       assignmentMode: true,
+      published: false,
       scheduledDate: date,
     };
   }
@@ -274,6 +388,7 @@ export async function computeAssignedSawRoute(pool, { collectorId, branchId, sch
     collectorId,
     branchId,
     asOfDate,
+    scheduledDate: date,
   });
 
   const filtered = ranked.filter((r) => assignedIds.has(Number(r.customer_id)));
@@ -285,16 +400,77 @@ export async function computeAssignedSawRoute(pool, { collectorId, branchId, sch
 
   const rankedAssigned = orderAssignedSawStops(filtered, extras, visitByCustomer);
 
+  // Determine depot coordinates from stop branch metadata or branches table
+  let depotLat = Number(rankedAssigned[0]?.branch_lat);
+  let depotLon = Number(rankedAssigned[0]?.branch_lon);
+  if ((!Number.isFinite(depotLat) || !Number.isFinite(depotLon)) && branchId != null) {
+    const bRes = await pool.query(
+      `SELECT latitude::float AS lat, longitude::float AS lon FROM branches WHERE id = $1`,
+      [branchId]
+    );
+    depotLat = Number(bRes.rows[0]?.lat);
+    depotLon = Number(bRes.rows[0]?.lon);
+  }
+
+  let optimizedAssigned = rankedAssigned.map((row, idx) => ({
+    ...row,
+    route_sequence: idx + 1,
+    routeIndex: idx + 1,
+  }));
+  let roadProvider = 'priority-order';
+
+  // BM detail / fast reads can skip OSRM; Collector route and preview still optimize.
+  if (optimizeRoute && Number.isFinite(depotLat) && Number.isFinite(depotLon) && rankedAssigned.length >= 1) {
+    const coordRows = rankedAssigned.filter(
+      (r) => Number.isFinite(Number(r.cust_lat)) && Number.isFinite(Number(r.cust_lon))
+    );
+    let costMatrix = null;
+    let distanceMatrixKm = null;
+    let durationMatrixMin = null;
+
+    if (coordRows.length >= 2) {
+      const waypointsLonLat = [
+        [depotLon, depotLat],
+        ...coordRows.map((r) => [Number(r.cust_lon), Number(r.cust_lat)]),
+      ];
+      try {
+        const table = await Promise.race([
+          osrmDrivingTable(waypointsLonLat),
+          new Promise((_, reject) => setTimeout(() => reject(new Error('OSRM table timeout')), 4500)),
+        ]);
+        costMatrix = table.durationsMin;
+        distanceMatrixKm = table.distancesKm;
+        durationMatrixMin = table.durationsMin;
+        roadProvider = 'osrm';
+      } catch {
+        roadProvider = 'haversine-fallback';
+      }
+    }
+
+    optimizedAssigned = optimizePriorityAwareRoute({
+      depot: { lat: depotLat, lon: depotLon },
+      stops: rankedAssigned,
+      costMatrix,
+      distanceMatrixKm,
+      durationMatrixMin,
+    });
+  }
+
+  const completedCount = optimizedAssigned.filter((row) => row.visit_status === 'Completed').length;
+
   return {
     asOf,
-    ranked: rankedAssigned,
+    ranked: optimizedAssigned,
     stats: {
       ...stats,
       assigned: assignments.length,
-      onRoute: rankedAssigned.length,
-      completed: rankedAssigned.filter((row) => row.visit_status === 'Completed').length,
+      onRoute: optimizedAssigned.length,
+      completed: completedCount,
+      pending: Math.max(0, optimizedAssigned.length - completedCount),
+      roadProvider,
     },
     assignmentMode: true,
+    published: true,
     scheduledDate: date,
   };
 }
@@ -304,6 +480,7 @@ async function fetchAssignedCustomersOutsideSaw(pool, customerIds, collectorId, 
   const result = await pool.query(
     `SELECT
        c.customer_id,
+       c.customer_code,
        c.first_name,
        c.last_name,
        c.address,
@@ -333,6 +510,7 @@ async function fetchAssignedCustomersOutsideSaw(pool, customerIds, collectorId, 
     const balance = Number(row.outstanding_balance) || 0;
     return {
       customer_id: row.customer_id,
+      customer_code: row.customer_code || null,
       collector_id: collectorId,
       first_name: row.first_name,
       last_name: row.last_name,
@@ -352,6 +530,110 @@ async function fetchAssignedCustomersOutsideSaw(pool, customerIds, collectorId, 
       generated_at: asOf,
     };
   });
+}
+
+/**
+ * Preview an optimized visiting order for selected customers without publishing.
+ * Uses the same Priority-Aware optimizer as the Collector published route.
+ */
+export async function previewCollectionRoute(pool, {
+  collectorId,
+  branchId,
+  customerIds,
+  scheduledDate,
+  asOfDate,
+}) {
+  const date = scheduledDate || manilaDateString();
+  const asOf = asOfDate || date;
+  const uniqueIds = [...new Set((customerIds || []).map(Number).filter((n) => Number.isFinite(n) && n > 0))];
+  if (!uniqueIds.length) {
+    return {
+      asOf,
+      ranked: [],
+      stats: { selected: 0, optimized: 0, roadProvider: null },
+      scheduledDate: date,
+      published: false,
+    };
+  }
+
+  const { ranked } = await computeCollectorSawPriority(pool, {
+    collectorId,
+    branchId,
+    asOfDate: asOf,
+    scheduledDate: date,
+  });
+  const selected = ranked.filter((r) => uniqueIds.includes(Number(r.customer_id)));
+  const selectedIds = new Set(selected.map((r) => Number(r.customer_id)));
+  const missingIds = uniqueIds.filter((id) => !selectedIds.has(id));
+  const extras = missingIds.length
+    ? await fetchAssignedCustomersOutsideSaw(pool, missingIds, collectorId, asOf)
+    : [];
+  const combined = orderAssignedSawStops(selected, extras, new Map());
+
+  let depotLat = Number(combined[0]?.branch_lat);
+  let depotLon = Number(combined[0]?.branch_lon);
+  if ((!Number.isFinite(depotLat) || !Number.isFinite(depotLon)) && branchId != null) {
+    const bRes = await pool.query(
+      `SELECT latitude::float AS lat, longitude::float AS lon FROM branches WHERE id = $1`,
+      [branchId]
+    );
+    depotLat = Number(bRes.rows[0]?.lat);
+    depotLon = Number(bRes.rows[0]?.lon);
+  }
+
+  let optimized = combined.map((row, idx) => ({
+    ...row,
+    route_sequence: idx + 1,
+    routeIndex: idx + 1,
+  }));
+  let roadProvider = 'priority-order';
+
+  if (Number.isFinite(depotLat) && Number.isFinite(depotLon) && combined.length >= 1) {
+    const coordRows = combined.filter(
+      (r) => Number.isFinite(Number(r.cust_lat)) && Number.isFinite(Number(r.cust_lon))
+    );
+    let costMatrix = null;
+    let distanceMatrixKm = null;
+    let durationMatrixMin = null;
+    if (coordRows.length >= 2) {
+      const waypointsLonLat = [
+        [depotLon, depotLat],
+        ...coordRows.map((r) => [Number(r.cust_lon), Number(r.cust_lat)]),
+      ];
+      try {
+        const table = await Promise.race([
+          osrmDrivingTable(waypointsLonLat),
+          new Promise((_, reject) => setTimeout(() => reject(new Error('OSRM table timeout')), 4500)),
+        ]);
+        costMatrix = table.durationsMin;
+        distanceMatrixKm = table.distancesKm;
+        durationMatrixMin = table.durationsMin;
+        roadProvider = 'osrm';
+      } catch {
+        roadProvider = 'haversine-fallback';
+      }
+    }
+    optimized = optimizePriorityAwareRoute({
+      depot: { lat: depotLat, lon: depotLon },
+      stops: combined,
+      costMatrix,
+      distanceMatrixKm,
+      durationMatrixMin,
+    });
+  }
+
+  return {
+    asOf,
+    ranked: optimized,
+    stats: {
+      selected: uniqueIds.length,
+      optimized: optimized.length,
+      roadProvider,
+      blocked: optimized.filter((r) => r.assignment_block).length,
+    },
+    scheduledDate: date,
+    published: false,
+  };
 }
 
 export async function assignCollectionVisits(pool, {
@@ -378,28 +660,54 @@ export async function assignCollectionVisits(pool, {
         continue;
       }
 
+      // Same customer + same date must not have an active Collection visit for ANY collector.
       const existing = await client.query(
-        `SELECT visit_id FROM field_visits
-         WHERE user_id = $1 AND customer_id = $2 AND visit_type = 'Collection'
-           AND scheduled_date = $3::date AND status IN ('Pending', 'Completed')`,
-        [collectorId, customerId, date]
+        `SELECT fv.visit_id, fv.user_id, fv.status,
+                COALESCE(NULLIF(TRIM(CONCAT_WS(' ', u.first_name, u.last_name)), ''), 'Collector') AS collector_name
+         FROM field_visits fv
+         JOIN users u ON u.id = fv.user_id
+         WHERE fv.customer_id = $1
+           AND fv.visit_type = 'Collection'
+           AND fv.scheduled_date = $2::date
+           AND fv.status IN ('Pending', 'Completed')
+         ORDER BY fv.visit_id ASC
+         LIMIT 1
+         FOR UPDATE`,
+        [customerId, date]
       );
       if (existing.rows.length) {
+        const row = existing.rows[0];
+        const sameCollector = Number(row.user_id) === Number(collectorId);
         skipped.push({
           customer_id: customerId,
-          reason: 'already_scheduled',
-          visit_id: existing.rows[0].visit_id,
+          reason: sameCollector ? 'already_scheduled' : 'assigned_to_other_collector',
+          visit_id: row.visit_id,
+          assigned_collector_id: row.user_id,
+          assigned_collector_name: row.collector_name,
+          visit_status: row.status,
         });
         continue;
       }
 
-      const ins = await client.query(
-        `INSERT INTO field_visits (customer_id, user_id, visit_type, scheduled_date, status)
-         VALUES ($1, $2, 'Collection', $3::date, 'Pending')
-         RETURNING visit_id, customer_id, scheduled_date, status`,
-        [customerId, collectorId, date]
-      );
-      created.push(ins.rows[0]);
+      try {
+        const ins = await client.query(
+          `INSERT INTO field_visits (customer_id, user_id, visit_type, scheduled_date, status)
+           VALUES ($1, $2, 'Collection', $3::date, 'Pending')
+           RETURNING visit_id, customer_id, scheduled_date, status`,
+          [customerId, collectorId, date]
+        );
+        created.push(ins.rows[0]);
+      } catch (insertErr) {
+        // Concurrent insert race — unique index may reject duplicates.
+        if (insertErr?.code === '23505') {
+          skipped.push({
+            customer_id: customerId,
+            reason: 'assignment_conflict',
+          });
+          continue;
+        }
+        throw insertErr;
+      }
     }
     await client.query('COMMIT');
     return { created, skipped, scheduledDate: date };

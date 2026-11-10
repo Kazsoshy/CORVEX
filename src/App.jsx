@@ -8,8 +8,13 @@ import { BranchManagerPageBody } from './components/branchManager/BranchManagerP
 import { CustomerPageBody } from './components/customer/CustomerPageBody';
 import { SuperAdminPageBody } from './components/superAdmin/SuperAdminPageBody';
 import { Toast, useToast } from './components/shared/Toast';
-import { getEntryPathForRole, logout, getCurrentUser, getUserAssignedLocation } from './api/authService.js';
+import { getEntryPathForRole, logout, getCurrentUser, getUserAssignedLocation, refreshSessionPermissions } from './api/authService.js';
 import { IdleSessionMonitor } from './components/IdleSessionMonitor.jsx';
+import {
+  canAccessSuperAdminPage,
+  filterNavByPermissions,
+  firstAllowedSuperAdminPath,
+} from './utils/permissions.js';
 import logo from './assets/corvex-logo.png';
 import { LoginPage } from './components/auth/LoginPage';
 import { LandingPage } from './components/landing/LandingPage';
@@ -34,41 +39,92 @@ import { customerRole } from './rolePages/customer';
 import { superAdminRole } from './rolePages/superAdmin';
 import { resolveSuperAdminPage, isSuperAdminNavActive } from './utils/superAdminRoutes';
 import { isBranchManagerNavActive, resolveBranchManagerPage } from './utils/branchManagerRoutes';
-import { SIDEBAR_EVENT } from './settings/preferences.js';
+import { SIDEBAR_EVENT, isSidebarCollapsedPref, setSidebarCollapsedPref } from './settings/preferences.js';
 import { ShortcutDialog } from './components/shared/ShortcutDialog';
+import { TopNavbar } from './components/shared/TopNavbar';
 import { useMyAvatar } from './components/shared/ProfilePhoto.jsx';
 import { fetchNotifications } from './api/notificationService.js';
+
+/** Roles that have a dedicated personal settings page (not system/ops settings). */
+const PERSONAL_SETTINGS_PREFIXES = new Set([
+  'sales',
+  'warehouse',
+  'collector',
+  'branch-manager',
+  'customer',
+]);
 
 const ROLES = [collectorRole, salesRole, warehouseRole, operatingManagerRole, branchManagerRole, customerRole, superAdminRole];
 const ROLE_BY_KEY = Object.fromEntries(ROLES.map((role) => [role.key, role]));
 const ROUTE_REGISTRY = Object.assign({}, ...ROLES.map((role) => role.routes));
 
-/** Profile and Settings stay with the account row, not the main navigation. */
-function isSidebarUtilityNavLink(link) {
+/** Profile, Settings, and Notifications stay in the global top navbar, not the main sidebar navigation. */
+function isSidebarUtilityNavLink(link, { keepNotifications = false } = {}) {
   if (!link) return false;
   const label = String(link.label || '').trim().toLowerCase();
   if (label === 'profile' || label === 'settings') return true;
-  return /\/profile\/?$/i.test(String(link.to || ''));
+  if (!keepNotifications && label === 'notifications') return true;
+  const path = String(link.to || '');
+  if (keepNotifications) return /\/profile\/?$/i.test(path);
+  return /\/(profile|notifications)\/?$/i.test(path);
 }
 
-function withoutStandaloneProfileNav(links = []) {
-  return links.filter((link) => !isSidebarUtilityNavLink(link));
+function withoutStandaloneProfileNav(links = [], options) {
+  return links.filter((link) => !isSidebarUtilityNavLink(link, options));
 }
 
-function sidebarSectionsWithoutProfile(sections = []) {
+function sidebarSectionsWithoutProfile(sections = [], options) {
   return sections
     .map((section) => ({
       ...section,
-      items: withoutStandaloneProfileNav(section.items || []),
+      items: withoutStandaloneProfileNav(section.items || [], options),
     }))
     .filter((section) => section.items.length > 0);
 }
 
+function rolePathPrefix(role) {
+  if (!role?.entryPath) return null;
+  return String(role.entryPath).split('/').filter(Boolean)[0] || null;
+}
+
 function profilePathForRole(role) {
   if (role?.key === 'customer') return '/customer/my-profile';
-  if (!role?.entryPath) return null;
-  const prefix = String(role.entryPath).split('/').filter(Boolean)[0];
+  const prefix = rolePathPrefix(role);
   return prefix ? `/${prefix}/profile` : null;
+}
+
+function notificationsPathForRole(role) {
+  const prefix = rolePathPrefix(role);
+  return prefix ? `/${prefix}/notifications` : null;
+}
+
+function settingsPathForRole(role) {
+  const prefix = rolePathPrefix(role);
+  if (!prefix) return null;
+  if (PERSONAL_SETTINGS_PREFIXES.has(prefix)) return `/${prefix}/settings`;
+  return `/${prefix}/profile?tab=settings`;
+}
+
+function profileTabPath(profilePath, tab) {
+  if (!profilePath) return null;
+  if (!tab || tab === 'account') return profilePath;
+  return `${profilePath}?tab=${encodeURIComponent(tab)}`;
+}
+
+function resolveAccountMenuActiveId(pathname, search, profilePath, settingsPath) {
+  const params = new URLSearchParams(search || '');
+  const tab = String(params.get('tab') || '').trim().toLowerCase();
+
+  if (settingsPath && !settingsPath.includes('?') && pathname === settingsPath) {
+    return 'settings';
+  }
+  if (profilePath && pathname === profilePath) {
+    if (tab === 'security') return 'security';
+    if (tab === 'session' || tab === 'activity') return 'session';
+    if (tab === 'settings') return 'settings';
+    return 'account';
+  }
+  return null;
 }
 
 function App() {
@@ -131,7 +187,7 @@ function PrototypeShell() {
   const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
   const { toast, showToast, clearToast } = useToast();
 
-  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(() => localStorage.getItem('corvex_sidebar_collapsed') === 'true');
+  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(() => isSidebarCollapsedPref());
   const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const [announce, setAnnounce] = useState('');
@@ -151,14 +207,21 @@ function PrototypeShell() {
   }, [isCustomer, isCustomerLogin, location.pathname]);
 
   useEffect(() => {
-    localStorage.setItem('corvex_sidebar_collapsed', String(isSidebarCollapsed));
-    window.dispatchEvent(new CustomEvent(SIDEBAR_EVENT, { detail: isSidebarCollapsed }));
+    if (isSidebarCollapsedPref() === isSidebarCollapsed) return;
+    setSidebarCollapsedPref(isSidebarCollapsed);
   }, [isSidebarCollapsed]);
 
   useEffect(() => {
     const onSidebar = (event) => setIsSidebarCollapsed(Boolean(event.detail));
+    const syncFromSession = () => setIsSidebarCollapsed(isSidebarCollapsedPref());
     window.addEventListener(SIDEBAR_EVENT, onSidebar);
-    return () => window.removeEventListener(SIDEBAR_EVENT, onSidebar);
+    window.addEventListener('corvex-session-ready', syncFromSession);
+    window.addEventListener('corvex-signed-out', syncFromSession);
+    return () => {
+      window.removeEventListener(SIDEBAR_EVENT, onSidebar);
+      window.removeEventListener('corvex-session-ready', syncFromSession);
+      window.removeEventListener('corvex-signed-out', syncFromSession);
+    };
   }, []);
 
   useEffect(() => {
@@ -230,6 +293,44 @@ function PrototypeShell() {
     if (!onOwnArea) navigate(home, { replace: true });
   }, [location.pathname, navigate, currentRole]);
 
+  // Keep session permissions fresh so Super Admin grant changes take effect after refresh.
+  useEffect(() => {
+    const token = localStorage.getItem('corvex_token');
+    if (!token || !getCurrentUser()) return undefined;
+    let active = true;
+    refreshSessionPermissions().then(() => {
+      if (active) window.dispatchEvent(new Event('corvex-permissions-updated'));
+    });
+    const onFocus = () => {
+      refreshSessionPermissions().then(() => {
+        window.dispatchEvent(new Event('corvex-permissions-updated'));
+      });
+    };
+    window.addEventListener('focus', onFocus);
+    return () => {
+      active = false;
+      window.removeEventListener('focus', onFocus);
+    };
+  }, []);
+
+  const [permVersion, setPermVersion] = useState(0);
+  useEffect(() => {
+    const bump = () => setPermVersion((v) => v + 1);
+    window.addEventListener('corvex-permissions-updated', bump);
+    window.addEventListener('corvex-session-ready', bump);
+    return () => {
+      window.removeEventListener('corvex-permissions-updated', bump);
+      window.removeEventListener('corvex-session-ready', bump);
+    };
+  }, []);
+
+  // Block direct URL access to Super Admin pages without the matching View permission.
+  useEffect(() => {
+    if (!isSuperAdmin || !page?.pageType) return;
+    if (canAccessSuperAdminPage(page.pageType)) return;
+    navigate(firstAllowedSuperAdminPath(), { replace: true });
+  }, [isSuperAdmin, page?.pageType, navigate, permVersion, location.pathname]);
+
   useEffect(() => {
     const handleRequestLogout = () => setShowLogoutConfirm(true);
     window.addEventListener('request-logout', handleRequestLogout);
@@ -250,16 +351,54 @@ function PrototypeShell() {
       ];
     }
 
-    return withoutStandaloneProfileNav(currentRole.navPages || []);
-  }, [currentRole, location.pathname]);
+    const links = withoutStandaloneProfileNav(currentRole.navPages || [], {
+      keepNotifications: currentRole.key === 'customer',
+    });
+    if (currentRole.key === 'superAdmin') {
+      return filterNavByPermissions(links);
+    }
+    return links;
+  }, [currentRole, location.pathname, permVersion]);
 
   const sidebarSections = useMemo(
-    () => sidebarSectionsWithoutProfile(currentRole?.navSections || []),
+    () => sidebarSectionsWithoutProfile(currentRole?.navSections || [], {
+      keepNotifications: currentRole?.key === 'customer',
+    }),
     [currentRole]
   );
 
   const profilePath = useMemo(() => profilePathForRole(currentRole), [currentRole]);
-  const isProfileActive = Boolean(profilePath && location.pathname === profilePath);
+  const settingsPath = useMemo(() => settingsPathForRole(currentRole), [currentRole]);
+  const notificationsPath = useMemo(() => {
+    const base = notificationsPathForRole(currentRole);
+    if (!base) return null;
+    if (isSuperAdmin && !canAccessSuperAdminPage('notifications')) return null;
+    return base;
+  }, [currentRole, isSuperAdmin, permVersion]);
+  const accountMenuActiveId = useMemo(
+    () => resolveAccountMenuActiveId(location.pathname, location.search, profilePath, settingsPath),
+    [location.pathname, location.search, profilePath, settingsPath]
+  );
+  const isProfileActive = Boolean(
+    accountMenuActiveId
+    || (settingsPath && !settingsPath.includes('?') && location.pathname === settingsPath)
+  );
+  const isNotificationsPage = Boolean(notificationsPath && location.pathname === notificationsPath);
+  const showTopNavbar = Boolean(currentRole && !isAuthPath(location.pathname) && !isCustomerLogin);
+
+  const handleAccountMenuSelect = useCallback((itemId) => {
+    closeMobileSidebar();
+    if (!profilePath) return;
+    if (itemId === 'settings' && settingsPath) {
+      navigate(settingsPath);
+      return;
+    }
+    navigate(profileTabPath(profilePath, itemId));
+  }, [closeMobileSidebar, navigate, profilePath, settingsPath]);
+
+  const handleAccountMenuLogout = useCallback(() => {
+    setShowLogoutConfirm(true);
+  }, []);
 
   const isNavItemActive = useCallback((to) => {
     if (!to) return false;
@@ -340,84 +479,82 @@ function PrototypeShell() {
 
           {currentRole && !isAuthPath(location.pathname) && !isCustomerLogin ? (
             <>
+              {/* Sidebar Navigation Links */}
               <nav className="nav-links">
                 {sidebarSections.length ? (
-                  sidebarSections.map((section) => (
-                    <details key={section.title} className="nav-group" open>
-                      <summary className="nav-group-summary">
-                        <span>{section.title}</span>
-                        <span className="nav-group-chevron" aria-hidden="true">
-                          <NavIcon name="chevronRight" />
-                        </span>
-                      </summary>
-                      <div className="nav-group-items">
-                        {section.items.map((link) => (
+                  /* render sections */
+                  (() => {
+                    const dashboardSec = sidebarSections.find(
+                      (sec) => sec.title && sec.title.trim().toLowerCase() === 'dashboard'
+                    );
+                    const dashboardLink = dashboardSec?.items?.[0] || (currentRole?.entryPath ? { label: 'Dashboard', to: currentRole.entryPath } : null);
+                    const otherSections = sidebarSections.filter(
+                      (sec) => !sec.title || sec.title.trim().toLowerCase() !== 'dashboard'
+                    );
+
+                    return (
+                      <>
+                        {dashboardLink && (
                           <Link
-                            key={link.to}
-                            to={link.to}
+                            key={dashboardLink.to}
+                            to={dashboardLink.to}
                             onClick={closeMobileSidebar}
-                            className={
-                              isRoleModule
-                                ? (isCollector
-                                  ? isCollectorNavActive(fullPath, link.to)
-                                  : isSales
-                                    ? isSalesNavActive(fullPath, link.to)
-                                    : isWarehouse
-                                      ? isWarehouseNavActive(fullPath, link.to)
-                                      : isOperatingManager
-                                        ? isOperatingManagerNavActive(fullPath, link.to)
-                                        : isBranchManager
-                                          ? isBranchManagerNavActive(fullPath, link.to)
-                                          : isSuperAdmin
-                                            ? isSuperAdminNavActive(fullPath, link.to)
-                                            : isCustomerNavActive(fullPath, link.to))
-                                  ? 'nav-link active'
-                                  : 'nav-link'
-                                : location.pathname === link.to
-                                  ? 'nav-link active'
-                                  : 'nav-link'
-                            }
-                            data-tooltip={link.label}
+                            className={isNavItemActive(dashboardLink.to) ? 'nav-link active' : 'nav-link'}
+                            aria-current={isNavItemActive(dashboardLink.to) ? 'page' : undefined}
+                            data-tooltip={dashboardLink.label || 'Dashboard'}
                           >
                             <span className="nav-link-icon">
-                              <NavIcon label={link.label} />
+                              <NavIcon label={dashboardLink.label || 'Dashboard'} />
                             </span>
-                            <span className="nav-link-text">{link.label}</span>
-                            {isCustomer && link.label === 'Notifications' && customerUnread > 0 ? (
-                              <span className="cp-nav-badge">{customerUnread > 9 ? '9+' : customerUnread}</span>
-                            ) : null}
+                            <span className="nav-link-text">{dashboardLink.label || 'Dashboard'}</span>
                           </Link>
+                        )}
+                        {otherSections.map((section) => (
+                          <details key={section.title} className="nav-group" open={isSidebarCollapsed ? true : undefined}>
+                            <summary
+                              className="nav-group-summary"
+                              onClick={(e) => {
+                                if (isSidebarCollapsed) e.preventDefault();
+                              }}
+                            >
+                              <span>{section.title}</span>
+                              <span className="nav-group-chevron" aria-hidden="true">
+                                <NavIcon name="chevronRight" />
+                              </span>
+                            </summary>
+                            <div className="nav-group-items">
+                              {section.items.map((link) => (
+                                <Link
+                                  key={link.to}
+                                  to={link.to}
+                                  onClick={closeMobileSidebar}
+                                  className={isNavItemActive(link.to) ? 'nav-link active' : 'nav-link'}
+                                  aria-current={isNavItemActive(link.to) ? 'page' : undefined}
+                                  data-tooltip={link.label}
+                                >
+                                  <span className="nav-link-icon">
+                                    <NavIcon label={link.label} />
+                                  </span>
+                                  <span className="nav-link-text">{link.label}</span>
+                                  {isCustomer && link.label === 'Notifications' && customerUnread > 0 ? (
+                                    <span className="cp-nav-badge">{customerUnread > 9 ? '9+' : customerUnread}</span>
+                                  ) : null}
+                                </Link>
+                              ))}
+                            </div>
+                          </details>
                         ))}
-                      </div>
-                    </details>
-                  ))
+                      </>
+                    );
+                  })()
                 ) : (
                   topLinks.map((link) => (
                     <Link
                       key={link.to}
                       to={link.to}
                       onClick={closeMobileSidebar}
-                      className={
-                        isRoleModule
-                          ? (isCollector
-                            ? isCollectorNavActive(fullPath, link.to)
-                            : isSales
-                              ? isSalesNavActive(fullPath, link.to)
-                              : isWarehouse
-                                ? isWarehouseNavActive(fullPath, link.to)
-                                : isOperatingManager
-                                  ? isOperatingManagerNavActive(fullPath, link.to)
-                                  : isBranchManager
-                                    ? isBranchManagerNavActive(fullPath, link.to)
-                                    : isSuperAdmin
-                                      ? isSuperAdminNavActive(fullPath, link.to)
-                                      : isCustomerNavActive(fullPath, link.to))
-                            ? 'nav-link active'
-                            : 'nav-link'
-                          : location.pathname === link.to
-                            ? 'nav-link active'
-                            : 'nav-link'
-                      }
+                      className={isNavItemActive(link.to) ? 'nav-link active' : 'nav-link'}
+                      aria-current={isNavItemActive(link.to) ? 'page' : undefined}
                       data-tooltip={link.label}
                     >
                       <span className="nav-link-icon">
@@ -448,7 +585,7 @@ function PrototypeShell() {
             </nav>
           )}
         </div>
-        {currentRole && !isAuthPath(location.pathname) && !isCustomerLogin && (
+        {currentRole?.key === 'customer' && !isAuthPath(location.pathname) && !isCustomerLogin && (
           <div className="sidebar-footer">
             <div
               className={`sidebar-profile${isProfileActive ? ' active' : ''}`}
@@ -490,36 +627,37 @@ function PrototypeShell() {
               <span className="sidebar-switch-icon">
                 <NavIcon name="login" />
               </span>
-              <span className="sidebar-switch-text">{currentRole?.key === 'customer' ? 'Sign Out' : 'Logout'}</span>
+              <span className="sidebar-switch-text">Sign Out</span>
             </button>
           </div>
         )}
       </aside>
 
+      {showTopNavbar ? (
+        <TopNavbar
+          currentRole={currentRole}
+          currentUser={currentUser}
+          userAssignedLocation={userAssignedLocation}
+          pageTitle={pageTitle}
+          breadcrumbs={page?.breadcrumbs}
+          avatarSrc={avatarSrc}
+          isProfileActive={isProfileActive}
+          accountMenuActiveId={accountMenuActiveId}
+          notificationsPath={notificationsPath}
+          isNotificationsPage={isNotificationsPage}
+          onSelectAccountItem={handleAccountMenuSelect}
+          onLogout={handleAccountMenuLogout}
+          onOpenMobileSidebar={openMobileSidebar}
+          isMobileSidebarOpen={isMobileSidebarOpen}
+          pathname={location.pathname}
+          search={location.search}
+          navigate={navigate}
+          showToast={showToast}
+        />
+      ) : null}
+
       <main id="corvex-main" className="content" tabIndex={-1}>
         <div className="content-ambient" aria-hidden="true" />
-
-        <header className="mobile-app-bar">
-          <div className="mobile-app-bar-copy">
-            <span className="mobile-app-bar-brand">{currentRole?.label || 'CORVEX'}</span>
-            {pageTitle && pageTitle !== 'CORVEX' ? (
-              <span className="mobile-app-bar-page">{pageTitle}</span>
-            ) : (
-              <span className="mobile-app-bar-page">CORVEX</span>
-            )}
-          </div>
-          {profilePath ? (
-            <button
-              className="mobile-app-bar-avatar"
-              type="button"
-              onClick={() => navigate(profilePath)}
-              aria-label="Open profile"
-              title="Profile"
-            >
-              {avatarSrc ? <img src={avatarSrc} alt="" /> : <NavIcon name="accounts" />}
-            </button>
-          ) : null}
-        </header>
 
         <Routes>
           <Route path="/password-reset" element={<PasswordResetNotice navigate={navigate} />} />
@@ -750,8 +888,8 @@ function PageBody({ showMap, setShowMap, filter, setFilter, page, currentRole, n
                 zoom={12}
                 height={500}
                 markers={[
-                  { id: '1', position: [7.1907, 125.4553], label: 'A', color: '#0B1E30', popup: 'Marker A' },
-                  { id: '2', position: [7.2000, 125.4500], label: 'B', color: '#408DAD', popup: 'Marker B' }
+                  { id: '1', position: [7.1907, 125.4553], label: 'A', color: '#0B2133', popup: 'Marker A' },
+                  { id: '2', position: [7.2000, 125.4500], label: 'B', color: '#153450', popup: 'Marker B' }
                 ]}
               />
             </div>
@@ -791,8 +929,8 @@ function PageBody({ showMap, setShowMap, filter, setFilter, page, currentRole, n
                 zoom={12}
                 height={500}
                 markers={[
-                  { id: '1', position: [7.1907, 125.4553], label: 'P1', color: '#0B1E30', popup: 'Location 1' },
-                  { id: '2', position: [7.2000, 125.4500], label: 'P2', color: '#408DAD', popup: 'Location 2' }
+                  { id: '1', position: [7.1907, 125.4553], label: 'P1', color: '#0B2133', popup: 'Location 1' },
+                  { id: '2', position: [7.2000, 125.4500], label: 'P2', color: '#153450', popup: 'Location 2' }
                 ]}
               />
             </div>

@@ -1,15 +1,16 @@
 import { getCurrentUser } from '../api/authService.js';
+import { getPreferences } from '../settings/preferences.js';
 
 export function isSalesOfflineEnabled() {
-  return localStorage.getItem('corvex_sales_offline') === '1';
+  return getPreferences().salesOffline === true;
 }
 
 export function isSalesAutoSyncEnabled() {
-  return localStorage.getItem('corvex_sales_autosync') !== '0';
+  return getPreferences().salesAutoSync !== false;
 }
 
 export function isCollectorAutoSyncEnabled() {
-  return localStorage.getItem('corvex_collector_autosync') !== '0';
+  return getPreferences().collectorAutoSync !== false;
 }
 
 export function isAutoSyncEnabledForCurrentUser() {

@@ -5,24 +5,21 @@ import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { formatCurrency, formatDisplayDate, formatDisplayDateTime, formatPaymentTimestamp, formatPhone } from '../../utils/formatters.js';
 import {
-  fetchAccounts,
   fetchAccountById,
-  fetchCollectionPayments,
-  fetchCollectionPaymentById,
-  fetchDigitalReceipts,
-  fetchDigitalReceiptById,
-  sendReceiptToCustomer,
-  fetchTodayFieldVisits,
   fetchSawPriority,
   mapSawRowToRouteStop,
-  fetchFieldActivityReports,
-  submitFieldActivityReport,
   fetchCollectorDashboard,
   fetchCollectorPaymentMethods,
   submitCollectionPayment,
-  submitCollectorCreditInvestigation,
-  submitCollectorIncident,
+  submitFieldVisitOutcome,
 } from '../../api/collectorService';
+import { AccountsPage, AccountDetailPage } from './CollectorCustomers';
+import {
+  CollectionHistoryPage,
+  CollectionPaymentDetailPage,
+  DigitalReceiptPage,
+  ReceiptsRedirectPage,
+} from './CollectorHistory';
 import { fetchNotifications } from '../../api/notificationService.js';
 import { getCurrentUser } from '../../api/authService.js';
 import { isBrowserOnline } from '../../offline/connection.js';
@@ -31,8 +28,13 @@ import { DeviceQueue, loadWaiting } from '../../offline/DeviceQueue.jsx';
 import { flushOfflineQueue } from '../../offline/flushQueue.js';
 import { isCollectorAutoSyncEnabled } from '../../offline/prefs.js';
 import { UserSettingsPanel } from '../shared/UserSettingsPanel';
-import { downloadPdf } from '../../utils/dataExport';
-import { collectorMapPath, openPhoneCall } from '../../utils/mapsNavigation';
+import {
+  collectorMapPath,
+  hasCallablePhone,
+  openExternalNavigation,
+  openNavigateBackToCollector,
+  openPhoneCall,
+} from '../../utils/mapsNavigation';
 import { NotificationsInbox } from '../shared/NotificationsInbox';
 import { EmptyState } from '../shared/EmptyState';
 import { LoadingState } from '../shared/LoadingState';
@@ -41,6 +43,7 @@ import { AccountProfilePanel } from '../shared/AccountProfilePanel';
 import { NavIcon } from '../../navIcons';
 import LeafletMap from '../common/LeafletMap';
 import CollectionRouteMap from './CollectionRouteMap';
+import { FieldActivityReportsPage, FieldActivityReportDetailPage } from './CollectorFieldReports';
 import { fetchDrivingRoute, fetchRouteDepot } from '../../api/routingService';
 import { StatusBadge } from '../StatusBadge';
 function FormPanel({
@@ -95,409 +98,15 @@ function resolveCollectorNotificationPath(category) {
   return '/collector/notifications';
 }
 
-function DashboardPage({
-  navigate,
-  showToast
-}) {
-  const currentUser = getCurrentUser();
-  const today = formatDisplayDate(new Date());
-  const [dashboard, setDashboard] = useState(null);
-  const [unreadCount, setUnreadCount] = useState(0);
-  const [scheduleNotices, setScheduleNotices] = useState([]);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    async function load() {
-      setLoading(true);
-      const [dashRes, notifRes] = await Promise.all([
-        fetchCollectorDashboard(),
-        fetchNotifications(),
-      ]);
-      if (dashRes.success) setDashboard(dashRes.data);
-      else if (showToast) showToast(dashRes.message || 'Failed to load dashboard.', 'error');
-      if (notifRes.success) {
-        const rows = notifRes.data || [];
-        setUnreadCount(rows.filter(n => n.status !== 'Read').length);
-        setScheduleNotices(rows.filter((n) => String(n.category || '').toLowerCase().includes('schedule')).slice(0, 4));
-      }
-      setLoading(false);
-    }
-    load();
-  }, [showToast]);
-
-  const agentName = currentUser?.fullName || 'Collector';
-  const summary = dashboard?.summary || {};
-  const recentCollections = dashboard?.recentCollections || [];
-  const recentFieldReports = dashboard?.recentFieldReports || [];
-  const routeProgress = summary.routeProgressPercent ?? 0;
-
-  if (loading) return <LoadingState message="Loading dashboard..." />;
-
-  return <div className="page">
-      <section className="panel dashboard-greeting">
-        <div className="flex flex-col gap-1">
-          <p className="text-[0.82rem] font-bold tracking-widest uppercase text-navy/60 m-0">Good morning</p>
-          <h2>{agentName}</h2>
-          <p className="text-ink/70">{today}</p>
-        </div>
-        <Link to="/collector/notifications" className="relative p-2 text-ink/70 hover:text-blue hover:bg-blue/5 rounded-full transition-colors cursor-pointer" aria-label={`${unreadCount} unread notifications`}>
-          <NavIcon name="bell" />
-          {unreadCount > 0 ? <span className="absolute top-0 right-0 min-w-[18px] h-[18px] px-1 flex justify-center items-center rounded-full bg-red text-white text-[0.7rem] font-bold border-2 border-mint">{unreadCount}</span> : null}
-        </Link>
-      </section>
-
-      <StatsGrid stats={[{
-      label: 'Collected Today',
-      value: formatCurrency(summary.amountCollectedToday ?? 0)
-    }, {
-      label: 'Collections Today',
-      value: String(summary.collectionsToday ?? 0)
-    }]} />
-
-      {scheduleNotices.length ? (
-        <section className="panel content-panel relative overflow-hidden">
-          <div className="list-section-header">
-            <h3 style={{ margin: 0 }}>Today&apos;s schedule alerts</h3>
-            <button className="button secondary" type="button" onClick={() => navigate('/collector/route')}>Open route</button>
-          </div>
-          <ul className="notification-list" style={{ margin: 0 }}>
-            {scheduleNotices.map((n) => (
-              <li key={n.notification_id} className={`notification-item${n.status === 'Read' ? '' : ' unread'}`}>
-                <div>
-                  <strong>{n.title}</strong>
-                  <p className="muted">{n.message}</p>
-                </div>
-              </li>
-            ))}
-          </ul>
-        </section>
-      ) : null}
-
-      <div className="dashboard-widgets grid two-up">
-        <section className="panel content-panel relative overflow-hidden">
-          <div className="list-section-header">
-            <h3>Recent Collections</h3>
-          </div>
-          {recentCollections.length ? (
-            <div className="corvex-table-wrapper">
-              <table className="corvex-table">
-                <thead>
-                  <tr>
-                    <th>Name</th>
-                    <th>Date</th>
-                    <th>Amount</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {recentCollections.map(item => (
-                    <tr key={item.collectionpayment_id}>
-                      <td><strong>{item.customer_name || '—'}</strong></td>
-                      <td>{formatDisplayDate(item.payment_date)}</td>
-                      <td style={{ fontWeight: 600 }}>{formatCurrency(Number(item.amount))}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          ) : (
-            <EmptyState title="No collections yet" description="Collections logged today will appear here." />
-          )}
-        </section>
-
-        <section className="panel content-panel relative overflow-hidden">
-          <div className="list-section-header">
-            <h3>Recent Field Reports</h3>
-          </div>
-          {recentFieldReports.length ? (
-            <div className="corvex-table-wrapper">
-              <table className="corvex-table">
-                <thead>
-                  <tr>
-                    <th>Type</th>
-                    <th>Name</th>
-                    <th>Date / Time</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {recentFieldReports.map(item => (
-                    <tr key={item.report_id}>
-                      <td><strong>{item.activity_type || '—'}</strong></td>
-                      <td>{item.customer_name || '—'}</td>
-                      <td>{formatDisplayDateTime(item.created_at)}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          ) : (
-            <EmptyState title="No field reports yet" description="Submit field activity from the Field Reports page." actionLabel="Field Reports" onAction={() => navigate('/collector/field-reports')} />
-          )}
-        </section>
-      </div>
-
-      <section className="panel content-panel relative overflow-hidden">
-        <div className="flex flex-col md:flex-row justify-between gap-4 items-start md:items-center mb-4">
-          <h3>Today&apos;s Route Progress</h3>
-          <span className="text-ink/70">View route for updates</span>
-        </div>
-        <div className="progress-bar" role="progressbar" aria-valuenow={routeProgress} aria-valuemin={0} aria-valuemax={100}>
-          <div className="progress-fill" style={{
-          width: `${routeProgress}%`
-        }} />
-        </div>
-        <p className="muted progress-caption">
-          {summary.routeStopsCompleted ?? 0} of {summary.routeStopsTotal ?? 0} today&apos;s visits completed ({routeProgress}%)
-        </p>
-      </section>
-    </div>;
-}
-function FieldActivityReportsPage({
-  showToast
-}) {
-  const [reports, setReports] = useState([]);
-  const [visits, setVisits] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [submitting, setSubmitting] = useState(false);
-  const [form, setForm] = useState({
-    visit_id: '',
-    activity_type: '',
-    remarks: '',
-    photo: '',
-    photoName: '',
-  });
-  const [errors, setErrors] = useState({});
-  const [deviceReports, setDeviceReports] = useState([]);
-  async function loadReports() {
-    setLoading(true);
-    const [reportsResult, visitsResult] = await Promise.all([fetchFieldActivityReports(), fetchTodayFieldVisits()]);
-    if (reportsResult.success) setReports(reportsResult.data || []);
-    if (visitsResult.success) setVisits(visitsResult.data || []);
-    setDeviceReports(await loadWaiting('field_activity_reports'));
-    setLoading(false);
-  }
-  useEffect(() => {
-    loadReports();
-  }, []);
-  const handleSubmit = async e => {
-    e.preventDefault();
-    const nextErrors = {};
-    if (!form.visit_id) nextErrors.visit_id = 'Select a visit.';
-    if (!form.activity_type) nextErrors.activity_type = 'Select an activity type.';
-    if (!form.remarks.trim()) nextErrors.remarks = 'Remarks are required.';
-    if (!form.photo) nextErrors.photo = 'Photo evidence is required.';
-    setErrors(nextErrors);
-    if (Object.keys(nextErrors).length) return;
-    const visit = visits.find((row) => String(row.visit_id) === String(form.visit_id));
-    const payload = {
-      visit_id: Number(form.visit_id),
-      activity_type: form.activity_type,
-      remarks: form.remarks.trim(),
-      photo: form.photo,
-      customer_name: visit?.customer_name || '',
-      visit_status: visit?.status || '',
-    };
-    const keepLocal = async () => {
-      await saveOfflineRecord({ tableName: 'field_activity_reports', payload });
-      showToast(
-        isCollectorAutoSyncEnabled()
-          ? 'Saved on this device. It will sync when you are online.'
-          : 'Saved on this device. Send it from Settings while auto-sync is off.',
-        'success'
-      );
-      setForm({ visit_id: '', activity_type: '', remarks: '', photo: '', photoName: '' });
-      setDeviceReports(await loadWaiting('field_activity_reports'));
-    };
-    if (!isBrowserOnline()) {
-      await keepLocal();
-      return;
-    }
-    setSubmitting(true);
-    const result = await submitFieldActivityReport(payload);
-    setSubmitting(false);
-    if (result.success) {
-      showToast(result.message || 'Report submitted to Operating Manager.', 'success');
-      setForm({
-        visit_id: '',
-        activity_type: '',
-        remarks: '',
-        photo: '',
-        photoName: '',
-      });
-      loadReports();
-    } else if (result.offline) {
-      await keepLocal();
-    } else {
-      showToast(result.message || 'Failed to submit report.', 'error');
-    }
-  };
-  const pagination_reports = usePagination(reports);
-  const paginated_reports = pagination_reports.paginatedData;
-  if (loading) return <LoadingState message="Loading field activity reports..." />;
-  return <div className="page">
-      <section className="panel content-panel relative overflow-hidden">
-        <div className="flex flex-col md:flex-row justify-between gap-4 items-start md:items-center mb-4">
-          <div>
-            <h3>Field Activity Reports</h3>
-            <p className="text-ink/70" style={{
-            margin: '4px 0 0',
-            fontSize: '0.82rem'
-          }}>
-              Submit visit activity to the Operating Manager ({reports.length} report{reports.length !== 1 ? 's' : ''} on file)
-            </p>
-          </div>
-        </div>
-
-        <DeviceQueue rows={deviceReports} />
-
-        <form className="field-report-form" onSubmit={handleSubmit}>
-        <div className="field-report-filter-row">
-          <label className="field-report-field">
-            <span>Visit / Customer<span className="required">*</span></span>
-            <select className="filter-select" value={form.visit_id} onChange={e => setForm(p => ({
-              ...p,
-              visit_id: e.target.value
-            }))}>
-              <option value="">Select today&apos;s visit</option>
-              {visits.map(v => <option key={v.visit_id} value={v.visit_id}>
-                  {v.customer_name} — {v.visit_type} ({formatDisplayDate(v.scheduled_date)}, {v.status})
-                </option>)}
-            </select>
-            {errors.visit_id ? <p className="form-error">{errors.visit_id}</p> : null}
-          </label>
-          <label className="field-report-field">
-            <span>Activity Type<span className="required">*</span></span>
-            <select className="filter-select" value={form.activity_type} onChange={e => setForm(p => ({
-              ...p,
-              activity_type: e.target.value
-            }))}>
-              <option value="">Select activity type</option>
-              {['Collection', 'Sales Visit', 'Delivery', 'Site Check', 'Follow-up', 'Customer Not Available'].map(t => <option key={t} value={t}>{t}</option>)}
-            </select>
-            {errors.activity_type ? <p className="form-error">{errors.activity_type}</p> : null}
-          </label>
-        </div>
-        {!visits.length ? <p className="field-report-hint">
-            No visits scheduled for today. Reports can be filed once a visit is assigned.
-          </p> : null}
-        <div className="form-group field-report-block">
-          <label>Remarks<span className="required">*</span></label>
-          <textarea rows={3} placeholder="Describe the visit outcome, payment collected, or follow-up needed..." value={form.remarks} onChange={e => setForm(p => ({
-            ...p,
-            remarks: e.target.value
-          }))} />
-          {errors.remarks ? <p className="form-error">{errors.remarks}</p> : null}
-        </div>
-        <div className="form-group field-report-block">
-          <label>Photo Evidence<span className="required">*</span></label>
-          <input
-            type="file"
-            accept="image/*"
-            capture="environment"
-            onChange={(e) => {
-              const file = e.target.files?.[0];
-              if (!file) {
-                setForm((p) => ({ ...p, photo: '', photoName: '' }));
-                return;
-              }
-              if (!file.type.startsWith('image/')) {
-                setErrors((prev) => ({ ...prev, photo: 'Please select an image file.' }));
-                return;
-              }
-              if (file.size > 700_000) {
-                setErrors((prev) => ({ ...prev, photo: 'Image must be 700 KB or smaller.' }));
-                return;
-              }
-              const reader = new FileReader();
-              reader.onload = () => {
-                setForm((p) => ({
-                  ...p,
-                  photo: typeof reader.result === 'string' ? reader.result : '',
-                  photoName: file.name,
-                }));
-                setErrors((prev) => {
-                  const next = { ...prev };
-                  delete next.photo;
-                  return next;
-                });
-              };
-              reader.readAsDataURL(file);
-            }}
-          />
-          {form.photoName ? (
-            <p className="text-ink/70" style={{ fontSize: '0.82rem', marginTop: 6 }}>
-              Selected: {form.photoName}
-            </p>
-          ) : null}
-          {form.photo ? (
-            <img
-              src={form.photo}
-              alt="Report preview"
-              style={{ marginTop: 8, maxWidth: 200, maxHeight: 140, borderRadius: 8, border: '1px solid #BADBE9' }}
-            />
-          ) : null}
-          {errors.photo ? <p className="form-error">{errors.photo}</p> : null}
-        </div>
-        <div className="flex justify-end">
-          <button className="button" type="submit" disabled={submitting || !visits.length}>
-            {submitting ? 'Submitting…' : 'Submit to Operating Manager'}
-          </button>
-        </div>
-        </form>
-      </section>
-
-      {reports.length ? <section className="panel content-panel relative overflow-hidden">
-          <><div className="corvex-table-wrapper">
-            <table className="corvex-table">
-              <thead>
-                <tr>
-                  <th>Report ID</th>
-                  <th>Visit ID</th>
-                  <th>Customer</th>
-                  <th>Activity Type</th>
-                  <th>Visit Date</th>
-                  <th>Sync Status</th>
-                  <th>Photo</th>
-                  <th>Created At</th>
-                  <th>Remarks</th>
-                </tr>
-              </thead>
-              <tbody>
-                {paginated_reports.map(r => <tr key={r.report_id}>
-                    <td><span style={{
-                    fontFamily: 'monospace',
-                    fontSize: '0.82rem'
-                  }}>{r.report_id}</span></td>
-                    <td><span style={{
-                    fontFamily: 'monospace',
-                    fontSize: '0.82rem'
-                  }}>{r.visit_id}</span></td>
-                    <td>{r.customer_name}</td>
-                    <td>{r.activity_type}</td>
-                    <td>{formatDisplayDate(r.scheduled_date)}</td>
-                    <td><StatusBadge status={r.sync_status} /></td>
-                    <td>
-                      {r.photo ? (
-                        <a href={r.photo} target="_blank" rel="noreferrer">
-                          <img src={r.photo} alt="Report" style={{ width: 48, height: 48, objectFit: 'cover', borderRadius: 6, border: '1px solid #BADBE9' }} />
-                        </a>
-                      ) : '—'}
-                    </td>
-                    <td>{formatDisplayDateTime(r.created_at)}</td>
-                    <td style={{
-                  maxWidth: 220,
-                  overflow: 'hidden',
-                  textOverflow: 'ellipsis',
-                  whiteSpace: 'nowrap'
-                }} title={r.remarks}>{r.remarks || '—'}</td>
-                  </tr>)}
-              </tbody>
-            </table>
-          </div><Pagination {...pagination_reports} /></>
-        </section> : <EmptyState title="No field activity reports yet" description="Submit a report after completing a route stop." />}
-    </div>;
-}
-function isRouteStopCompleted(stop) {
-  return stop.status === 'Completed' || stop.visitStatus === 'Completed';
+function greetingForNow() {
+  const hour = Number(new Intl.DateTimeFormat('en-GB', {
+    timeZone: 'Asia/Manila',
+    hour: 'numeric',
+    hour12: false,
+  }).format(new Date()));
+  if (hour < 12) return 'Good morning';
+  if (hour < 18) return 'Good afternoon';
+  return 'Good evening';
 }
 
 function manilaDateInputValue() {
@@ -509,6 +118,377 @@ function manilaDateInputValue() {
   }).format(new Date());
 }
 
+function DashboardPage({
+  navigate,
+  showToast
+}) {
+  const currentUser = getCurrentUser();
+  const todayIso = manilaDateInputValue();
+  const todayLabel = formatDisplayDate(todayIso);
+  const [dashboard, setDashboard] = useState(null);
+  const [unreadCount, setUnreadCount] = useState(0);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState('');
+  const [offlinePending, setOfflinePending] = useState(0);
+  const online = isBrowserOnline();
+
+  useEffect(() => {
+    let cancelled = false;
+    async function load() {
+      setLoading(true);
+      setLoadError('');
+      const [dashRes, notifRes, pendingPayments, pendingReports] = await Promise.all([
+        fetchCollectorDashboard(),
+        fetchNotifications(),
+        loadWaiting('collection_payment').catch(() => []),
+        loadWaiting('field_activity_reports').catch(() => []),
+      ]);
+      if (cancelled) return;
+      if (dashRes.success) setDashboard(dashRes.data);
+      else {
+        setDashboard(null);
+        setLoadError(dashRes.message || 'Failed to load dashboard.');
+        if (showToast) showToast(dashRes.message || 'Failed to load dashboard.', 'error');
+      }
+      if (notifRes.success) {
+        const rows = notifRes.data || [];
+        setUnreadCount(rows.filter((n) => n.status !== 'Read' && !n.read).length);
+      }
+      setOfflinePending((pendingPayments?.length || 0) + (pendingReports?.length || 0));
+      setLoading(false);
+    }
+    load();
+    return () => { cancelled = true; };
+  }, [showToast]);
+
+  const agentName = currentUser?.fullName || 'Collector';
+  const summary = dashboard?.summary || {};
+  const recentCollections = dashboard?.recentCollections || [];
+  const recentFieldReports = dashboard?.recentFieldReports || [];
+  const nextStop = dashboard?.nextStop || null;
+  const routePublished = Boolean(summary.routePublished);
+  const routeTotal = Number(summary.routeStopsTotal || 0);
+  const routeCompleted = Number(summary.routeStopsCompleted || 0);
+  const routeRemaining = Number(
+    summary.routeStopsRemaining != null
+      ? summary.routeStopsRemaining
+      : Math.max(0, routeTotal - routeCompleted)
+  );
+  const routeProgress = routePublished ? Number(summary.routeProgressPercent || 0) : 0;
+  const collectionsToday = Number(summary.collectionsToday || 0);
+  const unsuccessfulToday = Number(summary.unsuccessfulVisitsToday || 0);
+
+  let greetingSub = 'Check your notifications and collection history while you wait for a published route.';
+  if (routePublished && routeRemaining > 0) {
+    greetingSub = `You have ${routeRemaining} assigned stop${routeRemaining === 1 ? '' : 's'} remaining today. Let's get started.`;
+  } else if (routePublished && routeRemaining === 0) {
+    greetingSub = 'All assigned visits completed. Review collections or file any remaining field reports.';
+  } else if (!routePublished) {
+    greetingSub = 'No collection route has been published for today yet.';
+  }
+
+  if (loading) return <LoadingState message="Loading dashboard..." />;
+
+  return (
+    <div className="page collector-dashboard">
+      {!online ? (
+        <p className="muted" role="status">
+          You are offline. Showing the last loaded dashboard when available; sync pending records when you reconnect.
+        </p>
+      ) : null}
+      {offlinePending > 0 ? (
+        <p className="muted" role="status">
+          {offlinePending} offline record{offlinePending === 1 ? '' : 's'} waiting to sync — open Settings to sync now.
+        </p>
+      ) : null}
+
+      <section className="panel dashboard-greeting">
+        <div className="dashboard-greeting-main">
+          <p className="dashboard-eyebrow">{greetingForNow()}</p>
+          <h2>{agentName}!</h2>
+          <p className="muted">{todayLabel}</p>
+          <p className="muted" style={{ marginTop: 4 }}>{greetingSub}</p>
+        </div>
+      </section>
+
+      {loadError && !dashboard ? (
+        <EmptyState
+          title="Dashboard unavailable"
+          description={loadError}
+          actionLabel="Retry"
+          onAction={() => window.location.reload()}
+        />
+      ) : (
+        <>
+          <StatsGrid
+            stats={[
+              {
+                label: `${collectionsToday} collection${collectionsToday === 1 ? '' : 's'} today`,
+                value: formatCurrency(summary.amountCollectedToday ?? 0),
+                title: 'Collected Today',
+                icon: 'philippine-peso',
+                onClick: () => navigate('/collector/history'),
+              },
+              {
+                label: routePublished ? `${routeProgress}% completed` : 'No route assigned',
+                value: routePublished ? `${routeCompleted} / ${routeTotal}` : '—',
+                title: 'Route Completion',
+                icon: 'route',
+                onClick: () => navigate('/collector/route'),
+              },
+              {
+                label: !routePublished
+                  ? 'No route assigned today'
+                  : routeRemaining === 0
+                    ? 'All stops completed'
+                    : 'Continue your assigned route',
+                value: !routePublished ? '—' : String(routeRemaining),
+                title: 'Remaining Stops',
+                icon: 'map-pin',
+                onClick: () => navigate('/collector/route'),
+              },
+              {
+                label: 'Unsuccessful or issue outcomes',
+                value: String(unsuccessfulToday),
+                title: 'Unsuccessful / Issue Visits Today',
+                icon: 'alert-triangle',
+                onClick: () => navigate('/collector/field-reports'),
+              },
+            ]}
+          />
+
+          <section className="panel content-panel collector-dash-actions">
+            <div className="dashboard-actions collector-action-strip">
+              <button className="button" type="button" onClick={() => navigate('/collector/route')}>
+                <NavIcon name="route" /> Open Today&apos;s Route
+              </button>
+              <button className="button secondary" type="button" onClick={() => navigate('/collector/field-reports')}>
+                <NavIcon name="file-text" /> File Field Report
+              </button>
+              <button className="button ghost" type="button" onClick={() => navigate('/collector/history')}>
+                <NavIcon name="history" /> Collection History
+              </button>
+            </div>
+          </section>
+
+          <section className="panel content-panel visit-progress-panel">
+            <div className="list-section-header">
+              <div>
+                <h3 style={{ margin: 0 }}>Today&apos;s Route Progress</h3>
+                {routePublished ? (
+                  <p className="list-section-subtitle muted" style={{ margin: '4px 0 0' }}>
+                    {routeCompleted} of {routeTotal} stops completed · {routeRemaining} remaining
+                  </p>
+                ) : null}
+              </div>
+              <button className="button secondary" type="button" onClick={() => navigate('/collector/route')}>
+                View Today&apos;s Route
+              </button>
+            </div>
+            {routePublished ? (
+              <>
+                <div
+                  className="progress-bar"
+                  role="progressbar"
+                  aria-valuenow={routeProgress}
+                  aria-valuemin={0}
+                  aria-valuemax={100}
+                  aria-label={`${routeProgress}% of today's route completed`}
+                >
+                  <div className="progress-fill" style={{ width: `${routeProgress}%` }} />
+                </div>
+                <p className="muted progress-caption">{routeProgress}% completed</p>
+              </>
+            ) : (
+              <EmptyState
+                title="No route assigned today"
+                description="Your Branch Manager has not published your collection route yet. Check again later or review your collection history."
+                actionLabel="Open Route Page"
+                onAction={() => navigate('/collector/route')}
+              />
+            )}
+          </section>
+
+          {routePublished ? (
+            <section className="panel content-panel">
+              <div className="list-section-header">
+                <h3 style={{ margin: 0 }}>Today&apos;s Next Stop</h3>
+              </div>
+              {nextStop ? (
+                <div className="collector-next-stop">
+                  <div>
+                    <strong>{nextStop.customer_name}</strong>
+                    {nextStop.customer_code ? (
+                      <span className="muted"> · {nextStop.customer_code}</span>
+                    ) : null}
+                    <p className="muted" style={{ margin: '4px 0 0' }}>
+                      {formatCurrency(nextStop.outstanding_balance || 0)}
+                      {nextStop.days_overdue > 0 ? ` · ${nextStop.days_overdue} day${nextStop.days_overdue === 1 ? '' : 's'} overdue` : ''}
+                      {nextStop.address ? ` · ${nextStop.address}` : ''}
+                    </p>
+                    <p className="muted" style={{ margin: '2px 0 0' }}>
+                      Visit status: {nextStop.status || 'Pending'}
+                    </p>
+                  </div>
+                  <button
+                    className="button"
+                    type="button"
+                    onClick={() => navigate(`/collector/account-detail/${nextStop.customer_id}?from=route`)}
+                  >
+                    View Stop
+                  </button>
+                </div>
+              ) : (
+                <p className="muted" style={{ margin: 0 }}>All assigned visits completed.</p>
+              )}
+            </section>
+          ) : null}
+
+          <div className="dashboard-widgets grid two-up">
+            <section className="panel content-panel relative overflow-hidden">
+              <div className="list-section-header">
+                <h3 style={{ margin: 0 }}>Recent Collections</h3>
+                <button className="button ghost" type="button" onClick={() => navigate('/collector/history')}>
+                  View All Collections
+                </button>
+              </div>
+              {recentCollections.length ? (
+                <div className="corvex-table-wrapper">
+                  <table className="corvex-table">
+                    <thead>
+                      <tr>
+                        <th>Customer</th>
+                        <th>Receipt</th>
+                        <th>Method</th>
+                        <th>Amount</th>
+                        <th>Status</th>
+                        <th>Date &amp; Time</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {recentCollections.map((item) => (
+                        <tr
+                          key={item.collectionpayment_id}
+                          className="is-clickable"
+                          style={{ cursor: 'pointer' }}
+                          onClick={() => navigate(`/collector/history/${item.collectionpayment_id}`)}
+                        >
+                          <td>
+                            <strong>{item.customer_name || '—'}</strong>
+                            {item.customer_code ? (
+                              <div className="muted" style={{ fontSize: '0.8rem' }}>{item.customer_code}</div>
+                            ) : null}
+                          </td>
+                          <td>
+                            {item.receipts_id && item.receipt_number ? (
+                              <button
+                                type="button"
+                                className="button ghost"
+                                style={{ padding: '2px 6px', fontFamily: 'monospace' }}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  navigate(`/collector/receipts/${item.receipts_id}`);
+                                }}
+                              >
+                                {item.receipt_number}
+                              </button>
+                            ) : (
+                              <span className="muted">{item.receipt_number || '—'}</span>
+                            )}
+                          </td>
+                          <td>{item.payment_method || '—'}</td>
+                          <td style={{ fontWeight: 600 }}>{formatCurrency(Number(item.amount))}</td>
+                          <td><StatusBadge status={item.status} /></td>
+                          <td>{formatPaymentTimestamp(item.payment_date, item.payment_time)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              ) : (
+                <EmptyState
+                  title="No collections recorded yet."
+                  description="Open Today's Route to begin collecting from assigned stops."
+                  actionLabel="Open Today's Route"
+                  onAction={() => navigate('/collector/route')}
+                />
+              )}
+            </section>
+
+            <section className="panel content-panel relative overflow-hidden">
+              <div className="list-section-header">
+                <h3 style={{ margin: 0 }}>Recent Field Reports</h3>
+                <button className="button ghost" type="button" onClick={() => navigate('/collector/field-reports')}>
+                  View All Reports
+                </button>
+              </div>
+              {recentFieldReports.length ? (
+                <div className="corvex-table-wrapper">
+                  <table className="corvex-table">
+                    <thead>
+                      <tr>
+                        <th>Customer</th>
+                        <th>Activity</th>
+                        <th>Severity</th>
+                        <th>Submitted</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {recentFieldReports.map((item) => (
+                        <tr
+                          key={item.report_id}
+                          className="is-clickable"
+                          style={{ cursor: 'pointer' }}
+                          onClick={() => navigate(`/collector/field-reports/${item.report_id}`)}
+                        >
+                          <td>
+                            <strong>{item.customer_name || '—'}</strong>
+                            {item.customer_code ? (
+                              <div className="muted" style={{ fontSize: '0.8rem' }}>{item.customer_code}</div>
+                            ) : null}
+                          </td>
+                          <td>{item.activity_type || '—'}</td>
+                          <td>{item.severity ? <StatusBadge status={item.severity} /> : <span className="muted">—</span>}</td>
+                          <td>{formatDisplayDateTime(item.created_at)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              ) : (
+                <EmptyState
+                  title="No field reports submitted yet."
+                  description="File a Field Activity Report when a visit needs documentation."
+                  actionLabel="File Field Report"
+                  onAction={() => navigate('/collector/field-reports')}
+                />
+              )}
+            </section>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+function isRouteStopCompleted(stop) {
+  return stop.status === 'Completed' || stop.visitStatus === 'Completed';
+}
+
+function formatLongRouteDate(dateStr) {
+  if (!dateStr) return '—';
+  const match = String(dateStr).slice(0, 10).match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  const d = match
+    ? new Date(Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3]), 12, 0, 0))
+    : new Date(dateStr);
+  if (Number.isNaN(d.getTime())) return String(dateStr);
+  return new Intl.DateTimeFormat('en-US', {
+    timeZone: 'Asia/Manila',
+    month: 'long',
+    day: 'numeric',
+    year: 'numeric',
+  }).format(d);
+}
+
 function RoutePage({
   pageType,
   navigate,
@@ -518,30 +498,21 @@ function RoutePage({
   const [sawMeta, setSawMeta] = useState(null);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState('All');
-  const [showMap, setShowMap] = useState(pageType === 'routeMap');
-  const [roadStats, setRoadStats] = useState(null);
   const routeDate = manilaDateInputValue();
+
   useEffect(() => {
     let cancelled = false;
     async function load() {
       setLoading(true);
       const sawRes = await fetchSawPriority({ date: routeDate });
       if (cancelled) return;
-      setSawMeta(sawRes.meta || null);
+      const meta = sawRes.meta || null;
+      setSawMeta(meta);
       let stops = [];
-      if (sawRes.success && (sawRes.data || []).length) {
+      if (sawRes.success && meta?.published && (sawRes.data || []).length) {
         stops = sawRes.data.map((row) => mapSawRowToRouteStop(row));
-      } else if (!sawRes.success) {
-        const accountsRes = await fetchAccounts();
-        if (accountsRes.success) {
-          stops = accountsRes.data
-            .filter((a) => a.rawStatus === 'Active')
-            .sort((a, b) => (b.outstandingBalance || 0) - (a.outstandingBalance || 0))
-            .map((a, i) => ({ ...a, rank: i + 1 }));
-        }
-        if (showToast) {
-          showToast('SAW priority unavailable — showing balance order.', 'error');
-        }
+      } else if (!sawRes.success && showToast) {
+        showToast(sawRes.message || 'Unable to load today\'s route.', 'error');
       }
       if (!cancelled) {
         setCustomers(stops);
@@ -552,56 +523,43 @@ function RoutePage({
     return () => { cancelled = true; };
   }, [routeDate, showToast]);
 
-  useEffect(() => {
-    if (pageType !== 'routeSummary' || !customers.length) return;
-    const payload = customers
-      .filter((s) => accountMapPosition(s).hasCoords)
-      .map((s) => ({
-        id: s.id,
-        latitude: s.latitude,
-        longitude: s.longitude,
-        rank: s.rank,
-      }));
-    if (!payload.length) return;
-    fetchDrivingRoute('saw', payload).then((res) => {
-      if (res.success) setRoadStats(res.data?.road || null);
-    });
-  }, [pageType, customers]);
-
   const filteredStops = useMemo(() => {
     if (filter === 'All') return customers;
     if (filter === 'Pending') return customers.filter((s) => !isRouteStopCompleted(s));
     return customers.filter(isRouteStopCompleted);
   }, [filter, customers]);
+
   const mapStops = useMemo(
-    () => filteredStops.filter((s) => accountMapPosition(s).hasCoords),
-    [filteredStops]
+    () => customers.filter((s) => accountMapPosition(s).hasCoords),
+    [customers]
   );
+
   const routeCounts = useMemo(() => ({
     All: customers.length,
     Pending: customers.filter((s) => !isRouteStopCompleted(s)).length,
     Completed: customers.filter(isRouteStopCompleted).length,
   }), [customers]);
-  const actions = [{
-    label: 'Route List',
-    to: '/collector/route',
-    variant: pageType === 'routeList' ? undefined : 'secondary'
-  }, {
-    label: 'Map View',
-    to: '/collector/route/map',
-    variant: pageType === 'routeMap' ? undefined : 'secondary'
-  }, {
-    label: 'Route Summary',
-    to: '/collector/route/summary',
-    variant: pageType === 'routeSummary' ? undefined : 'secondary'
-  }];
-  const pagination_filteredStops = usePagination(filteredStops);
+
+  const isMapView = pageType === 'routeMap';
+  const actions = [
+    {
+      label: 'Route List',
+      to: '/collector/route',
+      variant: !isMapView ? undefined : 'secondary',
+    },
+    {
+      label: 'Map View',
+      to: '/collector/route/map',
+      variant: isMapView ? undefined : 'secondary',
+    },
+  ];
+
+  const pagination_filteredStops = usePagination(filteredStops, { resetKey: filter });
   const paginated_filteredStops = pagination_filteredStops.paginatedData;
-  const showingSawFallback = sawMeta?.listSource === 'saw';
-  const stopsLabel = "Today's Stops";
-  const routeNote = showingSawFallback
-    ? `No customers were assigned for ${sawMeta?.scheduledDate || routeDate}. This list is the SAW ranking of eligible customers.`
-    : `Assigned route · SAW rank · ${customers.length} stop${customers.length === 1 ? '' : 's'}${sawMeta?.scheduledDate ? ` · ${sawMeta.scheduledDate}` : ''}. Completed visits keep their SAW rank.`;
+
+  const isPublished = Boolean(sawMeta?.published && customers.length > 0);
+  const formattedRouteDate = formatLongRouteDate(sawMeta?.scheduledDate || routeDate);
+  const routeSubtitle = `Today's assigned customers · ${customers.length} stop${customers.length === 1 ? '' : 's'} · ${formattedRouteDate}`;
 
   const routeToolbar = (
     <div className="flex flex-wrap gap-2 justify-end items-center" style={{ marginTop: 4, marginBottom: 4 }}>
@@ -618,117 +576,194 @@ function RoutePage({
     </div>
   );
 
-  if (loading) return <LoadingState message="Loading route..." />;
-  if (pageType === 'routeSummary') {
-    return <div className="page">
-        {showingSawFallback ? <p className="muted" style={{ marginTop: 0 }}>{routeNote}</p> : null}
-        <StatsGrid stats={[{
-        label: stopsLabel,
-        value: String(customers.length)
-      }, {
-        label: 'Overdue Customers',
-        value: String(customers.filter(s => s.status === 'Overdue').length)
-      }, {
-        label: 'Road distance',
-        value: roadStats?.distanceKm != null
-          ? `${roadStats.distanceKm} km (OSRM)`
-          : customers.length
-            ? `${customers.reduce((s, c) => s + (Number(c.distanceKm) || 0), 0).toFixed(1)} km est.`
-            : '—'
-      }, {
-        label: 'SAW as of',
-        value: sawMeta?.asOf || '—'
-      }]} />
-        {routeToolbar}
-        <section className="panel content-panel relative overflow-hidden">
-          <div className="flex flex-col md:flex-row justify-between gap-4 items-start md:items-center mb-4">
-            <h3>Route Summary</h3>
-          </div>
-          <DetailRowsTable rows={[
-            { label: 'Total Outstanding on Route', value: formatCurrency(customers.reduce((sum, s) => sum + (s.outstandingBalance || 0), 0)) },
-            { label: 'Pending / Overdue Visits', value: `${routeCounts.Pending} stops` },
-            { label: 'Completed Visits', value: `${routeCounts.Completed} stops` },
-          ]} />
-        </section>
-      </div>;
-  }
-  return <div className="page">
-      <StatsGrid stats={[{
-      label: stopsLabel,
-      value: String(customers.length)
-    }, {
-      label: 'Overdue Customers',
-      value: String(customers.filter(s => s.status === 'Overdue').length)
-    }, {
-      label: 'Road distance',
-      value: roadStats?.distanceKm != null ? `${roadStats.distanceKm} km` : '—'
-      }]} />
+  if (loading) return <LoadingState message="Loading today's route..." />;
+
+  return (
+    <div className="page">
+      <StatsGrid
+        stats={[
+          {
+            label: "Today's Stops",
+            value: String(customers.length),
+          },
+          {
+            label: 'Completed Visits',
+            value: String(routeCounts.Completed),
+          },
+          {
+            label: 'Remaining Stops',
+            value: String(routeCounts.Pending),
+          },
+          {
+            label: 'Total Collected Today',
+            value: formatCurrency(sawMeta?.amountCollectedToday || 0),
+          },
+        ]}
+      />
       {routeToolbar}
       <section className="panel content-panel relative overflow-hidden">
-        <div className="flex flex-col md:flex-row justify-between gap-4 items-start md:items-center mb-4">
-          <div>
-            <h3>{showMap || pageType === 'routeMap' ? 'Route Map View' : 'SAW Customer Priority List'}</h3>
-            {sawMeta ? (
-              <p className="muted" style={{ marginTop: 4 }}>{routeNote}</p>
-            ) : null}
-          </div>
-          <div className="inline-toolbar">
-            <div className="segmented-control">
-              {['All', 'Pending', 'Completed'].map(item => <button key={item} className={filter === item ? 'segment active' : 'segment'} type="button" onClick={() => setFilter(item)}>
-                  {item} ({routeCounts[item]})
-                </button>)}
-            </div>
-            {pageType !== 'routeMap' ? <button className="button secondary" type="button" onClick={() => setShowMap(!showMap)}>
-                {showMap ? 'Show List View' : 'Show Map View'}
-              </button> : null}
-          </div>
-        </div>
-        {customers.length === 0 ? (
+        {!isPublished ? (
           <EmptyState
-            title="No eligible customers for this date"
-            description="SAW ranks customers with an open balance, a due date, and map coordinates."
+            title="Waiting for Today's Route"
+            description="Your collection route has not been published yet. Please wait for your assigned stops."
           />
-        ) : showMap || pageType === 'routeMap' ? (
-          <CollectionRouteMap
-            stops={mapStops}
-            showToast={showToast}
-            navigate={navigate}
-            onRoadStats={setRoadStats}
-          />
-        ) : filteredStops.length ? <><div className="corvex-table-wrapper">
-            <table className="corvex-table">
-              <thead>
-                <tr>
-                  <th>SAW Rank</th>
-                  <th>Customer</th>
-                  <th>Address</th>
-                  <th>Balance</th>
-                  <th>Days overdue</th>
-                  <th>Distance</th>
-                  <th>SAW</th>
-                  <th>Status</th>
-                  <th>Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {paginated_filteredStops.map((stop) => <tr key={stop.id}>
-                    <td><strong>{stop.rank == null ? '—' : `#${stop.rank}`}</strong></td>
-                    <td>{stop.customerName}</td>
-                    <td>{stop.address}</td>
-                    <td>{formatCurrency(stop.outstandingBalance || 0)}</td>
-                    <td>{stop.daysOverdue ?? 0}</td>
-                    <td>{Number(stop.distanceKm) ? `${Number(stop.distanceKm).toFixed(1)} km` : '—'}</td>
-                    <td>{stop.sawScore != null ? Number(stop.sawScore).toFixed(3) : '—'}</td>
-                    <td><StatusBadge status={stop.status} /></td>
-                    <td className="table-actions">
-                      <button className="icon-action-button" type="button" title="View" onClick={() => navigate(`/collector/account-detail/${stop.id}?from=route`)}><NavIcon name="view" /></button>
-                    </td>
-                  </tr>)}
-              </tbody>
-            </table>
-          </div><Pagination {...pagination_filteredStops} /></> : <EmptyState title="No customers match this filter" description="Try a different status filter." />}
+        ) : isMapView ? (
+          <>
+            <div className="flex flex-col md:flex-row justify-between gap-4 items-start md:items-center mb-2">
+              <div>
+                <h3>Route Map View</h3>
+              </div>
+            </div>
+            {mapStops.length ? (
+              <CollectionRouteMap
+                stops={mapStops}
+                showToast={showToast}
+                navigate={navigate}
+              />
+            ) : (
+              <EmptyState
+                title="No map coordinates on file"
+                description="Your assigned stops do not have map coordinates yet. Open a customer from the Route List to view their address."
+              />
+            )}
+          </>
+        ) : (
+          <>
+            <div className="flex flex-col md:flex-row justify-between gap-4 items-start md:items-center mb-4">
+              <div>
+                <h3>Customer List for Today</h3>
+                <p className="muted" style={{ marginTop: 4 }}>{routeSubtitle}</p>
+              </div>
+              <div className="inline-toolbar">
+                <div className="segmented-control">
+                  {['All', 'Pending', 'Completed'].map((item) => (
+                    <button
+                      key={item}
+                      className={filter === item ? 'segment active' : 'segment'}
+                      type="button"
+                      onClick={() => setFilter(item)}
+                    >
+                      {item} ({routeCounts[item]})
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+            {filteredStops.length ? (
+              <>
+                <div className="corvex-table-wrapper">
+                  <table className="corvex-table">
+                    <thead>
+                      <tr>
+                        <th>Customer Name</th>
+                        <th>Outstanding Balance</th>
+                        <th>Visit Status</th>
+                        <th>Available Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {paginated_filteredStops.map((stop, index) => {
+                        const visitStatus = isRouteStopCompleted(stop) ? 'Completed' : 'Pending';
+                        const callable = hasCallablePhone(stop.phone);
+                        const seqNum = stop.routeSequence ?? stop.routeIndex ?? index + 1;
+                        return (
+                          <tr
+                            key={stop.id}
+                            className="clickable-row"
+                            onClick={() => navigate(`/collector/account-detail/${stop.id}?from=route`)}
+                          >
+                            <td>
+                              <div className="flex items-center gap-2">
+                                <span
+                                  style={{
+                                    display: 'inline-flex',
+                                    alignItems: 'center',
+                                    justifyContent: 'center',
+                                    minWidth: 24,
+                                    height: 24,
+                                    borderRadius: 999,
+                                    background: 'var(--surface-2)',
+                                    fontSize: '0.78rem',
+                                    fontWeight: 700,
+                                  }}
+                                >
+                                  #{seqNum}
+                                </span>
+                                <div>
+                                  <strong>{stop.customerName}</strong>
+                                  {callable ? (
+                                    <div className="muted" style={{ fontSize: '0.78rem' }}>
+                                      {formatPhone(stop.phone)}
+                                    </div>
+                                  ) : null}
+                                </div>
+                              </div>
+                            </td>
+                            <td style={{ fontWeight: 600 }}>
+                              {formatCurrency(stop.outstandingBalance || 0)}
+                            </td>
+                            <td>
+                              <div className="flex flex-wrap items-center gap-1.5">
+                                <StatusBadge status={visitStatus} />
+                                {visitStatus === 'Completed' && stop.visitOutcome && stop.visitOutcome !== 'Collected' ? (
+                                  <span className="muted" style={{ fontSize: '0.78rem' }}>
+                                    · {stop.visitOutcome}
+                                  </span>
+                                ) : null}
+                              </div>
+                            </td>
+                            <td className="table-actions" onClick={(e) => e.stopPropagation()}>
+                              <div className="flex flex-wrap items-center gap-1.5">
+                                <button
+                                  className="button ghost"
+                                  type="button"
+                                  style={{ padding: '4px 10px', fontSize: '0.8rem' }}
+                                  disabled={!callable}
+                                  title={callable ? `Call ${stop.customerName}` : 'No valid phone number on file'}
+                                  onClick={() => collectorCall(stop, showToast)}
+                                >
+                                  Call
+                                </button>
+                                <button
+                                  className="icon-action-button"
+                                  type="button"
+                                  title="View Customer Details"
+                                  onClick={() => navigate(`/collector/account-detail/${stop.id}?from=route`)}
+                                >
+                                  <NavIcon name="view" />
+                                </button>
+                                {!isRouteStopCompleted(stop) && (stop.outstandingBalance || 0) > 0 ? (
+                                  <button
+                                    className="button"
+                                    type="button"
+                                    style={{ padding: '4px 10px', fontSize: '0.8rem' }}
+                                    title="Log Collection"
+                                    onClick={() => navigate(`/collector/collection-log/${stop.id}?from=route`)}
+                                  >
+                                    Log Collection
+                                  </button>
+                                ) : null}
+                              </div>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+                <Pagination {...pagination_filteredStops} />
+              </>
+            ) : (
+              <EmptyState
+                title="No customers match this filter"
+                description="Try switching between All, Pending, and Completed visits."
+              />
+            )}
+          </>
+        )}
       </section>
-    </div>;
+    </div>
+  );
 }
 function accountMapPosition(account) {
   const lat = Number(account?.latitude);
@@ -770,7 +805,7 @@ function CustomerMapPage({
     (async () => {
       const [depotRes, routeRes] = await Promise.all([
         fetchRouteDepot(),
-        fetchDrivingRoute('saw', [{
+        fetchDrivingRoute('recommended', [{
           id: account.id,
           latitude: account.latitude,
           longitude: account.longitude,
@@ -796,20 +831,20 @@ function CustomerMapPage({
       id: 'depot',
       position: [depot.latitude, depot.longitude],
       label: 'B',
-      color: '#1A4162',
-      popup: `<strong>${depot.name || 'Branch'}</strong><br/>Start here`,
+      color: '#153450',
+      popup: `<strong>${depot.name || 'Branch'}</strong><br/>Starting location`,
     });
   }
   markers.push({
     id: account.id,
     position: center,
     label: isRouteNav ? '1' : (account.customerName || 'CU').substring(0, 2).toUpperCase(),
-    color: '#0B1E30',
+    color: '#0B2133',
     popup: `<strong>${account.customerName}</strong><br/>${account.address || ''}`,
   });
   const fitBounds = markers.map((m) => m.position);
   const polylines = roadLeg?.positions?.length
-    ? [{ id: 'nav-leg', positions: roadLeg.positions, color: '#0B1E30', weight: 4 }]
+    ? [{ id: 'nav-leg', positions: roadLeg.positions, color: '#0B2133', weight: 4 }]
     : [];
 
   return <div className="page">
@@ -820,8 +855,8 @@ function CustomerMapPage({
             <p className="text-ink/70" style={{ margin: '4px 0 0' }}>{account.address}</p>
             {isRouteNav && roadLeg?.distanceKm != null ? (
               <p className="muted" style={{ margin: '8px 0 0', fontSize: '0.85rem' }}>
-                Branch to customer · {roadLeg.distanceKm} km road
-                {roadLeg.durationMin != null ? ` · ~${roadLeg.durationMin} min` : ''} (OSRM)
+                Estimated distance: {roadLeg.distanceKm} km
+                {roadLeg.durationMin != null ? ` · ~${roadLeg.durationMin} min drive` : ''}
               </p>
             ) : null}
             {!hasCoords ? <p className="text-ink/60" style={{ margin: '8px 0 0', fontSize: '0.85rem' }}>
@@ -846,253 +881,17 @@ function CustomerMapPage({
     </div>;
 }
 
-function AccountsPage({
-  navigate,
-  showToast
-}) {
-  const [search, setSearch] = useState('');
-  const [filter, setFilter] = useState('All Customers');
-  const [sortBy, setSortBy] = useState('Name');
-  const [loading, setLoading] = useState(true);
-  const [customers, setCustomers] = useState([]);
-  useEffect(() => {
-    async function load() {
-      setLoading(true);
-      const result = await fetchAccounts({ limit: 200, page: 1 });
-      if (result.success) setCustomers(result.data);
-      setLoading(false);
-    }
-    load();
-  }, []);
-  const filteredCustomers = useMemo(() => {
-    let results = [...customers];
-    const query = search.trim().toLowerCase();
-    if (query) {
-      results = results.filter(customer => (customer.customerName || '').toLowerCase().includes(query) || (customer.accountNumber || '').toLowerCase().includes(query) || (customer.phone || '').includes(query));
-    }
-    switch (filter) {
-      case 'Assigned Today':
-        results = results.filter(a => a.assignedToday);
-        break;
-      case 'Pending':
-        results = results.filter(a => a.status === 'Pending');
-        break;
-      case 'Completed':
-        results = results.filter(a => a.status === 'Completed');
-        break;
-      case 'Overdue':
-        results = results.filter(a => a.status === 'Overdue');
-        break;
-      case 'Blacklisted':
-        results = results.filter(a => a.blacklisted);
-        break;
-      default:
-        break;
-    }
-    switch (sortBy) {
-      case 'Outstanding Balance':
-        results.sort((a, b) => (b.outstandingBalance || 0) - (a.outstandingBalance || 0));
-        break;
-      case 'Days Overdue':
-        results.sort((a, b) => (b.daysOverdue || 0) - (a.daysOverdue || 0));
-        break;
-      case 'Distance':
-        results.sort((a, b) => (a.distanceKm || 0) - (b.distanceKm || 0));
-        break;
-      default:
-        results.sort((a, b) => (a.customerName || '').localeCompare(b.customerName || ''));
-        break;
-    }
-    return results;
-  }, [customers, search, filter, sortBy]);
-  const pagination = usePagination(filteredCustomers, {
-    pageSize: DEFAULT_PAGE_SIZE,
-    resetKey: `${search}|${filter}|${sortBy}`,
-  });
-  const rows = pagination.paginatedData;
-  if (loading) return <LoadingState message="Loading customers..." />;
-  return <div className="page">
-      <section className="panel content-panel relative overflow-hidden">
-        <div className="list-section-header">
-          <h3>Customer List <span className="text-ink/70">({filteredCustomers.length})</span></h3>
-        </div>
-        <div className="list-section-toolbar">
-          <div className="list-section-controls">
-            <input className="filter-input search" type="search" placeholder="Search by customer name, account number, or phone" value={search} onChange={e => setSearch(e.target.value)} />
-            <select className="filter-select" value={filter} onChange={e => setFilter(e.target.value)}>
-              {['All Customers', 'Assigned Today', 'Pending', 'Completed', 'Overdue', 'Blacklisted'].map(option => <option key={option} value={option}>{option}</option>)}
-            </select>
-            <select className="filter-select" value={sortBy} onChange={e => setSortBy(e.target.value)}>
-              {['Name', 'Outstanding Balance', 'Days Overdue', 'Distance'].map(option => <option key={option} value={option}>Sort: {option}</option>)}
-            </select>
-          </div>
-        </div>
-        {filteredCustomers.length ? <>
-          <div className="corvex-table-wrapper">
-            <table className="corvex-table">
-              <thead>
-                <tr>
-                  <th>Customer</th>
-                  <th>Account</th>
-                  <th>Address</th>
-                  <th>Outstanding</th>
-                  <th>Days Overdue</th>
-                  <th>Status</th>
-                  <th>Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {rows.map(customer => <tr key={customer.id} className="clickable-row" onClick={() => navigate(`/collector/account-detail/${customer.id}?from=accounts`)}>
-                    <td><strong>{customer.customerName}</strong></td>
-                    <td><span style={{ fontFamily: 'monospace', fontSize: '0.82rem' }}>{customer.accountNumber || '—'}</span></td>
-                    <td>{customer.address || '—'}</td>
-                    <td style={{ fontWeight: 600 }}>{formatCurrency(customer.outstandingBalance)}</td>
-                    <td>{customer.daysOverdue ?? '—'}</td>
-                    <td><StatusBadge status={customer.status} /></td>
-                    <td className="table-actions" onClick={e => e.stopPropagation()}>
-                      <button className="icon-action-button" type="button" title="View Details" onClick={() => navigate(`/collector/account-detail/${customer.id}?from=accounts`)}>
-                        <NavIcon name="view" />
-                      </button>
-                      <button className="icon-action-button" type="button" title="Call Customer" onClick={() => collectorCall(customer, showToast)}>
-                        <NavIcon name="user" />
-                      </button>
-                      <button className="icon-action-button" type="button" title="Open Map" onClick={() => collectorOpenMap(customer, navigate, 'accounts')}>
-                        <NavIcon name="map" />
-                      </button>
-                    </td>
-                  </tr>)}
-              </tbody>
-            </table>
-          </div>
-          <Pagination {...pagination} />
-        </> : <EmptyState title="No customers found" description="Adjust your search or filters to find customers." actionLabel="Clear search" onAction={() => {
-      setSearch('');
-      setFilter('All Customers');
-    }} />}
-      </section>
-    </div>;
+function formatManilaDateTimeDisplay(dateObj = new Date()) {
+  return new Intl.DateTimeFormat('en-US', {
+    timeZone: 'Asia/Manila',
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+  }).format(dateObj);
 }
-function AccountDetailPage({
-  accountId,
-  parentContext,
-  navigate,
-  showToast
-}) {
-  const [account, setAccount] = useState(null);
-  const [loading, setLoading] = useState(true);
-  useEffect(() => {
-    async function load() {
-      setLoading(true);
-      const result = await fetchAccountById(accountId);
-      if (result.success) setAccount(result.data);
-      setLoading(false);
-    }
-    load();
-  }, [accountId]);
-  const pagination_account_paymentHistory = usePagination(account?.paymentHistory || []);
-  const paginated_account_paymentHistory = pagination_account_paymentHistory.paginatedData;
-  if (loading) return <LoadingState message="Loading customer..." />;
-  if (!account) {
-    return <EmptyState title="Customer not found" description="This customer may have been removed or is unavailable." actionLabel="Back to Customers" onAction={() => navigate('/collector/accounts')} />;
-  }
-  const backTo = parentContext === 'route' ? '/collector/route' : '/collector/accounts';
-  const contextQuery = `?from=${parentContext}`;
-  return <div className="page">
-      <StatsGrid stats={[{
-      label: 'Outstanding Balance',
-      value: formatCurrency(account.outstandingBalance || 0)
-    }, {
-      label: 'Days Overdue',
-      value: String(account.daysOverdue || 0)
-    }, {
-      label: 'Delinquency Status',
-      value: account.status
-    }, {
-      label: 'Account Manager',
-      value: account.account_manager_name || '—'
-    }, {
-      label: 'Customer Since',
-      value: account.customer_since || '—'
-    }, {
-      label: 'Last Visit',
-      value: account.lastVisitDate || '—'
-    }]} />
 
-      <section className="panel content-panel account-detail-panel">
-        <div className="flex flex-col md:flex-row justify-between gap-4 items-start md:items-center mb-4">
-          <h3>{account.customerName}</h3>
-          <p className="text-ink/70">{account.accountNumber}</p>
-        </div>
-        <div className="account-detail-grid two-up">
-          <DetailRowsTable rows={[
-            { label: 'Address', value: account.address || '—' },
-            { label: 'Contact', value: formatPhone(account.phone) },
-            { label: 'Branch', value: account.branch_name || '—' },
-            { label: 'Account Manager', value: account.account_manager_name || '—' },
-            { label: 'Last Visit', value: account.lastVisitDate || '—' },
-          ]} />
-          <div style={{
-          minHeight: 200,
-          width: '100%',
-          borderRadius: 8,
-          overflow: 'hidden'
-        }}>
-            <LeafletMap center={account.latitude && account.longitude ? [account.latitude, account.longitude] : [7.1907, 125.4553]} zoom={15} height={200} markers={[{
-            id: account.id,
-            position: account.latitude && account.longitude ? [account.latitude, account.longitude] : [7.1907, 125.4553],
-            label: (account.customerName || 'CU').substring(0, 2).toUpperCase(),
-            color: '#0B1E30',
-            popup: account.customerName
-          }]} />
-          </div>
-        </div>
-      </section>
-
-      <section className="panel content-panel relative overflow-hidden">
-        <div className="flex flex-col md:flex-row justify-between gap-4 items-start md:items-center mb-4">
-          <h3>Payment History</h3>
-        </div>
-        {account.paymentHistory && account.paymentHistory.length ? <><div className="corvex-table-wrapper">
-            <table className="corvex-table">
-              <thead>
-                <tr>
-                  <th>Date</th>
-                  <th>Receipt #</th>
-                  <th>Amount</th>
-                  <th>Method</th>
-                  <th>Collected By</th>
-                  <th>Status</th>
-                </tr>
-              </thead>
-              <tbody>
-                {paginated_account_paymentHistory.map((row, i) => <tr key={row.receipt || i}>
-                    <td>{formatDisplayDate(row.date)}</td>
-                    <td><span style={{
-                    fontFamily: 'monospace',
-                    fontSize: '0.82rem'
-                  }}>{row.receipt || '—'}</span></td>
-                    <td>{formatCurrency(row.amount)}</td>
-                    <td>{row.method || 'Cash'}</td>
-                    <td>{row.collector}</td>
-                    <td>
-                      <StatusBadge status={row.status || 'Completed'} />
-                    </td>
-                  </tr>)}
-              </tbody>
-            </table>
-          </div><Pagination {...pagination_account_paymentHistory} /></> : <EmptyState title="No payment history" description="Previous collections for this customer will appear here." />}
-      </section>
-
-      <div className="flex flex-wrap justify-end gap-2 mt-4">
-        <button className="button ghost" type="button" onClick={() => navigate(backTo)}>Back</button>
-        <button className="button secondary" type="button" onClick={() => collectorOpenMap(account, navigate, parentContext)}>View on Map</button>
-        <button className="button secondary" type="button" onClick={() => collectorCall(account, showToast)}>Call Customer</button>
-        <button className="button secondary" type="button" onClick={() => navigate(`/collector/incident/${account.id}${contextQuery}`)}>Report Incident</button>
-        <button className="button secondary" type="button" onClick={() => navigate(`/collector/ci-form/${account.id}${contextQuery}`)}>Submit CI Form</button>
-        <button className="button" type="button" onClick={() => navigate(`/collector/collection-log/${account.id}${contextQuery}`)}>Log Collection</button>
-      </div>
-    </div>;
-}
 function CollectionLogPage({
   accountId,
   parentContext,
@@ -1102,23 +901,26 @@ function CollectionLogPage({
   const [account, setAccount] = useState(null);
   const [loading, setLoading] = useState(true);
   const [formData, setFormData] = useState({
-    customerName: '',
     amountCollected: '',
-    paymentMethod: '',
+    paymentMethod: 'Cash',
+    gcashReference: '',
     notes: '',
-    partialPayment: false,
     generateReceipt: true,
-    proofPhoto: ''
   });
   const [errors, setErrors] = useState({});
+  const [confirmOpen, setConfirmOpen] = useState(false);
   const [submitting, setSubmitting] = useState(false);
-  const [paymentMethods, setPaymentMethods] = useState(['Cash', 'Check', 'Bank Transfer', 'GCash', 'Maya']);
+  const [recordedPayment, setRecordedPayment] = useState(null);
+  const [paymentMethods, setPaymentMethods] = useState(['Cash', 'GCash']);
   const [devicePayments, setDevicePayments] = useState([]);
+  const [collectionTimeDisplay] = useState(() => formatManilaDateTimeDisplay(new Date()));
   const contextQuery = `?from=${parentContext}`;
+
   async function refreshDevicePayments() {
     const rows = await loadWaiting('collection_payment');
     setDevicePayments(rows.filter((row) => String(row.payload?.customer_id) === String(accountId)));
   }
+
   useEffect(() => {
     async function load() {
       setLoading(true);
@@ -1128,78 +930,150 @@ function CollectionLogPage({
       ]);
       if (acctRes.success) {
         setAccount(acctRes.data);
-        setFormData(prev => ({
-          ...prev,
-          customerName: acctRes.data.customerName || '',
-        }));
       }
       if (methodsRes.success && methodsRes.data?.length) {
-        setPaymentMethods(methodsRes.data.map(m => m.method_name));
+        const allowed = methodsRes.data
+          .map((m) => m.method_name)
+          .filter((name) => ['cash', 'gcash'].includes(String(name || '').toLowerCase()));
+        if (allowed.length) setPaymentMethods(allowed);
       }
       await refreshDevicePayments();
       setLoading(false);
     }
     load();
   }, [accountId]);
-  if (loading) return <LoadingState message="Loading customer..." />;
+
+  if (loading) return <LoadingState message="Loading customer account..." />;
   if (!account) {
-    return <div className="page">
-      <DeviceQueue rows={devicePayments} />
-      <EmptyState title="Customer not found" actionLabel="Back to Customers" onAction={() => navigate('/collector/accounts')} />
-    </div>;
+    return (
+      <div className="page">
+        <DeviceQueue rows={devicePayments} />
+        <EmptyState
+          title="Customer not found"
+          actionLabel="Back to Route"
+          onAction={() => navigate(parentContext === 'route' ? '/collector/route' : '/collector/accounts')}
+        />
+      </div>
+    );
   }
-  const remainingBalance = Math.max((account.outstandingBalance || 0) - (Number(formData.amountCollected) || 0), 0);
+
+  if (parentContext !== 'route' || !account.todayVisit?.visit_id) {
+    return (
+      <div className="page">
+        <EmptyState
+          title="Collection not available"
+          description="Collections can only be logged from a published stop on Today's Route."
+          actionLabel={parentContext === 'route' ? 'Back to Route' : 'Back to Customers'}
+          onAction={() => navigate(parentContext === 'route' ? '/collector/route' : '/collector/accounts')}
+        />
+      </div>
+    );
+  }
+
+  const outstanding = Number(account.outstandingBalance) || 0;
+  const enteredAmount = Number(formData.amountCollected) || 0;
+  const remainingBalance = Math.max(0, Math.round((outstanding - enteredAmount) * 100) / 100);
+  const isGCash = String(formData.paymentMethod).toLowerCase() === 'gcash';
+
   const handleChange = (name, value) => {
-    setFormData(prev => ({
+    setFormData((prev) => ({
       ...prev,
-      [name]: value
+      [name]: value,
     }));
-    setErrors(prev => ({
+    setErrors((prev) => ({
       ...prev,
-      [name]: undefined
+      [name]: undefined,
     }));
   };
-  const handleSubmit = async () => {
+
+  const validateForm = () => {
     const amount = Number(formData.amountCollected);
-    const outstanding = account.outstandingBalance || 0;
     const nextErrors = {};
-    if (!amount || amount <= 0) nextErrors.amountCollected = 'Enter a valid amount greater than zero.';
-    if (!formData.partialPayment && amount > outstanding) nextErrors.amountCollected = 'Amount cannot exceed outstanding balance.';
-    if (formData.partialPayment && amount > outstanding) nextErrors.amountCollected = 'Partial payment still cannot exceed outstanding balance.';
-    if (outstanding <= 0) nextErrors.amountCollected = 'Customer has no outstanding balance.';
-    if (!formData.paymentMethod) nextErrors.paymentMethod = 'Select a payment method.';
+    if (!Number.isFinite(amount) || amount <= 0) {
+      nextErrors.amountCollected = 'Enter a valid collection amount greater than zero.';
+    } else if (outstanding <= 0) {
+      nextErrors.amountCollected = 'This customer has no outstanding balance to collect.';
+    } else if (amount > outstanding) {
+      nextErrors.amountCollected = `Amount collected cannot exceed the outstanding balance (${formatCurrency(outstanding)}).`;
+    }
+
+    const method = String(formData.paymentMethod || '').trim();
+    if (!['Cash', 'GCash'].includes(method)) {
+      nextErrors.paymentMethod = 'Select Cash or GCash.';
+    }
+
+    if (method === 'GCash') {
+      const ref = String(formData.gcashReference || '').trim();
+      if (!ref || ref.length < 6) {
+        nextErrors.gcashReference = 'Enter a valid GCash reference number (at least 6 characters).';
+      }
+    }
+
     setErrors(nextErrors);
     if (Object.keys(nextErrors).length) {
-      showToast('Please fix the errors before submitting.', 'error');
+      showToast?.('Please review and fix the highlighted fields.', 'error');
+      return false;
+    }
+    return true;
+  };
+
+  const handleRequestSubmit = (e) => {
+    e?.preventDefault?.();
+    if (submitting) return;
+    if (!validateForm()) return;
+    setConfirmOpen(true);
+  };
+
+  const handleConfirmAndSave = async () => {
+    if (submitting) return;
+    const amount = Math.round(Number(formData.amountCollected) * 100) / 100;
+    const visitId = account.todayVisit?.visit_id || null;
+    if (!visitId || parentContext !== 'route') {
+      showToast?.('Collections can only be logged from a published route stop.', 'error');
+      setConfirmOpen(false);
       return;
     }
+
     const payload = {
-      customer_id: Number(account.id),
+      customer_id: Number(account.id || account.customer_id),
+      visit_id: Number(visitId),
       amount,
       payment_method: formData.paymentMethod,
-      notes: formData.notes || null,
+      reference_number: isGCash ? String(formData.gcashReference).trim() : null,
+      notes: formData.notes ? String(formData.notes).trim() : null,
       generate_receipt: formData.generateReceipt,
       expected_balance: outstanding,
       customer_name: account.customerName || '',
     };
+
     const keepLocal = async () => {
       await saveOfflineRecord({ tableName: 'collection_payment', payload });
+      setConfirmOpen(false);
       showToast(
         isCollectorAutoSyncEnabled()
           ? 'Saved on this device. It will sync when you are online.'
           : 'Saved on this device. Send it from Settings while auto-sync is off.',
         'success'
       );
-      setFormData((prev) => ({ ...prev, amountCollected: '', notes: '' }));
+      setFormData((prev) => ({
+        ...prev,
+        amountCollected: '',
+        gcashReference: '',
+        notes: '',
+      }));
       await refreshDevicePayments();
     };
+
     if (!isBrowserOnline()) {
       await keepLocal();
       return;
     }
+
     setSubmitting(true);
     const result = await submitCollectionPayment(payload);
     setSubmitting(false);
+    setConfirmOpen(false);
+
     if (!result.success) {
       if (result.offline) {
         await keepLocal();
@@ -1208,821 +1082,338 @@ function CollectionLogPage({
       showToast(result.message || 'Collection failed.', 'error');
       return;
     }
-    showToast(result.message || 'Collection logged successfully.', 'success');
-    if (result.data?.receipts_id) {
-      navigate(`/collector/receipts/${result.data.receipts_id}`);
-    } else if (result.data?.collectionpayment_id) {
-      navigate(`/collector/history/${result.data.collectionpayment_id}`);
-    } else {
-      navigate(`/collector/account-detail/${account.id}${contextQuery}`);
-    }
-  };
-  return <div className="page">
-      <DeviceQueue rows={devicePayments} />
-      <FormPanel title="Log Payment Collection" formData={formData} onChange={handleChange} errors={errors} fields={[{
-      name: 'customerName',
-      label: 'Customer Name',
-      type: 'text',
-      disabled: true,
-      defaultValue: account.customerName
-    }, {
-      name: 'amountCollected',
-      label: 'Amount Collected',
-      type: 'number',
-      required: true,
-      min: 0,
-      max: account.outstandingBalance || 0,
-      placeholder: 'Enter amount'
-    }, {
-      name: 'paymentMethod',
-      label: 'Payment Method',
-      type: 'select',
-      required: true,
-      placeholder: 'Select payment method',
-      options: paymentMethods
-    }, {
-      name: 'notes',
-      label: 'Notes',
-      type: 'textarea',
-      placeholder: 'Add notes about the transaction...'
-    }, {
-      name: 'proofPhoto',
-      label: 'Proof Photo Upload',
-      type: 'file',
-      accept: 'image/*'
-    }, {
-      name: 'partialPayment',
-      label: 'Partial Payment',
-      type: 'toggle',
-      toggleLabel: 'This is a partial payment'
-    }, {
-      name: 'remainingPreview',
-      label: 'Balance after confirmation',
-      type: 'preview',
-      value: formatCurrency(remainingBalance)
-    }, {
-      name: 'generateReceipt',
-      label: 'Generate Digital Receipt',
-      type: 'toggle',
-      toggleLabel: 'Generate receipt after submission'
-    }]} />
-      <div className="flex flex-wrap gap-2 justify-end mt-4 mb-2">
-        <button className="button secondary" type="button" onClick={() => navigate(`/collector/account-detail/${account.id}${contextQuery}`)}>Cancel</button>
-        <button className="button" type="button" onClick={handleSubmit} disabled={submitting}>{submitting ? 'Submitting…' : 'Submit for review'}</button>
-      </div>
-    </div>;
-}
-function ReceiptsListPage({
-  navigate,
-  showToast
-}) {
-  const [receipts, setReceipts] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
-  const [search, setSearch] = useState('');
-  const [dateFrom, setDateFrom] = useState('');
-  const [dateTo, setDateTo] = useState('');
-  useEffect(() => {
-    async function load() {
-      setLoading(true);
-      setError(null);
-      const result = await fetchDigitalReceipts();
-      if (result.success) {
-        setReceipts(result.data || []);
-      } else {
-        setError(result.message || 'Failed to load receipts.');
-        if (showToast) showToast(result.message || 'Failed to load receipts', 'error');
-      }
-      setLoading(false);
-    }
-    load();
-  }, [showToast]);
-  const filtered = useMemo(() => {
-    const q = search.trim().toLowerCase();
-    return receipts.filter(r => {
-      const matchSearch = !q || (r.receipt_number || '').toLowerCase().includes(q) || (r.customer_name || '').toLowerCase().includes(q) || String(r.receipts_id).includes(q);
-      const rDate = r.receipt_date ? r.receipt_date.slice(0, 10) : '';
-      const matchFrom = !dateFrom || rDate >= dateFrom;
-      const matchTo = !dateTo || rDate <= dateTo;
-      return matchSearch && matchFrom && matchTo;
+
+    showToast(result.message || 'Collection recorded.', 'success');
+    const saved = result.data || {};
+    const newRemaining =
+      saved.remaining_balance != null
+        ? Number(saved.remaining_balance)
+        : Math.max(0, outstanding - amount);
+
+    setAccount((prev) => (prev ? { ...prev, outstandingBalance: newRemaining } : prev));
+    setRecordedPayment({
+      collectionpayment_id: saved.collectionpayment_id,
+      receipt_number: saved.receipt_number || '—',
+      receipts_id: saved.receipts_id || null,
+      amount: Number(saved.amount ?? amount),
+      payment_method: saved.payment_method || formData.paymentMethod,
+      reference_number: saved.reference_number || (isGCash ? String(formData.gcashReference).trim() : null),
+      remaining_balance: newRemaining,
+      payment_date: saved.payment_date,
+      payment_time: saved.payment_time,
     });
-  }, [receipts, search, dateFrom, dateTo]);
-  const pagination_filtered = usePagination(filtered);
-  const paginated_filtered = pagination_filtered.paginatedData;
-  if (loading) return <LoadingState message="Loading digital receipts..." />;
-  if (error && !receipts.length) {
-    return <EmptyState title="Unable to load receipts" description={error} actionLabel="Retry" onAction={() => window.location.reload()} />;
-  }
-  return <div className="page">
-      <section className="panel content-panel relative overflow-hidden">
-        <div className="list-section-header">
-          <h3>Digital Receipts</h3>
-        </div>
-        <div className="list-section-toolbar suppliers-toolbar audit-logs-toolbar">
-          <div className="list-section-controls audit-logs-filters">
-            <input className="filter-input search" type="search" placeholder="Search by receipt number, customer, or ID" value={search} onChange={e => setSearch(e.target.value)} aria-label="Search receipts" />
-            <input className="filter-input" type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)} aria-label="From date" />
-            <input className="filter-input" type="date" value={dateTo} onChange={e => setDateTo(e.target.value)} aria-label="To date" />
+  };
+
+  if (recordedPayment) {
+    return (
+      <div className="page">
+        <section className="panel content-panel">
+          <div className="flex flex-col md:flex-row justify-between gap-4 items-start md:items-center mb-4">
+            <div>
+              <h3>Collection Recorded</h3>
+              <p className="muted" style={{ marginTop: 4 }}>
+                Payment has been saved and the customer&apos;s balance and route status have been updated.
+              </p>
+            </div>
+            <StatusBadge status="Completed" />
           </div>
-          <div className="list-section-actions suppliers-toolbar-actions">
+          <DetailRowsTable
+            rows={[
+              { label: 'Customer Name', value: account.customerName },
+              { label: 'Account Reference', value: account.accountNumber },
+              {
+                label: 'Transaction Reference',
+                value: <span style={{ fontFamily: 'monospace', fontWeight: 700 }}>{recordedPayment.receipt_number}</span>,
+              },
+              {
+                label: 'Amount Collected',
+                value: <strong style={{ color: 'var(--palette-navy)' }}>{formatCurrency(recordedPayment.amount)}</strong>,
+              },
+              { label: 'Payment Method', value: recordedPayment.payment_method },
+              ...(recordedPayment.reference_number
+                ? [
+                    {
+                      label: 'GCash Reference Number',
+                      value: <span style={{ fontFamily: 'monospace' }}>{recordedPayment.reference_number}</span>,
+                    },
+                  ]
+                : []),
+              {
+                label: 'Remaining Balance',
+                value: <strong>{formatCurrency(recordedPayment.remaining_balance)}</strong>,
+              },
+              {
+                label: 'Collection Date and Time',
+                value: formatPaymentTimestamp(recordedPayment.payment_date, recordedPayment.payment_time),
+              },
+            ]}
+          />
+          <div className="flex flex-wrap justify-end gap-2 mt-4">
             <button
-              className="button secondary whitespace-nowrap"
+              className="button secondary"
               type="button"
-              onClick={() => {
-                const rows = filtered.map(r => ({
-                  receipt_id: r.receipts_id,
-                  receipt_number: r.receipt_number,
-                  customer: r.customer_name,
-                  amount: r.amount,
-                  method: r.payment_method,
-                  status: r.payment_status,
-                  date: r.receipt_date,
-                }));
-                if (downloadPdf(rows, { filename: 'collector-receipts.pdf', title: 'Collector Receipts' })) showToast('Receipts exported as PDF.', 'success');
-                else showToast('Nothing to export.', 'error');
-              }}
+              onClick={() => navigate(`/collector/account-detail/${account.id}${contextQuery}`)}
             >
-              Export PDF
+              Back to Customer Detail
+            </button>
+            {recordedPayment.receipts_id ? (
+              <button
+                className="button secondary"
+                type="button"
+                onClick={() => navigate(`/collector/receipts/${recordedPayment.receipts_id}`)}
+              >
+                Open Official Receipt
+              </button>
+            ) : null}
+            <button
+              className="button"
+              type="button"
+              onClick={() => navigate('/collector/route')}
+            >
+              Return to Today&apos;s Route
             </button>
           </div>
-        </div>
-        {filtered.length ? <><div className="corvex-table-wrapper">
-            <table className="corvex-table">
-              <thead>
-                <tr>
-                  <th>Receipt ID</th>
-                  <th>Receipt Number</th>
-                  <th>Customer</th>
-                  <th>Amount</th>
-                  <th>Payment Method</th>
-                  <th>Payment Status</th>
-                  <th>Generated By</th>
-                  <th>Receipt Date</th>
-                  <th>Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {paginated_filtered.map(r => <tr key={r.receipts_id}>
-                    <td><span style={{
-                    fontFamily: 'monospace',
-                    fontSize: '0.82rem'
-                  }}>{r.receipts_id}</span></td>
-                    <td><span style={{
-                    fontFamily: 'monospace',
-                    fontSize: '0.82rem'
-                  }}>{r.receipt_number}</span></td>
-                    <td>{r.customer_name || '—'}</td>
-                    <td style={{
-                  fontWeight: 600
-                }}>{formatCurrency(Number(r.amount))}</td>
-                    <td>{r.payment_method || '—'}</td>
-                    <td><StatusBadge status={r.payment_status} /></td>
-                    <td>{r.generated_by_name || '—'}</td>
-                    <td>{formatDisplayDate(r.receipt_date)}</td>
-                    <td className="table-actions">
-                      <button className="icon-action-button" type="button" title="View" onClick={() => navigate(`/collector/receipts/${r.receipts_id}`)}>
-                        <NavIcon name="view" />
-                      </button>
-                    </td>
-                  </tr>)}
-              </tbody>
-            </table>
-          </div><Pagination {...pagination_filtered} /></>
-        : <EmptyState title="No receipts found" description="Adjust your search or date filters." />}
-      </section>
-    </div>;
-}
-function DigitalReceiptPage({
-  receiptId,
-  navigate,
-  showToast
-}) {
-  const [receipt, setReceipt] = useState(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
-  useEffect(() => {
-    async function load() {
-      if (!receiptId) {
-        setError('No receipt ID provided.');
-        setLoading(false);
-        return;
-      }
-      setLoading(true);
-      setError(null);
-      const result = await fetchDigitalReceiptById(receiptId);
-      if (result.success && result.data) {
-        setReceipt(result.data);
-      } else {
-        setError(result.message || 'Receipt not found.');
-        if (showToast) showToast(result.message || 'Receipt not found', 'error');
-      }
-      setLoading(false);
-    }
-    load();
-  }, [receiptId, showToast]);
-  if (loading) return <LoadingState message="Loading receipt..." />;
-  if (error || !receipt) {
-    return <EmptyState title="Receipt not found" description={error || 'This receipt does not exist.'} actionLabel="Back to Receipts" onAction={() => navigate('/collector/receipts')} />;
-  }
-  return <div className="page">
-      {/* Header */}
-      <section className="panel dashboard-greeting">
-        <div className="flex flex-col gap-1">
-          <p className="text-[0.82rem] font-bold tracking-widest uppercase text-navy/60 m-0">Digital Receipt · ID {receipt.receipts_id}</p>
-          <h2>{receipt.receipt_number}</h2>
-          <p className="text-ink/70">{receipt.branch_name} · {receipt.customer_name}</p>
-        </div>
-      </section>
-
-      {/* KPI strip */}
-      <StatsGrid stats={[{
-      label: 'Receipt ID',
-      value: String(receipt.receipts_id)
-    }, {
-      label: 'Amount',
-      value: formatCurrency(Number(receipt.amount))
-    }, {
-      label: 'Payment Status',
-      value: receipt.payment_status || '—'
-    }, {
-      label: 'Receipt Date',
-      value: formatDisplayDate(receipt.receipt_date)
-    }]} />
-
-      {/* Full detail */}
-      <section className="panel content-panel relative overflow-hidden">
-        <div className="flex flex-col md:flex-row justify-between gap-4 items-start md:items-center mb-4"><h3>Receipt Detail</h3></div>
-        <DetailRowsTable rows={[
-          { label: 'Receipt ID', value: <span style={{ fontFamily: 'monospace' }}>{receipt.receipts_id}</span> },
-          { label: 'Receipt Number', value: <span style={{ fontFamily: 'monospace' }}>{receipt.receipt_number}</span> },
-          { label: 'Receipt Date', value: formatDisplayDate(receipt.receipt_date) },
-          { label: 'Generated By', value: receipt.generated_by_name || '—' },
-          { label: 'Customer', value: receipt.customer_name || '—' },
-          { label: 'Customer ID', value: <span style={{ fontFamily: 'monospace' }}>{receipt.customer_id}</span> },
-          { label: 'Customer Address', value: receipt.customer_address || '—' },
-          { label: 'Customer Phone', value: formatPhone(receipt.customer_phone) },
-          { label: 'Branch', value: receipt.branch_name || '—' },
-          { label: 'Amount', value: <span style={{ fontWeight: 700, color: '#0B1E30' }}>{formatCurrency(Number(receipt.amount))}</span> },
-          { label: 'Payment Method', value: receipt.payment_method || '—' },
-          { label: 'Payment Date', value: formatDisplayDate(receipt.payment_date) },
-          { label: 'Payment Time', value: receipt.payment_time ? String(receipt.payment_time).slice(0, 8) : '—' },
-          { label: 'Payment Status', value: <StatusBadge status={receipt.payment_status} /> },
-          ...(receipt.notes ? [{ label: 'Notes', value: receipt.notes }] : []),
-        ]} />
-      </section>
-
-      <div className="flex flex-wrap justify-end gap-2 mt-4">
-        <button className="button ghost" type="button" onClick={() => navigate('/collector/receipts')}>Back to Receipts</button>
-        <button className="button secondary" type="button" onClick={async () => {
-          const result = await sendReceiptToCustomer(receipt.receipts_id);
-          if (result.success) showToast(result.message || 'Receipt sent.', 'success');
-          else showToast(result.message || 'Could not send receipt.', 'error');
-        }}>
-          Send to (Customer)
-        </button>
-        <button
-          className="button"
-          type="button"
-          onClick={() => {
-            const row = {
-              receipt_id: receipt.receipts_id,
-              receipt_number: receipt.receipt_number,
-              customer: receipt.customer_name,
-              amount: receipt.amount,
-              method: receipt.payment_method,
-              payment_date: receipt.payment_date,
-              branch: receipt.branch_name,
-            };
-            if (downloadPdf([row], { filename: `receipt-${receipt.receipt_number}.pdf`, title: 'Receipt Details' })) showToast('Receipt exported as PDF.', 'success');
-          }}
-        >
-          Export PDF
-        </button>
+        </section>
       </div>
-    </div>;
+    );
+  }
+
+  return (
+    <div className="page">
+      <DeviceQueue rows={devicePayments} />
+
+      <section className="panel content-panel">
+        <div className="flex flex-col md:flex-row justify-between gap-4 items-start md:items-center mb-4">
+          <div>
+            <h3>Customer and Account Information</h3>
+          </div>
+          <StatusBadge status={account.status} />
+        </div>
+        <DetailRowsTable
+          rows={[
+            { label: 'Customer Name', value: <strong>{account.customerName}</strong> },
+            {
+              label: 'Account Reference',
+              value: <span style={{ fontFamily: 'monospace' }}>{account.accountNumber}</span>,
+            },
+            {
+              label: 'Outstanding Balance',
+              value: <strong style={{ fontSize: '1.05rem' }}>{formatCurrency(outstanding)}</strong>,
+            },
+            { label: 'Days Overdue', value: `${account.daysOverdue || 0} days` },
+          ]}
+        />
+      </section>
+
+      <section className="panel form-panel content-panel">
+        <div className="flex flex-col md:flex-row justify-between gap-4 items-start md:items-center mb-4">
+          <div>
+            <h3>Collection Details</h3>
+            <p className="muted" style={{ marginTop: 4 }}>
+              Accepted payment modes: Cash and GCash.
+            </p>
+          </div>
+        </div>
+
+        <form onSubmit={handleRequestSubmit}>
+          <div className="form-group">
+            <div className="flex items-center justify-between">
+              <label>
+                Amount Collected<span className="required">*</span>
+              </label>
+              {outstanding > 0 ? (
+                <button
+                  type="button"
+                  className="button ghost"
+                  style={{ padding: '2px 8px', fontSize: '0.78rem' }}
+                  onClick={() => handleChange('amountCollected', String(outstanding))}
+                >
+                  Collect Full Balance ({formatCurrency(outstanding)})
+                </button>
+              ) : null}
+            </div>
+            <input
+              type="number"
+              min="0.01"
+              max={outstanding}
+              step="0.01"
+              placeholder="Enter amount collected"
+              value={formData.amountCollected}
+              onChange={(e) => handleChange('amountCollected', e.target.value)}
+            />
+            {errors.amountCollected ? <p className="form-error">{errors.amountCollected}</p> : null}
+          </div>
+
+          <div
+            className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-4"
+            style={{
+              padding: '12px 14px',
+              background: 'var(--surface-2)',
+              borderRadius: 8,
+              border: '1px solid var(--surface-3)',
+            }}
+          >
+            <div>
+              <div className="muted" style={{ fontSize: '0.78rem' }}>Outstanding Balance</div>
+              <div style={{ fontWeight: 700 }}>{formatCurrency(outstanding)}</div>
+            </div>
+            <div>
+              <div className="muted" style={{ fontSize: '0.78rem' }}>Amount Collected</div>
+              <div style={{ fontWeight: 700 }}>{formatCurrency(enteredAmount)}</div>
+            </div>
+            <div>
+              <div className="muted" style={{ fontSize: '0.78rem' }}>Remaining Balance</div>
+              <div style={{ fontWeight: 700 }}>{formatCurrency(remainingBalance)}</div>
+            </div>
+          </div>
+
+          <div className="field-report-filter-row">
+            <div className="form-group" style={{ marginBottom: 0 }}>
+              <label>
+                Payment Method<span className="required">*</span>
+              </label>
+              <select
+                className="filter-select"
+                value={formData.paymentMethod}
+                onChange={(e) => handleChange('paymentMethod', e.target.value)}
+              >
+                {paymentMethods.map((opt) => (
+                  <option key={opt} value={opt}>{opt}</option>
+                ))}
+              </select>
+              {errors.paymentMethod ? <p className="form-error">{errors.paymentMethod}</p> : null}
+            </div>
+
+            <div className="form-group" style={{ marginBottom: 0 }}>
+              <label>Collection Date and Time</label>
+              <input type="text" value={collectionTimeDisplay} disabled />
+            </div>
+          </div>
+
+          {isGCash ? (
+            <div className="form-group" style={{ marginTop: 14 }}>
+              <label>
+                GCash Reference Number<span className="required">*</span>
+              </label>
+              <input
+                type="text"
+                placeholder="Enter GCash transaction reference number"
+                value={formData.gcashReference}
+                onChange={(e) => handleChange('gcashReference', e.target.value)}
+              />
+              {errors.gcashReference ? <p className="form-error">{errors.gcashReference}</p> : null}
+            </div>
+          ) : null}
+
+          <div className="form-group" style={{ marginTop: 14 }}>
+            <label>Remarks (Optional)</label>
+            <textarea
+              rows={3}
+              placeholder="Optional remarks about this collection..."
+              value={formData.notes}
+              onChange={(e) => handleChange('notes', e.target.value)}
+            />
+          </div>
+
+          <div className="form-group">
+            <label className="toggle-label">
+              <input
+                type="checkbox"
+                checked={Boolean(formData.generateReceipt)}
+                onChange={(e) => handleChange('generateReceipt', e.target.checked)}
+              />
+              Generate official digital receipt
+            </label>
+          </div>
+
+          <div className="flex flex-wrap gap-2 justify-end mt-4">
+            <button
+              className="button secondary"
+              type="button"
+              onClick={() => navigate(`/collector/account-detail/${account.id}${contextQuery}`)}
+            >
+              Cancel
+            </button>
+            <button
+              className="button"
+              type="submit"
+              disabled={submitting || outstanding <= 0}
+            >
+              {submitting ? 'Saving…' : 'Review & Save Collection'}
+            </button>
+          </div>
+        </form>
+      </section>
+
+      {confirmOpen ? (
+        <div
+          className="modal-overlay"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="confirm-collection-title"
+          onClick={() => !submitting && setConfirmOpen(false)}
+        >
+          <div className="modal-content" style={{ maxWidth: 480 }} onClick={(e) => e.stopPropagation()}>
+            <h3 id="confirm-collection-title" style={{ marginTop: 0 }}>Confirm Collection</h3>
+            <p className="muted" style={{ marginBottom: 14 }}>
+              Please verify the payment details before saving this transaction.
+            </p>
+            <DetailRowsTable
+              rows={[
+                { label: 'Customer', value: account.customerName },
+                { label: 'Account Reference', value: account.accountNumber },
+                { label: 'Outstanding Balance', value: formatCurrency(outstanding) },
+                {
+                  label: 'Amount Collected',
+                  value: <strong>{formatCurrency(enteredAmount)}</strong>,
+                },
+                { label: 'Payment Method', value: formData.paymentMethod },
+                ...(isGCash
+                  ? [{ label: 'GCash Reference', value: formData.gcashReference.trim() }]
+                  : []),
+                {
+                  label: 'Remaining Balance',
+                  value: <strong>{formatCurrency(remainingBalance)}</strong>,
+                },
+                { label: 'Date & Time', value: collectionTimeDisplay },
+              ]}
+            />
+            <div className="modal-actions" style={{ marginTop: 16 }}>
+              <button
+                className="button secondary"
+                type="button"
+                disabled={submitting}
+                onClick={() => setConfirmOpen(false)}
+              >
+                Back to Edit
+              </button>
+              <button
+                className="button"
+                type="button"
+                disabled={submitting}
+                onClick={handleConfirmAndSave}
+              >
+                {submitting ? 'Recording…' : 'Confirm & Save Payment'}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+    </div>
+  );
 }
 function CIFormPage({
   accountId,
   parentContext,
   navigate,
-  showToast
 }) {
-  const [account, setAccount] = useState(null);
-  const [loading, setLoading] = useState(true);
-  const [formData, setFormData] = useState({
-    customerName: '',
-    purpose: '',
-    monthlyIncome: '',
-    businessType: '',
-    reference1: '',
-    reference2: '',
-    remarks: '',
-  });
-  const [submitting, setSubmitting] = useState(false);
-  const contextQuery = `?from=${parentContext}`;
-  useEffect(() => {
-    async function load() {
-      setLoading(true);
-      const result = await fetchAccountById(accountId);
-      if (result.success) {
-        setAccount(result.data);
-        setFormData(prev => ({
-          ...prev,
-          customerName: result.data.customerName || '',
-        }));
-      }
-      setLoading(false);
-    }
-    load();
-  }, [accountId]);
-  if (loading) return <LoadingState message="Loading customer..." />;
-  if (!account) {
-    return <EmptyState title="Customer not found" actionLabel="Back to Customers" onAction={() => navigate('/collector/accounts')} />;
-  }
-  return <div className="page">
-      <FormPanel title="Credit Investigation Form" formData={formData} onChange={(name, value) => setFormData(prev => ({
-      ...prev,
-      [name]: value
-    }))} fields={[{
-      name: 'customerName',
-      label: 'Customer Name',
-      type: 'text',
-      disabled: true,
-      defaultValue: account.customerName
-    }, {
-      name: 'purpose',
-      label: 'Purpose of CI',
-      type: 'select',
-      required: true,
-      placeholder: 'Select purpose',
-      options: ['Credit Limit Increase', 'New Customer', 'Delinquency Review', 'Account Restructure']
-    }, {
-      name: 'monthlyIncome',
-      label: 'Monthly Income',
-      type: 'number',
-      required: true,
-      placeholder: '₱ amount'
-    }, {
-      name: 'businessType',
-      label: 'Business Type',
-      type: 'select',
-      required: true,
-      placeholder: 'Select type',
-      options: ['Sari-Sari Store', 'Convenience Store', 'General Store', 'Wholesale', 'Retail', 'Service']
-    }, {
-      name: 'reference1',
-      label: 'Character Reference 1',
-      type: 'text',
-      placeholder: 'Name and contact'
-    }, {
-      name: 'reference2',
-      label: 'Character Reference 2',
-      type: 'text',
-      placeholder: 'Name and contact'
-    }, {
-      name: 'remarks',
-      label: 'Remarks',
-      type: 'textarea',
-      placeholder: 'Additional notes for the operating manager...'
-    }]} />
-      <div className="flex flex-wrap gap-2 justify-end mt-4 mb-2">
-        <button className="button secondary" type="button" onClick={() => navigate(`/collector/account-detail/${account.id}${contextQuery}`)}>Cancel</button>
-        <button className="button" type="button" disabled={submitting} onClick={async () => {
-        if (!formData.purpose || !formData.monthlyIncome || !formData.businessType) {
-          showToast('Purpose, monthly income, and business type are required.', 'error');
-          return;
-        }
-        const referencesSummary = [formData.reference1, formData.reference2].filter(Boolean).join(' | ') || null;
-        setSubmitting(true);
-        const result = await submitCollectorCreditInvestigation({
-          customer_id: Number(account.id),
-          purpose: formData.purpose,
-          monthly_income: Number(formData.monthlyIncome),
-          business_type: formData.businessType,
-          references_summary: referencesSummary,
-          form_remarks: formData.remarks || null,
-        });
-        setSubmitting(false);
-        if (!result.success) {
-          showToast(result.message || 'Submit failed.', 'error');
-          return;
-        }
-        showToast(result.message || 'CI submitted.', 'success');
-        navigate(`/collector/account-detail/${account.id}${contextQuery}`);
-      }}>{submitting ? 'Submitting…' : 'Submit to Operating Manager'}</button>
-      </div>
-    </div>;
-}
-function IncidentReportPage({
-  accountId,
-  parentContext,
-  navigate,
-  showToast
-}) {
-  const [account, setAccount] = useState(null);
-  const [loading, setLoading] = useState(true);
-  const [formData, setFormData] = useState({});
-  const [submitting, setSubmitting] = useState(false);
   const contextQuery = parentContext ? `?from=${parentContext}` : '';
-  const backTo = account ? `/collector/account-detail/${account.id}${contextQuery}` : '/collector/dashboard';
   useEffect(() => {
-    async function load() {
-      if (!accountId) {
-        setLoading(false);
-        return;
-      }
-      setLoading(true);
-      const result = await fetchAccountById(accountId);
-      if (result.success) setAccount(result.data);
-      setLoading(false);
-    }
-    load();
-  }, [accountId]);
-  if (accountId && loading) return <LoadingState message="Loading customer..." />;
-  return <div className="page">
-      {account ? <section className="panel content-panel relative overflow-hidden">
-          <p className="text-ink/70">Reporting incident for <strong>{account.customerName}</strong> ({account.accountNumber})</p>
-        </section> : null}
-      <FormPanel title="Report Incident" formData={formData} onChange={(name, value) => setFormData(prev => ({
-      ...prev,
-      [name]: value
-    }))} fields={[{
-      name: 'incidentType',
-      label: 'Incident Type',
-      type: 'select',
-      required: true,
-      placeholder: 'Select type',
-      options: ['Safety Concern', 'Payment Dispute', 'Customer Aggression', 'Location Issue', 'Product Damage', 'Other']
-    }, {
-      name: 'description',
-      label: 'Description',
-      type: 'textarea',
-      required: true,
-      placeholder: 'Describe the incident in detail...'
-    }, {
-      name: 'location',
-      label: 'Location',
-      type: 'text',
-      placeholder: account?.address ?? 'Auto-detected or manual entry'
-    }, {
-      name: 'photo',
-      label: 'Photo Upload',
-      type: 'file',
-      accept: 'image/*'
-    }, {
-      name: 'gps',
-      label: 'GPS Coordinates',
-      type: 'text',
-      placeholder: '14.6760, 121.0437 (auto-detected)'
-    }, {
-      name: 'severity',
-      label: 'Severity Level',
-      type: 'select',
-      required: true,
-      placeholder: 'Select severity',
-      options: ['Low', 'Medium', 'High', 'Critical']
-    }]} />
-      <div className="flex flex-wrap gap-2 justify-end mt-4 mb-2">
-        <button className="button secondary" type="button" onClick={() => navigate(backTo)}>Cancel</button>
-        <button className="button" type="button" disabled={submitting} onClick={async () => {
-        if (!formData.incidentType || !formData.description || !formData.severity) {
-          showToast('Incident type, description, and severity are required.', 'error');
-          return;
-        }
-        setSubmitting(true);
-        const result = await submitCollectorIncident({
-          customer_id: accountId ? Number(accountId) : null,
-          incident_type: formData.incidentType,
-          description: formData.description,
-          location: formData.location || account?.address || null,
-          severity: formData.severity,
-          gps: formData.gps || null,
-        });
-        setSubmitting(false);
-        if (!result.success) {
-          showToast(result.message || 'Submit failed.', 'error');
-          return;
-        }
-        showToast(result.message || 'Incident report sent.', 'success');
-        navigate(backTo);
-      }}>{submitting ? 'Submitting…' : 'Submit to Operating Manager'}</button>
-      </div>
-    </div>;
-}
-function collectionPaymentPdfRow(payment) {
-  return {
-    payment_id: payment.collectionpayment_id,
-    receipt_number: payment.receipt_number || '',
-    customer: payment.customer_name || '',
-    collector: payment.collector_name || '',
-    branch: payment.branch_name || '',
-    payment_method: payment.payment_method || '',
-    amount: formatCurrency(Number(payment.amount)),
-    status: payment.status || '',
-    timestamp: formatPaymentTimestamp(payment.payment_date, payment.payment_time),
-    notes: payment.notes || '',
-  };
+    navigate(accountId ? `/collector/account-detail/${accountId}${contextQuery}` : '/collector/route');
+  }, [accountId, contextQuery, navigate]);
+  return <LoadingState message="Redirecting..." />;
 }
 
-function CollectionHistoryPage({
-  navigate,
-  showToast
-}) {
-  const [payments, setPayments] = useState([]);
-  const [search, setSearch] = useState('');
-  const [statusFilter, setStatusFilter] = useState('All');
-  const [dateFrom, setDateFrom] = useState('');
-  const [dateTo, setDateTo] = useState('');
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
-  const [devicePayments, setDevicePayments] = useState([]);
-  const [selectedPayment, setSelectedPayment] = useState(null);
-  const [detailLoading, setDetailLoading] = useState(false);
-  useEffect(() => {
-    async function load() {
-      setLoading(true);
-      setError(null);
-      const result = await fetchCollectionPayments();
-      if (result.success) {
-        setPayments(result.data || []);
-      } else {
-        setError(result.message || 'Failed to load collection payments.');
-      }
-      setDevicePayments(await loadWaiting('collection_payment'));
-      setLoading(false);
-    }
-    load();
-  }, [showToast]);
-  const filtered = useMemo(() => {
-    const query = search.trim().toLowerCase();
-    return payments.filter(p => {
-      const matchesSearch = !query || (p.customer_name || '').toLowerCase().includes(query) || (p.receipt_number || '').toLowerCase().includes(query) || String(p.receipts_id || '').includes(query) || String(p.collectionpayment_id).includes(query);
-      const matchesStatus = statusFilter === 'All' || p.status === statusFilter;
-      const matchesFrom = !dateFrom || p.payment_date >= dateFrom;
-      const matchesTo = !dateTo || p.payment_date <= dateTo;
-      return matchesSearch && matchesStatus && matchesFrom && matchesTo;
-    });
-  }, [payments, search, statusFilter, dateFrom, dateTo]);
-  const pagination_filtered = usePagination(filtered, {
-    resetKey: `${search}|${statusFilter}|${dateFrom}|${dateTo}`,
-  });
-  const paginated_filtered = pagination_filtered.paginatedData;
-
-  const openPaymentDetail = async (payment) => {
-    setSelectedPayment(payment);
-    setDetailLoading(true);
-    const result = await fetchCollectionPaymentById(payment.collectionpayment_id);
-    setDetailLoading(false);
-    if (result.success && result.data) {
-      setSelectedPayment(result.data);
-    } else {
-      showToast?.(result.message || 'Could not load full payment details.', 'error');
-    }
-  };
-
-  const closePaymentDetail = () => {
-    setSelectedPayment(null);
-    setDetailLoading(false);
-  };
-
-  const exportFilteredPdf = () => {
-    const rows = filtered.map((p) => ({
-      payment_id: p.collectionpayment_id,
-      receipt: p.receipt_number,
-      customer: p.customer_name,
-      amount: p.amount,
-      method: p.payment_method,
-      status: p.status,
-      date: p.payment_date,
-    }));
-    if (downloadPdf(rows, { filename: 'collector-payments.pdf', title: 'Collector Payments' })) {
-      showToast('Payments exported as PDF.', 'success');
-    } else {
-      showToast('Nothing to export.', 'error');
-    }
-  };
-
-  const exportSelectedPdf = () => {
-    if (!selectedPayment) return;
-    const row = collectionPaymentPdfRow(selectedPayment);
-    const filename = `collection-payment-${selectedPayment.collectionpayment_id}.pdf`;
-    if (downloadPdf([row], {
-      filename,
-      title: 'Collection Payment Details',
-      subtitle: selectedPayment.receipt_number || `Payment #${selectedPayment.collectionpayment_id}`,
-    })) {
-      showToast('Payment exported as PDF.', 'success');
-    } else {
-      showToast('Nothing to export.', 'error');
-    }
-  };
-
-  if (loading) return <LoadingState message="Loading collection payments..." />;
-  if (error && !payments.length) {
-    return <div className="page">
-      <DeviceQueue rows={devicePayments} />
-      <EmptyState title="Unable to load collection payments" description={error} actionLabel="Retry" onAction={() => window.location.reload()} />
-    </div>;
-  }
-  return <div className="page">
-      <DeviceQueue rows={devicePayments} />
-      <section className="panel content-panel relative overflow-hidden">
-        <div className="list-section-header">
-          <h3>Collection Payments</h3>
-        </div>
-        <div className="list-section-toolbar suppliers-toolbar audit-logs-toolbar">
-          <div className="list-section-controls audit-logs-filters">
-            <input
-              className="filter-input search"
-              type="search"
-              placeholder="Search by customer, receipt number, or ID"
-              value={search}
-              onChange={e => setSearch(e.target.value)}
-              aria-label="Search collection payments"
-            />
-            <select
-              className="filter-select"
-              value={statusFilter}
-              onChange={e => setStatusFilter(e.target.value)}
-              aria-label="Filter by status"
-            >
-              {['All', 'Pending', 'Completed', 'Cancelled'].map(option => <option key={option} value={option}>Status: {option}</option>)}
-            </select>
-            <input className="filter-input" type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)} aria-label="From date" />
-            <input className="filter-input" type="date" value={dateTo} onChange={e => setDateTo(e.target.value)} aria-label="To date" />
-          </div>
-          <div className="list-section-actions suppliers-toolbar-actions">
-            <button className="button secondary whitespace-nowrap" type="button" onClick={exportFilteredPdf}>
-              Export PDF
-            </button>
-          </div>
-        </div>
-        {filtered.length ? <><div className="corvex-table-wrapper">
-            <table className="corvex-table">
-              <thead>
-                <tr>
-                  <th>Payment ID</th>
-                  <th>Receipt Number</th>
-                  <th>Customer</th>
-                  <th>Collector</th>
-                  <th>Branch</th>
-                  <th>Payment Method</th>
-                  <th>Amount</th>
-                  <th>Timestamp</th>
-                  <th>Status</th>
-                  <th>Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {paginated_filtered.map(p => <tr key={p.collectionpayment_id}>
-                    <td><span style={{
-                    fontFamily: 'monospace',
-                    fontSize: '0.82rem'
-                  }}>{p.collectionpayment_id}</span></td>
-                    <td><span style={{
-                    fontFamily: 'monospace',
-                    fontSize: '0.82rem'
-                  }}>{p.receipt_number || '—'}</span></td>
-                    <td>{p.customer_name || '—'}</td>
-                    <td>{p.collector_name || '—'}</td>
-                    <td>{p.branch_name || '—'}</td>
-                    <td>{p.payment_method || '—'}</td>
-                    <td>{formatCurrency(Number(p.amount))}</td>
-                    <td style={{
-                  fontSize: '0.82rem'
-                }}>{formatPaymentTimestamp(p.payment_date, p.payment_time)}</td>
-                    <td><StatusBadge status={p.status} /></td>
-                    <td className="table-actions">
-                      <button className="icon-action-button" type="button" title="View" onClick={() => openPaymentDetail(p)}>
-                        <NavIcon name="view" />
-                      </button>
-                    </td>
-                  </tr>)}
-              </tbody>
-            </table>
-          </div><Pagination {...pagination_filtered} /></>
-        : <EmptyState title="No collection records found" description="Adjust your search or date filters." />}
-      </section>
-
-      {selectedPayment ? (
-        <div
-          className="modal-overlay"
-          role="dialog"
-          aria-modal="true"
-          aria-labelledby="collection-payment-detail-title"
-          onClick={closePaymentDetail}
-        >
-          <div className="modal-content" style={{ maxWidth: 640 }} onClick={(e) => e.stopPropagation()}>
-            <div className="flex flex-col md:flex-row justify-between gap-4 items-start md:items-center mb-4">
-              <div>
-                <h3 id="collection-payment-detail-title" style={{ margin: 0 }}>Collection Payment Details</h3>
-                <p className="text-ink/70" style={{ margin: '4px 0 0', fontSize: '0.82rem' }}>
-                  Payment ID {selectedPayment.collectionpayment_id}
-                  {selectedPayment.receipt_number ? ` · ${selectedPayment.receipt_number}` : ''}
-                </p>
-              </div>
-              <StatusBadge status={selectedPayment.status} />
-            </div>
-            {detailLoading ? (
-              <LoadingState message="Loading payment details..." />
-            ) : (
-              <DetailRowsTable rows={[
-                { label: 'Payment ID', value: <span style={{ fontFamily: 'monospace' }}>{selectedPayment.collectionpayment_id}</span> },
-                { label: 'Receipt ID', value: <span style={{ fontFamily: 'monospace' }}>{selectedPayment.receipts_id ?? '—'}</span> },
-                { label: 'Receipt Number', value: <span style={{ fontFamily: 'monospace' }}>{selectedPayment.receipt_number || '—'}</span> },
-                { label: 'Customer', value: selectedPayment.customer_name || '—' },
-                { label: 'Customer ID', value: <span style={{ fontFamily: 'monospace' }}>{selectedPayment.customer_id ?? '—'}</span> },
-                { label: 'Collector', value: selectedPayment.collector_name || '—' },
-                { label: 'Branch', value: selectedPayment.branch_name || '—' },
-                { label: 'Branch ID', value: <span style={{ fontFamily: 'monospace' }}>{selectedPayment.branch_id ?? '—'}</span> },
-                { label: 'Payment Method', value: selectedPayment.payment_method || '—' },
-                { label: 'Amount', value: <span style={{ fontWeight: 700, color: 'var(--palette-navy)' }}>{formatCurrency(Number(selectedPayment.amount))}</span> },
-                { label: 'Timestamp', value: formatPaymentTimestamp(selectedPayment.payment_date, selectedPayment.payment_time) },
-                { label: 'Status', value: <StatusBadge status={selectedPayment.status} /> },
-                { label: 'Created At', value: formatDisplayDateTime(selectedPayment.created_at) },
-                { label: 'Updated At', value: formatDisplayDateTime(selectedPayment.updated_at) },
-                ...(selectedPayment.notes ? [{ label: 'Notes', value: selectedPayment.notes }] : []),
-              ]} />
-            )}
-            <div className="modal-actions">
-              {selectedPayment.receipts_id ? (
-                <button
-                  className="button ghost"
-                  type="button"
-                  onClick={() => {
-                    closePaymentDetail();
-                    navigate(`/collector/receipts/${selectedPayment.receipts_id}`);
-                  }}
-                >
-                  Open Receipt
-                </button>
-              ) : null}
-              <button className="button secondary" type="button" onClick={exportSelectedPdf} disabled={detailLoading}>
-                Export PDF
-              </button>
-              <button className="button" type="button" onClick={closePaymentDetail}>Close</button>
-            </div>
-          </div>
-        </div>
-      ) : null}
-    </div>;
-}
-function CollectionPaymentDetailPage({
-  paymentId,
-  navigate,
-  showToast
-}) {
-  const [payment, setPayment] = useState(null);
-  const [loading, setLoading] = useState(true);
-  useEffect(() => {
-    async function load() {
-      setLoading(true);
-      const result = await fetchCollectionPaymentById(paymentId);
-      if (result.success) setPayment(result.data);else if (showToast) showToast(result.message || 'Payment not found.', 'error');
-      setLoading(false);
-    }
-    load();
-  }, [paymentId, showToast]);
-  if (loading) return <LoadingState message="Loading collection payment..." />;
-  if (!payment) {
-    return <EmptyState title="Payment not found" actionLabel="Back to History" onAction={() => navigate('/collector/history')} />;
-  }
-  return <div className="page">
-      <StatsGrid stats={[{
-      label: 'Payment ID',
-      value: String(payment.collectionpayment_id)
-    }, {
-      label: 'Amount',
-      value: formatCurrency(Number(payment.amount))
-    }, {
-      label: 'Status',
-      value: payment.status
-    }]} />
-      <section className="panel content-panel relative overflow-hidden">
-        <div className="flex flex-col md:flex-row justify-between gap-4 items-start md:items-center mb-4">
-          <h3>Collection Payment Detail</h3>
-        </div>
-        <DetailRowsTable rows={[
-          { label: 'Receipt ID', value: <span style={{ fontFamily: 'monospace' }}>{payment.receipts_id ?? '—'}</span> },
-          { label: 'Receipt Number', value: <span style={{ fontFamily: 'monospace' }}>{payment.receipt_number || '—'}</span> },
-          { label: 'Customer', value: payment.customer_name || '—' },
-          { label: 'Customer ID', value: <span style={{ fontFamily: 'monospace' }}>{payment.customer_id ?? '—'}</span> },
-          { label: 'Collector', value: payment.collector_name || '—' },
-          { label: 'Branch', value: payment.branch_name || '—' },
-          { label: 'Branch ID', value: <span style={{ fontFamily: 'monospace' }}>{payment.branch_id ?? '—'}</span> },
-          { label: 'Payment Method', value: payment.payment_method || '—' },
-          { label: 'Timestamp', value: formatPaymentTimestamp(payment.payment_date, payment.payment_time) },
-          { label: 'Created At', value: formatDisplayDateTime(payment.created_at) },
-          { label: 'Updated At', value: formatDisplayDateTime(payment.updated_at) },
-          ...(payment.notes ? [{ label: 'Notes', value: payment.notes }] : []),
-        ]} />
-      </section>
-      <div className="flex flex-wrap justify-end gap-2 mt-4">
-        <button className="button ghost" type="button" onClick={() => navigate('/collector/history')}>Back to History</button>
-        {payment.receipts_id ? <button className="button secondary" type="button" onClick={() => navigate(`/collector/receipts/${payment.receipts_id}`)}>Open Digital Receipt</button> : null}
-      </div>
-    </div>;
-}
 function NotificationsPage({
   navigate,
   showToast
@@ -2041,7 +1432,6 @@ function ProfilePage({
   return <AccountProfilePanel
     showToast={showToast}
     title="Collector profile"
-    subtitle="Your name, contact details, and sign-in for this CORVEX account."
     settings={<SettingsPage embedded showToast={showToast} />}
   />;
 }
@@ -2121,21 +1511,20 @@ export function CollectorPageBody({
       return <AccountDetailPage {...props} />;
     case 'collectionLog':
       return <CollectionLogPage {...props} />;
-    case 'receiptsList':
-      return <ReceiptsListPage {...props} />;
+    case 'receiptsRedirect':
+      return <ReceiptsRedirectPage {...props} />;
     case 'digitalReceipt':
       return <DigitalReceiptPage receiptId={page.params?.receiptId} {...props} />;
     case 'ciForm':
       return <CIFormPage {...props} />;
-    case 'incidentReport':
-    case 'incidentReportStandalone':
-      return <IncidentReportPage {...props} />;
     case 'history':
       return <CollectionHistoryPage {...props} />;
     case 'fieldActivityReports':
       return <FieldActivityReportsPage {...props} />;
+    case 'fieldActivityReportDetail':
+      return <FieldActivityReportDetailPage reportId={page.params?.reportId} {...props} />;
     case 'collectionPaymentDetail':
-      return <CollectionPaymentDetailPage {...props} />;
+      return <CollectionPaymentDetailPage paymentId={page.params?.paymentId} {...props} />;
     case 'notifications':
       return <NotificationsPage {...props} />;
     case 'profile':

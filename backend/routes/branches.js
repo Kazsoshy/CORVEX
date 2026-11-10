@@ -1,5 +1,6 @@
 import express from 'express';
 import { requireAuth, requireRole, requireAssignedBranch, assertSameBranch, isUnscoped, ROLE_SETS } from '../middleware/auth.js';
+import { AUDIT_STATUS, writeAuditFromReq } from '../lib/auditLog.js';
 
 const router = express.Router();
 router.use(requireRole(ROLE_SETS.branches), requireAssignedBranch);
@@ -266,6 +267,15 @@ router.post('/', requireAuth, requireOrgScope, async (req, res) => {
       ]
     );
 
+    await writeAuditFromReq(pool, req, {
+      module: 'Branch Management',
+      activity: 'Create Branch',
+      action: 'Create Branch',
+      description: `Created branch ${result.rows[0].branch_name}.`,
+      status: AUDIT_STATUS.CREATED,
+      affectedRecord: `branch:${result.rows[0].branch_id}`,
+    });
+
     return res.status(201).json({
       success: true,
       message: 'Branch created.',
@@ -328,6 +338,15 @@ router.put('/:id', requireAuth, requireOrgScope, async (req, res) => {
     if (!result.rows.length) {
       return res.status(404).json({ success: false, message: 'Branch not found.' });
     }
+
+    await writeAuditFromReq(pool, req, {
+      module: 'Branch Management',
+      activity: 'Update Branch',
+      action: 'Update Branch',
+      description: `Updated branch ${result.rows[0].branch_name}.`,
+      status: AUDIT_STATUS.UPDATED,
+      affectedRecord: `branch:${bid}`,
+    });
 
     return res.status(200).json({
       success: true,

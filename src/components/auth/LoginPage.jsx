@@ -1,10 +1,10 @@
 import React, { useState, useCallback, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Mail, Lock, Eye, EyeOff, AlertCircle, ArrowRight } from 'lucide-react';
 import { login as apiLogin, getEntryPathForRole } from '../../api/authService.js';
 import { consumeAuthNotice } from '../../api/sessionActivity.js';
-import whiteLogo from '../../assets/corvex-white-logo.png';
+import whiteLogo from '../../assets/corvex-logo.png';
 import bgImage from '../../assets/corvex-bg.png';
 import './LoginPage.css';
 
@@ -71,13 +71,21 @@ export function LoginPage() {
     <div className="login-page login-page--split">
       <div className="login-shell login-shell--split">
         <aside className="login-visual" aria-label="CORVEX branding">
-          <img src={bgImage} alt="" className="login-visual-image" />
+          <img
+            src={bgImage}
+            alt="CORVEX commercial furniture showroom interior"
+            className="login-visual-image"
+          />
           <div className="login-visual-overlay" aria-hidden="true" />
 
-          <div className="login-visual-brand">
-            <img src={whiteLogo} alt="" className="login-visual-logo" />
-            <span>CORVEX</span>
-          </div>
+          <Link to="/" className="login-visual-brand" aria-label="Go to CORVEX landing page">
+            <div className="login-visual-logo-wrap">
+              <img src={whiteLogo} alt="CORVEX logo" className="login-visual-logo" />
+            </div>
+            <div className="login-visual-brand-text">
+              <span className="login-visual-brand-name">CORVEX</span>
+            </div>
+          </Link>
 
           <div className="login-visual-copy">
             <h2 className="login-visual-headline">
@@ -98,10 +106,12 @@ export function LoginPage() {
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.45, ease: [0.16, 1, 0.3, 1] }}
           >
-            <h1 className="login-heading">Welcome back</h1>
-            <p className="login-subtitle">
-              Sign in to continue to your Corvex account.
-            </p>
+            <div className="login-form-header">
+              <h1 className="login-heading">Welcome back</h1>
+              <p className="login-subtitle">
+                Sign in to continue to your Corvex account.
+              </p>
+            </div>
 
             <AnimatePresence>
               {apiError && (
@@ -121,7 +131,7 @@ export function LoginPage() {
             <form onSubmit={handleLogin} noValidate className="login-form-wrapper">
               <div className="login-input-group">
                 <label htmlFor="login-email" className="login-label">Email</label>
-                <div className="relative w-full group">
+                <div className="login-input-control group">
                   <span className="login-input-icon">
                     <Mail {...fieldIconProps} />
                   </span>
@@ -134,14 +144,29 @@ export function LoginPage() {
                     className={`login-input ${errors.email ? 'has-error' : ''}`}
                     autoComplete="username"
                     disabled={loading}
+                    aria-invalid={!!errors.email}
+                    aria-describedby={errors.email ? 'login-email-error' : undefined}
                   />
                 </div>
-                {errors.email && <span className="login-error-message">{errors.email}</span>}
+                {errors.email && (
+                  <span id="login-email-error" className="login-error-message" role="alert">
+                    {errors.email}
+                  </span>
+                )}
               </div>
 
               <div className="login-input-group">
-                <label htmlFor="login-password" className="login-label">Password</label>
-                <div className="relative w-full group">
+                <div className="login-label-row">
+                  <label htmlFor="login-password" className="login-label">Password</label>
+                  <button
+                    type="button"
+                    className="login-link login-forgot"
+                    onClick={() => navigate('/password-reset')}
+                  >
+                    Forgot password?
+                  </button>
+                </div>
+                <div className="login-input-control group">
                   <span className="login-input-icon">
                     <Lock {...fieldIconProps} />
                   </span>
@@ -154,6 +179,8 @@ export function LoginPage() {
                     className={`login-input login-input-password ${errors.password ? 'has-error' : ''}`}
                     autoComplete="current-password"
                     disabled={loading}
+                    aria-invalid={!!errors.password}
+                    aria-describedby={errors.password ? 'login-password-error' : undefined}
                   />
                   <button
                     type="button"
@@ -164,14 +191,11 @@ export function LoginPage() {
                     {showPassword ? <EyeOff {...fieldIconProps} /> : <Eye {...fieldIconProps} />}
                   </button>
                 </div>
-                {errors.password && <span className="login-error-message">{errors.password}</span>}
-                <button
-                  type="button"
-                  className="login-link login-forgot"
-                  onClick={() => navigate('/password-reset')}
-                >
-                  Forgot password?
-                </button>
+                {errors.password && (
+                  <span id="login-password-error" className="login-error-message" role="alert">
+                    {errors.password}
+                  </span>
+                )}
               </div>
 
               <button
@@ -183,7 +207,7 @@ export function LoginPage() {
                   <span className="login-spinner" aria-hidden="true" />
                 ) : (
                   <>
-                    Sign In
+                    <span>Sign In</span>
                     <ArrowRight size={18} strokeWidth={2} aria-hidden="true" />
                   </>
                 )}
@@ -192,7 +216,7 @@ export function LoginPage() {
 
             <p className="login-secure-note">
               <Lock size={13} strokeWidth={2} aria-hidden="true" />
-              Your account is secure and protected.
+              <span>Your account is secure and protected.</span>
             </p>
           </motion.div>
         </div>

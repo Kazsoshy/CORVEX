@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { Lock, MonitorSmartphone, Settings, UserRound } from 'lucide-react';
 import { persistCurrentUserFromProfile, requestLogout } from '../../api/authService';
 import { fetchMyProfile, updateMyProfile } from '../../api/profileService';
@@ -12,7 +13,6 @@ import { describeIdlePolicy, IDLE_TIMEOUT_MS } from '../../api/sessionActivity';
 import {
   ProfileFact,
   ProfilePasswordForm,
-  ProfileTabs,
   browserLabel,
   copyProfileValue,
   formatIdleRemaining,
@@ -26,6 +26,14 @@ const TABS = [
   { id: 'session', label: 'Session', detail: 'This sign-in and sign out', icon: MonitorSmartphone },
   { id: 'settings', label: 'Settings', detail: 'Display, reading, and alerts', icon: Settings },
 ];
+
+const TAB_IDS = new Set(TABS.map((tab) => tab.id));
+
+function normalizeProfileTab(raw) {
+  const value = String(raw || '').trim().toLowerCase();
+  if (value === 'activity') return 'session';
+  return TAB_IDS.has(value) ? value : 'account';
+}
 
 function buildDraft(profile) {
   return {
@@ -48,21 +56,31 @@ function fullNameFrom(profile) {
 export function AccountProfilePanel({
   showToast,
   title = 'Profile',
-  subtitle = 'Your name, contact details, and sign-in for this CORVEX account.',
+  subtitle = 'View and update your personal account details.',
   extraActions = null,
   settingsRole = 'personal',
   settings = null,
 }) {
+  const [searchParams, setSearchParams] = useSearchParams();
   const [profile, setProfile] = useState(null);
   const [draft, setDraft] = useState(null);
   const [editing, setEditing] = useState(false);
-  const [section, setSection] = useState('account');
+  const [section, setSection] = useState(() => normalizeProfileTab(searchParams.get('tab')));
   const [saving, setSaving] = useState(false);
   const [loadError, setLoadError] = useState('');
   const [loading, setLoading] = useState(true);
   const [passwordDirty, setPasswordDirty] = useState(false);
   const remaining = useIdleRemaining();
   const onPasswordDirty = useCallback((dirty) => setPasswordDirty(dirty), []);
+
+  const syncTabToUrl = useCallback((next) => {
+    setSearchParams((prev) => {
+      const params = new URLSearchParams(prev);
+      if (!next || next === 'account') params.delete('tab');
+      else params.set('tab', next);
+      return params;
+    }, { replace: true });
+  }, [setSearchParams]);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -97,14 +115,16 @@ export function AccountProfilePanel({
 
   const accountDirty = editing && draft && JSON.stringify(draft) !== JSON.stringify(buildDraft(profile));
 
-  const changeSection = (next) => {
+  useEffect(() => {
+    const next = normalizeProfileTab(searchParams.get('tab'));
     if (next === section) return;
     if (accountDirty || passwordDirty) {
       showToast?.('Save or clear your changes before leaving this section.', 'error');
+      syncTabToUrl(section);
       return;
     }
     setSection(next);
-  };
+  }, [searchParams, section, accountDirty, passwordDirty, showToast, syncTabToUrl]);
 
   const cancelEdit = () => {
     setDraft(buildDraft(profile));
@@ -210,25 +230,14 @@ export function AccountProfilePanel({
         </div>
       </header>
 
-      <div className="settings-shell">
-        <ProfileTabs
-          label="Profile sections"
-          tabs={TABS}
-          active={section}
-          onChange={changeSection}
-          idPrefix="profile"
-        />
-
-        <div
-          className="settings-stage"
-          role="tabpanel"
-          id={`profile-panel-${section}`}
-          aria-labelledby={`profile-tab-${section}`}
-        >
-          <div className="settings-stage-head">
-            <h3>{activeTab.label}</h3>
-            <p className="muted">{activeTab.detail}</p>
-          </div>
+      <div className="settings-shell profile-shell">
+        <div className="settings-stage" id={`profile-panel-${section}`}>
+          {section !== 'account' ? (
+            <div className="settings-stage-head">
+              <h3>{activeTab.label}</h3>
+              <p className="muted">{activeTab.detail}</p>
+            </div>
+          ) : null}
 
           {section === 'account' ? (
             <section className="settings-card">

@@ -7,6 +7,7 @@ import {
   updateCustomer,
 } from '../../api/salesService';
 import { lookupCustomersForDuplicate } from '../../api/customerPortalService';
+import { fetchTerritories } from '../../api/territoriesService';
 import { getCurrentUser, getUserAssignedLocation } from '../../api/authService.js';
 import {
   CIVIL_STATUS_OPTIONS,
@@ -25,6 +26,7 @@ import {
   resolveAddressSelection,
 } from '../../utils/phAddress';
 import { openExternalNavigation } from '../../utils/mapsNavigation';
+import { paymentStanding as sharedPaymentStanding } from '../../utils/customerStanding.js';
 import { formatCurrency, formatDisplayDate } from '../../data/salesMockData';
 import { useServerPagination, DEFAULT_PAGE_SIZE } from '../../hooks/usePagination';
 import LeafletMap from '../common/LeafletMap';
@@ -78,10 +80,7 @@ function areaOrAddress(customer) {
 }
 
 function paymentStanding(customer) {
-  const outstanding = money(customer?.activity?.outstanding_balance ?? customer?.outstandingBalance ?? 0);
-  if (outstanding <= 0) return 'Current';
-  if (customer?.hasOverdueInvoice) return 'Overdue';
-  return 'Has Balance';
+  return sharedPaymentStanding(customer);
 }
 
 function creditStatusLabel(customer) {
@@ -173,7 +172,7 @@ function MapPinPicker({ latitude, longitude, onChange, warning }) {
           position: center,
           draggable: true,
           onDragEnd: setPin,
-          color: '#0B1E30',
+          color: '#0B2133',
           popup: 'Customer location',
         }] : []}
       />
@@ -410,9 +409,10 @@ export function CustomerDetailPage({
             { label: 'Government ID', value: customer.id_type ? `${customer.id_type} · ${customer.id_number || '—'}` : '—' },
             { label: 'Credit Status', value: <StatusBadge status={creditStatusLabel(customer)} /> },
             { label: 'Branch', value: customer.branch_name || '—' },
+            { label: 'Territory', value: customer.territory_name || '—' },
             { label: sameOwner ? 'Sales Agent' : 'Assigned Sales Agent', value: agentName },
             ...(!sameOwner && customer.account_manager_name
-              ? [{ label: 'Account Manager', value: customer.account_manager_name }]
+              ? [{ label: 'Account Manager / Collector', value: customer.account_manager_name }]
               : []),
           ]}
         />
@@ -423,7 +423,7 @@ export function CustomerDetailPage({
               <img
                 src={customer.id_photo}
                 alt="Government ID"
-                style={{ maxWidth: 240, maxHeight: 160, borderRadius: 8, border: '1px solid #BADBE9' }}
+                style={{ maxWidth: 240, maxHeight: 160, borderRadius: 8, border: '1px solid #E2E8F0' }}
               />
             </a>
           </div>
@@ -473,7 +473,7 @@ export function CustomerDetailPage({
               id: customer.customer_id,
               position: [Number(customer.latitude), Number(customer.longitude)],
               popup: `<strong>${ownerName}</strong><br/>${customer.address || ''}`,
-              color: '#0B1E30',
+              color: '#0B2133',
             }]}
           />
         ) : (
@@ -641,6 +641,7 @@ function emptyCustomerForm() {
     id_photo: '',
     id_photo_name: '',
     acknowledgeDuplicate: false,
+    territory_id: '',
   };
 }
 
@@ -663,6 +664,31 @@ export function CustomerFormPage({
   const [cityOptions, setCityOptions] = useState([]);
   const [barangayOptions, setBarangayOptions] = useState([]);
   const [barangaysLoading, setBarangaysLoading] = useState(false);
+  const [territories, setTerritories] = useState([]);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function loadTerritories() {
+      try {
+        const result = await fetchTerritories({ status: 'Active' });
+        if (cancelled) return;
+        const rows = result?.success ? (result.data || []) : [];
+        setTerritories(rows);
+        if (!isEdit && rows.length === 1) {
+          setForm((prev) => (prev.territory_id ? prev : { ...prev, territory_id: String(rows[0].territory_id) }));
+        } else if (!isEdit) {
+          const mine = rows.find((row) => Number(row.default_sales_agent_id) === Number(currentUser?.id));
+          if (mine) {
+            setForm((prev) => (prev.territory_id ? prev : { ...prev, territory_id: String(mine.territory_id) }));
+          }
+        }
+      } catch {
+        if (!cancelled) setTerritories([]);
+      }
+    }
+    loadTerritories();
+    return () => { cancelled = true; };
+  }, [isEdit, currentUser?.id]);
 
   useEffect(() => {
     async function load() {
@@ -728,6 +754,7 @@ export function CustomerFormPage({
           id_photo: customer.id_photo || '',
           id_photo_name: customer.id_photo ? 'Saved ID photo' : '',
           acknowledgeDuplicate: false,
+          territory_id: customer.territory_id != null ? String(customer.territory_id) : '',
         });
       }
       setLoading(false);
@@ -851,6 +878,7 @@ export function CustomerFormPage({
       'contact_person_relationship',
       'id_type',
       'id_number',
+      'territory_id',
     ].forEach((field) => {
       if (!String(form[field] || '').trim()) nextErrors[field] = 'Required';
     });
@@ -909,6 +937,7 @@ export function CustomerFormPage({
       id_type: form.id_type,
       id_number: form.id_number.trim(),
       id_photo: form.id_photo || null,
+      territory_id: form.territory_id ? Number(form.territory_id) : null,
     };
 
     setSubmitting(true);
@@ -916,10 +945,13 @@ export function CustomerFormPage({
     if (isEdit) {
       result = await updateCustomer(customerId, payload);
     } else {
+      const selectedTerritory = territories.find((row) => String(row.territory_id) === String(form.territory_id));
       result = await createCustomer({
         ...payload,
         branch_id: currentUser?.branchId ?? undefined,
-        account_manager_id: currentUser?.id ?? undefined,
+        account_manager_id: selectedTerritory?.default_collector_id
+          ? Number(selectedTerritory.default_collector_id)
+          : undefined,
         create_portal_account: false,
       });
     }
@@ -993,6 +1025,31 @@ export function CustomerFormPage({
             {errors.acknowledgeDuplicate ? <p className="form-error">{errors.acknowledgeDuplicate}</p> : null}
           </section>
         ) : null}
+
+        <h4 className="subsection-title">Territory</h4>
+        <div className="account-detail-grid two-up">
+          <div className="form-group">
+            <label htmlFor="cust-territory">Branch Territory *</label>
+            <select
+              id="cust-territory"
+              className="filter-select"
+              value={form.territory_id}
+              onChange={(e) => updateField('territory_id', e.target.value)}
+            >
+              <option value="">Select territory</option>
+              {territories.map((row) => (
+                <option key={row.territory_id} value={row.territory_id}>
+                  {row.territory_name}
+                  {row.default_collector_name ? ` · Collector: ${row.default_collector_name}` : ''}
+                </option>
+              ))}
+            </select>
+            {errors.territory_id ? <p className="form-error">{errors.territory_id}</p> : null}
+            <p className="muted" style={{ marginTop: 6, marginBottom: 0 }}>
+              New customers inherit the territory&apos;s default Collector as Account Manager when none is set.
+            </p>
+          </div>
+        </div>
 
         <h4 className="subsection-title">Identity</h4>
         <div className="account-detail-grid two-up">
@@ -1092,7 +1149,7 @@ export function CustomerFormPage({
             <img
               src={form.id_photo}
               alt="ID preview"
-              style={{ marginTop: 8, maxWidth: 200, maxHeight: 140, borderRadius: 8, border: '1px solid #BADBE9' }}
+              style={{ marginTop: 8, maxWidth: 200, maxHeight: 140, borderRadius: 8, border: '1px solid #E2E8F0' }}
             />
           ) : null}
           {errors.id_photo ? <p className="form-error">{errors.id_photo}</p> : null}

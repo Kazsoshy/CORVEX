@@ -177,7 +177,7 @@ function DashboardPage({
         <Card title="User Growth" sub="Monthly registered users">
           <ResponsiveContainer width="100%" height={200}>
             <AreaChart data={USER_GROWTH}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#BADBE9" />
+              <CartesianGrid strokeDasharray="3 3" stroke="#E2E8F0" />
               <XAxis dataKey="month" tick={{
               fontSize: 12
             }} />
@@ -185,7 +185,7 @@ function DashboardPage({
               fontSize: 12
             }} />
               <Tooltip />
-              <Area type="monotone" dataKey="users" name="Users" stroke="#1A4162" fill="#1A4162" fillOpacity={0.1} strokeWidth={2} />
+              <Area type="monotone" dataKey="users" name="Users" stroke="#153450" fill="#153450" fillOpacity={0.1} strokeWidth={2} />
             </AreaChart>
           </ResponsiveContainer>
         </Card>
@@ -193,7 +193,7 @@ function DashboardPage({
         <Card title="Branch Overview" sub="Performance scores">
           <ResponsiveContainer width="100%" height={200}>
             <BarChart data={BRANCH_PERFORMANCE_CHART}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#BADBE9" />
+              <CartesianGrid strokeDasharray="3 3" stroke="#E2E8F0" />
               <XAxis dataKey="branch" tick={{
               fontSize: 12
             }} />
@@ -202,7 +202,7 @@ function DashboardPage({
             }} />
               <Tooltip />
               <Legend />
-              <Bar dataKey="performance" name="Performance" fill="#1A4162" radius={[4, 4, 0, 0]} />
+              <Bar dataKey="performance" name="Performance" fill="#153450" radius={[4, 4, 0, 0]} />
               <Bar dataKey="risk" name="Risk Score" fill="#ef4444" radius={[4, 4, 0, 0]} />
             </BarChart>
           </ResponsiveContainer>
@@ -1838,14 +1838,14 @@ function ReportsPage({
         <Card title="Collections Trend" sub={analytics.scope || 'All branches'}>
           <ResponsiveContainer width="100%" height={240}>
             <AreaChart data={analytics.trends?.collections || []}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#BADBE9" />
+              <CartesianGrid strokeDasharray="3 3" stroke="#E2E8F0" />
               <XAxis dataKey="day" tick={{
               fontSize: 12
             }} /><YAxis tick={{
               fontSize: 11
             }} tickFormatter={v => `${(v / 1000).toFixed(0)}k`} />
               <Tooltip formatter={v => formatCurrency(v)} />
-              <Area type="monotone" dataKey="amount" name="Collections" stroke="#1A4162" fill="#1A4162" fillOpacity={0.1} strokeWidth={2} />
+              <Area type="monotone" dataKey="amount" name="Collections" stroke="#153450" fill="#153450" fillOpacity={0.1} strokeWidth={2} />
             </AreaChart>
           </ResponsiveContainer>
         </Card>
@@ -1883,15 +1883,15 @@ function ReportsPage({
               compliance: row.routeCompliance,
               inventory: row.inventoryHealth,
             }))}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#BADBE9" />
+              <CartesianGrid strokeDasharray="3 3" stroke="#E2E8F0" />
               <XAxis dataKey="branch" tick={{
               fontSize: 12
             }} /><YAxis domain={[0, 100]} tick={{
               fontSize: 12
             }} />
               <Tooltip /><Legend />
-              <Bar dataKey="compliance" name="Route Compliance" fill="#1A4162" radius={[4, 4, 0, 0]} />
-              <Bar dataKey="inventory" name="Inventory Health" fill="#1A4162" radius={[4, 4, 0, 0]} />
+              <Bar dataKey="compliance" name="Route Compliance" fill="#153450" radius={[4, 4, 0, 0]} />
+              <Bar dataKey="inventory" name="Inventory Health" fill="#153450" radius={[4, 4, 0, 0]} />
             </BarChart>
           </ResponsiveContainer>
         </Card>
@@ -1914,6 +1914,38 @@ function ReportsPage({
     </div>;
 }
 
+function auditStatusLabel(log) {
+  return String(log?.status || log?.status_details || log?.action || '—').trim() || '—';
+}
+
+function auditActivityLabel(log) {
+  return String(log?.activity || log?.action || '—').trim() || '—';
+}
+
+function uniqueSortedLabels(values) {
+  return [...new Set(values.filter(Boolean))].sort((a, b) => a.localeCompare(b));
+}
+
+function buildAuditDetailRows(log) {
+  if (!log) return [];
+  const status = auditStatusLabel(log);
+  const description = String(log.description || log.status_details || '').trim() || '—';
+  return [
+    { key: 'log_id', label: 'Log ID', value: log.log_id ?? '—' },
+    { key: 'date', label: 'Date', value: formatDisplayDate(log.activity_date || log.created_at) },
+    { key: 'timestamp', label: 'Timestamp', value: formatDisplayDateTime(log.created_at) },
+    { key: 'user', label: 'User', value: log.user_name || (log.user_id ? `User #${log.user_id}` : 'System') },
+    { key: 'role', label: 'Role', value: log.role_name || '—' },
+    { key: 'module', label: 'Module', value: log.module || '—' },
+    { key: 'activity', label: 'Activity', value: auditActivityLabel(log) },
+    { key: 'status', label: 'Status', value: <StatusBadge status={status} /> },
+    { key: 'reference', label: 'Reference', value: log.affected_record || '—' },
+    { key: 'branch', label: 'Affected Branch', value: log.branch_name || log.branch_id || '—' },
+    { key: 'description', label: 'Description', value: description },
+    { key: 'ip', label: 'IP Address', value: log.ip_address || '—' },
+  ];
+}
+
 // ── Audit Logs ────────────────────────────────────────────────────────────────
 function AuditLogsPage({
   showToast
@@ -1922,8 +1954,13 @@ function AuditLogsPage({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [searchFilter, setSearchFilter] = useState('');
-  const [actionFilter, setActionFilter] = useState('all');
   const [userFilter, setUserFilter] = useState('all');
+  const [roleFilter, setRoleFilter] = useState('all');
+  const [moduleFilter, setModuleFilter] = useState('all');
+  const [activityFilter, setActivityFilter] = useState('all');
+  const [statusFilter, setStatusFilter] = useState('all');
+  const [dateFilter, setDateFilter] = useState('');
+  const [viewingLog, setViewingLog] = useState(null);
   useEffect(() => {
     async function loadAuditLogs() {
       setLoading(true);
@@ -1938,55 +1975,58 @@ function AuditLogsPage({
     loadAuditLogs();
   }, []);
 
-  const actionOptions = useMemo(() => {
-    const values = new Set();
-    auditLogs.forEach((log) => {
-      const action = String(log.action || '').trim();
-      if (action) values.add(action);
-    });
-    return [...values].sort((a, b) => a.localeCompare(b));
-  }, [auditLogs]);
-
-  const userOptions = useMemo(() => {
-    const byKey = new Map();
-    auditLogs.forEach((log) => {
-      const key = String(log.user_id ?? log.user_name ?? '');
-      if (!key) return;
-      const label = log.user_name || `User #${log.user_id}`;
-      if (!byKey.has(key)) byKey.set(key, { value: key, label });
-    });
-    return [...byKey.values()].sort((a, b) => a.label.localeCompare(b.label));
-  }, [auditLogs]);
+  const userOptions = useMemo(() => uniqueSortedLabels(auditLogs.map((l) => l.user_name || (l.user_id ? `User #${l.user_id}` : ''))), [auditLogs]);
+  const roleOptions = useMemo(() => uniqueSortedLabels(auditLogs.map((l) => l.role_name)), [auditLogs]);
+  const moduleOptions = useMemo(() => uniqueSortedLabels(auditLogs.map((l) => l.module)), [auditLogs]);
+  const activityOptions = useMemo(() => uniqueSortedLabels(auditLogs.map((l) => auditActivityLabel(l))), [auditLogs]);
+  const statusOptions = useMemo(() => uniqueSortedLabels(auditLogs.map((l) => auditStatusLabel(l))), [auditLogs]);
 
   const filtered = useMemo(() => auditLogs.filter((log) => {
-    const action = String(log.action || '');
-    const details = String(log.status_details || '');
-    const userName = String(log.user_name || `User #${log.user_id || ''}`);
-    const userKey = String(log.user_id ?? log.user_name ?? '');
+    const userName = String(log.user_name || (log.user_id ? `User #${log.user_id}` : 'System'));
+    const activity = auditActivityLabel(log);
+    const status = auditStatusLabel(log);
     const q = searchFilter.trim().toLowerCase();
 
-    if (actionFilter !== 'all' && action !== actionFilter) return false;
-    if (userFilter !== 'all' && userKey !== userFilter) return false;
+    if (userFilter !== 'all' && userName !== userFilter) return false;
+    if (roleFilter !== 'all' && String(log.role_name || '') !== roleFilter) return false;
+    if (moduleFilter !== 'all' && String(log.module || '') !== moduleFilter) return false;
+    if (activityFilter !== 'all' && activity !== activityFilter) return false;
+    if (statusFilter !== 'all' && status !== statusFilter) return false;
+    if (dateFilter) {
+      const created = new Date(log.created_at);
+      if (!Number.isFinite(created.getTime())) return false;
+      const day = [
+        created.getFullYear(),
+        String(created.getMonth() + 1).padStart(2, '0'),
+        String(created.getDate()).padStart(2, '0'),
+      ].join('-');
+      if (day !== dateFilter) return false;
+    }
     if (q) {
-      const haystack = [action, details, userName, log.ip_address].join(' ').toLowerCase();
+      const haystack = [
+        userName, log.role_name, log.module, activity, log.action, status,
+        log.description, log.status_details, log.ip_address, log.affected_record,
+      ].join(' ').toLowerCase();
       if (!haystack.includes(q)) return false;
     }
     return true;
-  }), [auditLogs, searchFilter, actionFilter, userFilter]);
+  }), [auditLogs, searchFilter, userFilter, roleFilter, moduleFilter, activityFilter, statusFilter, dateFilter]);
 
   const pagination_filtered = usePagination(filtered, {
-    resetKey: `${searchFilter}|${actionFilter}|${userFilter}`,
+    resetKey: `${searchFilter}|${userFilter}|${roleFilter}|${moduleFilter}|${activityFilter}|${statusFilter}|${dateFilter}`,
   });
   const paginated_filtered = pagination_filtered.paginatedData;
 
   const exportPdf = () => {
     const rows = filtered.map((l) => ({
-      log_id: l.log_id,
-      user: l.user_name || `User #${l.user_id}`,
-      action: l.action,
-      ip_address: l.ip_address,
-      status_details: l.status_details,
-      created_at: l.created_at,
+      timestamp: formatDisplayDateTime(l.created_at),
+      user: l.user_name || (l.user_id ? `User #${l.user_id}` : 'System'),
+      role: l.role_name || '—',
+      module: l.module || '—',
+      activity: auditActivityLabel(l),
+      status: auditStatusLabel(l),
+      description: l.description || l.status_details || '—',
+      ip_address: l.ip_address || '—',
     }));
     if (exportRows(rows, { format: 'pdf', filename: 'admin-audit-logs.pdf', title: 'Audit Logs' })) {
       showToast('Logs exported as PDF.', 'success');
@@ -2019,62 +2059,103 @@ function AuditLogsPage({
           }}>({filtered.length} entries)</span></h3>
         </div>
         <div className="list-section-toolbar suppliers-toolbar audit-logs-toolbar">
-          <div className="list-section-controls audit-logs-filters">
+          <div className="list-section-controls audit-logs-filters" style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>
             <input
               className="filter-input search"
               type="search"
-              placeholder="Search by user, action, or status…"
+              placeholder="Search user, module, activity, status…"
               value={searchFilter}
               onChange={(e) => setSearchFilter(e.target.value)}
               aria-label="Search audit logs"
             />
-            <select
-              className="filter-select"
-              value={actionFilter}
-              onChange={(e) => setActionFilter(e.target.value)}
-              aria-label="Filter by action"
-            >
-              <option value="all">All Actions</option>
-              {actionOptions.map((action) => (
-                <option key={action} value={action}>{action}</option>
-              ))}
-            </select>
-            <select
-              className="filter-select"
-              value={userFilter}
-              onChange={(e) => setUserFilter(e.target.value)}
-              aria-label="Filter by user"
-            >
+            <select className="filter-select" value={userFilter} onChange={(e) => setUserFilter(e.target.value)} aria-label="Filter by user">
               <option value="all">All Users</option>
-              {userOptions.map((user) => (
-                <option key={user.value} value={user.value}>{user.label}</option>
-              ))}
+              {userOptions.map((user) => <option key={user} value={user}>{user}</option>)}
             </select>
-          </div>
-          <div className="list-section-actions suppliers-toolbar-actions">
+            <select className="filter-select" value={roleFilter} onChange={(e) => setRoleFilter(e.target.value)} aria-label="Filter by role">
+              <option value="all">All Roles</option>
+              {roleOptions.map((role) => <option key={role} value={role}>{role}</option>)}
+            </select>
+            <select className="filter-select" value={moduleFilter} onChange={(e) => setModuleFilter(e.target.value)} aria-label="Filter by module">
+              <option value="all">All Modules</option>
+              {moduleOptions.map((mod) => <option key={mod} value={mod}>{mod}</option>)}
+            </select>
+            <select className="filter-select" value={activityFilter} onChange={(e) => setActivityFilter(e.target.value)} aria-label="Filter by activity">
+              <option value="all">All Activities</option>
+              {activityOptions.map((activity) => <option key={activity} value={activity}>{activity}</option>)}
+            </select>
+            <select className="filter-select" value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} aria-label="Filter by status">
+              <option value="all">All Statuses</option>
+              {statusOptions.map((status) => <option key={status} value={status}>{status}</option>)}
+            </select>
+            <input className="filter-input" type="date" value={dateFilter} onChange={(e) => setDateFilter(e.target.value)} aria-label="Filter by date" />
             <button className="button" type="button" onClick={exportPdf}>Export PDF</button>
           </div>
         </div>
         <><div className="corvex-table-wrapper">
           <table className="corvex-table">
-            <thead><tr><th>Log ID</th><th>User</th><th>Action</th><th>IP Address</th><th>Status Details</th><th>Created At</th></tr></thead>
+            <thead>
+              <tr>
+                <th>Timestamp</th>
+                <th>User</th>
+                <th>Role</th>
+                <th>Module</th>
+                <th>Activity</th>
+                <th>IP Address</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
             <tbody>
-              {filtered.length === 0 ? <tr><td colSpan="6" style={{
+              {filtered.length === 0 ? <tr><td colSpan="7" style={{
                   textAlign: 'center',
                   padding: '40px',
                   color: '#5F7385'
-                }}>No audit logs found</td></tr> : paginated_filtered.map(l => <tr key={l.log_id}>
-                    <td>{l.log_id}</td>
-                    <td>{l.user_name || `User #${l.user_id}`}</td>
-                    <td>{l.action}</td>
-                    <td>{l.ip_address}</td>
-                    <td>{l.status_details}</td>
+                }}>No audit logs found</td></tr> : paginated_filtered.map((l) => (
+                  <tr key={l.log_id}>
                     <td>{formatDisplayDateTime(l.created_at)}</td>
-                  </tr>)}
+                    <td>{l.user_name || (l.user_id ? `User #${l.user_id}` : 'System')}</td>
+                    <td>{l.role_name || '—'}</td>
+                    <td>{l.module || '—'}</td>
+                    <td>{auditActivityLabel(l)}</td>
+                    <td>{l.ip_address || '—'}</td>
+                    <td>
+                      <button
+                        className="icon-action-button"
+                        type="button"
+                        title="View"
+                        aria-label={`View audit log ${l.log_id}`}
+                        onClick={() => setViewingLog(l)}
+                      >
+                        <NavIcon name="view" />
+                      </button>
+                    </td>
+                  </tr>
+                ))}
             </tbody>
           </table>
         </div><Pagination {...pagination_filtered} /></>
       </section>
+      {viewingLog ? <div className="modal-overlay" onClick={() => setViewingLog(null)}>
+          <div
+            className="modal-content"
+            style={{ maxWidth: 560 }}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="audit-log-view-title"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3 id="audit-log-view-title" style={{ marginTop: 0 }}>Audit Log Details</h3>
+            <p className="text-ink/70" style={{ margin: '0 0 16px', fontSize: '0.88rem' }}>
+              Full record of the selected system activity.
+            </p>
+            <DetailRowsTable rows={buildAuditDetailRows(viewingLog)} />
+            <div className="modal-actions" style={{ marginTop: 16 }}>
+              <button className="button secondary" type="button" onClick={() => setViewingLog(null)}>
+                Close
+              </button>
+            </div>
+          </div>
+        </div> : null}
     </div>;
 }
 
@@ -2091,7 +2172,6 @@ function ProfilePage({
   return <AccountProfilePanel
     showToast={showToast}
     title="Admin profile"
-    subtitle="Your name, contact details, and sign-in for this CORVEX account."
   />;
 }
 

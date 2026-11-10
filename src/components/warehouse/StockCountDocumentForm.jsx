@@ -176,6 +176,9 @@ export function StockCountDocumentForm({
     <div className="page">
       <section className="panel form-panel content-panel">
         <h3 style={{ marginTop: 0 }}>New Stock Count</h3>
+        <p className="muted" style={{ marginTop: 4 }}>
+          Zero-variance counts complete immediately. Any variance requires Branch Manager approval before stock changes.
+        </p>
 
         <div className="form-group">
           <label>Products<span className="required">*</span></label>

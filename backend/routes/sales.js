@@ -17,8 +17,14 @@ import { notifyCreditInvestigationSubmitted } from '../lib/creditInvestigationNo
 import {
   buildCustomerCreditEvidence,
   createCreditReview,
+  resubmitCreditReview,
   mapCreditReviewApiRow,
 } from '../lib/creditReview.js';
+import {
+  convertRecommendationToCi,
+  listCreditRecommendations,
+  updateRecommendationStatus,
+} from '../lib/creditRecommendations.js';
 import { applySalesInvoice } from '../lib/salesInvoiceWrite.js';
 import {
   notifyInvoicePendingReview,
@@ -26,6 +32,7 @@ import {
   notifyScheduleAssigned,
   publishStockAlerts,
 } from '../lib/operationalNotifications.js';
+import { AUDIT_STATUS, writeAuditFromReq } from '../lib/auditLog.js';
 import {
   AREA_ASSIGNMENT_FROM,
   AREA_ASSIGNMENT_SELECT,
@@ -35,6 +42,7 @@ import {
   resolveScopeDates,
   withProducts,
 } from '../lib/salesAreaAssignments.js';
+import { SALES_ACTIVITY_TYPES } from '../lib/fieldActivityReports.js';
 
 const router = express.Router();
 
@@ -423,6 +431,12 @@ router.post('/credit-investigations', salesStaffOnly, async (req, res) => {
     const requestReason = req.body.request_reason || req.body.purpose;
     const requestedCreditLimit = req.body.requested_credit_limit;
     const requestRemarks = req.body.request_remarks || req.body.form_remarks;
+    const resubmitCiId = req.body.resubmit_ci_id != null && req.body.resubmit_ci_id !== ''
+      ? Number(req.body.resubmit_ci_id)
+      : null;
+    const recommendationId = req.body.recommendation_id != null && req.body.recommendation_id !== ''
+      ? Number(req.body.recommendation_id)
+      : null;
 
     if (!Number.isFinite(customerId)) {
       return res.status(400).json({ success: false, message: 'Customer is required.' });
@@ -440,14 +454,56 @@ router.post('/credit-investigations', salesStaffOnly, async (req, res) => {
     const submitterName = submitterMeta.rows[0]?.display_name || 'Sales agent';
 
     await client.query('BEGIN');
-    const created = await createCreditReview(client, {
-      customerId,
-      branchId: access.row.branch_id,
-      submittedBy: user.id,
-      requestReason,
-      requestedCreditLimit,
-      requestRemarks,
-    });
+
+    // Auto-detect open revision for this customer when Sales re-requests without an explicit id.
+    let targetResubmitId = Number.isFinite(resubmitCiId) ? resubmitCiId : null;
+    if (!targetResubmitId) {
+      const openRevision = await client.query(
+        `SELECT ci_id FROM credit_investigations
+         WHERE customer_id = $1
+           AND submitted_by = $2
+           AND status = 'Revision Requested'
+         ORDER BY updated_at DESC NULLS LAST, created_at DESC
+         LIMIT 1`,
+        [customerId, user.id]
+      );
+      if (openRevision.rows.length) {
+        targetResubmitId = Number(openRevision.rows[0].ci_id);
+      }
+    }
+
+    const created = targetResubmitId
+      ? await resubmitCreditReview(client, {
+        ciId: targetResubmitId,
+        submittedBy: user.id,
+        requestReason,
+        requestedCreditLimit,
+        requestRemarks,
+      })
+      : await createCreditReview(client, {
+        customerId,
+        branchId: access.row.branch_id,
+        submittedBy: user.id,
+        requestReason,
+        requestedCreditLimit,
+        requestRemarks,
+      });
+
+    if (Number.isFinite(recommendationId) && recommendationId > 0 && !created.resubmitted) {
+      try {
+        await updateRecommendationStatus(client, {
+          recommendationId,
+          branchId: access.row.branch_id,
+          status: 'Converted to CI',
+          actorId: user.id,
+          convertedCiId: created.row.ci_id,
+        });
+      } catch (linkErr) {
+        // Non-fatal: CI was created; recommendation link is best-effort.
+        console.error('[Sales] link recommendation after CI:', linkErr.message);
+      }
+    }
+
     await client.query('COMMIT');
 
     const customerName = created.evidence?.customer?.name || 'Customer';
@@ -458,14 +514,28 @@ router.post('/credit-investigations', salesStaffOnly, async (req, res) => {
       submitterName,
     });
 
-    return res.status(201).json({
+    await writeAuditFromReq(req.app.locals.pool, req, {
+      module: 'Sales',
+      activity: created.resubmitted ? 'Resubmit Credit Investigation' : 'Submit Credit Investigation',
+      action: created.resubmitted ? 'Resubmit Credit Investigation' : 'Submit Credit Investigation',
+      description: created.resubmitted
+        ? `Resubmitted credit investigation #${created.row.ci_id} for ${customerName} after revision request.`
+        : `Submitted credit investigation for ${customerName}.`,
+      status: created.resubmitted ? AUDIT_STATUS.UPDATED : AUDIT_STATUS.CREATED,
+      affectedRecord: `credit_investigation:${created.row.ci_id}`,
+    });
+
+    return res.status(created.resubmitted ? 200 : 201).json({
       success: true,
-      message: 'Credit review submitted for Branch Manager decision.',
+      message: created.resubmitted
+        ? 'Revised credit review resubmitted for Branch Manager decision.'
+        : 'Credit review submitted for Branch Manager decision.',
       data: {
         ...created.row,
         customer_id: customerId,
         customer_name: customerName,
         risk_level: created.row.risk_level,
+        resubmitted: Boolean(created.resubmitted),
       },
     });
   } catch (err) {
@@ -575,6 +645,121 @@ router.get('/customers/:id/credit-review-context', salesStaffOnly, async (req, r
   } catch (err) {
     console.error('[Sales] GET /customers/:id/credit-review-context error:', err.message);
     return res.status(500).json({ success: false, message: 'Failed to load credit review context.' });
+  }
+});
+
+router.get('/credit-recommendations', salesStaffOnly, async (req, res) => {
+  try {
+    const pool = req.app.locals.pool;
+    const user = req.currentUser;
+    const page = Math.max(1, Number(req.query.page) || 1);
+    const limit = Math.min(100, Math.max(1, Number(req.query.limit) || 25));
+    const status = String(req.query.status || 'New').trim() || 'New';
+    const listed = await listCreditRecommendations(pool, {
+      branchId: user.branchId || null,
+      salesAgentId: user.id,
+      status,
+      recommendationType: req.query.recommendation_type || null,
+      page,
+      limit,
+    });
+    return res.status(200).json({
+      success: true,
+      data: listed.rows,
+      pagination: {
+        total: listed.total,
+        page,
+        limit,
+        totalPages: Math.ceil(listed.total / limit) || 0,
+      },
+    });
+  } catch (err) {
+    console.error('[Sales] GET /credit-recommendations error:', err.message);
+    return res.status(500).json({ success: false, message: 'Failed to load credit recommendations.' });
+  }
+});
+
+router.post('/credit-recommendations/:id/convert', salesStaffOnly, async (req, res) => {
+  const client = await req.app.locals.pool.connect();
+  try {
+    const user = req.currentUser;
+    const recommendationId = Number(req.params.id);
+    if (!Number.isFinite(recommendationId)) {
+      return res.status(400).json({ success: false, message: 'Invalid recommendation id.' });
+    }
+
+    await client.query('BEGIN');
+    const owned = await client.query(
+      `SELECT cr.recommendation_id, cr.customer_id, c.assigned_sales_agent_id, c.branch_id
+       FROM credit_recommendations cr
+       JOIN customers c ON c.customer_id = cr.customer_id
+       WHERE cr.recommendation_id = $1`,
+      [recommendationId]
+    );
+    if (!owned.rows.length) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ success: false, message: 'Recommendation not found.' });
+    }
+    const row = owned.rows[0];
+    if (Number(row.assigned_sales_agent_id) !== Number(user.id)) {
+      await client.query('ROLLBACK');
+      return res.status(403).json({
+        success: false,
+        message: 'You can only convert recommendations for your assigned customers.',
+      });
+    }
+
+    const converted = await convertRecommendationToCi(client, {
+      recommendationId,
+      branchId: row.branch_id,
+      submittedBy: user.id,
+      requestReason: req.body.request_reason || null,
+      requestedCreditLimit: req.body.requested_credit_limit,
+      requestRemarks: req.body.request_remarks || null,
+    });
+    await client.query('COMMIT');
+
+    await notifyCreditInvestigationSubmitted(req.app.locals.pool, {
+      branchId: row.branch_id,
+      ciId: converted.created.row.ci_id,
+      customerName: converted.created.evidence?.customer?.name || 'Customer',
+      submitterName: user.fullName || user.email || 'Sales agent',
+    });
+
+    await writeAuditFromReq(req.app.locals.pool, req, {
+      module: 'Sales',
+      activity: 'Convert Credit Recommendation',
+      action: 'Convert Credit Recommendation',
+      description: `Converted recommendation #${recommendationId} to CI #${converted.created.row.ci_id}.`,
+      status: AUDIT_STATUS.CREATED,
+      affectedRecord: `credit_investigation:${converted.created.row.ci_id}`,
+    });
+
+    return res.status(201).json({
+      success: true,
+      message: 'Recommendation converted to a formal credit investigation.',
+      data: {
+        recommendation_id: recommendationId,
+        ci_id: converted.created.row.ci_id,
+        status: converted.created.row.status,
+      },
+    });
+  } catch (err) {
+    try { await client.query('ROLLBACK'); } catch { /* ignore */ }
+    if (err.status === 409) {
+      return res.status(409).json({
+        success: false,
+        message: err.message,
+        data: err.existingId ? { ci_id: err.existingId } : undefined,
+      });
+    }
+    if (err.status) {
+      return res.status(err.status).json({ success: false, message: err.message });
+    }
+    console.error('[Sales] POST /credit-recommendations/:id/convert error:', err.message);
+    return res.status(500).json({ success: false, message: 'Failed to convert recommendation.' });
+  } finally {
+    client.release();
   }
 });
 
@@ -838,6 +1023,15 @@ router.post('/invoices', async (req, res) => {
       agentId: user.id,
     });
 
+    await writeAuditFromReq(pool, req, {
+      module: 'Sales',
+      activity: 'Create Sales Invoice',
+      action: 'Create Sales Invoice',
+      description: `Logged sales invoice ${invoiceNumber}.`,
+      status: AUDIT_STATUS.CREATED,
+      affectedRecord: `invoice:${applied.invoiceId}`,
+    });
+
     try {
       const invoice = await getInvoice(invoiceNumber, { ...user, pool });
       return res.status(201).json({
@@ -1046,6 +1240,15 @@ router.post('/visits', async (req, res) => {
 
     const visit = await getVisit.call({ pool }, result.rows[0].visit_id, req.currentUser.id);
 
+    await writeAuditFromReq(pool, req, {
+      module: 'Sales',
+      activity: 'Create Field Visit',
+      action: 'Create Field Visit',
+      description: `Created ${visitType} visit for customer #${customerId} on ${scheduledDate}.`,
+      status: AUDIT_STATUS.CREATED,
+      affectedRecord: `visit:${result.rows[0].visit_id}`,
+    });
+
     return res.status(201).json({
       success: true,
       data: visit,
@@ -1159,6 +1362,15 @@ router.put('/visits/:id', async (req, res) => {
     if (effectiveStatus === 'Completed' && effectiveType === 'Sales' && req.currentUser.roleSlug === 'sales_staff') {
       await assignSalesAgentToCustomer(pool, visit.customer_id, req.currentUser.id);
     }
+
+    await writeAuditFromReq(pool, req, {
+      module: 'Sales',
+      activity: 'Edit Field Visit',
+      action: 'Edit Field Visit',
+      description: `Updated field visit #${visitId} (status: ${effectiveStatus}).`,
+      status: AUDIT_STATUS.UPDATED,
+      affectedRecord: `visit:${visitId}`,
+    });
 
     return res.status(200).json({
       success: true,
@@ -1438,6 +1650,15 @@ router.patch('/purchase-requests/:id', async (req, res) => {
       reopened: Boolean(reopen) && status === 'In Review',
     });
 
+    await writeAuditFromReq(pool, req, {
+      module: 'Sales',
+      activity: 'Update Purchase Request',
+      action: 'Update Purchase Request',
+      description: `Updated purchase request #${requestId} to status ${status}.`,
+      status: AUDIT_STATUS.UPDATED,
+      affectedRecord: `purchase_request:${requestId}`,
+    });
+
     return res.status(200).json({
       success: true,
       message: status === 'Rejected' || status === 'Cancelled'
@@ -1553,6 +1774,13 @@ router.post('/field-reports', async (req, res) => {
       message: 'activity_type and remarks are required.',
     });
   }
+  const activity = String(activity_type).trim();
+  if (!SALES_ACTIVITY_TYPES.includes(activity)) {
+    return res.status(400).json({
+      success: false,
+      message: 'activity_type is not a supported sales field activity.',
+    });
+  }
   if (!assignmentId && !visitId) {
     return res.status(400).json({
       success: false,
@@ -1616,15 +1844,26 @@ router.post('/field-reports', async (req, res) => {
         assignmentId,
         customerId,
         userId,
-        String(activity_type).trim(),
+        activity,
         String(remarks).trim(),
         photoValue,
       ]
     );
 
+    await writeAuditFromReq(pool, req, {
+      module: 'Sales',
+      activity: 'Submit Field Report',
+      action: 'Submit Field Report',
+      description: assignmentId
+        ? `Submitted field activity report (${activity}) for assignment #${assignmentId}.`
+        : `Submitted field activity report (${activity}) for visit #${visitId}.`,
+      status: AUDIT_STATUS.CREATED,
+      affectedRecord: `field_report:${result.rows[0].report_id}`,
+    });
+
     return res.status(201).json({
       success: true,
-      message: 'Field activity report submitted.',
+      message: 'Field activity report submitted successfully. Your Branch Manager can now review this report.',
       data: result.rows[0],
     });
   } catch (error) {

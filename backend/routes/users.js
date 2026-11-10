@@ -1,9 +1,16 @@
 import express from 'express';
 import bcrypt from 'bcryptjs';
-import { allow, ROLE_SETS } from '../middleware/auth.js';
+import { requirePermission } from '../middleware/auth.js';
+import { AUDIT_STATUS, summarizeChanges, writeAuditFromReq } from '../lib/auditLog.js';
+import { getUserPermissionMatrix, saveUserPermissions } from '../lib/permissions.js';
+import { recordPermissionChangeEvent } from '../lib/security/detectors.js';
 
 const router = express.Router();
-router.use(allow(ROLE_SETS.userAdmin));
+// Catalog permissions are authoritative (Super Admin always passes via middleware).
+router.use(requirePermission(
+  'users.view', 'users.create', 'users.edit', 'users.disable', 'users.activate',
+  'roles.view', 'roles.assign',
+));
 
 async function roleSlug(pool, roleId) {
   const result = await pool.query(`SELECT slug FROM roles WHERE role_id = $1`, [Number(roleId)]);
@@ -183,6 +190,115 @@ router.get('/', async (req, res) => {
 });
 
 // ──────────────────────────────────────────────────────────────────────────────
+// GET /api/users/:id/permissions — Full catalog + selected user's grants
+// ──────────────────────────────────────────────────────────────────────────────
+router.get(
+  '/:id/permissions',
+  requirePermission('roles.view', 'roles.assign'),
+  async (req, res) => {
+    try {
+      const pool = req.app.locals.pool;
+      const userId = Number(req.params.id);
+      if (!Number.isInteger(userId) || userId <= 0) {
+        return res.status(400).json({ success: false, message: 'Invalid user id.' });
+      }
+
+      const userResult = await pool.query(`${USER_SELECT} WHERE u.id = $1`, [userId]);
+      if (userResult.rows.length === 0) {
+        return res.status(404).json({ success: false, message: 'User not found.' });
+      }
+
+      const matrix = await getUserPermissionMatrix(pool, userId);
+      if (!matrix) {
+        return res.status(404).json({ success: false, message: 'User not found.' });
+      }
+
+      return res.status(200).json({
+        success: true,
+        data: {
+          user: formatUser(userResult.rows[0]),
+          locked: matrix.locked,
+          hasCustomPermissions: matrix.hasCustomPermissions,
+          permissions: matrix.permissions,
+          modules: matrix.modules,
+        },
+      });
+    } catch (err) {
+      console.error('[Users] GET /:id/permissions error:', err.message);
+      return res.status(500).json({ success: false, message: 'Failed to fetch user permissions.' });
+    }
+  }
+);
+
+// ──────────────────────────────────────────────────────────────────────────────
+// PUT /api/users/:id/permissions — Save selected user's permission grants
+// Body: { permissions: { [permission_id]: boolean } }
+// ──────────────────────────────────────────────────────────────────────────────
+router.put(
+  '/:id/permissions',
+  requirePermission('roles.assign'),
+  async (req, res) => {
+    try {
+      const pool = req.app.locals.pool;
+      const userId = Number(req.params.id);
+      const { permissions } = req.body || {};
+
+      if (!Number.isInteger(userId) || userId <= 0) {
+        return res.status(400).json({ success: false, message: 'Invalid user id.' });
+      }
+      if (!permissions || typeof permissions !== 'object' || Array.isArray(permissions)) {
+        return res.status(400).json({ success: false, message: 'permissions object is required.' });
+      }
+
+      const matrix = await saveUserPermissions(pool, userId, permissions);
+
+      try {
+        await recordPermissionChangeEvent(pool, {
+          actorId: req.currentUser?.id || null,
+          actorName: req.currentUser?.fullName || req.currentUser?.email || 'Administrator',
+          roleId: matrix.user.role_id,
+          roleName: `${matrix.user.role_name} (user #${userId})`,
+          roleSlug: matrix.user.role_slug,
+          changedPermissions: permissions,
+          sourceIp: req.ip || null,
+        });
+      } catch (secErr) {
+        console.error('[Users] security permission monitor:', secErr.message);
+      }
+
+      await writeAuditFromReq(pool, req, {
+        module: 'Roles and Permissions',
+        activity: 'Update User Permissions',
+        action: 'Update User Permissions',
+        description: `Updated permissions for user #${userId}.`,
+        status: AUDIT_STATUS.UPDATED,
+        affectedRecord: `user:${userId}`,
+      });
+
+      const userResult = await pool.query(`${USER_SELECT} WHERE u.id = $1`, [userId]);
+      return res.status(200).json({
+        success: true,
+        message: 'User permissions updated successfully.',
+        data: {
+          user: formatUser(userResult.rows[0]),
+          locked: matrix.locked,
+          hasCustomPermissions: matrix.hasCustomPermissions,
+          permissions: matrix.permissions,
+          modules: matrix.modules,
+        },
+      });
+    } catch (err) {
+      const status = err.status || 500;
+      if (status >= 500) console.error('[Users] PUT /:id/permissions error:', err.message);
+      return res.status(status).json({
+        success: false,
+        message: err.status ? err.message : 'Failed to update user permissions.',
+      });
+    }
+  }
+);
+
+// ──────────────────────────────────────────────────────────────────────────────
 // GET /api/users/:id
 // ──────────────────────────────────────────────────────────────────────────────
 router.get('/:id', async (req, res) => {
@@ -205,7 +321,7 @@ router.get('/:id', async (req, res) => {
 // ──────────────────────────────────────────────────────────────────────────────
 // POST /api/users  — Create user
 // ──────────────────────────────────────────────────────────────────────────────
-router.post('/', async (req, res) => {
+router.post('/', requirePermission('users.create'), async (req, res) => {
   try {
     const pool = req.app.locals.pool;
     const {
@@ -282,6 +398,15 @@ router.post('/', async (req, res) => {
       [result.rows[0].user_id]
     );
 
+    await writeAuditFromReq(pool, req, {
+      module: 'User Management',
+      activity: 'Create User',
+      action: 'Create User',
+      description: `Created user account ${fullName} (${email.toLowerCase().trim()}) with role ${assignedSlug}.`,
+      status: AUDIT_STATUS.CREATED,
+      affectedRecord: `user:${result.rows[0].user_id}`,
+    });
+
     return res.status(201).json({
       success: true,
       message: 'User created successfully.',
@@ -299,7 +424,7 @@ router.post('/', async (req, res) => {
 // ──────────────────────────────────────────────────────────────────────────────
 // PUT /api/users/:id  — Update user
 // ──────────────────────────────────────────────────────────────────────────────
-router.put('/:id', async (req, res) => {
+router.put('/:id', requirePermission('users.edit', 'users.activate'), async (req, res) => {
   try {
     const pool = req.app.locals.pool;
     const userId = Number(req.params.id);
@@ -309,10 +434,19 @@ router.put('/:id', async (req, res) => {
     } = req.body;
 
     // Check user exists
-    const existing = await pool.query(`SELECT id AS user_id FROM users WHERE id = $1`, [userId]);
+    const existing = await pool.query(
+      `SELECT id AS user_id, first_name, last_name, email, status, role_id, branch_id,
+              failed_login_count, login_locked_until
+       FROM users WHERE id = $1`,
+      [userId]
+    );
     if (existing.rows.length === 0) {
       return res.status(404).json({ success: false, message: 'User not found.' });
     }
+    const before = existing.rows[0];
+    const unlockLogin = Boolean(req.body.unlock_login) || (
+      status === 'Active' && before.login_locked_until && new Date(before.login_locked_until).getTime() > Date.now()
+    );
 
     const targetSlug = await userRoleSlug(pool, userId);
     if (targetSlug === 'super_admin' && req.currentUser.roleSlug !== 'super_admin') {
@@ -383,6 +517,11 @@ router.put('/:id', async (req, res) => {
       params.push(hash);
     }
 
+    if (unlockLogin) {
+      updates.push('failed_login_count = 0');
+      updates.push('login_locked_until = NULL');
+    }
+
     if (updates.length === 0) {
       return res.status(400).json({ success: false, message: 'No fields to update.' });
     }
@@ -400,6 +539,47 @@ router.put('/:id', async (req, res) => {
     );
 
     const updated = await pool.query(`${USER_SELECT} WHERE u.id = $1`, [userId]);
+    const after = updated.rows[0];
+    const changeSummary = summarizeChanges(
+      {
+        first_name: before.first_name,
+        last_name: before.last_name,
+        email: before.email,
+        status: before.status,
+        role_id: before.role_id,
+        branch_id: before.branch_id,
+      },
+      {
+        first_name: after.first_name,
+        last_name: after.last_name,
+        email: after.email,
+        status: after.status,
+        role_id: after.role_id,
+        branch_id: after.branch_id,
+      }
+    );
+
+    if (unlockLogin) {
+      await writeAuditFromReq(pool, req, {
+        module: 'User Management',
+        activity: 'Account Unlocked',
+        action: 'Account Unlocked',
+        description: `Unlocked login lockout for ${after.first_name} ${after.last_name}.`,
+        status: AUDIT_STATUS.ACCOUNT_UNLOCKED,
+        affectedRecord: `user:${userId}`,
+      });
+    }
+
+    await writeAuditFromReq(pool, req, {
+      module: 'User Management',
+      activity: password ? 'Reset User Password' : 'Edit User',
+      action: password ? 'Password Reset' : 'Edit User',
+      description: password
+        ? `Reset password for user account ${after.first_name} ${after.last_name}.`
+        : `Edited user account ${after.first_name} ${after.last_name}.${changeSummary ? ` Changes: ${changeSummary}` : ''}`,
+      status: password ? AUDIT_STATUS.PASSWORD_RESET : AUDIT_STATUS.UPDATED,
+      affectedRecord: `user:${userId}`,
+    });
 
     return res.status(200).json({
       success: true,
@@ -418,7 +598,7 @@ router.put('/:id', async (req, res) => {
 // ──────────────────────────────────────────────────────────────────────────────
 // DELETE /api/users/:id  — Soft disable (set status = Inactive; record kept)
 // ──────────────────────────────────────────────────────────────────────────────
-router.delete('/:id', async (req, res) => {
+router.delete('/:id', requirePermission('users.disable', 'users.activate'), async (req, res) => {
   try {
     const pool = req.app.locals.pool;
     const userId = Number(req.params.id);
@@ -436,6 +616,15 @@ router.delete('/:id', async (req, res) => {
     if (result.rows.length === 0) {
       return res.status(404).json({ success: false, message: 'User not found.' });
     }
+
+    await writeAuditFromReq(pool, req, {
+      module: 'User Management',
+      activity: 'Deactivate User',
+      action: 'Deactivate User',
+      description: `Deactivated user account #${userId}. Record preserved.`,
+      status: AUDIT_STATUS.ARCHIVED,
+      affectedRecord: `user:${userId}`,
+    });
 
     return res.status(200).json({
       success: true,

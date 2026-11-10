@@ -1,23 +1,30 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import LeafletMap from '../common/LeafletMap';
-import { Pagination } from '../shared/Pagination';
-import { usePagination } from '../../hooks/usePagination';
 import { EmptyState } from '../shared/EmptyState';
 import { LoadingState } from '../shared/LoadingState';
-import { StatusBadge } from '../StatusBadge';
-import { NavIcon } from '../../navIcons';
 import { getBranchMap, getSawMapRoads } from '../../api/branchManagerService.js';
 import { getCurrentUser } from '../../api/authService.js';
-import { formatCurrency, formatDisplayDate } from '../../utils/formatters.js';
 import {
-  LAYER_OPTIONS,
+  MAP_MODES,
   PERIOD_OPTIONS,
+  STAFF_TYPE_OPTIONS,
+  STANDING_OPTIONS,
   buildBranchLeafletView,
-  defaultLayersForPage,
+  defaultModeForPage,
   hasCoords,
   manilaMapDate,
 } from '../../utils/branchLeafletLayers.js';
+
+function isCollectorStaffId(staffId, staff) {
+  if (!staffId || staffId === 'all') return false;
+  return (staff?.collectors || []).some((c) => String(c.id) === String(staffId));
+}
+
+function isSalesStaffId(staffId, staff) {
+  if (!staffId || staffId === 'all') return false;
+  return (staff?.salesAgents || []).some((a) => String(a.id) === String(staffId));
+}
 
 export function BranchLeafletPage({
   pageType,
@@ -28,28 +35,55 @@ export function BranchLeafletPage({
 }) {
   const [searchParams, setSearchParams] = useSearchParams();
   const staffFromQuery = searchParams.get('staff') || 'all';
+  const periodFromQuery = searchParams.get('period') || 'today';
+  const customerFromQuery = searchParams.get('customer')
+    || searchParams.get('customerId')
+    || searchParams.get('customer_id')
+    || '';
   const currentUser = getCurrentUser();
   const isOrgScope = ['operating_manager', 'super_admin'].includes(currentUser?.role?.slug);
   const scopedBranchLabel = branchName
     || currentUser?.branch?.name
     || (isOrgScope ? 'All Branches' : 'Your Branch');
-  const [period, setPeriod] = useState('month');
+
+  const [mode, setMode] = useState(() => (
+    customerFromQuery ? 'customers' : (staffFromQuery !== 'all' ? 'routes' : defaultModeForPage(pageType))
+  ));
+  const [period, setPeriod] = useState(periodFromQuery === 'week' || periodFromQuery === 'month' ? periodFromQuery : 'today');
   const [branchId, setBranchId] = useState('all');
+  const [staffType, setStaffType] = useState('all');
   const [staffId, setStaffId] = useState(staffFromQuery);
-  const [layers, setLayers] = useState(() => defaultLayersForPage(pageType));
+  const [standing, setStanding] = useState('all');
+  const [search, setSearch] = useState('');
+  const [focusCustomerId, setFocusCustomerId] = useState(customerFromQuery || null);
   const [payload, setPayload] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [sawRoads, setSawRoads] = useState([]);
-  const [sawRoadDate, setSawRoadDate] = useState('');
-  const roadsEnabled = layers.includes('Collector Routes') || layers.includes('Route Efficiency Layer');
+  const [plannedRoads, setPlannedRoads] = useState([]);
 
   useEffect(() => {
     setStaffId(staffFromQuery);
-  }, [staffFromQuery]);
+    if (customerFromQuery) {
+      setMode('customers');
+      setFocusCustomerId(customerFromQuery);
+    } else if (staffFromQuery !== 'all') {
+      setMode('routes');
+    }
+  }, [staffFromQuery, customerFromQuery]);
 
   useEffect(() => {
-    setLayers(defaultLayersForPage(pageType));
-  }, [pageType]);
+    if (periodFromQuery === 'week' || periodFromQuery === 'month' || periodFromQuery === 'today') {
+      setPeriod(periodFromQuery);
+    }
+  }, [periodFromQuery]);
+
+  useEffect(() => {
+    if (customerFromQuery) {
+      setMode('customers');
+      setFocusCustomerId(customerFromQuery);
+      return;
+    }
+    if (staffFromQuery === 'all') setMode(defaultModeForPage(pageType));
+  }, [pageType, staffFromQuery, customerFromQuery]);
 
   useEffect(() => {
     let cancelled = false;
@@ -69,42 +103,65 @@ export function BranchLeafletPage({
     return () => {
       cancelled = true;
     };
-  }, [period]);
+  }, [period, showToast]);
+
+  const staffPool = useMemo(() => {
+    const staff = payload?.staff || { collectors: [], salesAgents: [] };
+    if (!isOrgScope || branchId === 'all') return staff;
+    return {
+      collectors: (staff.collectors || []).filter((c) => Number(c.branchId) === Number(branchId)),
+      salesAgents: (staff.salesAgents || []).filter((a) => Number(a.branchId) === Number(branchId)),
+    };
+  }, [payload, isOrgScope, branchId]);
+
+  const shouldLoadPlannedRoads = mode === 'routes'
+    && staffType !== 'sales'
+    && !isSalesStaffId(staffId, staffPool);
 
   useEffect(() => {
-    if (!roadsEnabled) {
-      setSawRoads([]);
-      setSawRoadDate('');
+    if (!shouldLoadPlannedRoads) {
+      setPlannedRoads([]);
       return undefined;
     }
     let cancelled = false;
-    const date = manilaMapDate();
+    const date = period === 'today'
+      ? manilaMapDate()
+      : (payload?.range?.end || manilaMapDate());
     const params = { date };
     const scopedBranch = isOrgScope ? branchId : 'all';
     if (scopedBranch !== 'all') params.branch_id = scopedBranch;
-    if (staffId !== 'all') params.collector_id = staffId;
+    if (staffId !== 'all' && isCollectorStaffId(staffId, staffPool)) {
+      params.collector_id = staffId;
+    }
     getSawMapRoads(params).then((result) => {
       if (cancelled) return;
-      setSawRoads(result.success ? result.data || [] : []);
-      setSawRoadDate(result.meta?.scheduledDate || date);
-      if (!result.success) showToast?.(result.message || 'SAW road routes are unavailable.', 'error');
+      const roads = result.success ? (result.data || []) : [];
+      // Only assigned/planned routes — never present eligible ranking as live tracking.
+      setPlannedRoads(roads.filter((road) => road.listSource === 'assigned'));
+      if (!result.success) {
+        showToast?.(result.message || 'Planned collection routes are unavailable.', 'error');
+      }
     });
     return () => {
       cancelled = true;
     };
-  }, [roadsEnabled, branchId, staffId, isOrgScope]);
+  }, [shouldLoadPlannedRoads, branchId, staffId, isOrgScope, period, payload?.range?.end, staffPool, showToast]);
 
   const view = useMemo(
     () => buildBranchLeafletView({
       payload,
-      layers,
+      mode,
       staffId,
+      staffType,
+      paymentStatus: standing,
+      search,
       navigate,
       opsBase,
       branchId: isOrgScope ? branchId : 'all',
-      sawRoads,
+      sawRoads: plannedRoads,
+      focusCustomerId,
     }),
-    [payload, layers, staffId, navigate, opsBase, isOrgScope, branchId, sawRoads]
+    [payload, mode, staffId, staffType, standing, search, navigate, opsBase, isOrgScope, branchId, plannedRoads, focusCustomerId]
   );
 
   const selectedBranch = (payload?.branches || []).find((branch) => (
@@ -115,24 +172,14 @@ export function BranchLeafletPage({
   const mapCenter = selectedBranch && hasCoords(selectedBranch.lat, selectedBranch.lng)
     ? [selectedBranch.lat, selectedBranch.lng]
     : (view.bounds[0] || [7.0731, 125.6128]);
-  const pagination = usePagination(view.tableRows);
-  const rows = pagination.paginatedData;
-  const staff = view.filteredStaff || payload?.staff || { collectors: [], salesAgents: [] };
-  const title = pageType === 'leafletDelinquency'
-    ? 'Delinquency Heatmap'
-    : pageType === 'leafletProfitability'
-      ? 'Profitability Zones'
-      : pageType === 'leafletTerritory'
-        ? 'Territory Map'
-        : 'Field Map';
 
-  const toggleLayer = (layer) => {
-    setLayers((current) => (
-      current.includes(layer) ? current.filter((item) => item !== layer) : [...current, layer]
-    ));
-  };
+  const searchMatches = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    if (!q || mode !== 'customers') return [];
+    return (view.tableRows || []).slice(0, 8);
+  }, [search, mode, view.tableRows]);
 
-  if (loading && !payload) return <LoadingState variant="map" message="Loading map data..." />;
+  if (loading && !payload) return <LoadingState variant="map" message="Loading field map..." />;
 
   return (
     <div className="page">
@@ -140,29 +187,67 @@ export function BranchLeafletPage({
         <div className="flex flex-col md:flex-row justify-between gap-4 items-start md:items-center mb-4">
           <div>
             <p className="text-[0.82rem] font-bold tracking-widest uppercase text-navy/60 m-0">{scopedBranchLabel}</p>
-            <h3>{title}</h3>
+            <h3>Field Map</h3>
             <p className="text-ink/70" style={{ margin: '4px 0 0', fontSize: '0.85rem' }}>
-              Find collectors and sales agents by route and scheduled stops · {view.accountCount} mapped accounts · {view.visitCount} scheduled visits
-              {payload?.range ? ` · ${formatDisplayDate(payload.range.start)} to ${formatDisplayDate(payload.range.end)}` : ''}
-              {!isOrgScope ? ' · your branch only' : ''}
-              {sawRoads.length ? ` · ${sawRoads.length} SAW road${sawRoads.length === 1 ? '' : 's'} for ${formatDisplayDate(sawRoadDate)}` : ''}
+              View your branch&apos;s customers and planned field activities.
             </p>
           </div>
         </div>
+
+        <div className="segmented-control" style={{ marginBottom: 12 }}>
+          {MAP_MODES.map((item) => (
+            <button
+              key={item.key}
+              className={mode === item.key ? 'segment active' : 'segment'}
+              type="button"
+              onClick={() => {
+                setMode(item.key);
+                setFocusCustomerId(null);
+              }}
+            >
+              {item.label}
+            </button>
+          ))}
+        </div>
+
         <div className="accounts-filters">
           {isOrgScope ? (
-            <select className="filter-select" value={branchId} onChange={(e) => { setBranchId(e.target.value); setStaffId('all'); }}>
+            <select
+              className="filter-select"
+              value={branchId}
+              onChange={(e) => {
+                setBranchId(e.target.value);
+                setStaffId('all');
+              }}
+            >
               <option value="all">All Branches</option>
               {(payload?.branches || []).map((branch) => (
                 <option key={branch.id} value={branch.id}>{branch.name}</option>
               ))}
             </select>
           ) : null}
-          <select className="filter-select" value={period} onChange={(e) => setPeriod(e.target.value)}>
-            {PERIOD_OPTIONS.map((option) => (
+
+          {mode === 'routes' ? (
+            <select className="filter-select" value={period} onChange={(e) => setPeriod(e.target.value)}>
+              {PERIOD_OPTIONS.map((option) => (
+                <option key={option.value} value={option.value}>{option.label}</option>
+              ))}
+            </select>
+          ) : null}
+
+          <select
+            className="filter-select"
+            value={staffType}
+            onChange={(e) => {
+              setStaffType(e.target.value);
+              setStaffId('all');
+            }}
+          >
+            {STAFF_TYPE_OPTIONS.map((option) => (
               <option key={option.value} value={option.value}>{option.label}</option>
             ))}
           </select>
+
           <select
             className="filter-select"
             value={staffId}
@@ -175,23 +260,81 @@ export function BranchLeafletPage({
               setSearchParams(nextParams, { replace: true });
             }}
           >
-            <option value="all">{isOrgScope ? 'All Staff' : 'All Branch Staff'}</option>
-            {staff.collectors.map((collector) => (
+            <option value="all">All Staff</option>
+            {staffType !== 'sales' && staffPool.collectors.map((collector) => (
               <option key={`collector-${collector.id}`} value={collector.id}>Collector · {collector.name}</option>
             ))}
-            {staff.salesAgents.map((agent) => (
+            {staffType !== 'collectors' && staffPool.salesAgents.map((agent) => (
               <option key={`sales-${agent.id}`} value={agent.id}>Sales · {agent.name}</option>
             ))}
           </select>
+
+          {mode === 'customers' ? (
+            <>
+              <select className="filter-select" value={standing} onChange={(e) => setStanding(e.target.value)}>
+                {STANDING_OPTIONS.map((option) => (
+                  <option key={option.value} value={option.value}>{option.label}</option>
+                ))}
+              </select>
+              <input
+                className="filter-select"
+                style={{ minWidth: 180 }}
+                type="search"
+                placeholder="Search customer name"
+                value={search}
+                onChange={(e) => {
+                  setSearch(e.target.value);
+                  setFocusCustomerId(null);
+                }}
+              />
+            </>
+          ) : null}
         </div>
-        <div className="layer-toggles">
-          {LAYER_OPTIONS.map((layer) => (
-            <label key={layer} className="toggle-label">
-              <input type="checkbox" checked={layers.includes(layer)} onChange={() => toggleLayer(layer)} />
-              {layer}
-            </label>
-          ))}
+
+        {mode === 'customers' && searchMatches.length > 0 && search.trim() ? (
+          <div className="map-search-results" style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 12 }}>
+            {searchMatches.map((account) => (
+              <button
+                key={`search-${account.id}`}
+                type="button"
+                className="button ghost"
+                style={{ fontSize: '0.8rem' }}
+                onClick={() => setFocusCustomerId(account.id)}
+              >
+                {account.customerName}
+              </button>
+            ))}
+          </div>
+        ) : null}
+
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12, marginBottom: 12, fontSize: '0.85rem', color: 'var(--ink, #0B2133)' }}>
+          {mode === 'customers' ? (
+            <>
+              <span>Customers on map: <strong>{view.accountCount}</strong></span>
+              <span>
+                Missing location:{' '}
+                <button
+                  type="button"
+                  className="button ghost"
+                  style={{ padding: 0, fontSize: 'inherit', fontWeight: 700 }}
+                  onClick={() => navigate(`${opsBase}/customers`)}
+                >
+                  {view.missingLocationCount}
+                </button>
+              </span>
+            </>
+          ) : null}
+          {mode === 'routes' ? (
+            <span>Planned stops: <strong>{view.visitCount}</strong></span>
+          ) : null}
+          {mode === 'routes' ? (
+            <span className="text-ink/70">Routes are planned schedules — not live GPS tracking.</span>
+          ) : null}
+          {mode === 'coverage' ? (
+            <span className="text-ink/70">Coverage shapes are approximate from customer locations.</span>
+          ) : null}
         </div>
+
         {view.legend.length ? (
           <div className="map-legend">
             {view.legend.map((item) => (
@@ -202,77 +345,28 @@ export function BranchLeafletPage({
             ))}
           </div>
         ) : null}
+
         <div style={{ marginTop: 16 }}>
           <LeafletMap
-            center={mapCenter}
-            zoom={12}
+            center={focusCustomerId
+              ? (view.markers.find((m) => String(m.id) === `acct-${focusCustomerId}`)?.position || mapCenter)
+              : mapCenter}
+            zoom={focusCustomerId ? 15 : 12}
             height={560}
-            fitBounds={view.bounds.length ? view.bounds : null}
+            fitBounds={!focusCustomerId && view.bounds.length ? view.bounds : null}
             markers={view.markers}
             polylines={view.polylines}
             circles={view.circles}
             polygons={view.polygons}
           />
         </div>
-        {!view.markers.length && !view.circles.length && !view.polygons.length && !view.polylines.length ? (
-          <p className="text-ink/70" style={{ marginTop: 12, fontSize: '0.85rem' }}>
-            No mapped features for this period, staff filter, and layer combination. Try This Month or turn on another layer.
-          </p>
+
+        {view.emptyMessage ? (
+          <div style={{ marginTop: 12 }}>
+            <EmptyState title={view.emptyMessage} description="Adjust filters or choose another map view." />
+          </div>
         ) : null}
       </section>
-
-      <section className="panel content-panel relative overflow-hidden">
-        <div className="flex flex-col md:flex-row justify-between gap-4 items-start md:items-center mb-4">
-          <h3>Customer Pins</h3>
-        </div>
-        {rows.length ? (
-          <>
-            <div className="corvex-table-wrapper">
-              <table className="corvex-table">
-                <thead>
-                  <tr>
-                    <th>Customer</th>
-                    <th>Balance</th>
-                    <th>Status</th>
-                    <th>Last Visit</th>
-                    <th>Staff</th>
-                    <th>Actions</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {rows.map((account) => (
-                    <tr key={account.id}>
-                      <td>{account.customerName}</td>
-                      <td>{formatCurrency(account.balance)}</td>
-                      <td><StatusBadge status={account.paymentStatus} /></td>
-                      <td>{account.lastVisit ? formatDisplayDate(account.lastVisit) : '—'}</td>
-                      <td>{account.assignedStaff}</td>
-                      <td className="table-actions">
-                        <button
-                          className="icon-action-button"
-                          type="button"
-                          title="View"
-                          onClick={() => navigate(`${opsBase}/customers/${account.id}`)}
-                        >
-                          <NavIcon name="view" />
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-            <Pagination {...pagination} />
-          </>
-        ) : (
-          <EmptyState title="No customers on map" description="Customers for your branch will appear here once they have location data." />
-        )}
-      </section>
-
-      <div className="flex justify-end gap-2 mt-4">
-        <button className="button secondary" type="button" onClick={() => navigate(`${opsBase}/leaflet/delinquency`)}>Delinquency Heatmap</button>
-        <button className="button secondary" type="button" onClick={() => navigate(`${opsBase}/leaflet/profitability`)}>Profitability Zones</button>
-      </div>
     </div>
   );
 }

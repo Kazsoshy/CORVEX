@@ -134,7 +134,7 @@ export function RestockDocumentForm({
     setLines((prev) => prev.filter((line) => Number(line.product_id) !== Number(productId)));
   };
 
-  const handleSubmit = async () => {
+  const saveRestock = async ({ submit }) => {
     const nextErrors = {};
     const activeSupplier = suppliers.find((s) => String(s.suppliers_id) === String(form.supplierId));
     if (!form.supplierId) nextErrors.supplierId = 'Supplier is required.';
@@ -158,10 +158,12 @@ export function RestockDocumentForm({
     if (submitting) return;
 
     const confirmed = await confirmAction({
-      title: 'Record restock',
-      message: `Stock at ${user?.branch?.name || 'your branch'} increases as soon as this receipt is saved.`,
+      title: submit ? 'Submit restock' : 'Save restock draft',
+      message: submit
+        ? `Stock at ${user?.branch?.name || 'your branch'} will not increase until a Branch Manager approves this restock.`
+        : 'This saves the restock as a draft. Stock does not change yet.',
       detail: `${activeSupplier?.supplier_name || 'Supplier'} · ${totals.lineCount} product line${totals.lineCount === 1 ? '' : 's'} · ${totals.totalUnits} units`,
-      confirmLabel: 'Record restock',
+      confirmLabel: submit ? 'Submit restock' : 'Save draft',
     });
     if (!confirmed) return;
 
@@ -171,13 +173,20 @@ export function RestockDocumentForm({
       received_date: form.dateReceived,
       notes: form.notes.trim(),
       lines: normalized,
+      submit: Boolean(submit),
     });
     setSubmitting(false);
     if (!result.success) {
       showToast(result.message || 'Restock failed.', 'error');
       return;
     }
-    showToast(result.message || 'Restock recorded.', 'success');
+    showToast(
+      result.message
+        || (submit
+          ? 'Restock submitted for approval.'
+          : 'Restock draft saved.'),
+      'success'
+    );
     const id = result.data?.restock_id;
     navigate(id ? `/warehouse/restock-history/${id}` : '/warehouse/restock-history');
   };
@@ -188,6 +197,9 @@ export function RestockDocumentForm({
     <div className="page">
       <section className="panel form-panel content-panel">
         <h3 style={{ marginTop: 0 }}>New Restock</h3>
+        <p className="muted" style={{ marginTop: 4 }}>
+          Save a draft or submit for Branch Manager approval. On-hand stock increases only after approval.
+        </p>
 
         <div className="form-group">
           <label>Supplier<span className="required">*</span></label>
@@ -262,7 +274,7 @@ export function RestockDocumentForm({
                               aria-label={`Quantity for ${line.product_name}`}
                             />
                           </td>
-                          <td style={{ fontWeight: 600 }}>{line.on_hand + qty}</td>
+                          <td style={{ fontWeight: 600 }} title="Projected after BM approval">{line.on_hand + qty}</td>
                           <td>
                             <button className="icon-action-button danger" type="button" title="Remove" onClick={() => removeLine(line.product_id)}>
                               <NavIcon name="close" />
@@ -297,8 +309,21 @@ export function RestockDocumentForm({
         <button className="button secondary" type="button" onClick={() => navigate(cancelTo)} disabled={submitting}>
           Cancel
         </button>
-        <button className="button" type="button" onClick={handleSubmit} disabled={submitting || !lines.length}>
-          {submitting ? 'Saving…' : 'Record restock'}
+        <button
+          className="button secondary"
+          type="button"
+          onClick={() => saveRestock({ submit: false })}
+          disabled={submitting || !lines.length}
+        >
+          {submitting ? 'Saving…' : 'Save draft'}
+        </button>
+        <button
+          className="button"
+          type="button"
+          onClick={() => saveRestock({ submit: true })}
+          disabled={submitting || !lines.length}
+        >
+          {submitting ? 'Submitting…' : 'Submit for approval'}
         </button>
       </div>
     </div>

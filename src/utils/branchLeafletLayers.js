@@ -1,14 +1,19 @@
-import { formatCurrency, formatDisplayDate } from './formatters.js';
+import { createElement } from 'react';
+import { formatCurrency } from './formatters.js';
 import { mapSeries, palette } from '../theme/palette.js';
+import { paymentStanding, standingFilterMatches } from './customerStanding.js';
 
+/** @deprecated Use MAP_MODES — kept so older imports do not crash during rollout. */
 export const LAYER_OPTIONS = [
-  'Collector Routes',
-  'Sales Territories',
-  'Payment Behavior Zones',
-  'Delinquency Clusters',
-  'Profitability Zones',
-  'High Collection Areas',
-  'Route Efficiency Layer',
+  'Today\'s Routes',
+  'Customers',
+  'Coverage',
+];
+
+export const MAP_MODES = [
+  { key: 'routes', label: "Today's Routes" },
+  { key: 'customers', label: 'Customers' },
+  { key: 'coverage', label: 'Coverage' },
 ];
 
 export const PERIOD_OPTIONS = [
@@ -17,14 +22,34 @@ export const PERIOD_OPTIONS = [
   { value: 'month', label: 'This Month' },
 ];
 
+export const STAFF_TYPE_OPTIONS = [
+  { value: 'all', label: 'All Staff' },
+  { value: 'collectors', label: 'Collectors' },
+  { value: 'sales', label: 'Sales Agents' },
+];
+
+export const STANDING_OPTIONS = [
+  { value: 'all', label: 'All Standing' },
+  { value: 'Overdue', label: 'Overdue' },
+  { value: 'Has Balance', label: 'With Balance' },
+  { value: 'Current', label: 'Current' },
+];
+
 const STAFF_COLORS = mapSeries;
 const TERRITORY_COLORS = [palette.navy, palette.cyan, palette.midnight, palette.powder, '#2A9B6A', '#d97706'];
 
+export function defaultModeForPage(pageType) {
+  if (pageType === 'leafletTerritory') return 'coverage';
+  if (pageType === 'leafletDelinquency' || pageType === 'leafletProfitability') return 'customers';
+  return 'routes';
+}
+
+/** @deprecated Prefer defaultModeForPage */
 export function defaultLayersForPage(pageType) {
-  if (pageType === 'leafletDelinquency') return ['Delinquency Clusters'];
-  if (pageType === 'leafletProfitability') return ['Profitability Zones'];
-  if (pageType === 'leafletTerritory') return ['Sales Territories'];
-  return ['Collector Routes', 'Delinquency Clusters'];
+  const mode = defaultModeForPage(pageType);
+  if (mode === 'coverage') return ['Coverage'];
+  if (mode === 'customers') return ['Customers'];
+  return ["Today's Routes"];
 }
 
 export function manilaMapDate() {
@@ -94,50 +119,6 @@ function coverRadius(points, center) {
   return Math.min(1400, Math.max(280, farthest * 1.15));
 }
 
-function clusterByGrid(accounts, cellDeg = 0.008) {
-  const buckets = new Map();
-  accounts.forEach((account) => {
-    const gy = Math.floor(account.lat / cellDeg);
-    const gx = Math.floor(account.lng / cellDeg);
-    const key = `${gy}:${gx}`;
-    if (!buckets.has(key)) {
-      buckets.set(key, {
-        id: key,
-        accounts: [],
-        lat: 0,
-        lng: 0,
-        overdue: 0,
-        current: 0,
-        outstanding: 0,
-        purchaseVolume: 0,
-        collected: 0,
-        sales: 0,
-      });
-    }
-    const cell = buckets.get(key);
-    cell.accounts.push(account);
-    cell.lat += account.lat;
-    cell.lng += account.lng;
-    cell.outstanding += Number(account.balance || 0);
-    cell.purchaseVolume += Number(account.purchaseVolume || 0);
-    cell.collected += Number(account.periodCollected || 0);
-    cell.sales += Number(account.periodSales || 0);
-    if (account.paymentStatus === 'Overdue') cell.overdue += 1;
-    else cell.current += 1;
-  });
-
-  return [...buckets.values()].map((cell) => {
-    const center = [cell.lat / cell.accounts.length, cell.lng / cell.accounts.length];
-    const points = cell.accounts.map((a) => [a.lat, a.lng]);
-    return {
-      ...cell,
-      count: cell.accounts.length,
-      center,
-      radius: coverRadius(points, center),
-    };
-  });
-}
-
 function accountMatchesStaff(account, staffId) {
   if (!staffId || staffId === 'all') return true;
   const id = Number(staffId);
@@ -161,11 +142,22 @@ function matchesSearch(account, search) {
   if (!q) return true;
   return [
     account.customerName,
+    account.customerCode,
     account.assignedStaff,
+    account.collectorName,
+    account.salesAgentName,
     account.branchName,
     account.territoryName,
     account.address,
   ].some((value) => String(value || '').toLowerCase().includes(q));
+}
+
+function resolveMode({ mode, layers }) {
+  if (mode === 'routes' || mode === 'customers' || mode === 'coverage') return mode;
+  const active = new Set(layers || []);
+  if (active.has('Coverage') || active.has('Sales Territories')) return 'coverage';
+  if (active.has('Customers') || active.has('Delinquency Clusters') || active.has('Profitability Zones')) return 'customers';
+  return 'routes';
 }
 
 export const BRANCH_MARKER_COLORS = [
@@ -181,23 +173,58 @@ export function branchMarkerColor(index) {
   return BRANCH_MARKER_COLORS[index % BRANCH_MARKER_COLORS.length];
 }
 
+function standingOf(account) {
+  return paymentStanding(account);
+}
+
+function standingColor(standing) {
+  if (standing === 'Overdue') return '#dc2626';
+  if (standing === 'Has Balance') return '#d97706';
+  return '#153450';
+}
+
+function accountPopupContent(account, { navigate, opsBase } = {}) {
+  const standing = standingOf(account);
+  const openCustomer = () => {
+    if (navigate && opsBase) navigate(`${opsBase}/customers/${account.id}`);
+  };
+  const line = (text) => createElement('div', null, text);
+  return createElement(
+    'div',
+    { style: { minWidth: 200, maxWidth: 260, fontSize: '0.82rem', lineHeight: 1.45 } },
+    createElement('strong', { style: { display: 'block', marginBottom: 4 } }, account.customerName),
+    line(`Code: ${account.customerCode || '—'}`),
+    line(`Standing: ${standing}`),
+    line(`Balance: ${formatCurrency(account.balance || 0)}`),
+    line(`Sales Agent: ${account.salesAgentName || '—'}`),
+    line(`Collector: ${account.collectorName || '—'}`),
+    line(`Branch: ${account.branchName || '—'}`),
+    navigate && opsBase
+      ? createElement(
+        'button',
+        {
+          type: 'button',
+          className: 'button secondary',
+          style: { marginTop: 8, width: '100%', fontSize: '0.78rem', padding: '6px 8px' },
+          onClick: openCustomer,
+        },
+        'Open Customer'
+      )
+      : null
+  );
+}
+
 function visitPopup(visit) {
-  return `${visit.customerName} · ${visit.visitType} · ${visit.status}${visit.scheduledDate ? ` · ${formatDisplayDate(visit.scheduledDate)}` : ''}`;
+  return `${visit.customerName} · ${visit.visitType} · ${visit.status}`;
 }
 
-function accountPopup(account, extras = []) {
-  const lines = [
-    account.customerName,
-    account.paymentStatus,
-    `Balance ${formatCurrency(account.balance || 0)}`,
-    account.assignedStaff ? `Staff: ${account.assignedStaff}` : null,
-    ...extras,
-  ].filter(Boolean);
-  return lines.join(' · ');
-}
-
+/**
+ * Build Field Map overlays for BM / OM.
+ * Modes: routes | customers | coverage
+ */
 export function buildBranchLeafletView({
   payload,
+  mode,
   layers,
   staffId,
   navigate,
@@ -207,8 +234,9 @@ export function buildBranchLeafletView({
   paymentStatus = 'all',
   search = '',
   sawRoads = [],
+  focusCustomerId = null,
 }) {
-  const active = new Set(layers);
+  const resolvedMode = resolveMode({ mode, layers });
   const allBranches = payload?.branches || [];
   const branches = allBranches.filter((branch) => (
     !branchId || branchId === 'all' || Number(branch.id) === Number(branchId)
@@ -216,23 +244,19 @@ export function buildBranchLeafletView({
   const staff = payload?.staff || { collectors: [], salesAgents: [] };
   const filteredCollectors = (staff.collectors || []).filter((person) => matchesBranch(person, branchId));
   const filteredSales = (staff.salesAgents || []).filter((person) => matchesBranch(person, branchId));
-  const staffPool = [
-    ...(staffType === 'sales' ? [] : filteredCollectors),
-    ...(staffType === 'collectors' ? [] : filteredSales),
-  ];
-  const staffIdsInType = new Set(staffPool.map((person) => String(person.id)));
 
   const allAccounts = (payload?.accounts || []).filter((a) => hasCoords(a.lat, a.lng));
   const accounts = allAccounts.filter((a) => {
     if (!matchesBranch(a, branchId)) return false;
     if (!accountMatchesStaff(a, staffId)) return false;
-    if (paymentStatus && paymentStatus !== 'all' && a.paymentStatus !== paymentStatus) return false;
+    const standing = standingOf(a);
+    if (!standingFilterMatches(standing, paymentStatus)) return false;
     if (!matchesSearch(a, search)) return false;
     if (staffType === 'collectors' && !a.collectorId) return false;
     if (staffType === 'sales' && !a.salesAgentId) return false;
-    if (staffId && staffId !== 'all' && !staffIdsInType.has(String(staffId)) && staffType !== 'all') return false;
     return true;
   });
+
   const visits = (payload?.visits || []).filter((v) => {
     if (!hasCoords(v.lat, v.lng)) return false;
     if (!matchesBranch(v, branchId)) return false;
@@ -258,312 +282,289 @@ export function buildBranchLeafletView({
       position: [branch.lat, branch.lng],
       label: String(branch.name || 'B').slice(0, 2).toUpperCase(),
       color,
-      popup: `${branch.name} · Branch depot`,
+      popup: `${branch.name} · Branch`,
     });
     bounds.push([branch.lat, branch.lng]);
   });
 
   const collectorIndex = new Map(filteredCollectors.map((c, i) => [String(c.id), i]));
-  const showRoutes = active.has('Collector Routes') || active.has('Route Efficiency Layer');
-  const efficiencyMode = active.has('Route Efficiency Layer');
-  const visibleSawRoads = (sawRoads || []).filter((road) => {
-    if (staffType === 'sales') return false;
-    if (staffId && staffId !== 'all' && String(road.collectorId) !== String(staffId)) return false;
-    if (branchId && branchId !== 'all' && Number(road.branchId) !== Number(branchId)) return false;
-    return Array.isArray(road.positions) && road.positions.length >= 2;
-  });
-  const roadByCollector = new Map(visibleSawRoads.map((road) => [String(road.collectorId), road]));
-  const drawnRoadIds = new Set();
 
-  function drawSawRoad(road, color) {
-    const distance = road.distanceKm != null ? `${road.distanceKm} km` : null;
-    const source = road.listSource === 'assigned' ? 'Assigned route' : 'Eligible SAW ranking';
-    const surface = road.provider === 'osrm' ? 'OSRM road' : 'SAW stop order';
-    polylines.push({
-      id: `saw-road-${road.collectorId}`,
-      positions: road.positions,
-      color,
-      weight: 5,
-      opacity: 0.9,
-      popup: [road.collectorName, 'SAW road', source, surface, `${road.stops?.length || 0} stops`, distance, road.scheduledDate]
-        .filter(Boolean)
-        .join(' · '),
-    });
-    (road.stops || []).forEach((stop) => {
-      markers.push({
-        id: `saw-stop-${road.collectorId}-${stop.customerId}`,
-        position: [Number(stop.lat), Number(stop.lng)],
-        label: stop.rank == null ? '•' : String(stop.rank),
-        color,
-        popup: `#${stop.rank ?? '—'} · ${stop.customerName || 'Customer'}${stop.score != null ? ` · ${Number(stop.score).toFixed(3)}` : ''}`,
+  if (resolvedMode === 'routes') {
+    const salesAgentIds = new Set(filteredSales.map((person) => String(person.id)));
+    const selectedIsSales = staffId !== 'all' && salesAgentIds.has(String(staffId));
+    const showSalesAreas = staffType === 'sales' || selectedIsSales || staffType === 'all';
+    const showCollectorRoutes = staffType !== 'sales' && !selectedIsSales;
+
+    if (showSalesAreas) {
+      const areaAssignments = (payload?.areaAssignments || []).filter((area) => {
+        if (!matchesBranch(area, branchId)) return false;
+        if (staffType === 'collectors') return false;
+        if (staffId && staffId !== 'all' && String(area.salesAgentId) !== String(staffId)) return false;
+        return true;
       });
-      bounds.push([Number(stop.lat), Number(stop.lng)]);
-    });
-    drawnRoadIds.add(String(road.collectorId));
-  }
-
-  if (showRoutes) {
-    const depotById = new Map(
-      branches.filter((branch) => hasCoords(branch.lat, branch.lng)).map((branch) => [Number(branch.id), branch])
-    );
-    const fallbackDepot = branches.find((branch) => hasCoords(branch.lat, branch.lng));
-    const byStaff = new Map();
-    visits.forEach((visit) => {
-      const key = String(visit.staffId);
-      if (!byStaff.has(key)) byStaff.set(key, []);
-      byStaff.get(key).push(visit);
-    });
-
-    byStaff.forEach((stops, key) => {
-      const ordered = [...stops].sort((a, b) => {
-        const dateCmp = String(a.scheduledDate || '').localeCompare(String(b.scheduledDate || ''));
-        if (dateCmp) return dateCmp;
-        return Number(a.visitId) - Number(b.visitId);
-      });
-      const points = ordered.map((s) => [s.lat, s.lng]);
-      const depot = depotById.get(Number(ordered[0]?.branchId)) || fallbackDepot;
-      if (depot && points.length) {
-        points.unshift([depot.lat, depot.lng]);
-      }
-      const completed = ordered.filter((s) => s.status === 'Completed').length;
-      const missed = ordered.filter((s) => s.status === 'Missed').length;
-      const rate = ordered.length ? Math.round((completed / ordered.length) * 100) : 0;
-      const color = efficiencyMode
-        ? (rate >= 80 ? '#2A9B6A' : rate >= 50 ? '#d97706' : '#dc2626')
-        : staffColor(collectorIndex.get(key) ?? 0);
-      const staffName = ordered[0]?.staffName || `Staff #${key}`;
-      const isSales = ordered.some((s) => s.visitType === 'Sales') && ordered.every((s) => s.visitType !== 'Collection');
-      const road = roadByCollector.get(key);
-      if (road && !isSales) {
-        drawSawRoad(road, color);
-        return;
-      }
-
-      if (points.length >= 2) {
-        polylines.push({
-          id: `route-${key}`,
-          positions: points,
-          color,
-          weight: efficiencyMode ? 5 : 4,
-          opacity: 0.85,
-          dashArray: efficiencyMode && rate < 80 ? '8 6' : isSales ? '6 6' : undefined,
-          popup: `${staffName} · ${ordered.length} stops · ${rate}% completed${missed ? ` · ${missed} missed` : ''}`,
-        });
-      }
-
-      ordered.forEach((stop, index) => {
-        const stopColor = stop.status === 'Missed'
-          ? '#dc2626'
-          : stop.status === 'Completed'
-            ? '#2A9B6A'
-            : color;
+      const salesIndex = new Map(filteredSales.map((person, index) => [String(person.id), index]));
+      areaAssignments.forEach((area) => {
+        const color = staffColor(salesIndex.get(String(area.salesAgentId)) ?? 0);
+        if (!area.hasMapLocation || !hasCoords(area.lat, area.lng)) return;
         markers.push({
-          id: `stop-${stop.visitId}`,
-          position: [stop.lat, stop.lng],
-          label: String(index + 1),
-          color: stopColor,
-          popup: `${staffName} · ${visitPopup(stop)}`,
+          id: `area-${area.assignmentId}`,
+          position: [area.lat, area.lng],
+          label: 'A',
+          color: area.status === 'Done' ? '#2A9B6A' : color,
+          popup: [
+            area.salesAgentName,
+            area.areaName,
+            area.territoryName,
+            area.status,
+            area.workDate,
+            `${area.radiusMeters || 800} m coverage`,
+          ].filter(Boolean).join(' · '),
         });
-        bounds.push([stop.lat, stop.lng]);
-      });
-    });
-
-    roadByCollector.forEach((road, key) => {
-      if (drawnRoadIds.has(key)) return;
-      drawSawRoad(road, staffColor(collectorIndex.get(key) ?? 0));
-    });
-
-    if (active.has('Collector Routes')) {
-      legend.push({
-        color: '#1A4162',
-        label: visibleSawRoads.length ? 'SAW road routes' : 'Collector / sales routes',
-      });
-    }
-    if (efficiencyMode) {
-      legend.push({ color: '#2A9B6A', label: 'Efficient (≥80% completed)' });
-      legend.push({ color: '#d97706', label: 'Watch (50–79%)' });
-      legend.push({ color: '#dc2626', label: 'Inefficient (<50% or missed)' });
-    }
-  }
-
-  if (active.has('Sales Territories')) {
-    territories.forEach((territory, index) => {
-      const assignedIds = new Set((territory.assignedUserIds || []).map((id) => Number(id)));
-      if (staffId && staffId !== 'all' && assignedIds.size && !assignedIds.has(Number(staffId))) return;
-      const members = accounts.filter((account) => {
-        if (territory.id && Number(account.territoryId) === Number(territory.id)) return true;
-        if (!assignedIds.size) return false;
-        return assignedIds.has(Number(account.collectorId)) || assignedIds.has(Number(account.salesAgentId));
-      });
-      const points = members.map((a) => [a.lat, a.lng]);
-      if (!points.length) return;
-      const color = TERRITORY_COLORS[index % TERRITORY_COLORS.length];
-      const hull = convexHull(points);
-      const assignedNames = (territory.assignedNames || []).filter(Boolean).join(', ') || 'Unassigned';
-      const popup = `${territory.name} · ${members.length} accounts · ${assignedNames}${territory.coverageArea ? ` · ${territory.coverageArea}` : ''}`;
-      if (hull.length >= 3) {
-        polygons.push({
-          id: `territory-${territory.id}`,
-          positions: hull,
-          color,
-          fillColor: color,
-          fillOpacity: 0.16,
-          popup,
-        });
-        hull.forEach((p) => bounds.push(p));
-      } else {
-        const center = centroid(points);
         circles.push({
-          id: `territory-${territory.id}`,
-          center,
-          radius: coverRadius(points, center),
-          color,
-          fillColor: color,
-          fillOpacity: 0.18,
-          popup,
+          id: `area-radius-${area.assignmentId}`,
+          center: [area.lat, area.lng],
+          radius: Number(area.radiusMeters) || 800,
+          color: area.status === 'Done' ? '#2A9B6A' : color,
+          fillOpacity: 0.12,
         });
-        bounds.push(center);
+        bounds.push([area.lat, area.lng]);
+      });
+      legend.push({ color: '#0B2133', label: 'Canvass area pin' });
+      legend.push({ color: '#2A9B6A', label: 'Completed area' });
+    }
+
+    if (showCollectorRoutes) {
+      const visibleRoads = (sawRoads || []).filter((road) => {
+        if (staffType === 'sales') return false;
+        if (staffId && staffId !== 'all' && String(road.collectorId) !== String(staffId)) return false;
+        if (branchId && branchId !== 'all' && Number(road.branchId) !== Number(branchId)) return false;
+        if (road.listSource && road.listSource !== 'assigned') return false;
+        return Array.isArray(road.positions) && road.positions.length >= 2;
+      });
+      const roadByCollector = new Map(visibleRoads.map((road) => [String(road.collectorId), road]));
+      const drawnRoadIds = new Set();
+
+      function drawPlannedRoad(road, color) {
+        const distance = road.distanceKm != null ? `${road.distanceKm} km` : null;
+        polylines.push({
+          id: `planned-road-${road.collectorId}`,
+          positions: road.positions,
+          color,
+          weight: 5,
+          opacity: 0.9,
+          popup: [road.collectorName, 'Planned collection route', `${road.stops?.length || 0} stops`, distance, road.scheduledDate]
+            .filter(Boolean)
+            .join(' · '),
+        });
+        (road.stops || []).forEach((stop) => {
+          markers.push({
+            id: `planned-stop-${road.collectorId}-${stop.customerId}`,
+            position: [Number(stop.lat), Number(stop.lng)],
+            label: stop.rank == null ? '•' : String(stop.rank),
+            color,
+            popup: `${stop.customerName || 'Customer'} · Stop ${stop.rank ?? '—'}`,
+          });
+          bounds.push([Number(stop.lat), Number(stop.lng)]);
+        });
+        drawnRoadIds.add(String(road.collectorId));
       }
-    });
-    legend.push({ color: '#1A4162', label: 'Sales territories' });
+
+      const byStaff = new Map();
+      visits.forEach((visit) => {
+        if (visit.roleSlug === 'sales_staff' || visit.visitType === 'Sales') return;
+        const key = String(visit.staffId);
+        if (!byStaff.has(key)) byStaff.set(key, []);
+        byStaff.get(key).push(visit);
+      });
+
+      byStaff.forEach((stops, key) => {
+        const ordered = [...stops].sort((a, b) => {
+          const dateCmp = String(a.scheduledDate || '').localeCompare(String(b.scheduledDate || ''));
+          if (dateCmp) return dateCmp;
+          return Number(a.visitId) - Number(b.visitId);
+        });
+        const color = staffColor(collectorIndex.get(key) ?? Number(key) % STAFF_COLORS.length);
+        const staffName = ordered[0]?.staffName || `Staff #${key}`;
+        const road = roadByCollector.get(key);
+        if (road) {
+          drawPlannedRoad(road, color);
+          return;
+        }
+        ordered.forEach((stop, index) => {
+          const stopColor = stop.status === 'Missed'
+            ? '#dc2626'
+            : stop.status === 'Completed'
+              ? '#2A9B6A'
+              : color;
+          markers.push({
+            id: `stop-${stop.visitId}`,
+            position: [stop.lat, stop.lng],
+            label: String(index + 1),
+            color: stopColor,
+            popup: `${staffName} · ${visitPopup(stop)}`,
+          });
+          bounds.push([stop.lat, stop.lng]);
+        });
+      });
+
+      roadByCollector.forEach((road, key) => {
+        if (drawnRoadIds.has(key)) return;
+        drawPlannedRoad(road, staffColor(collectorIndex.get(key) ?? 0));
+      });
+
+      legend.push({ color: '#153450', label: 'Planned collection route' });
+      legend.push({ color: '#2A9B6A', label: 'Completed stop' });
+      legend.push({ color: '#dc2626', label: 'Missed stop' });
+    }
   }
 
-  const cells = clusterByGrid(accounts);
-
-  if (active.has('Payment Behavior Zones')) {
-    cells.forEach((cell) => {
-      const delinquent = cell.overdue >= cell.current;
-      const color = delinquent ? '#dc2626' : '#2A9B6A';
-      circles.push({
-        id: `pay-${cell.id}`,
-        center: cell.center,
-        radius: cell.radius,
-        color,
-        fillColor: color,
-        fillOpacity: delinquent ? 0.28 : 0.18,
-        popup: `${delinquent ? 'Overdue-heavy' : 'Current-paying'} zone · ${cell.count} accounts · ${cell.overdue} overdue`,
-      });
-      bounds.push(cell.center);
-    });
-    legend.push({ color: '#2A9B6A', label: 'Current-paying zones' });
-    legend.push({ color: '#dc2626', label: 'Overdue payment zones' });
-  }
-
-  if (active.has('Delinquency Clusters')) {
-    cells.filter((cell) => cell.overdue > 0).forEach((cell) => {
-      circles.push({
-        id: `delq-${cell.id}`,
-        center: cell.center,
-        radius: Math.min(1600, cell.radius + cell.overdue * 40),
-        color: '#b91c1c',
-        fillColor: '#ef4444',
-        fillOpacity: Math.min(0.45, 0.16 + cell.overdue * 0.08),
-        popup: `Delinquency cluster · ${cell.overdue} overdue · ${formatCurrency(cell.outstanding)} outstanding`,
-      });
-      bounds.push(cell.center);
-    });
-    accounts.filter((a) => a.paymentStatus === 'Overdue').forEach((account) => {
-      markers.push({
-        id: `overdue-${account.id}`,
-        position: [account.lat, account.lng],
-        label: (account.customerName || 'CU').slice(0, 2).toUpperCase(),
-        color: '#dc2626',
-        popup: accountPopup(account, [`Overdue ${formatCurrency(account.balance || 0)}`]),
-      });
-      bounds.push([account.lat, account.lng]);
-    });
-    legend.push({ color: '#dc2626', label: 'Delinquent accounts / clusters' });
-  }
-
-  if (active.has('Profitability Zones')) {
-    cells.forEach((cell) => {
-      const net = cell.purchaseVolume - cell.outstanding;
-      const color = net >= 0 ? '#2A9B6A' : '#dc2626';
-      circles.push({
-        id: `profit-${cell.id}`,
-        center: cell.center,
-        radius: cell.radius,
-        color,
-        fillColor: color,
-        fillOpacity: net >= 0 ? 0.18 : 0.28,
-        popup: `Profitability · purchases ${formatCurrency(cell.purchaseVolume)} · outstanding ${formatCurrency(cell.outstanding)} · net ${formatCurrency(net)}`,
-      });
-      bounds.push(cell.center);
-    });
-    legend.push({ color: '#2A9B6A', label: 'Higher purchase vs outstanding' });
-    legend.push({ color: '#dc2626', label: 'Outstanding exceeds purchases' });
-  }
-
-  if (active.has('High Collection Areas')) {
-    const collecting = cells.filter((cell) => cell.collected > 0);
-    const source = collecting.length ? collecting : cells.filter((cell) => cell.outstanding > 0);
-    source.forEach((cell) => {
-      const amount = collecting.length ? cell.collected : cell.outstanding;
-      const color = '#408DAD';
-      circles.push({
-        id: `collect-${cell.id}`,
-        center: cell.center,
-        radius: Math.min(1500, 300 + Math.log10(amount + 10) * 180),
-        color,
-        fillColor: color,
-        fillOpacity: 0.22,
-        popup: collecting.length
-          ? `High collection area · ${formatCurrency(cell.collected)} collected this period · ${cell.count} accounts`
-          : `Collection opportunity · ${formatCurrency(cell.outstanding)} outstanding · ${cell.count} accounts`,
-      });
-      bounds.push(cell.center);
-    });
-    legend.push({ color: '#408DAD', label: collecting.length ? 'High collection this period' : 'Collection opportunity (no payments in period)' });
-  }
-
-  const zoneOnly = ['Payment Behavior Zones', 'Delinquency Clusters', 'Profitability Zones', 'High Collection Areas', 'Sales Territories']
-    .some((name) => active.has(name));
-  if (!showRoutes && !zoneOnly) {
+  if (resolvedMode === 'customers') {
     accounts.forEach((account) => {
+      const standing = standingOf(account);
+      const focused = focusCustomerId != null && String(focusCustomerId) === String(account.id);
       markers.push({
         id: `acct-${account.id}`,
         position: [account.lat, account.lng],
         label: (account.customerName || 'CU').slice(0, 2).toUpperCase(),
-        color: account.paymentStatus === 'Overdue' ? '#ef4444' : '#1A4162',
-        popup: accountPopup(account),
+        color: focused ? '#7c3aed' : standingColor(standing),
+        popupContent: accountPopupContent(account, { navigate, opsBase }),
       });
       bounds.push([account.lat, account.lng]);
     });
+    legend.push({ color: '#153450', label: 'Current' });
+    legend.push({ color: '#d97706', label: 'With balance' });
+    legend.push({ color: '#dc2626', label: 'Overdue' });
   }
 
-  const tableRows = accounts.map((account) => ({
-    ...account,
-    onOpen: navigate && opsBase ? () => navigate(`${opsBase}/customers/${account.id}`) : undefined,
-  }));
+  if (resolvedMode === 'coverage') {
+    territories.forEach((territory, index) => {
+      const assignedIds = new Set((territory.assignedUserIds || []).map((id) => Number(id)));
+      if (staffId && staffId !== 'all') {
+        const selected = Number(staffId);
+        const isDefaultOwner = Number(territory.defaultSalesAgentId) === selected
+          || Number(territory.defaultCollectorId) === selected;
+        if (!isDefaultOwner && assignedIds.size && !assignedIds.has(selected)) return;
+        if (!isDefaultOwner && !assignedIds.size) return;
+      }
+      const members = allAccounts.filter((account) => {
+        if (!matchesBranch(account, branchId)) return false;
+        return territory.id && Number(account.territoryId) === Number(territory.id);
+      });
+      const color = TERRITORY_COLORS[index % TERRITORY_COLORS.length];
+      const owners = [
+        territory.defaultSalesAgentName ? `SA: ${territory.defaultSalesAgentName}` : null,
+        territory.defaultCollectorName ? `Collector: ${territory.defaultCollectorName}` : null,
+      ].filter(Boolean).join(' · ') || (territory.assignedNames || []).filter(Boolean).join(', ') || 'Unassigned';
+      const popup = [
+        territory.name,
+        'Approximate Territory Coverage',
+        `${members.length} customers in territory`,
+        owners,
+        territory.radiusMeters ? `${territory.radiusMeters} m radius` : null,
+        territory.coverageArea ? `Notes: ${territory.coverageArea}` : null,
+      ].filter(Boolean).join(' · ');
 
-  const overdueCount = accounts.filter((account) => account.paymentStatus === 'Overdue').length;
+      if (territory.hasMapLocation && hasCoords(territory.lat, territory.lng)) {
+        markers.push({
+          id: `territory-pin-${territory.id}`,
+          position: [territory.lat, territory.lng],
+          label: 'T',
+          color,
+          popup,
+        });
+        circles.push({
+          id: `territory-${territory.id}`,
+          center: [territory.lat, territory.lng],
+          radius: Number(territory.radiusMeters) || 800,
+          color,
+          fillColor: color,
+          fillOpacity: 0.14,
+          popup,
+        });
+        bounds.push([territory.lat, territory.lng]);
+        members.forEach((account) => {
+          markers.push({
+            id: `territory-cust-${territory.id}-${account.id}`,
+            position: [account.lat, account.lng],
+            label: (account.customerName || 'CU').slice(0, 2).toUpperCase(),
+            color,
+            popupContent: accountPopupContent(account, { navigate, opsBase }),
+          });
+          bounds.push([account.lat, account.lng]);
+        });
+        return;
+      }
+
+      // No invented geometry for territories without a stored pin.
+      if (!members.length) return;
+      const points = members.map((a) => [a.lat, a.lng]);
+      const center = centroid(points);
+      circles.push({
+        id: `territory-fallback-${territory.id}`,
+        center,
+        radius: coverRadius(points, center),
+        color,
+        fillColor: color,
+        fillOpacity: 0.1,
+        popup: `${popup} · Pin missing — customer cluster only`,
+      });
+      bounds.push(center);
+    });
+    legend.push({ color: '#153450', label: 'Approximate Territory Coverage' });
+  }
+
+  const overdueCount = accounts.filter((account) => standingOf(account) === 'Overdue').length;
+  const missingLocationCount = Number(payload?.summary?.customersMissingLocation || 0);
   const branchSummary = branches.map((branch) => {
-    const branchAccounts = accounts.filter((account) => Number(account.branchId) === Number(branch.id));
+    const branchAccounts = allAccounts.filter((account) => Number(account.branchId) === Number(branch.id));
     return {
       id: branch.id,
       name: branch.name,
       accounts: branchAccounts.length,
-      overdue: branchAccounts.filter((account) => account.paymentStatus === 'Overdue').length,
+      overdue: branchAccounts.filter((account) => standingOf(account) === 'Overdue').length,
       visits: visits.filter((visit) => Number(visit.branchId) === Number(branch.id)).length,
       color: branchMarkerColor(branchColorIndex.get(Number(branch.id)) ?? 0),
     };
   });
 
   return {
+    mode: resolvedMode,
     markers,
     polylines,
     circles,
     polygons,
     legend,
     bounds,
-    tableRows,
+    tableRows: accounts.map((account) => ({
+      ...account,
+      paymentStatus: standingOf(account),
+      onOpen: navigate && opsBase ? () => navigate(`${opsBase}/customers/${account.id}`) : undefined,
+    })),
     accountCount: accounts.length,
     visitCount: visits.length,
     overdueCount,
+    missingLocationCount,
+    customersOnMap: Number(payload?.summary?.customersOnMap ?? accounts.length),
     branchSummary,
     filteredStaff: {
       collectors: filteredCollectors,
       salesAgents: filteredSales,
     },
+    emptyMessage: (() => {
+      if (resolvedMode === 'routes' && !visits.length && !(sawRoads || []).some((r) => r.listSource === 'assigned')) {
+        return staffId !== 'all'
+          ? 'No planned stops for this staff member in the selected period.'
+          : 'No planned field stops for this period.';
+      }
+      if (resolvedMode === 'customers' && !accounts.length) {
+        if (String(search || '').trim()) return 'No customers match your search.';
+        if (paymentStatus && paymentStatus !== 'all') return 'No customers match this standing filter.';
+        return 'No customers with a map location yet.';
+      }
+      if (resolvedMode === 'coverage' && !polygons.length && !circles.length) {
+        return 'No Active territory coverage to show. Set a map pin and radius on Branch Territories.';
+      }
+      return null;
+    })(),
   };
 }

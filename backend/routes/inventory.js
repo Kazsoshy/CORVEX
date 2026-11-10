@@ -8,24 +8,30 @@ import {
   upsertBranchInventoryStock,
 } from '../lib/branchInventoryStock.js';
 import {
+  notifyRestockDecision,
   notifyRestockRecorded,
+  notifyRestockSubmitted,
+  notifyStockCountDecision,
+  notifyStockCountSubmitted,
   notifyTransferCompleted,
   notifyTransferDecision,
+  notifyTransferShipped,
   notifyTransferSubmitted,
 } from '../lib/inventoryTransferNotifications.js';
 import {
-  completeTransferStockMulti,
   getAvailableToTransfer,
   loadRestockLines,
   loadTransferLines,
   manilaToday,
-  movementRefForRestock,
-  movementRefForStockCount,
   nextDeliveryRef,
   nextRestockRef,
   nextStockCountRef,
   nextTransferRef,
   parseDocumentLines,
+  postRestockStock,
+  postStockCountAdjustments,
+  receiveTransferStock,
+  shipTransferStock,
   summarizeLines,
 } from '../lib/inventoryDocuments.js';
 import { publishStockAlerts } from '../lib/operationalNotifications.js';
@@ -36,8 +42,10 @@ import {
 } from '../lib/stockMovementGroups.js';
 
 const TRANSFER_APPROVER_ROLES = new Set(['branch_manager', 'operating_manager', 'super_admin']);
-/** Stock mutations (restock / count / transfer create / product create) — not branch managers. */
-const INVENTORY_WRITER_ROLES = ['inventory_staff', 'operating_manager', 'super_admin'];
+/** Stock mutations (restock / count / transfer create / product create) — warehouse only.
+ *  OM/BM approve designated documents; they do not create routine warehouse receipts. */
+const INVENTORY_WRITER_ROLES = ['inventory_staff', 'super_admin'];
+const INVENTORY_APPROVER_ROLES = ['branch_manager', 'operating_manager', 'super_admin'];
 
 const router = express.Router();
 router.use(requireRole(ROLE_SETS.inventory), requireAssignedBranch);
@@ -376,8 +384,12 @@ router.get('/transfers', requireAuth, async (req, res) => {
       pIdx++;
     }
     if (status && status !== 'All') {
-      conditions.push(`it.status = $${pIdx++}`);
-      params.push(status);
+      if (String(status).toLowerCase() === 'pending') {
+        conditions.push(`it.status IN ('Pending Approval', 'Submitted')`);
+      } else {
+        conditions.push(`it.status = $${pIdx++}`);
+        params.push(status);
+      }
     }
 
     const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
@@ -501,13 +513,16 @@ const TRANSFER_STATUSES = new Set([
   'Pending Approval',
   'Submitted',
   'Approved',
-  'Completed',
+  'Shipped',
+  'Received',
+  'Completed', // legacy alias of Received
   'Rejected',
 ]);
 
 function assertTransferStatusChange(user, currentStatus, nextStatus, transferRow) {
   const role = user.roleSlug;
   const pending = ['Pending Approval', 'Submitted'];
+  const finalizeStatuses = new Set(['Received', 'Completed']);
 
   if (nextStatus === 'Approved' || nextStatus === 'Rejected') {
     if (!TRANSFER_APPROVER_ROLES.has(role)) {
@@ -527,24 +542,57 @@ function assertTransferStatusChange(user, currentStatus, nextStatus, transferRow
     return { ok: true };
   }
 
-  if (nextStatus === 'Completed') {
+  if (nextStatus === 'Shipped') {
     if (currentStatus !== 'Approved') {
       return {
         ok: false,
         status: 400,
-        message: 'Transfer must be approved before stock can be moved. Wait for manager approval.',
+        message: 'Transfer must be approved before source warehouse can ship.',
       };
     }
-    if (role === 'inventory_staff') {
-      if (Number(user.branchId) !== Number(transferRow.source_branch_id)) {
-        return {
-          ok: false,
-          status: 403,
-          message: 'Only warehouse staff at the source branch can confirm shipment and complete this transfer.',
-        };
-      }
-    } else if (!TRANSFER_APPROVER_ROLES.has(role)) {
-      return { ok: false, status: 403, message: 'Not authorized to complete transfers.' };
+    if (role !== 'inventory_staff' && role !== 'super_admin') {
+      return {
+        ok: false,
+        status: 403,
+        message: 'Only warehouse staff at the source branch can ship transfers. Managers approve only.',
+      };
+    }
+    if (role === 'inventory_staff'
+      && Number(user.branchId) !== Number(transferRow.source_branch_id)) {
+      return {
+        ok: false,
+        status: 403,
+        message: 'Only warehouse staff at the source branch can confirm shipment.',
+      };
+    }
+    return { ok: true };
+  }
+
+  if (finalizeStatuses.has(nextStatus)) {
+    // Legacy clients sending Completed after Approved: treat as ship+receive is blocked;
+    // they must use Shipped then Received. Allow Completed only as alias of Received.
+    const fromShipped = currentStatus === 'Shipped';
+    if (!fromShipped) {
+      return {
+        ok: false,
+        status: 400,
+        message: 'Transfer must be Shipped before destination warehouse can receive. Source ships first.',
+      };
+    }
+    if (role !== 'inventory_staff' && role !== 'super_admin') {
+      return {
+        ok: false,
+        status: 403,
+        message: 'Only warehouse staff at the destination branch can receive transfers. Managers approve only.',
+      };
+    }
+    if (role === 'inventory_staff'
+      && Number(user.branchId) !== Number(transferRow.destination_branch_id)) {
+      return {
+        ok: false,
+        status: 403,
+        message: 'Only warehouse staff at the destination branch can confirm receipt.',
+      };
     }
     return { ok: true };
   }
@@ -582,7 +630,9 @@ router.patch('/transfers/:id', requireAuth, async (req, res) => {
       return res.status(403).json({ success: false, message: 'Transfer is outside your branch scope.' });
     }
 
-    const completedDate = status === 'Completed' ? manilaToday() : null;
+    const isReceive = status === 'Received' || status === 'Completed';
+    const persistedStatus = status === 'Completed' ? 'Received' : status;
+    const receiveNotes = String(req.body.receive_notes || approvalInfo || '').trim() || null;
     const client = await pool.connect();
     try {
       await client.query('BEGIN');
@@ -615,32 +665,55 @@ router.patch('/transfers/:id', requireAuth, async (req, res) => {
       }
 
       const setApprover = status === 'Approved' || status === 'Rejected' ? user.id : transferRow.approved_by;
+      let lines = [];
+      let stockSnapshot = null;
+
+      if (status === 'Shipped' && transferRow.status !== 'Shipped') {
+        lines = await loadTransferLines(client, transferId);
+        if (!lines.length) {
+          await client.query('ROLLBACK');
+          return res.status(400).json({ success: false, message: 'Transfer has no product lines to ship.' });
+        }
+        stockSnapshot = await shipTransferStock(client, transferRow, lines, user.id);
+      }
+
+      if (isReceive && transferRow.status !== 'Received' && transferRow.status !== 'Completed') {
+        lines = await loadTransferLines(client, transferId);
+        if (!lines.length) {
+          await client.query('ROLLBACK');
+          return res.status(400).json({ success: false, message: 'Transfer has no product lines to receive.' });
+        }
+        stockSnapshot = await receiveTransferStock(client, transferRow, lines, user.id);
+      }
 
       const result = await client.query(
         `UPDATE inventory_transfers
          SET status = $1,
              approved_by = COALESCE($2, approved_by),
              approval_info = COALESCE($3, approval_info),
-             completed_date = COALESCE($4, completed_date),
+             shipped_by = CASE WHEN $1 = 'Shipped' THEN $6 ELSE shipped_by END,
+             shipped_at = CASE WHEN $1 = 'Shipped' THEN CURRENT_TIMESTAMP ELSE shipped_at END,
+             received_by = CASE WHEN $1 = 'Received' THEN $6 ELSE received_by END,
+             received_at = CASE WHEN $1 = 'Received' THEN CURRENT_TIMESTAMP ELSE received_at END,
+             receive_notes = CASE WHEN $1 = 'Received' THEN COALESCE($7, receive_notes) ELSE receive_notes END,
+             completed_date = CASE WHEN $1 = 'Received' THEN $4::date ELSE completed_date END,
              updated_at = CURRENT_TIMESTAMP
          WHERE transfer_id = $5
-         RETURNING transfer_id, transfer_ref, status, approval_info, completed_date, updated_at`,
-        [status, setApprover, approvalInfo ? String(approvalInfo).trim() : null, completedDate, transferId]
+         RETURNING transfer_id, transfer_ref, status, approval_info, completed_date,
+                   shipped_at, received_at, updated_at`,
+        [
+          persistedStatus,
+          setApprover,
+          approvalInfo ? String(approvalInfo).trim() : null,
+          isReceive ? manilaToday() : null,
+          transferId,
+          user.id,
+          receiveNotes,
+        ]
       );
 
-      let sourceSnapshot = null;
-      let lines = [];
-      if (status === 'Completed' && transferRow.status !== 'Completed') {
-        lines = await loadTransferLines(client, transferId);
-        if (!lines.length) {
-          await client.query('ROLLBACK');
-          return res.status(400).json({ success: false, message: 'Transfer has no product lines to complete.' });
-        }
-        sourceSnapshot = await completeTransferStockMulti(client, transferRow, lines, user.id);
-      }
-
       await client.query('COMMIT');
-      if (sourceSnapshot) await publishStockAlerts(pool, [sourceSnapshot]);
+      if (stockSnapshot) await publishStockAlerts(pool, [stockSnapshot]);
 
       if (status === 'Approved' || status === 'Rejected') {
         await notifyTransferDecision(pool, {
@@ -650,7 +723,20 @@ router.patch('/transfers/:id', requireAuth, async (req, res) => {
           rejectionReason: approvalInfo,
         });
       }
-      if (status === 'Completed') {
+      if (status === 'Shipped') {
+        if (!lines.length) lines = await loadTransferLines(pool, transferId);
+        const summary = summarizeLines(lines);
+        const srcName = await pool.query(`SELECT name FROM branches WHERE id = $1`, [transferRow.source_branch_id]);
+        await notifyTransferShipped(pool, {
+          transferRef: transferRow.transfer_ref,
+          productName: summary.product_name,
+          lineCount: summary.line_count,
+          totalQuantity: summary.total_quantity,
+          destinationBranchId: transferRow.destination_branch_id,
+          sourceBranchName: srcName.rows[0]?.name,
+        });
+      }
+      if (isReceive) {
         if (!lines.length) lines = await loadTransferLines(pool, transferId);
         const summary = summarizeLines(lines);
         await notifyTransferCompleted(pool, {
@@ -665,17 +751,19 @@ router.patch('/transfers/:id', requireAuth, async (req, res) => {
       await logWarehouseAudit(
         pool,
         user.id,
-        `Transfer ${status}`,
+        `Transfer ${persistedStatus}`,
         transferRow.transfer_ref,
         req.ip
       );
 
       const userMessage =
-        status === 'Completed'
-          ? 'Transfer completed and stock updated at both branches.'
-          : status === 'Approved'
-            ? 'Transfer approved. Source warehouse can confirm shipment to complete.'
-            : `Transfer ${status.toLowerCase()}.`;
+        persistedStatus === 'Received'
+          ? 'Transfer received. Destination stock updated.'
+          : status === 'Shipped'
+            ? 'Transfer shipped. Source stock deducted. Destination warehouse can confirm receipt.'
+            : status === 'Approved'
+              ? 'Transfer approved. Source warehouse can confirm shipment.'
+              : `Transfer ${String(persistedStatus).toLowerCase()}.`;
 
       return res.status(200).json({
         success: true,
@@ -689,7 +777,7 @@ router.patch('/transfers/:id', requireAuth, async (req, res) => {
           success: false,
           message: err.message && err.message !== 'INSUFFICIENT_STOCK'
             ? err.message
-            : 'Insufficient stock to complete transfer. No stock was moved.',
+            : 'Insufficient stock to ship transfer. No stock was moved.',
         });
       }
       throw err;
@@ -709,7 +797,7 @@ router.get('/restocks', requireAuth, async (req, res) => {
   try {
     const pool = req.app.locals.pool;
     const user = req.currentUser;
-    const { search, product_id, supplier_id, date_from, date_to } = req.query;
+    const { search, product_id, supplier_id, date_from, date_to, status } = req.query;
 
     const conditions = [];
     const params = [];
@@ -726,6 +814,17 @@ router.get('/restocks', requireAuth, async (req, res) => {
     if (supplier_id && Number.isFinite(Number(supplier_id))) {
       conditions.push(`h.supplier_id = $${pIdx++}`);
       params.push(Number(supplier_id));
+    }
+
+    if (status) {
+      const statuses = String(status).split(',').map((s) => s.trim()).filter(Boolean);
+      if (statuses.length === 1) {
+        conditions.push(`h.status = $${pIdx++}`);
+        params.push(statuses[0]);
+      } else if (statuses.length > 1) {
+        conditions.push(`h.status = ANY($${pIdx++}::text[])`);
+        params.push(statuses);
+      }
     }
 
     if (date_from) {
@@ -762,7 +861,8 @@ router.get('/restocks', requireAuth, async (req, res) => {
     const result = await pool.query(
       `SELECT
          h.restock_id, h.restock_ref, h.delivery_ref, h.received_date, h.notes, h.created_at,
-         h.branch_id, h.supplier_id, h.recorded_by,
+         h.branch_id, h.supplier_id, h.recorded_by, h.status,
+         h.submitted_at, h.approved_at, h.posted_at, h.decision_remarks,
          b.name AS branch_name,
          s.supplier_name,
          rec.full_name AS recorded_by_name,
@@ -1349,7 +1449,7 @@ router.get('/dashboard', requireAuth, async (req, res) => {
                WHERE status IN ('Pending Approval', 'Submitted') AND source_branch_id = $1
              )::int AS awaiting_approval,
              COUNT(*) FILTER (
-               WHERE status = 'Approved'
+               WHERE status = 'Shipped'
                  AND destination_branch_id = $1
                  AND source_branch_id IS DISTINCT FROM $1
              )::int AS incoming
@@ -1483,13 +1583,19 @@ router.get('/restocks/:id', requireAuth, async (req, res) => {
     }
     const result = await pool.query(
       `SELECT h.restock_id, h.restock_ref, h.delivery_ref, h.received_date, h.notes, h.created_at,
-              h.branch_id, h.supplier_id, h.recorded_by,
+              h.branch_id, h.supplier_id, h.recorded_by, h.status,
+              h.submitted_by, h.submitted_at, h.approved_by, h.approved_at,
+              h.decision_remarks, h.posted_by, h.posted_at,
               b.name AS branch_name, s.supplier_name, s.suppliers_id,
-              rec.full_name AS recorded_by_name
+              rec.full_name AS recorded_by_name,
+              sub.full_name AS submitted_by_name,
+              appr.full_name AS approved_by_name
        FROM restock_headers h
        JOIN branches b ON b.id = h.branch_id
        JOIN suppliers s ON s.suppliers_id = h.supplier_id
        LEFT JOIN users rec ON rec.id = h.recorded_by
+       LEFT JOIN users sub ON sub.id = h.submitted_by
+       LEFT JOIN users appr ON appr.id = h.approved_by
        WHERE h.restock_id = $1${branchSql}`,
       params
     );
@@ -1513,7 +1619,7 @@ router.get('/restocks/:id', requireAuth, async (req, res) => {
   }
 });
 
-// POST /api/inventory/restocks — multi-line goods receipt (legacy single SKU still accepted)
+// POST /api/inventory/restocks — create Draft (or submit immediately). Does NOT post stock.
 router.post('/restocks', requireAuth, requireRole(INVENTORY_WRITER_ROLES), async (req, res) => {
   const pool = req.app.locals.pool;
   const user = req.currentUser;
@@ -1521,7 +1627,7 @@ router.post('/restocks', requireAuth, requireRole(INVENTORY_WRITER_ROLES), async
   const supplierId = Number(req.body.supplier_id);
   const receivedDate = req.body.received_date || manilaToday();
   const notes = String(req.body.notes || '').trim();
-  // Optional supplier paper number only — system always assigns DR-YYYY-####.
+  const submitNow = Boolean(req.body.submit);
   const supplierPaper = String(
     req.body.supplier_delivery_note
     ?? req.body.supplier_paper_ref
@@ -1562,14 +1668,13 @@ router.post('/restocks', requireAuth, requireRole(INVENTORY_WRITER_ROLES), async
         return res.status(400).json({ success: false, message: 'Each line quantity must be a positive number.' });
       }
       const product = await client.query(
-        `SELECT id, reorder_point FROM products WHERE id = $1 AND COALESCE(status, 'Active') = 'Active'`,
+        `SELECT id FROM products WHERE id = $1 AND COALESCE(status, 'Active') = 'Active'`,
         [line.product_id]
       );
       if (!product.rows.length) {
         await client.query('ROLLBACK');
         return res.status(404).json({ success: false, message: `Product ${line.product_id} not found or inactive.` });
       }
-      line.reorder_point = product.rows[0].reorder_point;
     }
 
     const restockRef = await nextRestockRef(client);
@@ -1577,68 +1682,70 @@ router.post('/restocks', requireAuth, requireRole(INVENTORY_WRITER_ROLES), async
     const combinedNotes = supplierPaper
       ? (notes ? `Supplier delivery: ${supplierPaper}\n${notes}` : `Supplier delivery: ${supplierPaper}`)
       : (notes || null);
+    const status = submitNow ? 'Pending Approval' : 'Draft';
 
     const header = await client.query(
       `INSERT INTO restock_headers (
-         restock_ref, branch_id, supplier_id, delivery_ref, received_date, recorded_by, notes
-       ) VALUES ($1, $2, $3, $4, $5::date, $6, $7)
-       RETURNING restock_id, restock_ref, delivery_ref`,
-      [restockRef, branchId, supplierId, deliveryRef, receivedDate, user.id, combinedNotes]
+         restock_ref, branch_id, supplier_id, delivery_ref, received_date, recorded_by, notes,
+         status, submitted_by, submitted_at
+       ) VALUES (
+         $1, $2, $3, $4, $5::date, $6, $7,
+         $8, $9, CASE WHEN $8 = 'Pending Approval' THEN CURRENT_TIMESTAMP ELSE NULL END
+       )
+       RETURNING restock_id, restock_ref, delivery_ref, status`,
+      [
+        restockRef,
+        branchId,
+        supplierId,
+        deliveryRef,
+        receivedDate,
+        user.id,
+        combinedNotes,
+        status,
+        submitNow ? user.id : null,
+      ]
     );
     const restockId = header.rows[0].restock_id;
-    const snapshots = [];
 
     for (const line of lines) {
       await client.query(
         `INSERT INTO restock_lines (restock_id, product_id, quantity) VALUES ($1, $2, $3)`,
         [restockId, line.product_id, line.quantity]
       );
-      // Keep legacy table in sync for older reports/FKs.
-      await client.query(
-        `INSERT INTO restocks (product_id, branch_id, delivery_ref, supplier_id, quantity, received_date)
-         VALUES ($1, $2, $3, $4, $5, $6::date)`,
-        [line.product_id, branchId, deliveryRef, supplierId, line.quantity, receivedDate]
-      );
-      const stockSnapshot = await upsertBranchInventoryStock(client, {
-        branchId,
-        productId: line.product_id,
-        delta: line.quantity,
-        reorderLevel: line.reorder_point,
-      });
-      snapshots.push(stockSnapshot);
-      await insertStockMovement(client, {
-        performedBy: user.id,
-        productId: line.product_id,
-        branchId,
-        quantity: line.quantity,
-        type: 'Restock',
-        movementRef: movementRefForRestock(restockRef, line.product_id),
-        movementDate: receivedDate,
-      });
     }
 
     await client.query('COMMIT');
-    await publishStockAlerts(pool, snapshots);
     const loadedLines = await loadRestockLines(pool, restockId);
     const summary = summarizeLines(loadedLines);
-    await notifyRestockRecorded(pool, {
-      userId: user.id,
-      restockRef,
-      deliveryRef,
-      lineCount: summary.line_count,
-      totalQuantity: summary.total_quantity,
-    });
+
+    if (submitNow) {
+      const submitterMeta = await pool.query(
+        `SELECT COALESCE(NULLIF(TRIM(full_name), ''), email) AS display_name FROM users WHERE id = $1`,
+        [user.id]
+      );
+      await notifyRestockSubmitted(pool, {
+        branchId,
+        restockRef,
+        deliveryRef,
+        lineCount: summary.line_count,
+        totalQuantity: summary.total_quantity,
+        submitterName: submitterMeta.rows[0]?.display_name || 'Warehouse staff',
+      });
+    }
+
     await logWarehouseAudit(
       pool,
       user.id,
-      'Restock recorded',
-      `${restockRef} / ${deliveryRef}: ${summary.line_count} product(s), +${summary.total_quantity} units`,
+      submitNow ? 'Restock submitted' : 'Restock draft saved',
+      `${restockRef} / ${deliveryRef}: ${summary.line_count} product(s), +${summary.total_quantity} units (${status})`,
       req.ip
     );
 
     return res.status(201).json({
       success: true,
-      message: 'Restock recorded and inventory updated.',
+      message: submitNow
+        ? 'Restock submitted for branch manager approval. Stock will post after approval.'
+        : 'Restock draft saved. Submit for approval when ready — stock is unchanged until approved.',
       data: {
         ...header.rows[0],
         ...summary,
@@ -1648,7 +1755,82 @@ router.post('/restocks', requireAuth, requireRole(INVENTORY_WRITER_ROLES), async
   } catch (err) {
     await client.query('ROLLBACK');
     console.error('[Inventory] POST /restocks error:', err.message);
-    return res.status(500).json({ success: false, message: 'Failed to record restock.' });
+    return res.status(500).json({ success: false, message: 'Failed to save restock.' });
+  } finally {
+    client.release();
+  }
+});
+
+// POST /api/inventory/restocks/:id/submit — Draft → Pending Approval
+router.post('/restocks/:id/submit', requireAuth, requireRole(INVENTORY_WRITER_ROLES), async (req, res) => {
+  const pool = req.app.locals.pool;
+  const user = req.currentUser;
+  const restockId = Number(req.params.id);
+  if (!Number.isFinite(restockId)) {
+    return res.status(400).json({ success: false, message: 'Invalid restock ID.' });
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const existing = await client.query(
+      `SELECT * FROM restock_headers WHERE restock_id = $1 FOR UPDATE`,
+      [restockId]
+    );
+    if (!existing.rows.length) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ success: false, message: 'Restock not found.' });
+    }
+    const row = existing.rows[0];
+    if (!isUnscoped(user) && Number(row.branch_id) !== Number(user.branchId)) {
+      await client.query('ROLLBACK');
+      return res.status(403).json({ success: false, message: 'Restock is outside your branch.' });
+    }
+    if (row.status !== 'Draft') {
+      await client.query('ROLLBACK');
+      return res.status(400).json({
+        success: false,
+        message: `Cannot submit restock in status ${row.status}.`,
+      });
+    }
+
+    const updated = await client.query(
+      `UPDATE restock_headers
+       SET status = 'Pending Approval',
+           submitted_by = $1,
+           submitted_at = CURRENT_TIMESTAMP,
+           updated_at = CURRENT_TIMESTAMP
+       WHERE restock_id = $2
+       RETURNING *`,
+      [user.id, restockId]
+    );
+    await client.query('COMMIT');
+
+    const loadedLines = await loadRestockLines(pool, restockId);
+    const summary = summarizeLines(loadedLines);
+    const submitterMeta = await pool.query(
+      `SELECT COALESCE(NULLIF(TRIM(full_name), ''), email) AS display_name FROM users WHERE id = $1`,
+      [user.id]
+    );
+    await notifyRestockSubmitted(pool, {
+      branchId: row.branch_id,
+      restockRef: row.restock_ref,
+      deliveryRef: row.delivery_ref,
+      lineCount: summary.line_count,
+      totalQuantity: summary.total_quantity,
+      submitterName: submitterMeta.rows[0]?.display_name || 'Warehouse staff',
+    });
+    await logWarehouseAudit(pool, user.id, 'Restock submitted', row.restock_ref, req.ip);
+
+    return res.status(200).json({
+      success: true,
+      message: 'Restock submitted for approval.',
+      data: { ...updated.rows[0], ...summary, lines: loadedLines },
+    });
+  } catch (err) {
+    await client.query('ROLLBACK');
+    console.error('[Inventory] POST /restocks/:id/submit error:', err.message);
+    return res.status(500).json({ success: false, message: 'Failed to submit restock.' });
   } finally {
     client.release();
   }
@@ -1698,14 +1880,25 @@ router.get('/stock-counts', requireAuth, async (req, res) => {
     const pool = req.app.locals.pool;
     const user = req.currentUser;
     const params = [];
-    let where = '';
+    const conditions = [];
     if (!isUnscoped(user)) {
       if (user.branchId == null) {
         return res.status(403).json({ success: false, message: 'No branch assigned.' });
       }
       params.push(user.branchId);
-      where = 'WHERE h.branch_id = $1';
+      conditions.push(`h.branch_id = $${params.length}`);
     }
+    if (req.query.status) {
+      const statuses = String(req.query.status).split(',').map((s) => s.trim()).filter(Boolean);
+      if (statuses.length === 1) {
+        params.push(statuses[0]);
+        conditions.push(`h.status = $${params.length}`);
+      } else if (statuses.length > 1) {
+        params.push(statuses);
+        conditions.push(`h.status = ANY($${params.length}::text[])`);
+      }
+    }
+    const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
     const result = await pool.query(
       `SELECT
          h.count_id,
@@ -1716,6 +1909,8 @@ router.get('/stock-counts', requireAuth, async (req, res) => {
          u.full_name AS counted_by_name,
          h.notes,
          h.status,
+         h.decision_remarks,
+         h.approved_at,
          h.created_at,
          COALESCE(agg.line_count, 0)::int AS line_count,
          COALESCE(agg.discrepancy_count, 0)::int AS discrepancy_count
@@ -1756,10 +1951,13 @@ router.get('/stock-counts/:id', requireAuth, async (req, res) => {
     const header = await pool.query(
       `SELECT
          h.count_id, h.count_ref, h.branch_id, h.counted_by, h.notes, h.status, h.created_at,
-         b.name AS branch_name, u.full_name AS counted_by_name
+         h.approved_by, h.approved_at, h.decision_remarks,
+         b.name AS branch_name, u.full_name AS counted_by_name,
+         appr.full_name AS approved_by_name
        FROM stock_count_headers h
        JOIN branches b ON b.id = h.branch_id
        LEFT JOIN users u ON u.id = h.counted_by
+       LEFT JOIN users appr ON appr.id = h.approved_by
        WHERE h.count_id = $1${branchSql}`,
       params
     );
@@ -1853,15 +2051,17 @@ router.post('/stock-counts', requireAuth, requireRole(INVENTORY_WRITER_ROLES), a
       });
     }
 
+    const discrepancyCount = prepared.filter((l) => l.variance !== 0).length;
+    const needsApproval = discrepancyCount > 0;
+    const status = needsApproval ? 'Pending Approval' : 'Completed';
     const countRef = await nextStockCountRef(client);
     const header = await client.query(
       `INSERT INTO stock_count_headers (count_ref, branch_id, counted_by, notes, status)
-       VALUES ($1, $2, $3, $4, 'Completed')
+       VALUES ($1, $2, $3, $4, $5)
        RETURNING *`,
-      [countRef, branchId, user.id, sessionNotes || null]
+      [countRef, branchId, user.id, sessionNotes || null, status]
     );
     const countId = header.rows[0].count_id;
-    const snapshots = [];
 
     for (const line of prepared) {
       await client.query(
@@ -1870,36 +2070,45 @@ router.post('/stock-counts', requireAuth, requireRole(INVENTORY_WRITER_ROLES), a
          ) VALUES ($1, $2, $3, $4, $5, $6)`,
         [countId, line.product_id, line.system_quantity, line.physical_quantity, line.variance, line.line_notes]
       );
-
-      if (line.variance !== 0) {
-        const snap = await upsertBranchInventoryStock(client, {
-          branchId,
-          productId: line.product_id,
-          delta: line.variance,
-          reorderLevel: line.reorder_level,
-        });
-        snapshots.push(snap);
-        await insertStockMovement(client, {
-          performedBy: user.id,
-          productId: line.product_id,
-          branchId,
-          quantity: line.variance,
-          type: 'Stock Count Adjustment',
-          movementRef: movementRefForStockCount(countRef, line.product_id),
-          movementDate: manilaToday(),
-        });
-      }
     }
 
     await client.query('COMMIT');
-    if (snapshots.length) await publishStockAlerts(pool, snapshots);
 
-    const discrepancyCount = prepared.filter((l) => l.variance !== 0).length;
+    if (needsApproval) {
+      const submitterMeta = await pool.query(
+        `SELECT COALESCE(NULLIF(TRIM(full_name), ''), email) AS display_name FROM users WHERE id = $1`,
+        [user.id]
+      );
+      const submitterName = submitterMeta.rows[0]?.display_name || 'Warehouse staff';
+      await notifyStockCountSubmitted(pool, {
+        branchId,
+        countRef,
+        discrepancyCount,
+        submitterName,
+      });
+      try {
+        const { upsertOpenOperationalAlert } = await import('../lib/operationalAlerts.js');
+        await upsertOpenOperationalAlert(pool, {
+          branchId,
+          alertType: 'Inventory Stock Count Variance',
+          severity: discrepancyCount >= 5 ? 'Critical' : 'Warning',
+          title: `Stock count variance: ${countRef}`,
+          message: `${submitterName} submitted ${countRef} with ${discrepancyCount} variance line(s). Review and decide in Approval Center.`,
+          sourceKey: `stock_count:${countId}`,
+          entityType: 'stock_count',
+          entityId: countId,
+          linkPath: 'approval-center',
+        });
+      } catch (alertErr) {
+        console.error('[Inventory] stock count operational alert:', alertErr.message);
+      }
+    }
+
     await logWarehouseAudit(
       pool,
       user.id,
-      'Stock count',
-      `${countRef}: ${prepared.length} product(s), ${discrepancyCount} discrepancy(ies)`,
+      needsApproval ? 'Stock count submitted' : 'Stock count completed',
+      `${countRef}: ${prepared.length} product(s), ${discrepancyCount} discrepancy(ies) (${status})`,
       req.ip
     );
 
@@ -1916,8 +2125,8 @@ router.post('/stock-counts', requireAuth, requireRole(INVENTORY_WRITER_ROLES), a
 
     return res.status(201).json({
       success: true,
-      message: discrepancyCount
-        ? `Stock count ${countRef} saved. ${discrepancyCount} inventory adjustment(s) applied.`
+      message: needsApproval
+        ? `Stock count ${countRef} submitted for approval. ${discrepancyCount} variance(s) will post after BM approval.`
         : `Stock count ${countRef} saved. No inventory adjustments needed.`,
       data: {
         ...header.rows[0],

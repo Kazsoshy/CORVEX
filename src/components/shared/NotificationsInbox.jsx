@@ -15,6 +15,7 @@ export function NotificationsInbox({
   showToast,
   navigate,
   resolveRelatedPath,
+  canManage = true,
 }) {
   const [notifications, setNotifications] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -86,9 +87,11 @@ export function NotificationsInbox({
               </button>
             ))}
           </div>
-          <button className="button secondary" type="button" onClick={markAllRead}>
-            Mark All as Read
-          </button>
+          {canManage ? (
+            <button className="button secondary" type="button" onClick={markAllRead}>
+              Mark All as Read
+            </button>
+          ) : null}
         </div>
       </section>
 
@@ -115,7 +118,7 @@ export function NotificationsInbox({
                   </span>
                 </div>
                 <div className="notification-actions">
-                  {isUnread ? (
+                  {isUnread && canManage ? (
                     <button
                       type="button"
                       className="button ghost"

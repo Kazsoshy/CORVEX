@@ -2,7 +2,8 @@ import express from 'express';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { requireRole } from '../middleware/auth.js';
+import { requirePermission } from '../middleware/auth.js';
+import { AUDIT_STATUS, writeAuditFromReq } from '../lib/auditLog.js';
 
 const router = express.Router();
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -20,7 +21,14 @@ const DEFAULT_SETTINGS = {
   logoDataUrl: '',
 };
 
-router.use(requireRole(['super_admin']));
+router.use(requirePermission(
+  'settings.view',
+  'settings.update',
+  'backup.view',
+  'backup.create',
+  'backup.restore',
+  'backup.download',
+));
 
 function ensureBackupDir() {
   fs.mkdirSync(BACKUP_DIR, { recursive: true });
@@ -54,7 +62,7 @@ async function writeSettings(pool, settings) {
   }
 }
 
-router.get('/settings', async (req, res) => {
+router.get('/settings', requirePermission('settings.view'), async (req, res) => {
   try {
     const settings = await readSettings(req.app.locals.pool);
     return res.status(200).json({ success: true, data: settings });
@@ -64,7 +72,7 @@ router.get('/settings', async (req, res) => {
   }
 });
 
-router.put('/settings', async (req, res) => {
+router.put('/settings', requirePermission('settings.update'), async (req, res) => {
   try {
     const pool = req.app.locals.pool;
     const current = await readSettings(pool);
@@ -76,6 +84,14 @@ router.put('/settings', async (req, res) => {
       return res.status(400).json({ success: false, message: 'Logo must be smaller than 150 KB.' });
     }
     await writeSettings(pool, next);
+    await writeAuditFromReq(pool, req, {
+      module: 'System Configuration',
+      activity: 'Update Settings',
+      action: 'Update Settings',
+      description: 'Updated system configuration settings.',
+      status: AUDIT_STATUS.UPDATED,
+      affectedRecord: 'system:settings',
+    });
     return res.status(200).json({ success: true, message: 'Settings saved.', data: next });
   } catch (err) {
     console.error('[System] PUT /settings error:', err.message);
@@ -83,10 +99,18 @@ router.put('/settings', async (req, res) => {
   }
 });
 
-router.post('/settings/reset', async (req, res) => {
+router.post('/settings/reset', requirePermission('settings.update'), async (req, res) => {
   try {
     const pool = req.app.locals.pool;
     await writeSettings(pool, DEFAULT_SETTINGS);
+    await writeAuditFromReq(pool, req, {
+      module: 'System Configuration',
+      activity: 'Reset Settings',
+      action: 'Reset Settings',
+      description: 'Restored system settings to defaults.',
+      status: AUDIT_STATUS.RESTORED,
+      affectedRecord: 'system:settings',
+    });
     return res.status(200).json({ success: true, message: 'Settings restored to defaults.', data: { ...DEFAULT_SETTINGS } });
   } catch (err) {
     console.error('[System] POST /settings/reset error:', err.message);
@@ -112,7 +136,7 @@ async function buildSnapshot(pool) {
   };
 }
 
-router.get('/backups', async (req, res) => {
+router.get('/backups', requirePermission('backup.view'), async (req, res) => {
   try {
     const result = await req.app.locals.pool.query(
       `SELECT b.backup_id, b.backup_type, b.status, b.size_bytes, b.file_name, b.created_at,
@@ -129,7 +153,7 @@ router.get('/backups', async (req, res) => {
   }
 });
 
-router.post('/backups', async (req, res) => {
+router.post('/backups', requirePermission('backup.create'), async (req, res) => {
   try {
     const pool = req.app.locals.pool;
     ensureBackupDir();
@@ -144,6 +168,14 @@ router.post('/backups', async (req, res) => {
        RETURNING backup_id, backup_type, status, size_bytes, file_name, created_at`,
       [Buffer.byteLength(body), req.currentUser.id, fileName]
     );
+    await writeAuditFromReq(pool, req, {
+      module: 'System Configuration',
+      activity: 'Create Backup',
+      action: 'Create Backup',
+      description: `Created system backup ${fileName}.`,
+      status: AUDIT_STATUS.CREATED,
+      affectedRecord: `backup:${inserted.rows[0].backup_id}`,
+    });
     return res.status(201).json({
       success: true,
       message: 'Backup created. Download it from the history table.',
@@ -155,11 +187,12 @@ router.post('/backups', async (req, res) => {
   }
 });
 
-router.get('/backups/:id/download', async (req, res) => {
+router.get('/backups/:id/download', requirePermission('backup.download'), async (req, res) => {
   try {
     const id = Number(req.params.id);
     if (!Number.isFinite(id)) return res.status(400).json({ success: false, message: 'Invalid backup ID.' });
-    const result = await req.app.locals.pool.query(
+    const pool = req.app.locals.pool;
+    const result = await pool.query(
       `SELECT file_name FROM system_backups WHERE backup_id = $1`,
       [id]
     );
@@ -169,6 +202,14 @@ router.get('/backups/:id/download', async (req, res) => {
     if (!fs.existsSync(filePath)) {
       return res.status(404).json({ success: false, message: 'Backup file is missing on the server.' });
     }
+    await writeAuditFromReq(pool, req, {
+      module: 'System Configuration',
+      activity: 'Download Backup',
+      action: 'Download Backup',
+      description: `Downloaded system backup ${fileName}.`,
+      status: AUDIT_STATUS.EXPORTED,
+      affectedRecord: `backup:${id}`,
+    });
     res.setHeader('Content-Type', 'application/json');
     res.setHeader('Content-Disposition', `attachment; filename="${path.basename(fileName)}"`);
     return res.sendFile(filePath);
@@ -178,7 +219,7 @@ router.get('/backups/:id/download', async (req, res) => {
   }
 });
 
-router.post('/backups/:id/restore', async (req, res) => {
+router.post('/backups/:id/restore', requirePermission('backup.restore'), async (req, res) => {
   try {
     const id = Number(req.params.id);
     if (!Number.isFinite(id)) return res.status(400).json({ success: false, message: 'Invalid backup ID.' });
@@ -198,6 +239,14 @@ router.post('/backups/:id/restore', async (req, res) => {
       if (snapshot.settings[key] !== undefined) next[key] = String(snapshot.settings[key] ?? '');
     }
     await writeSettings(pool, next);
+    await writeAuditFromReq(pool, req, {
+      module: 'System Configuration',
+      activity: 'Restore Backup',
+      action: 'Restore Backup',
+      description: `Restored company settings from backup #${id}.`,
+      status: AUDIT_STATUS.RESTORED,
+      affectedRecord: `backup:${id}`,
+    });
     return res.status(200).json({
       success: true,
       message: 'Company settings restored from this backup. Transactions, users, and payments were not overwritten.',

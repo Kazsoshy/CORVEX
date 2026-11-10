@@ -1,6 +1,6 @@
 import { usePreferences } from '../settings/PreferencesProvider.jsx';
 
-const NEUTRAL_EXACT = new Set(['draft', 'archived', 'disabled', 'n/a', '—', '-', 'na']);
+const NEUTRAL_EXACT = new Set(['draft', 'disabled', 'n/a', '—', '-', 'na', 'logout']);
 
 const STATUS_MARKS = {
   success: '●',
@@ -12,25 +12,25 @@ const STATUS_MARKS = {
 
 const ERROR_TERMS = [
   'inactive', 'cancelled', 'canceled', 'rejected', 'failed',
-  'failure', 'critical', 'out of stock', 'out of balance', 'overdue', 'late',
+  'failure', 'critical', 'high', 'out of stock', 'out of balance', 'overdue', 'late',
   'offline', 'declined', 'denied', 'void', 'error', 'unpaid', 'unavailable',
-  'returned', 'reversed',
+  'returned', 'reversed', 'degraded', 'deleted', 'locked', 'unauthorized',
 ];
 
 const WARNING_TERMS = [
-  'pending', 'processing', 'in progress', 'low stock', 'low', 'warning',
+  'pending', 'processing', 'in progress', 'low stock', 'low', 'medium', 'warning',
   'submitted', 'awaiting', 'scheduled', 'rescheduled', 'partial', 'unread',
-  'due', 'open', 'needs alignment', 'misaligned', 'assigned',
+  'due', 'open', 'needs alignment', 'misaligned', 'investigating', 'archived', 'assigned',
 ];
 
 const SUCCESS_TERMS = [
   'active', 'available', 'completed', 'approved', 'success', 'successful',
   'sufficient', 'paid', 'delivered', 'resolved', 'synced', 'read', 'online',
   'posted', 'confirmed', 'accepted', 'clear', 'verified', 'current', 'healthy',
-  'received', 'aligned', 'done',
+  'received', 'aligned', 'created', 'restored', 'unlocked', 'allowed', 'done',
 ];
 
-const INFO_TERMS = ['shipped', 'informational', 'info'];
+const INFO_TERMS = ['shipped', 'informational', 'info', 'updated', 'exported', 'imported', 'password'];
 
 /**
  * Maps a status label to a semantic tone used for colored text.
@@ -58,19 +58,24 @@ export function getStatusTextClass(status) {
 }
 
 /**
- * Renders a status as plain colored text (no badge/pill background).
- * `variant` is accepted for backward compatibility but always renders text.
+ * Renders a consistent enterprise status indicator with both shape and text.
+ * Avoids relying on color alone for accessibility and fast operational scanning.
  */
 export function StatusBadge({ status, className = '', variant: _variant }) {
   const { prefs } = usePreferences();
   if (status === null || status === undefined || status === '') return null;
   const tone = getStatusTone(status);
-  const mark = (prefs.colorPalette === 'colorblind' || prefs.highContrast) ? STATUS_MARKS[tone] : '';
+  const isColorblindOrHighContrast = prefs.colorPalette === 'colorblind' || prefs.highContrast;
+  const mark = isColorblindOrHighContrast ? STATUS_MARKS[tone] : '';
 
   return (
-    <span className={`${getStatusTextClass(status)} ${className}`.trim()}>
-      {mark ? <span aria-hidden="true">{mark} </span> : null}
-      {status}
+    <span className={`status-badge-wrap ${getStatusTextClass(status)} ${className}`.trim()}>
+      {mark ? (
+        <span className="status-mark" aria-hidden="true">{mark} </span>
+      ) : (
+        <span className={`status-indicator-dot tone-${tone}`} aria-hidden="true" />
+      )}
+      <span className="status-label-text">{status}</span>
     </span>
   );
 }

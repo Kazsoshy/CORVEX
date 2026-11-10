@@ -72,8 +72,11 @@ const MIGRATIONS = [
   { file: '048_user_avatar.sql',                     label: '048_user_avatar.sql' },
   { file: '049_role_permission_status.sql',          label: '049_role_permission_status.sql' },
   { file: '050_purchase_request_review.sql',         label: '050_purchase_request_review.sql' },
+  { file: '051_security_monitoring.sql',             label: '051_security_monitoring.sql' },
   { file: '051_inventory_document_lines.sql',        label: '051_inventory_document_lines.sql' },
+  { file: '052_audit_logs_enrichment.sql',           label: '052_audit_logs_enrichment.sql' },
   { file: '052_stock_count_sessions.sql',            label: '052_stock_count_sessions.sql' },
+  { file: '053_user_permissions_catalog.sql',        label: '053_user_permissions_catalog.sql' },
   { file: '053_sales_area_assignments.sql',          label: '053_sales_area_assignments.sql' },
   { file: '054_far_area_assignments.sql',            label: '054_far_area_assignments.sql' },
   { file: '055_sales_invoice_pay_terms.sql',         label: '055_sales_invoice_pay_terms.sql' },
@@ -81,6 +84,15 @@ const MIGRATIONS = [
   { file: '057_customer_address_parts.sql',          label: '057_customer_address_parts.sql' },
   { file: '058_customer_civil_status_maiden.sql',    label: '058_customer_civil_status_maiden.sql' },
   { file: '059_credit_reviews.sql',                  label: '059_credit_reviews.sql' },
+  { file: '060_user_preferences.sql',                label: '060_user_preferences.sql' },
+  { file: '060_far_severity.sql',                     label: '060_far_severity.sql' },
+  { file: '061_field_visits_collection_day_unique.sql', label: '061_field_visits_collection_day_unique.sql' },
+  { file: '062_sales_area_assignment_conflicts.sql', label: '062_sales_area_assignment_conflicts.sql' },
+  { file: '063_territories_operational_model.sql', label: '063_territories_operational_model.sql' },
+  { file: '064_credit_recommendations.sql', label: '064_credit_recommendations.sql' },
+  { file: '065_inventory_approval_controls.sql', label: '065_inventory_approval_controls.sql' },
+  { file: '066_operational_alerts_desk.sql', label: '066_operational_alerts_desk.sql' },
+  { file: '067_audit_logs_branch_id.sql', label: '067_audit_logs_branch_id.sql' },
 ];
 
 async function ensureMigrationsTable() {

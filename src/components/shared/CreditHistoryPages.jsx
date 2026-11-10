@@ -1,8 +1,8 @@
 import { Pagination } from '../shared/Pagination';
-import { usePagination } from '../../hooks/usePagination';
+import { useServerPagination, DEFAULT_PAGE_SIZE } from '../../hooks/usePagination';
 import { useEffect, useMemo, useState } from 'react';
 import { useLocation } from 'react-router-dom';
-import { getCreditHistory } from '../../api/reportsService';
+import { getCreditHistory, getCreditHistoryById } from '../../api/reportsService';
 import { NavIcon } from '../../navIcons';
 import { EmptyState } from '../shared/EmptyState';
 import { LoadingState } from '../shared/LoadingState';
@@ -27,6 +27,23 @@ function receiptOrInvoice(record) {
   return record?.receipt_number || record?.invoice_number || '—';
 }
 
+function buildListQuery({
+  customerFilterId,
+  statusFilter,
+  dateFrom,
+  dateTo,
+  search,
+}) {
+  const params = new URLSearchParams();
+  if (customerFilterId) params.set('customerId', String(customerFilterId));
+  if (statusFilter && statusFilter !== 'All') params.set('status', statusFilter);
+  if (dateFrom) params.set('from', dateFrom);
+  if (dateTo) params.set('to', dateTo);
+  if (search.trim()) params.set('q', search.trim());
+  const qs = params.toString();
+  return qs ? `?${qs}` : '';
+}
+
 function buildPaymentHistoryPdfRows(record) {
   if (!record) return [];
   return [
@@ -36,12 +53,13 @@ function buildPaymentHistoryPdfRows(record) {
     { Field: 'Receipt', Value: dash(record.receipt_number) },
     { Field: 'Invoice', Value: dash(record.invoice_number) },
     { Field: 'Original Invoice Amount', Value: formatCurrency(record.invoice_amount) },
+    { Field: 'Previous Outstanding', Value: formatCurrency(record.previous_balance) },
     { Field: 'Amount Paid', Value: formatCurrency(record.payment_amount) },
     { Field: 'Remaining Balance', Value: formatCurrency(record.remaining_balance) },
     { Field: 'Payment Status', Value: dash(paymentStatus(record)) },
     { Field: 'Payment Date', Value: formatDisplayDate(record.transaction_date) },
     { Field: 'Payment Method', Value: dash(record.payment_method) },
-    { Field: 'Collector / Recorded By', Value: dash(record.collector_name) },
+    { Field: 'Collector', Value: dash(record.collector_name) },
     { Field: 'Remarks', Value: dash(record.collection_notes) },
   ];
 }
@@ -72,24 +90,63 @@ function downloadPaymentHistoryPdf(record, showToast) {
   }
 }
 
-function PaymentDetailRows({ record }) {
+function downloadPaymentHistoryListPdf(records, showToast, { title, subtitle } = {}) {
+  try {
+    if (!records?.length) {
+      showToast?.('Nothing to export.', 'error');
+      return false;
+    }
+    const rows = records.map((record) => ({
+      Customer: dash(record.customer_name),
+      Code: dash(record.customer_code),
+      Receipt: dash(record.receipt_number),
+      Invoice: dash(record.invoice_number),
+      Paid: formatCurrency(record.payment_amount),
+      Remaining: formatCurrency(record.remaining_balance),
+      Collector: dash(record.collector_name),
+      Status: dash(paymentStatus(record)),
+      Date: formatDisplayDate(record.transaction_date),
+    }));
+    const ok = downloadPdf(rows, {
+      filename: 'payment-history.pdf',
+      title: title || 'Payment History',
+      subtitle: subtitle || `${records.length} record(s)`,
+    });
+    if (ok) {
+      showToast?.('Payment history exported as PDF.', 'success');
+      return true;
+    }
+    showToast?.('Unable to generate PDF.', 'error');
+    return false;
+  } catch (err) {
+    console.error('[PaymentHistory] list PDF export failed:', err);
+    showToast?.('Unable to generate PDF.', 'error');
+    return false;
+  }
+}
+
+export function PaymentDetailRows({ record }) {
   return (
     <DetailRowsTable
       rows={[
         { label: 'Customer', value: record.customer_name || '—' },
         ...(record.customer_code ? [{ label: 'Customer Code', value: record.customer_code }] : []),
-        { label: 'Payment Reference / Receipt', value: record.receipt_number || '—' },
-        { label: 'Related Invoice', value: record.invoice_number || '—' },
+        { label: 'Receipt Number', value: record.receipt_number || '—' },
+        { label: 'Invoice Number', value: record.invoice_number || '—' },
         {
           label: 'Original Invoice Amount',
           value: record.invoice_amount != null ? formatCurrency(record.invoice_amount) : 'Not available',
+        },
+        {
+          label: 'Previous Outstanding Balance',
+          value: record.previous_balance != null ? formatCurrency(record.previous_balance) : 'Not available',
         },
         {
           label: 'Amount Paid',
           value: <span style={{ fontWeight: 700, color: 'var(--palette-navy)' }}>{formatCurrency(record.payment_amount)}</span>,
         },
         {
-          label: 'Remaining Balance',
+          label: 'Remaining Outstanding Balance',
           value: (
             <span style={{
               fontWeight: 700,
@@ -103,7 +160,7 @@ function PaymentDetailRows({ record }) {
         { label: 'Payment Status', value: <StatusBadge status={paymentStatus(record)} /> },
         { label: 'Payment Date', value: formatDisplayDate(record.transaction_date) },
         { label: 'Payment Method', value: record.payment_method || '—' },
-        { label: 'Collector / Recorded By', value: record.collector_name || '—' },
+        { label: 'Collector', value: record.collector_name || '—' },
         { label: 'Remarks', value: record.collection_notes || '—' },
         ...(record.branch_name ? [{ label: 'Branch', value: record.branch_name }] : []),
       ]}
@@ -112,41 +169,64 @@ function PaymentDetailRows({ record }) {
 }
 
 /**
- * Shared Payment History / Credit History ledger view.
+ * Shared Payment History ledger for Sales and Branch Manager.
  * @param {'sales'|'operations'} variant
  */
 export function CreditHistoryListPage({
   navigate,
   basePath = '/branch-manager/credit-history',
+  customerBasePath = null,
   showToast,
   variant = 'operations',
 }) {
   const location = useLocation();
   const isSales = variant === 'sales';
-  const pageTitle = isSales ? 'Payment History' : 'Credit History';
+  const pageTitle = 'Payment History';
   const pageSubtitle = isSales
-    ? 'Payments collectors confirmed for customers in your branch.'
-    : 'Payment ledger for customers in your branch.';
+    ? 'Review payment records and outstanding balances for your assigned customers.'
+    : 'Monitor customer payment records and outstanding balances across your branch.';
 
-  const initialCustomerId = useMemo(() => {
+  const resolvedCustomerBase = customerBasePath
+    || (isSales ? '/sales/customer-detail' : basePath.replace(/\/credit-history$/, '/customers'));
+
+  const initial = useMemo(() => {
     const params = new URLSearchParams(location.search);
-    return params.get('customerId') || params.get('customer_id') || '';
+    return {
+      customerId: params.get('customerId') || params.get('customer_id') || '',
+      status: params.get('status') || 'All',
+      from: params.get('from') || '',
+      to: params.get('to') || '',
+      q: params.get('q') || '',
+    };
   }, [location.search]);
 
   const [records, setRecords] = useState([]);
+  const [totalRecords, setTotalRecords] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
-  const [search, setSearch] = useState('');
-  const [statusFilter, setStatusFilter] = useState('All');
-  const [dateFrom, setDateFrom] = useState('');
-  const [dateTo, setDateTo] = useState('');
-  const [customerFilterId, setCustomerFilterId] = useState(initialCustomerId);
+  const [search, setSearch] = useState(initial.q);
+  const [searchDraft, setSearchDraft] = useState(initial.q);
+  const [statusFilter, setStatusFilter] = useState(initial.status);
+  const [dateFrom, setDateFrom] = useState(initial.from);
+  const [dateTo, setDateTo] = useState(initial.to);
+  const [customerFilterId, setCustomerFilterId] = useState(initial.customerId);
   const [customerFilterName, setCustomerFilterName] = useState('');
-  const [selectedRecord, setSelectedRecord] = useState(null);
 
   useEffect(() => {
-    setCustomerFilterId(initialCustomerId);
-  }, [initialCustomerId]);
+    setCustomerFilterId(initial.customerId);
+    setStatusFilter(initial.status || 'All');
+    setDateFrom(initial.from || '');
+    setDateTo(initial.to || '');
+    setSearch(initial.q || '');
+    setSearchDraft(initial.q || '');
+  }, [initial.customerId, initial.status, initial.from, initial.to, initial.q]);
+
+  const filterKey = `${customerFilterId}|${statusFilter}|${dateFrom}|${dateTo}|${search}`;
+  const pagination = useServerPagination({
+    totalRecords,
+    pageSize: DEFAULT_PAGE_SIZE,
+    resetKey: filterKey,
+  });
 
   useEffect(() => {
     async function load() {
@@ -157,11 +237,14 @@ export function CreditHistoryListPage({
         payment_status: statusFilter !== 'All' ? statusFilter : undefined,
         date_from: dateFrom || undefined,
         date_to: dateTo || undefined,
-        limit: 500,
+        q: search.trim() || undefined,
+        page: pagination.currentPage,
+        limit: DEFAULT_PAGE_SIZE,
       });
       if (result.success) {
         const nextRows = result.data || [];
         setRecords(nextRows);
+        setTotalRecords(Number(result.pagination?.total) || nextRows.length || 0);
         if (customerFilterId && nextRows[0]?.customer_name) {
           setCustomerFilterName(nextRows[0].customer_name);
         } else if (!customerFilterId) {
@@ -169,36 +252,50 @@ export function CreditHistoryListPage({
         }
       } else {
         setError(result.message || 'Failed to load payment history.');
+        setRecords([]);
+        setTotalRecords(0);
         showToast?.(result.message || 'Failed to load payment history', 'error');
       }
       setLoading(false);
     }
     load();
-  }, [customerFilterId, statusFilter, dateFrom, dateTo, showToast]);
+  }, [customerFilterId, statusFilter, dateFrom, dateTo, search, pagination.currentPage, showToast]);
 
-  const filtered = useMemo(() => {
-    const q = search.trim().toLowerCase();
-    if (!q) return records;
-    return records.filter((record) => {
-      const haystack = [
-        record.customer_name,
-        record.customer_code,
-        record.receipt_number,
-        record.invoice_number,
-      ].map((value) => String(value || '').toLowerCase());
-      return haystack.some((value) => value.includes(q));
-    });
-  }, [records, search]);
-
-  const pagination = usePagination(filtered, {
-    resetKey: `${search}|${statusFilter}|${dateFrom}|${dateTo}|${customerFilterId}`,
-  });
-  const rows = pagination.paginatedData;
+  const syncUrl = (next) => {
+    const qs = buildListQuery(next);
+    navigate(`${basePath}${qs}`, { replace: true });
+  };
 
   const clearCustomerFilter = () => {
     setCustomerFilterId('');
     setCustomerFilterName('');
-    navigate(basePath);
+    syncUrl({
+      customerFilterId: '',
+      statusFilter,
+      dateFrom,
+      dateTo,
+      search,
+    });
+  };
+
+  const openDetail = (creditId) => {
+    const qs = buildListQuery({
+      customerFilterId,
+      statusFilter,
+      dateFrom,
+      dateTo,
+      search,
+    });
+    navigate(`${basePath}/${creditId}${qs}`);
+  };
+
+  const openCustomer = (customerId) => {
+    if (!customerId) return;
+    if (isSales) {
+      navigate(`${resolvedCustomerBase}/${customerId}?from=customers`);
+      return;
+    }
+    navigate(`${resolvedCustomerBase}/${customerId}`);
   };
 
   if (loading && !records.length) return <LoadingState message="Loading payment history…" />;
@@ -217,31 +314,68 @@ export function CreditHistoryListPage({
     <div className="page">
       <section className="panel content-panel relative overflow-hidden">
         <div className="list-section-header">
-          <h3>{pageTitle}</h3>
-          <p className="muted">{pageSubtitle}</p>
-          {customerFilterId ? (
-            <p className="muted" style={{ marginTop: 8 }}>
-              Filtered to {customerFilterName || `customer #${customerFilterId}`}
-              {' · '}
-              <button className="button ghost" type="button" style={{ padding: 0, minHeight: 0 }} onClick={clearCustomerFilter}>
-                Clear customer filter
-              </button>
-            </p>
-          ) : null}
+          <div>
+            <h3>{pageTitle}</h3>
+            <p className="muted">{pageSubtitle}</p>
+            {customerFilterId ? (
+              <p className="muted" style={{ marginTop: 8 }}>
+                Filtered to {customerFilterName || `customer #${customerFilterId}`}
+                {' · '}
+                <button className="button ghost" type="button" style={{ padding: 0, minHeight: 0 }} onClick={clearCustomerFilter}>
+                  Clear customer filter
+                </button>
+              </p>
+            ) : null}
+          </div>
+          <button
+            className="button secondary"
+            type="button"
+            disabled={!records.length}
+            onClick={() => downloadPaymentHistoryListPdf(records, showToast, {
+              title: isSales ? 'Payment History' : 'Branch Payment History',
+              subtitle: isSales
+                ? 'Authorized customer payments'
+                : 'Branch export · current filters applied',
+            })}
+          >
+            {isSales ? 'Export PDF' : 'Export Branch PDF'}
+          </button>
         </div>
         <div className="list-section-toolbar">
           <div className="list-section-controls">
             <input
               className="filter-input search"
               type="search"
-              placeholder="Search customer, receipt, or invoice"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Search customer, receipt, invoice, or collector"
+              value={searchDraft}
+              onChange={(e) => setSearchDraft(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  setSearch(searchDraft);
+                  syncUrl({
+                    customerFilterId,
+                    statusFilter,
+                    dateFrom,
+                    dateTo,
+                    search: searchDraft,
+                  });
+                }
+              }}
             />
             <select
               className="filter-select"
               value={statusFilter}
-              onChange={(e) => setStatusFilter(e.target.value)}
+              onChange={(e) => {
+                const next = e.target.value;
+                setStatusFilter(next);
+                syncUrl({
+                  customerFilterId,
+                  statusFilter: next,
+                  dateFrom,
+                  dateTo,
+                  search,
+                });
+              }}
               aria-label="Payment status"
             >
               {['All', 'Paid', 'Partial', 'Overdue'].map((status) => (
@@ -252,20 +386,56 @@ export function CreditHistoryListPage({
               className="filter-input"
               type="date"
               value={dateFrom}
-              onChange={(e) => setDateFrom(e.target.value)}
+              onChange={(e) => {
+                const next = e.target.value;
+                setDateFrom(next);
+                syncUrl({
+                  customerFilterId,
+                  statusFilter,
+                  dateFrom: next,
+                  dateTo,
+                  search,
+                });
+              }}
               aria-label="From date"
             />
             <input
               className="filter-input"
               type="date"
               value={dateTo}
-              onChange={(e) => setDateTo(e.target.value)}
+              onChange={(e) => {
+                const next = e.target.value;
+                setDateTo(next);
+                syncUrl({
+                  customerFilterId,
+                  statusFilter,
+                  dateFrom,
+                  dateTo: next,
+                  search,
+                });
+              }}
               aria-label="To date"
             />
+            <button
+              className="button ghost"
+              type="button"
+              onClick={() => {
+                setSearch(searchDraft);
+                syncUrl({
+                  customerFilterId,
+                  statusFilter,
+                  dateFrom,
+                  dateTo,
+                  search: searchDraft,
+                });
+              }}
+            >
+              Search
+            </button>
           </div>
         </div>
 
-        {filtered.length ? (
+        {records.length ? (
           <>
             <div className="corvex-table-wrapper">
               <table className="corvex-table">
@@ -275,19 +445,18 @@ export function CreditHistoryListPage({
                     <th>Receipt / Invoice</th>
                     <th>Paid</th>
                     <th>Remaining</th>
+                    <th>Collector</th>
                     <th>Status</th>
                     <th>Date</th>
                     <th>Actions</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {rows.map((record) => (
+                  {records.map((record) => (
                     <tr
                       key={record.credit_id}
                       className="clickable-row"
-                      onClick={() => (isSales
-                        ? navigate(`${basePath}/${record.credit_id}`)
-                        : setSelectedRecord(record))}
+                      onClick={() => openDetail(record.credit_id)}
                     >
                       <td>
                         <strong>{record.customer_name}</strong>
@@ -308,6 +477,7 @@ export function CreditHistoryListPage({
                       >
                         {formatCurrency(record.remaining_balance)}
                       </td>
+                      <td>{record.collector_name || '—'}</td>
                       <td><StatusBadge status={paymentStatus(record)} /></td>
                       <td>{formatDisplayDate(record.transaction_date)}</td>
                       <td className="table-actions" onClick={(e) => e.stopPropagation()}>
@@ -316,23 +486,30 @@ export function CreditHistoryListPage({
                           type="button"
                           title="View details"
                           aria-label={`View payment for ${record.customer_name}`}
-                          onClick={() => (isSales
-                            ? navigate(`${basePath}/${record.credit_id}`)
-                            : setSelectedRecord(record))}
+                          onClick={() => openDetail(record.credit_id)}
                         >
                           <NavIcon name="view" />
                         </button>
-                        {!isSales ? (
+                        {record.customer_id ? (
                           <button
                             className="icon-action-button"
                             type="button"
-                            title="Download PDF"
-                            aria-label={`Download PDF for ${record.customer_name}`}
-                            onClick={() => downloadPaymentHistoryPdf(record, showToast)}
+                            title="Open customer"
+                            aria-label={`Open customer ${record.customer_name}`}
+                            onClick={() => openCustomer(record.customer_id)}
                           >
-                            <NavIcon name="download" />
+                            <NavIcon name="accounts" />
                           </button>
                         ) : null}
+                        <button
+                          className="icon-action-button"
+                          type="button"
+                          title="Download PDF"
+                          aria-label={`Download PDF for ${record.customer_name}`}
+                          onClick={() => downloadPaymentHistoryPdf(record, showToast)}
+                        >
+                          <NavIcon name="download" />
+                        </button>
                       </td>
                     </tr>
                   ))}
@@ -350,40 +527,6 @@ export function CreditHistoryListPage({
           />
         )}
       </section>
-
-      {!isSales && selectedRecord ? (
-        <div
-          className="modal-overlay"
-          role="dialog"
-          aria-modal="true"
-          aria-labelledby="payment-history-detail-title"
-          onClick={() => setSelectedRecord(null)}
-        >
-          <div className="modal-content" style={{ maxWidth: 640 }} onClick={(e) => e.stopPropagation()}>
-            <div className="flex flex-col md:flex-row justify-between gap-4 items-start md:items-center mb-4">
-              <div>
-                <h3 id="payment-history-detail-title" style={{ margin: 0 }}>Payment Details</h3>
-                <p className="text-ink/70" style={{ margin: '4px 0 0', fontSize: '0.82rem' }}>
-                  {selectedRecord.customer_name}
-                  {selectedRecord.receipt_number ? ` · ${selectedRecord.receipt_number}` : ''}
-                </p>
-              </div>
-              <StatusBadge status={paymentStatus(selectedRecord)} />
-            </div>
-            <PaymentDetailRows record={selectedRecord} />
-            <div className="modal-actions">
-              <button
-                className="button secondary"
-                type="button"
-                onClick={() => downloadPaymentHistoryPdf(selectedRecord, showToast)}
-              >
-                Download PDF
-              </button>
-              <button className="button" type="button" onClick={() => setSelectedRecord(null)}>Close</button>
-            </div>
-          </div>
-        </div>
-      ) : null}
     </div>
   );
 }
@@ -392,25 +535,31 @@ export function CreditHistoryDetailPage({
   creditId,
   navigate,
   basePath = '/branch-manager/credit-history',
+  customerBasePath = null,
   showToast,
   variant = 'operations',
 }) {
+  const location = useLocation();
   const isSales = variant === 'sales';
   const [record, setRecord] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
+  const resolvedCustomerBase = customerBasePath
+    || (isSales ? '/sales/customer-detail' : basePath.replace(/\/credit-history$/, '/customers'));
+
+  const listReturnPath = `${basePath}${location.search || ''}`;
+
   useEffect(() => {
     async function load() {
       setLoading(true);
       setError(null);
-      const result = await getCreditHistory({ limit: 1000 });
-      if (result.success) {
-        const found = (result.data || []).find((row) => String(row.credit_id) === String(creditId));
-        if (found) setRecord(found);
-        else setError('Payment record not found.');
+      const result = await getCreditHistoryById(creditId);
+      if (result.success && result.data) {
+        setRecord(result.data);
       } else {
-        setError(result.message || 'Failed to load record.');
+        setRecord(null);
+        setError(result.message || 'Payment record not found.');
       }
       setLoading(false);
     }
@@ -422,9 +571,9 @@ export function CreditHistoryDetailPage({
     return (
       <EmptyState
         title="Record not found"
-        description={error || 'This payment record does not exist.'}
-        actionLabel={isSales ? 'Back to Payment History' : 'Back to Credit History'}
-        onAction={() => navigate(basePath)}
+        description={error || 'This payment record does not exist or is outside your authorized scope.'}
+        actionLabel="Back to Payment History"
+        onAction={() => navigate(listReturnPath)}
       />
     );
   }
@@ -455,26 +604,39 @@ export function CreditHistoryDetailPage({
       </section>
 
       <div className="flex flex-wrap justify-end gap-2 mt-4">
-        {!isSales ? (
+        <button
+          className="button secondary"
+          type="button"
+          onClick={() => downloadPaymentHistoryPdf(record, showToast)}
+        >
+          Download PDF
+        </button>
+        {record.customer_id ? (
           <button
             className="button secondary"
             type="button"
-            onClick={() => downloadPaymentHistoryPdf(record, showToast)}
+            onClick={() => {
+              if (isSales) {
+                navigate(`${resolvedCustomerBase}/${record.customer_id}?from=customers`);
+              } else {
+                navigate(`${resolvedCustomerBase}/${record.customer_id}`);
+              }
+            }}
           >
-            Download PDF
+            Open Customer
           </button>
         ) : null}
-        {record.customer_id && isSales ? (
+        {isSales && record.customer_id ? (
           <button
             className="button secondary"
             type="button"
-            onClick={() => navigate(`/sales/customer-detail/${record.customer_id}?from=customers`)}
+            onClick={() => navigate(`/sales/customers`)}
           >
-            Customer Details
+            Customers
           </button>
         ) : null}
-        <button className="button ghost" type="button" onClick={() => navigate(basePath)}>
-          {isSales ? 'Back to Payment History' : 'Back to Credit History'}
+        <button className="button ghost" type="button" onClick={() => navigate(listReturnPath)}>
+          Back to Payment History
         </button>
       </div>
     </div>

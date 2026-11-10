@@ -147,14 +147,6 @@ function DashboardPage({
           <h2>{agentName}</h2>
           <p className="muted">{todayLabel}</p>
         </div>
-        <Link
-          to="/sales/notifications"
-          className="notification-bell"
-          aria-label={`${unreadCount} unread notifications`}
-        >
-          <NavIcon name="bell" />
-          {unreadCount > 0 ? <span className="notification-badge">{unreadCount}</span> : null}
-        </Link>
       </section>
 
       {firstCredit ? (
@@ -377,11 +369,11 @@ function DashboardPage({
                       );
                     }}
                   >
-                    <CartesianGrid strokeDasharray="3 3" stroke="#BADBE9" />
+                    <CartesianGrid strokeDasharray="3 3" stroke="#E2E8F0" />
                     <XAxis dataKey="period" tick={{ fontSize: 12 }} />
                     <YAxis tick={{ fontSize: 11 }} tickFormatter={(v) => `${(v / 1000).toFixed(0)}k`} />
                     <Tooltip formatter={(v) => formatCurrency(v)} />
-                    <Bar dataKey="amount" name="Revenue" fill="#1A4162" radius={[4, 4, 0, 0]} />
+                    <Bar dataKey="amount" name="Revenue" fill="#153450" radius={[4, 4, 0, 0]} />
                   </BarChart>
                 </ResponsiveContainer>
               </section>
@@ -410,11 +402,11 @@ function DashboardPage({
                       );
                     }}
                   >
-                    <CartesianGrid strokeDasharray="3 3" stroke="#BADBE9" />
+                    <CartesianGrid strokeDasharray="3 3" stroke="#E2E8F0" />
                     <XAxis dataKey="name" tick={{ fontSize: 11 }} interval={0} angle={-15} textAnchor="end" height={50} />
                     <YAxis allowDecimals={false} tick={{ fontSize: 11 }} />
                     <Tooltip />
-                    <Bar dataKey="units" name="Units" fill="#408DAD" radius={[4, 4, 0, 0]} />
+                    <Bar dataKey="units" name="Units" fill="#153450" radius={[4, 4, 0, 0]} />
                   </BarChart>
                 </ResponsiveContainer>
               </section>
@@ -443,11 +435,11 @@ function DashboardPage({
                       );
                     }}
                   >
-                    <CartesianGrid strokeDasharray="3 3" stroke="#BADBE9" />
+                    <CartesianGrid strokeDasharray="3 3" stroke="#E2E8F0" />
                     <XAxis dataKey="name" tick={{ fontSize: 11 }} interval={0} angle={-15} textAnchor="end" height={50} />
                     <YAxis tick={{ fontSize: 11 }} tickFormatter={(v) => `${(v / 1000).toFixed(0)}k`} />
                     <Tooltip formatter={(v) => formatCurrency(v)} />
-                    <Bar dataKey="revenue" name="Revenue" fill="#1A4162" radius={[4, 4, 0, 0]} />
+                    <Bar dataKey="revenue" name="Revenue" fill="#153450" radius={[4, 4, 0, 0]} />
                   </BarChart>
                 </ResponsiveContainer>
               </section>
@@ -592,7 +584,7 @@ function VisitLogPage({
               position: [Number(visit.latitude), Number(visit.longitude)],
               popup: `<strong>${customerName}</strong><br/>${visit.address || ''}`,
               label: String(visit.visit_id),
-              color: visit.status === 'Completed' ? '#1A4162' : '#0B1E30'
+              color: visit.status === 'Completed' ? '#153450' : '#0B2133'
             }]} />
               </div> : null}
           </div>
@@ -1215,7 +1207,6 @@ function ProfilePage({
       <AccountProfilePanel
         showToast={showToast}
         title="Sales profile"
-        subtitle="Your name, contact details, and sign-in for this CORVEX account."
         extraActions={<button className="button ghost" type="button" onClick={() => navigate('/sales/audit-log')}>Audit log</button>}
         settings={<SettingsPage embedded showToast={showToast} />}
       />
@@ -1245,11 +1236,11 @@ function RouteTrackingPage({
     id: v.visit_id,
     position: [Number(v.latitude), Number(v.longitude)],
     label: String(v.visit_id),
-    color: v.status === 'Completed' ? '#1A4162' : '#f59e0b',
+    color: v.status === 'Completed' ? '#153450' : '#f59e0b',
     popup: `${v.customer_name} — ${v.status}`,
   }));
   const polyline = markers.length >= 2
-    ? [{ id: 'route', positions: markers.map(m => m.position), color: '#0B1E30' }]
+    ? [{ id: 'route', positions: markers.map(m => m.position), color: '#0B2133' }]
     : [];
   const coverage = visits.length ? Math.round((completed.length / visits.length) * 100) : 0;
   if (loading) return <LoadingState message="Loading route..." />;
@@ -1467,6 +1458,7 @@ export function SalesPageBody({
           navigate={navigate}
           showToast={showToast}
           basePath="/sales/credit-history"
+          customerBasePath="/sales/customer-detail"
           variant="sales"
         />
       );
@@ -1477,6 +1469,7 @@ export function SalesPageBody({
           navigate={navigate}
           showToast={showToast}
           basePath="/sales/credit-history"
+          customerBasePath="/sales/customer-detail"
           variant="sales"
         />
       );

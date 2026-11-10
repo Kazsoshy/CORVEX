@@ -104,6 +104,114 @@ export async function fetchApprovalCenterSummary() {
   }
 }
 
+export async function fetchPendingRestocks() {
+  try {
+    const response = await apiClient.get('/approvals/restocks');
+    return response.data;
+  } catch (error) {
+    console.error('Failed to fetch restock approvals:', error);
+    return { success: false, data: [] };
+  }
+}
+
+export async function fetchRestockApprovalById(id) {
+  try {
+    const response = await apiClient.get(`/approvals/restocks/${id}`);
+    return response.data;
+  } catch (error) {
+    return { success: false, data: null, message: error.response?.data?.message || 'Failed to load restock.' };
+  }
+}
+
+export async function patchRestockApproval(id, body) {
+  try {
+    const response = await apiClient.patch(`/approvals/restocks/${id}`, body);
+    return response.data;
+  } catch (error) {
+    return {
+      success: false,
+      message: error.response?.data?.message || 'Failed to decide restock.',
+    };
+  }
+}
+
+export async function fetchPendingStockCounts() {
+  try {
+    const response = await apiClient.get('/approvals/stock-counts');
+    return response.data;
+  } catch (error) {
+    console.error('Failed to fetch stock count approvals:', error);
+    return { success: false, data: [] };
+  }
+}
+
+export async function fetchStockCountApprovalById(id) {
+  try {
+    const response = await apiClient.get(`/approvals/stock-counts/${id}`);
+    return response.data;
+  } catch (error) {
+    return { success: false, data: null, message: error.response?.data?.message || 'Failed to load stock count.' };
+  }
+}
+
+export async function patchStockCountApproval(id, body) {
+  try {
+    const response = await apiClient.patch(`/approvals/stock-counts/${id}`, body);
+    return response.data;
+  } catch (error) {
+    return {
+      success: false,
+      message: error.response?.data?.message || 'Failed to decide stock count.',
+    };
+  }
+}
+
+export async function evaluateCreditRecommendations(body = {}) {
+  try {
+    const response = await apiClient.post('/approvals/credit-recommendations/evaluate', body);
+    return response.data;
+  } catch (error) {
+    return {
+      success: false,
+      message: error.response?.data?.message || 'Failed to evaluate recommendations.',
+    };
+  }
+}
+
+export async function fetchCreditRecommendations(params = {}) {
+  try {
+    const response = await apiClient.get('/approvals/credit-recommendations', { params });
+    return response.data;
+  } catch (error) {
+    return { success: false, data: [], message: error.response?.data?.message || 'Failed to load recommendations.' };
+  }
+}
+
+export async function patchCreditRecommendation(id, body) {
+  try {
+    const response = await apiClient.patch(`/approvals/credit-recommendations/${id}`, body);
+    return response.data;
+  } catch (error) {
+    return {
+      success: false,
+      message: error.response?.data?.message || 'Failed to update recommendation.',
+    };
+  }
+}
+
+export async function convertCreditRecommendation(id, body = {}) {
+  try {
+    const response = await apiClient.post(`/approvals/credit-recommendations/${id}/convert`, body);
+    return response.data;
+  } catch (error) {
+    return {
+      success: false,
+      message: error.response?.data?.message || 'Failed to convert recommendation.',
+      data: error.response?.data?.data || null,
+    };
+  }
+}
+
 export function mapCreditInvestigationRow(row) {
   // Prefer the shared Credit Review mapper; keep legacy shape for older screens.
   const flags = row.delinquency_flags_json ?? row.risk_reasons ?? [];

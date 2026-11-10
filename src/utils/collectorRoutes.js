@@ -2,13 +2,14 @@ const ROUTE_DEFINITIONS = [
   { pattern: /^\/collector\/dashboard$/, pageType: 'dashboard' },
   { pattern: /^\/collector\/settings$/, pageType: 'settings' },
   { pattern: /^\/collector\/route\/map$/, pageType: 'routeMap' },
-  { pattern: /^\/collector\/route\/summary$/, pageType: 'routeSummary' },
+  { pattern: /^\/collector\/route\/summary$/, pageType: 'routeList' },
   { pattern: /^\/collector\/route$/, pageType: 'routeList' },
+  { pattern: /^\/collector\/field-reports\/(\d+)$/, pageType: 'fieldActivityReportDetail', params: ['reportId'] },
   { pattern: /^\/collector\/field-reports$/, pageType: 'fieldActivityReports' },
   { pattern: /^\/collector\/accounts$/, pageType: 'accounts' },
   { pattern: /^\/collector\/history$/, pageType: 'history' },
   { pattern: /^\/collector\/history\/([^/]+)$/, pageType: 'collectionPaymentDetail', params: ['paymentId'] },
-  { pattern: /^\/collector\/receipts$/, pageType: 'receiptsList' },
+  { pattern: /^\/collector\/receipts$/, pageType: 'receiptsRedirect' },
   { pattern: /^\/collector\/receipts\/(\d+)$/, pageType: 'digitalReceipt', params: ['receiptId'] },
   { pattern: /^\/collector\/notifications$/, pageType: 'notifications' },
   { pattern: /^\/collector\/profile$/, pageType: 'profile' },
@@ -17,8 +18,6 @@ const ROUTE_DEFINITIONS = [
   { pattern: /^\/collector\/collection-log\/(\d+)$/, pageType: 'collectionLog', params: ['accountId'] },
   { pattern: /^\/collector\/receipt\/(\d+)$/, pageType: 'digitalReceipt', params: ['receiptId'] },
   { pattern: /^\/collector\/ci-form\/(\d+)$/, pageType: 'ciForm', params: ['accountId'] },
-  { pattern: /^\/collector\/incident\/(\d+)$/, pageType: 'incidentReport', params: ['accountId'] },
-  { pattern: /^\/collector\/incident$/, pageType: 'incidentReportStandalone' },
 ];
 
 export function matchCollectorRoute(pathname) {
@@ -72,6 +71,16 @@ export function buildCollectorBreadcrumbs(pageType, params = {}, parentContext =
     case 'fieldActivityReports':
       return [...crumbs, { label: 'Field Activity Reports', to: '/collector/field-reports' }];
 
+    case 'fieldActivityReportDetail':
+      return [
+        ...crumbs,
+        { label: 'Field Activity Reports', to: '/collector/field-reports' },
+        {
+          label: params.reportId ? `Report #${params.reportId}` : 'Report Detail',
+          to: `/collector/field-reports/${params.reportId}`,
+        },
+      ];
+
     case 'accounts':
       return [...crumbs, { label: 'Customers', to: '/collector/accounts' }];
 
@@ -103,13 +112,6 @@ export function buildCollectorBreadcrumbs(pageType, params = {}, parentContext =
         { label: 'Collection Log', to: `/collector/collection-log/${params.accountId}?from=${parentContext}` },
       ];
 
-    case 'digitalReceipt':
-      return [
-        ...buildCollectorBreadcrumbs('collectionLog', params, parentContext).slice(0, -1),
-        { label: 'Collection Log', to: `/collector/collection-log/${params.accountId}?from=${parentContext}` },
-        { label: 'Digital Receipt', to: `/collector/receipt/${params.accountId}?from=${parentContext}` },
-      ];
-
     case 'ciForm':
       return [
         ...buildCollectorBreadcrumbs('accountDetail', params, parentContext).slice(0, -1),
@@ -117,34 +119,25 @@ export function buildCollectorBreadcrumbs(pageType, params = {}, parentContext =
         { label: 'CI Form', to: `/collector/ci-form/${params.accountId}?from=${parentContext}` },
       ];
 
-    case 'incidentReport':
-      return [
-        ...buildCollectorBreadcrumbs('accountDetail', params, parentContext).slice(0, -1),
-        { label: accountLabel, to: `/collector/account-detail/${params.accountId}?from=${parentContext}` },
-        { label: 'Incident Report', to: `/collector/incident/${params.accountId}?from=${parentContext}` },
-      ];
-
-    case 'incidentReportStandalone':
-      return [...crumbs, { label: 'Incident Report', to: '/collector/incident' }];
-
     case 'history':
+    case 'receiptsRedirect':
       return [...crumbs, { label: 'Collection History', to: '/collector/history' }];
 
     case 'collectionPaymentDetail':
       return [
         ...crumbs,
         { label: 'Collection History', to: '/collector/history' },
-        { label: params.paymentId ? `Payment #${params.paymentId}` : 'Payment Detail', to: `/collector/history/${params.paymentId}` },
+        { label: params.paymentId ? `Payment Detail` : 'Payment Detail', to: `/collector/history/${params.paymentId}` },
       ];
-
-    case 'receiptsList':
-      return [...crumbs, { label: 'Digital Receipts', to: '/collector/receipts' }];
 
     case 'digitalReceipt':
       return [
         ...crumbs,
-        { label: 'Digital Receipts', to: '/collector/receipts' },
-        { label: `Receipt #${params.receiptId}`, to: `/collector/receipts/${params.receiptId}` },
+        { label: 'Collection History', to: '/collector/history' },
+        {
+          label: 'Digital Receipt',
+          to: `/collector/receipts/${params.receiptId}`,
+        },
       ];
 
     case 'notifications':
@@ -172,17 +165,16 @@ export function resolveCollectorPage(pathname, search = '') {
     routeMap: 'Route Map View',
     routeSummary: 'Route Summary',
     fieldActivityReports: 'Field Activity Reports',
+    fieldActivityReportDetail: 'Field Activity Report',
     accounts: 'Customers',
     accountDetail: 'Customer Detail',
     customerMap: 'Customer Map',
     collectionLog: 'Collection Log',
-    receiptsList: 'Digital Receipts',
+    receiptsRedirect: 'Collection History',
     digitalReceipt: 'Digital Receipt',
     ciForm: 'Credit Investigation Form',
-    incidentReport: 'Incident Report',
-    incidentReportStandalone: 'Incident Report',
     history: 'Collection History',
-    collectionPaymentDetail: 'Collection Payment',
+    collectionPaymentDetail: 'Payment Detail',
     notifications: 'Notifications',
     profile: 'Profile',
   };
@@ -201,15 +193,18 @@ export function isCollectorNavActive(fullPath, navTo) {
   const pathname = fullPath.split('?')[0];
   if (navTo === '/collector/dashboard') return pathname === '/collector/dashboard';
   if (navTo === '/collector/route') return pathname.startsWith('/collector/route') || fullPath.includes('from=route');
-  if (navTo === '/collector/field-reports') return pathname === '/collector/field-reports';
+  if (navTo === '/collector/field-reports') return pathname === '/collector/field-reports' || pathname.startsWith('/collector/field-reports/');
   if (navTo === '/collector/accounts') {
     return pathname === '/collector/accounts'
       || pathname.startsWith('/collector/account-detail/')
       || pathname.startsWith('/collector/map/')
       || fullPath.includes('from=accounts');
   }
-  if (navTo === '/collector/history') return pathname.startsWith('/collector/history');
-  if (navTo === '/collector/receipts') return pathname.startsWith('/collector/receipts') || pathname.startsWith('/collector/receipt/');
+  if (navTo === '/collector/history') {
+    return pathname.startsWith('/collector/history')
+      || pathname.startsWith('/collector/receipts/')
+      || pathname.startsWith('/collector/receipt/');
+  }
   if (navTo === '/collector/notifications') return pathname === '/collector/notifications';
   if (navTo === '/collector/profile') return pathname === '/collector/profile';
   if (navTo === '/collector/settings') return pathname === '/collector/settings';

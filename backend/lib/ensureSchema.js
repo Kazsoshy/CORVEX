@@ -8,6 +8,7 @@ export async function ensureSchema(client) {
     ALTER TABLE users ADD COLUMN IF NOT EXISTS phone VARCHAR(30);
     ALTER TABLE users ADD COLUMN IF NOT EXISTS full_name VARCHAR(120);
     ALTER TABLE users ADD COLUMN IF NOT EXISTS avatar_file VARCHAR(80);
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS preferences JSONB DEFAULT NULL;
 
     ALTER TABLE customers ADD COLUMN IF NOT EXISTS middle_name VARCHAR(50) DEFAULT NULL;
     ALTER TABLE customers ADD COLUMN IF NOT EXISTS contact_person_mname VARCHAR(100) DEFAULT NULL;
@@ -26,6 +27,8 @@ export async function ensureSchema(client) {
 
     ALTER TABLE permissions ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP;
     ALTER TABLE permissions ADD COLUMN IF NOT EXISTS status VARCHAR(20) NOT NULL DEFAULT 'Active';
+    ALTER TABLE permissions ADD COLUMN IF NOT EXISTS module VARCHAR(80);
+    ALTER TABLE permissions ADD COLUMN IF NOT EXISTS code VARCHAR(100);
     ALTER TABLE roles ADD COLUMN IF NOT EXISTS status VARCHAR(20) NOT NULL DEFAULT 'Active';
 
     ALTER TABLE branch_inventory ADD COLUMN IF NOT EXISTS created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP;
@@ -102,6 +105,25 @@ export async function ensureSchema(client) {
   `);
 
   await client.query(`
+    CREATE UNIQUE INDEX IF NOT EXISTS uq_permissions_code
+      ON permissions (code)
+      WHERE code IS NOT NULL;
+  `);
+
+  await client.query(`
+    CREATE TABLE IF NOT EXISTS user_permissions (
+      user_id       INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      permission_id INTEGER NOT NULL REFERENCES permissions(permission_id) ON DELETE CASCADE,
+      granted       BOOLEAN NOT NULL DEFAULT TRUE,
+      created_at    TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at    TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      PRIMARY KEY (user_id, permission_id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_user_permissions_user
+      ON user_permissions (user_id);
+  `);
+
+  await client.query(`
     CREATE TABLE IF NOT EXISTS notification_dedup (
       dedup_key  VARCHAR(160) PRIMARY KEY,
       created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
@@ -127,7 +149,53 @@ export async function ensureSchema(client) {
       ON branch_inventory (available_stock);
   `);
 
+  // Warehouse document tables (also created by 051/052 migrations). Ensure on
+  // boot so inventory routes do not 500 into empty Warehouse Staff screens.
   await client.query(`
+    CREATE TABLE IF NOT EXISTS inventory_transfer_lines (
+      line_id     SERIAL PRIMARY KEY,
+      transfer_id INTEGER NOT NULL REFERENCES inventory_transfers(transfer_id) ON DELETE CASCADE,
+      product_id  INTEGER NOT NULL REFERENCES products(id),
+      quantity    INTEGER NOT NULL CHECK (quantity > 0),
+      UNIQUE (transfer_id, product_id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_inventory_transfer_lines_transfer_id
+      ON inventory_transfer_lines (transfer_id);
+    CREATE INDEX IF NOT EXISTS idx_inventory_transfer_lines_product_id
+      ON inventory_transfer_lines (product_id);
+
+    CREATE TABLE IF NOT EXISTS restock_headers (
+      restock_id    SERIAL PRIMARY KEY,
+      restock_ref   VARCHAR(100) NOT NULL UNIQUE,
+      branch_id     INTEGER NOT NULL REFERENCES branches(id),
+      supplier_id   INTEGER NOT NULL REFERENCES suppliers(suppliers_id),
+      delivery_ref  VARCHAR(100) NOT NULL,
+      received_date DATE NOT NULL,
+      recorded_by   INTEGER REFERENCES users(id),
+      notes         TEXT,
+      status        VARCHAR(30) NOT NULL DEFAULT 'Draft'
+                    CHECK (status IN ('Draft', 'Pending Approval', 'Approved', 'Posted', 'Rejected')),
+      submitted_by  INTEGER REFERENCES users(id),
+      submitted_at  TIMESTAMP,
+      approved_by   INTEGER REFERENCES users(id),
+      approved_at   TIMESTAMP,
+      decision_remarks TEXT,
+      posted_by     INTEGER REFERENCES users(id),
+      posted_at     TIMESTAMP,
+      created_at    TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at    TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+    CREATE TABLE IF NOT EXISTS restock_lines (
+      line_id    SERIAL PRIMARY KEY,
+      restock_id INTEGER NOT NULL REFERENCES restock_headers(restock_id) ON DELETE CASCADE,
+      product_id INTEGER NOT NULL REFERENCES products(id),
+      quantity   INTEGER NOT NULL CHECK (quantity > 0),
+      UNIQUE (restock_id, product_id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_restock_headers_branch_id ON restock_headers (branch_id);
+    CREATE INDEX IF NOT EXISTS idx_restock_headers_supplier_id ON restock_headers (supplier_id);
+    CREATE INDEX IF NOT EXISTS idx_restock_lines_restock_id ON restock_lines (restock_id);
+
     CREATE TABLE IF NOT EXISTS stock_count_headers (
       count_id     SERIAL PRIMARY KEY,
       count_ref    VARCHAR(100) NOT NULL UNIQUE,
@@ -135,8 +203,12 @@ export async function ensureSchema(client) {
       counted_by   INTEGER REFERENCES users(id),
       notes        TEXT,
       status       VARCHAR(30) NOT NULL DEFAULT 'Completed'
-                   CHECK (status IN ('Completed')),
-      created_at   TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+                   CHECK (status IN ('Pending Approval', 'Completed', 'Rejected')),
+      approved_by  INTEGER REFERENCES users(id),
+      approved_at  TIMESTAMP,
+      decision_remarks TEXT,
+      created_at   TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at   TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
     );
     CREATE TABLE IF NOT EXISTS stock_count_lines (
       line_id            SERIAL PRIMARY KEY,
@@ -152,6 +224,43 @@ export async function ensureSchema(client) {
     CREATE INDEX IF NOT EXISTS idx_stock_count_lines_count_id ON stock_count_lines (count_id);
     CREATE INDEX IF NOT EXISTS idx_stock_count_lines_product_id ON stock_count_lines (product_id);
   `);
+
+  // Soften legacy single-SKU transfer columns after document-lines model.
+  await client.query(`
+    ALTER TABLE inventory_transfers ADD COLUMN IF NOT EXISTS notes TEXT;
+    ALTER TABLE inventory_transfers ADD COLUMN IF NOT EXISTS shipped_by INTEGER REFERENCES users(id);
+    ALTER TABLE inventory_transfers ADD COLUMN IF NOT EXISTS shipped_at TIMESTAMP;
+    ALTER TABLE inventory_transfers ADD COLUMN IF NOT EXISTS received_by INTEGER REFERENCES users(id);
+    ALTER TABLE inventory_transfers ADD COLUMN IF NOT EXISTS received_at TIMESTAMP;
+    ALTER TABLE inventory_transfers ADD COLUMN IF NOT EXISTS receive_notes TEXT;
+  `);
+
+  // Restock / stock-count approval columns for existing databases.
+  await client.query(`
+    ALTER TABLE restock_headers ADD COLUMN IF NOT EXISTS status VARCHAR(30) NOT NULL DEFAULT 'Posted';
+    ALTER TABLE restock_headers ADD COLUMN IF NOT EXISTS submitted_by INTEGER REFERENCES users(id);
+    ALTER TABLE restock_headers ADD COLUMN IF NOT EXISTS submitted_at TIMESTAMP;
+    ALTER TABLE restock_headers ADD COLUMN IF NOT EXISTS approved_by INTEGER REFERENCES users(id);
+    ALTER TABLE restock_headers ADD COLUMN IF NOT EXISTS approved_at TIMESTAMP;
+    ALTER TABLE restock_headers ADD COLUMN IF NOT EXISTS decision_remarks TEXT;
+    ALTER TABLE restock_headers ADD COLUMN IF NOT EXISTS posted_by INTEGER REFERENCES users(id);
+    ALTER TABLE restock_headers ADD COLUMN IF NOT EXISTS posted_at TIMESTAMP;
+    ALTER TABLE restock_headers ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP;
+    ALTER TABLE stock_count_headers ADD COLUMN IF NOT EXISTS approved_by INTEGER REFERENCES users(id);
+    ALTER TABLE stock_count_headers ADD COLUMN IF NOT EXISTS approved_at TIMESTAMP;
+    ALTER TABLE stock_count_headers ADD COLUMN IF NOT EXISTS decision_remarks TEXT;
+    ALTER TABLE stock_count_headers ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP;
+  `);
+  try {
+    await client.query(`ALTER TABLE inventory_transfers ALTER COLUMN product_id DROP NOT NULL`);
+  } catch {
+    /* already nullable or constraint name differs */
+  }
+  try {
+    await client.query(`ALTER TABLE inventory_transfers ALTER COLUMN quantity DROP NOT NULL`);
+  } catch {
+    /* already nullable or constraint name differs */
+  }
 
   await client.query(`
     CREATE TABLE IF NOT EXISTS inventory_transfer_lines (
@@ -267,6 +376,36 @@ export async function ensureSchema(client) {
     CREATE INDEX IF NOT EXISTS idx_territory_assignments_user ON territory_assignments(user_id);
   `);
 
+  // Territories operational model (status, geometry, default personnel)
+  try {
+    await client.query(`
+      ALTER TABLE territories
+        ADD COLUMN IF NOT EXISTS status VARCHAR(20) NOT NULL DEFAULT 'Active',
+        ADD COLUMN IF NOT EXISTS latitude DECIMAL(10, 7),
+        ADD COLUMN IF NOT EXISTS longitude DECIMAL(10, 7),
+        ADD COLUMN IF NOT EXISTS radius_meters INTEGER NOT NULL DEFAULT 800,
+        ADD COLUMN IF NOT EXISTS default_sales_agent_id INTEGER REFERENCES users(id),
+        ADD COLUMN IF NOT EXISTS default_collector_id INTEGER REFERENCES users(id),
+        ADD COLUMN IF NOT EXISTS created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+    `);
+    try {
+      await client.query(`ALTER TABLE territories ALTER COLUMN coverage_area DROP NOT NULL`);
+    } catch {
+      /* already nullable */
+    }
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS idx_territories_branch_status ON territories (branch_id, status);
+      CREATE INDEX IF NOT EXISTS idx_territories_default_sales_agent ON territories (default_sales_agent_id);
+      CREATE INDEX IF NOT EXISTS idx_territories_default_collector ON territories (default_collector_id);
+      CREATE UNIQUE INDEX IF NOT EXISTS uq_territories_branch_name_active
+        ON territories (branch_id, lower(btrim(territory_name)))
+        WHERE status = 'Active'
+    `);
+  } catch (err) {
+    console.error('[ensureSchema] territories operational columns:', err.message);
+  }
+
   await client.query(`
     CREATE TABLE IF NOT EXISTS system_settings (
       setting_key   VARCHAR(80) PRIMARY KEY,
@@ -295,11 +434,134 @@ export async function ensureSchema(client) {
        OR contact !~ '[0-9]';
   `);
 
+  // Audit log enrichment + login lockout fields (safe if migration 052 already applied).
+  // Run as separate statements so one failure cannot skip the rest.
+  try {
+    await client.query(`ALTER TABLE audit_logs ALTER COLUMN user_id DROP NOT NULL`);
+    await client.query(`ALTER TABLE audit_logs ADD COLUMN IF NOT EXISTS role_name VARCHAR(100)`);
+    await client.query(`ALTER TABLE audit_logs ADD COLUMN IF NOT EXISTS module VARCHAR(100)`);
+    await client.query(`ALTER TABLE audit_logs ADD COLUMN IF NOT EXISTS activity VARCHAR(150)`);
+    await client.query(`ALTER TABLE audit_logs ADD COLUMN IF NOT EXISTS description TEXT`);
+    await client.query(`ALTER TABLE audit_logs ADD COLUMN IF NOT EXISTS status VARCHAR(50)`);
+    await client.query(`ALTER TABLE audit_logs ADD COLUMN IF NOT EXISTS affected_record VARCHAR(200)`);
+    await client.query(`ALTER TABLE audit_logs ADD COLUMN IF NOT EXISTS branch_id INTEGER`);
+    await client.query(`CREATE INDEX IF NOT EXISTS idx_audit_logs_branch_id ON audit_logs (branch_id)`);
+    await client.query(`CREATE INDEX IF NOT EXISTS idx_audit_logs_branch_created ON audit_logs (branch_id, created_at DESC)`);
+    await client.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS failed_login_count INTEGER NOT NULL DEFAULT 0`);
+    await client.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS login_locked_until TIMESTAMP NULL`);
+    await client.query(`CREATE INDEX IF NOT EXISTS idx_audit_logs_created_at ON audit_logs (created_at DESC)`);
+    await client.query(`
+      UPDATE audit_logs
+      SET
+        module = COALESCE(module, 'Authentication'),
+        activity = COALESCE(activity, action),
+        description = COALESCE(description, status_details),
+        status = COALESCE(
+          status,
+          CASE
+            WHEN status_details ILIKE '%fail%' THEN 'Failed Login'
+            WHEN status_details ILIKE '%success%' THEN 'Successful Login'
+            WHEN action ILIKE '%lock%' THEN 'Account Locked'
+            ELSE status_details
+          END
+        )
+      WHERE module IS NULL
+        AND (action ILIKE '%login%' OR status_details ILIKE '%login%')
+    `);
+  } catch (err) {
+    console.error('[ensureSchema] audit enrichment:', err.message);
+  }
+
+  // Super Admin module permission catalog (idempotent by code).
+  try {
+    await client.query(`
+      INSERT INTO permissions (label, description, module, code, status)
+      SELECT v.label, v.description, v.module, v.code, 'Active'
+      FROM (VALUES
+        ('View Dashboard', 'Ability to view the Super Admin system dashboard', 'Dashboard', 'dashboard.view'),
+        ('View Users', 'Ability to view the user directory', 'Users', 'users.view'),
+        ('Create User', 'Ability to create new user accounts', 'Users', 'users.create'),
+        ('Edit User', 'Ability to edit existing user accounts', 'Users', 'users.edit'),
+        ('Disable User', 'Ability to disable (soft-delete) user accounts', 'Users', 'users.disable'),
+        ('Activate/Deactivate User', 'Ability to change a user account Active/Inactive status', 'Users', 'users.activate'),
+        ('View Roles', 'Ability to view roles and the permissions matrix', 'Role & Permissions', 'roles.view'),
+        ('Create Role', 'Ability to create roles', 'Role & Permissions', 'roles.create'),
+        ('Edit Role', 'Ability to edit roles', 'Role & Permissions', 'roles.edit'),
+        ('Archive Role', 'Ability to archive roles', 'Role & Permissions', 'roles.delete'),
+        ('Assign Permissions', 'Ability to assign module permissions to users or roles', 'Role & Permissions', 'roles.assign'),
+        ('View System Settings', 'Ability to view company and system settings', 'System Settings', 'settings.view'),
+        ('Update System Settings', 'Ability to update or reset system settings', 'System Settings', 'settings.update'),
+        ('View Backups', 'Ability to view backup history', 'Backup & Restore', 'backup.view'),
+        ('Create Backup', 'Ability to create a manual system backup', 'Backup & Restore', 'backup.create'),
+        ('Restore Backup', 'Ability to restore settings from a backup', 'Backup & Restore', 'backup.restore'),
+        ('Download Backup', 'Ability to download a backup file', 'Backup & Restore', 'backup.download'),
+        ('View Database Monitoring', 'Ability to view database and server monitoring', 'Database Monitoring', 'monitoring.view'),
+        ('Access Monitoring Details', 'Ability to refresh and inspect monitoring details', 'Database Monitoring', 'monitoring.details'),
+        ('View Security Monitoring', 'Ability to view the security monitoring dashboard', 'Security Monitoring', 'security.view'),
+        ('View Security Events', 'Ability to view security events', 'Security Monitoring', 'security.events'),
+        ('Manage Security Settings', 'Ability to update security event status and run sweeps', 'Security Monitoring', 'security.manage'),
+        ('View Audit Logs', 'Ability to view system audit logs', 'Audit Logs', 'audit.view'),
+        ('View Audit Details', 'Ability to open full audit log detail records', 'Audit Logs', 'audit.details'),
+        ('View Notifications', 'Ability to view the notifications inbox', 'Notifications', 'notifications.view'),
+        ('Manage Notifications', 'Ability to mark notifications as read', 'Notifications', 'notifications.manage')
+      ) AS v(label, description, module, code)
+      WHERE NOT EXISTS (SELECT 1 FROM permissions p WHERE p.code = v.code)
+    `);
+
+    await client.query(`
+      INSERT INTO role_permissions (role_id, permission_id, granted)
+      SELECT r.role_id, p.permission_id, TRUE
+      FROM roles r
+      CROSS JOIN permissions p
+      WHERE r.slug = 'super_admin'
+        AND p.code IS NOT NULL
+        AND COALESCE(p.status, 'Active') = 'Active'
+      ON CONFLICT (role_id, permission_id) DO UPDATE SET granted = TRUE, updated_at = NOW()
+    `);
+  } catch (err) {
+    console.error('[ensureSchema] permission catalog:', err.message);
+  }
+
   await client.query(`
     ALTER TABLE field_activity_reports ALTER COLUMN visit_id DROP NOT NULL;
     ALTER TABLE field_activity_reports ADD COLUMN IF NOT EXISTS assignment_id INTEGER;
     ALTER TABLE field_activity_reports ADD COLUMN IF NOT EXISTS customer_id INTEGER;
+    ALTER TABLE field_activity_reports ADD COLUMN IF NOT EXISTS severity VARCHAR(20);
+
+    ALTER TABLE field_visits ADD COLUMN IF NOT EXISTS visit_outcome VARCHAR(40);
+    ALTER TABLE field_visits ADD COLUMN IF NOT EXISTS visit_remarks TEXT;
+    ALTER TABLE field_visits ADD COLUMN IF NOT EXISTS visited_at TIMESTAMP;
+
+    ALTER TABLE collection_payment ADD COLUMN IF NOT EXISTS reference_number VARCHAR(100);
   `);
+
+  // One active Collection visit per customer per day (any collector).
+  // Status CHECK only allows Pending|Completed, so this covers all live assignments.
+  try {
+    await client.query(`
+      CREATE UNIQUE INDEX IF NOT EXISTS uq_field_visits_collection_customer_day
+      ON field_visits (customer_id, scheduled_date)
+      WHERE visit_type = 'Collection'
+    `);
+  } catch (err) {
+    console.error('[ensureSchema] field_visits unique day index:', err.message);
+  }
+
+  try {
+    await client.query(`
+      CREATE UNIQUE INDEX IF NOT EXISTS uq_sales_area_territory_day
+      ON sales_area_assignments (territory_id, work_date)
+      WHERE territory_id IS NOT NULL
+        AND status IN ('Assigned', 'In Progress', 'Done')
+    `);
+    await client.query(`
+      CREATE UNIQUE INDEX IF NOT EXISTS uq_sales_area_agent_name_day
+      ON sales_area_assignments (sales_agent_id, work_date, lower(btrim(area_name)))
+      WHERE status IN ('Assigned', 'In Progress', 'Done')
+    `);
+  } catch (err) {
+    console.error('[ensureSchema] sales_area_assignments unique indexes:', err.message);
+  }
 
   await client.query(`
     CREATE TABLE IF NOT EXISTS sales_area_assignments (
@@ -330,4 +592,74 @@ export async function ensureSchema(client) {
       PRIMARY KEY (assignment_id, product_id)
     );
   `);
+
+  await client.query(`
+    ALTER TABLE credit_investigations
+      ADD COLUMN IF NOT EXISTS revision_history_json JSONB NOT NULL DEFAULT '[]'::jsonb;
+    ALTER TABLE credit_investigations
+      ADD COLUMN IF NOT EXISTS resubmitted_at TIMESTAMP;
+    ALTER TABLE credit_investigations
+      ADD COLUMN IF NOT EXISTS resubmitted_by INTEGER REFERENCES users(id);
+
+    CREATE TABLE IF NOT EXISTS credit_recommendations (
+      recommendation_id   SERIAL PRIMARY KEY,
+      customer_id         INTEGER NOT NULL REFERENCES customers(customer_id),
+      branch_id           INTEGER NOT NULL REFERENCES branches(id),
+      recommendation_type VARCHAR(40) NOT NULL,
+      trigger_reason      TEXT NOT NULL,
+      evidence_json       JSONB NOT NULL DEFAULT '{}'::jsonb,
+      risk_level          VARCHAR(20),
+      risk_score          INTEGER,
+      suggested_action    TEXT,
+      status              VARCHAR(30) NOT NULL DEFAULT 'New'
+                          CHECK (status IN ('New', 'Watching', 'Converted to CI', 'Dismissed')),
+      converted_ci_id     INTEGER REFERENCES credit_investigations(ci_id) ON DELETE SET NULL,
+      dismissed_reason    TEXT,
+      dismissed_by        INTEGER REFERENCES users(id),
+      dismissed_at        TIMESTAMP,
+      generated_at        TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      last_evaluated_at   TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      created_at          TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at          TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+    CREATE INDEX IF NOT EXISTS idx_credit_recommendations_branch_status
+      ON credit_recommendations (branch_id, status);
+    CREATE INDEX IF NOT EXISTS idx_credit_recommendations_customer
+      ON credit_recommendations (customer_id, status);
+  `);
+
+  try {
+    await client.query(`
+      CREATE UNIQUE INDEX IF NOT EXISTS uq_credit_recommendations_open_type
+      ON credit_recommendations (customer_id, recommendation_type)
+      WHERE status IN ('New', 'Watching')
+    `);
+  } catch (err) {
+    console.error('[ensureSchema] credit_recommendations unique index:', err.message);
+  }
+
+  await client.query(`
+    ALTER TABLE operational_alerts ADD COLUMN IF NOT EXISTS source_key VARCHAR(160);
+    ALTER TABLE operational_alerts ADD COLUMN IF NOT EXISTS entity_type VARCHAR(40);
+    ALTER TABLE operational_alerts ADD COLUMN IF NOT EXISTS entity_id INTEGER;
+    ALTER TABLE operational_alerts ADD COLUMN IF NOT EXISTS link_path VARCHAR(240);
+    ALTER TABLE operational_alerts ADD COLUMN IF NOT EXISTS resolution_note TEXT;
+    ALTER TABLE operational_alerts ADD COLUMN IF NOT EXISTS resolved_by INTEGER;
+    ALTER TABLE operational_alerts ADD COLUMN IF NOT EXISTS assigned_at TIMESTAMP;
+    ALTER TABLE operational_alerts ADD COLUMN IF NOT EXISTS escalated_at TIMESTAMP;
+    ALTER TABLE operational_alerts ADD COLUMN IF NOT EXISTS escalation_reason TEXT;
+  `);
+
+  try {
+    await client.query(`
+      CREATE UNIQUE INDEX IF NOT EXISTS uq_operational_alerts_open_source_key
+        ON operational_alerts (source_key)
+        WHERE status = 'Open' AND source_key IS NOT NULL;
+      CREATE INDEX IF NOT EXISTS idx_operational_alerts_status ON operational_alerts (status);
+      CREATE INDEX IF NOT EXISTS idx_operational_alerts_severity ON operational_alerts (severity);
+      CREATE INDEX IF NOT EXISTS idx_operational_alerts_branch_status ON operational_alerts (branch_id, status);
+    `);
+  } catch (err) {
+    console.error('[ensureSchema] operational_alerts indexes:', err.message);
+  }
 }

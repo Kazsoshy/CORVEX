@@ -2,7 +2,9 @@ import { createContext, useContext, useEffect, useMemo, useState } from 'react';
 import {
   PREF_EVENT,
   applyPreferences,
+  clearActivePreferences,
   getPreferences,
+  hydratePreferencesForCurrentUser,
   resetPreferenceGroup,
   updatePreferences,
 } from './preferences.js';
@@ -32,6 +34,25 @@ export function PreferencesProvider({ children }) {
       window.removeEventListener(PREF_EVENT, onChange);
       themeQuery.removeEventListener('change', onMedia);
       motionQuery.removeEventListener('change', onMedia);
+    };
+  }, []);
+
+  useEffect(() => {
+    const onSessionReady = () => {
+      hydratePreferencesForCurrentUser().then((next) => setPrefs(next));
+    };
+    const onSignedOut = () => {
+      setPrefs(clearActivePreferences());
+    };
+    window.addEventListener('corvex-session-ready', onSessionReady);
+    window.addEventListener('corvex-signed-out', onSignedOut);
+    // Hydrate if a session is already present (page refresh).
+    if (localStorage.getItem('corvex_token') && localStorage.getItem('corvex_user')) {
+      onSessionReady();
+    }
+    return () => {
+      window.removeEventListener('corvex-session-ready', onSessionReady);
+      window.removeEventListener('corvex-signed-out', onSignedOut);
     };
   }, []);
 

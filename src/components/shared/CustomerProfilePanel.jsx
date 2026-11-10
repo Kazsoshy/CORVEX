@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Lock, MonitorSmartphone, Settings, UserRound } from 'lucide-react';
 import { fetchMyProfile } from '../../api/profileService';
 import { fetchCustomerPortalMe, updateCustomerPortalContact } from '../../api/customerPortalService';
@@ -15,7 +15,6 @@ import { describeIdlePolicy, IDLE_TIMEOUT_MS } from '../../api/sessionActivity';
 import {
   ProfileFact,
   ProfilePasswordForm,
-  ProfileTabs,
   browserLabel,
   copyProfileValue,
   formatIdleRemaining,
@@ -30,22 +29,40 @@ const TABS = [
   { id: 'settings', label: 'Settings', detail: 'Display, reading, and alerts', icon: Settings },
 ];
 
+const TAB_IDS = new Set(TABS.map((tab) => tab.id));
+
+function normalizeCustomerTab(raw) {
+  const value = String(raw || '').trim().toLowerCase();
+  if (value === 'session') return 'activity';
+  return TAB_IDS.has(value) ? value : 'account';
+}
+
 function customerName(account) {
   return [account?.first_name, account?.middle_name, account?.last_name].filter(Boolean).join(' ').replace(/\s+/g, ' ').trim();
 }
 
 export function CustomerProfilePanel({ showToast, mode = 'profile' }) {
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
   const [account, setAccount] = useState(null);
   const [sessionUser, setSessionUser] = useState(null);
   const [contact, setContact] = useState({ phone: '', email: '' });
   const [editing, setEditing] = useState(false);
-  const [section, setSection] = useState('account');
+  const [section, setSection] = useState(() => normalizeCustomerTab(searchParams.get('tab')));
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [passwordDirty, setPasswordDirty] = useState(false);
   const remaining = useIdleRemaining();
   const onPasswordDirty = useCallback((dirty) => setPasswordDirty(dirty), []);
+
+  const syncTabToUrl = useCallback((next) => {
+    setSearchParams((prev) => {
+      const params = new URLSearchParams(prev);
+      if (!next || next === 'account') params.delete('tab');
+      else params.set('tab', next);
+      return params;
+    }, { replace: true });
+  }, [setSearchParams]);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -87,14 +104,16 @@ export function CustomerProfilePanel({ showToast, mode = 'profile' }) {
     || contact.email !== (account?.portal_email || '')
   );
 
-  const changeSection = (next) => {
+  useEffect(() => {
+    const next = normalizeCustomerTab(searchParams.get('tab'));
     if (next === section) return;
     if (contactDirty || passwordDirty) {
       showToast?.('Save or clear your changes before leaving this section.', 'error');
+      syncTabToUrl(section);
       return;
     }
     setSection(next);
-  };
+  }, [searchParams, section, contactDirty, passwordDirty, showToast, syncTabToUrl]);
 
   const cancelEdit = () => {
     setContact({
@@ -219,24 +238,14 @@ export function CustomerProfilePanel({ showToast, mode = 'profile' }) {
         </div>
       </header>
 
-      <div className="settings-shell">
-        <ProfileTabs
-          label="Profile sections"
-          tabs={TABS}
-          active={section}
-          onChange={changeSection}
-          idPrefix="customer-profile"
-        />
-        <div
-          className="settings-stage"
-          role="tabpanel"
-          id={`customer-profile-panel-${section}`}
-          aria-labelledby={`customer-profile-tab-${section}`}
-        >
-          <div className="settings-stage-head">
-            <h3>{activeTab.label}</h3>
-            <p className="muted">{activeTab.detail}</p>
-          </div>
+      <div className="settings-shell profile-shell">
+        <div className="settings-stage" id={`customer-profile-panel-${section}`}>
+          {section !== 'account' ? (
+            <div className="settings-stage-head">
+              <h3>{activeTab.label}</h3>
+              <p className="muted">{activeTab.detail}</p>
+            </div>
+          ) : null}
 
           {section === 'account' ? (
             <section className="settings-card">

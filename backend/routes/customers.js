@@ -1,12 +1,17 @@
 import express from 'express';
-import { allow, assertSameBranch, ROLE_SETS } from '../middleware/auth.js';
+import { allow, assertSameBranch, isUnscoped, ROLE_SETS } from '../middleware/auth.js';
 import {
   createPortalInvitation,
   resendPortalInvitation,
   dispatchPortalActivationEmail,
 } from '../lib/customerPortal.js';
 import { isMailConfigured } from '../lib/mail.js';
+import { AUDIT_STATUS, writeAuditFromReq } from '../lib/auditLog.js';
 import { notifyCustomerAccountStatus, notifyCustomerProfileUpdated, writeCustomerAudit } from '../lib/customerNotifications.js';
+import {
+  OVERDUE_CUSTOMER_SQL,
+  paymentStandingFromFlags,
+} from '../lib/customerStanding.js';
 
 const GOVERNMENT_ID_TYPES = new Set([
   'Philippine National ID',
@@ -182,14 +187,27 @@ const CUSTOMER_SELECT_CORE = `
          c.created_at,
          c.updated_at,
          b.name AS branch_name,
-         mgr.full_name AS account_manager_name,
-         agent.full_name AS assigned_sales_agent_name,
+         COALESCE(NULLIF(TRIM(mgr.full_name), ''), TRIM(CONCAT_WS(' ', mgr.first_name, mgr.last_name))) AS account_manager_name,
+         COALESCE(NULLIF(TRIM(agent.full_name), ''), TRIM(CONCAT_WS(' ', agent.first_name, agent.last_name))) AS assigned_sales_agent_name,
          ${PURCHASE_VOLUME_UNITS_SQL} AS "purchaseVolumeUnits"`;
+
+const OUTSTANDING_BALANCE_SQL = `COALESCE((
+  SELECT outstanding_balance FROM customer_activity WHERE customer_id = c.customer_id
+), 0)`;
 
 router.get('/', async (req, res) => {
   try {
     const pool = req.app.locals.pool;
-    let { branch_id, status, search, page = 1, limit = 20 } = req.query;
+    let {
+      branch_id,
+      status,
+      search,
+      standing,
+      territory_id,
+      page = 1,
+      limit = 20,
+      include_stats,
+    } = req.query;
 
     if (!branch_id && req.currentUser && req.currentUser.branchId) {
       branch_id = String(req.currentUser.branchId);
@@ -201,10 +219,17 @@ router.get('/', async (req, res) => {
 
     if (branch_id) { conditions.push(`c.branch_id = $${pIdx++}`); params.push(Number(branch_id)); }
     if (status)    { conditions.push(`c.status = $${pIdx++}`);    params.push(status); }
+    if (territory_id === 'none' || territory_id === 'null') {
+      conditions.push(`c.territory_id IS NULL`);
+    } else if (territory_id) {
+      conditions.push(`c.territory_id = $${pIdx++}`);
+      params.push(Number(territory_id));
+    }
     if (search) {
       conditions.push(`(
         c.first_name ILIKE $${pIdx}
         OR c.last_name ILIKE $${pIdx}
+        OR c.middle_name ILIKE $${pIdx}
         OR c.customer_code ILIKE $${pIdx}
         OR c.address ILIKE $${pIdx}
         OR c.address_region ILIKE $${pIdx}
@@ -219,6 +244,36 @@ router.get('/', async (req, res) => {
         OR CONCAT(COALESCE(c.contact_person_fname, ''), ' ', COALESCE(c.contact_person_lname, '')) ILIKE $${pIdx}
       )`);
       params.push(`%${search}%`);
+      pIdx += 1;
+    }
+
+    const standingKey = String(standing || '').trim().toLowerCase().replace(/\s+/g, '_');
+    if (standingKey === 'with_balance') {
+      // Collector-compatible: any positive outstanding balance (may include Overdue).
+      conditions.push(`${OUTSTANDING_BALANCE_SQL} > 0`);
+    } else if (standingKey === 'has_balance') {
+      conditions.push(`${OUTSTANDING_BALANCE_SQL} > 0`);
+      conditions.push(`NOT (${OVERDUE_CUSTOMER_SQL})`);
+    } else if (standingKey === 'current') {
+      conditions.push(`${OUTSTANDING_BALANCE_SQL} <= 0`);
+    } else if (standingKey === 'overdue') {
+      conditions.push(OVERDUE_CUSTOMER_SQL);
+    } else if (standingKey === 'assigned_today') {
+      if (req.currentUser?.roleSlug !== 'collector' || !req.currentUser?.id) {
+        return res.status(403).json({
+          success: false,
+          message: 'Assigned Today filter is only available to collectors.',
+        });
+      }
+      conditions.push(`EXISTS (
+        SELECT 1
+        FROM field_visits fv
+        WHERE fv.customer_id = c.customer_id
+          AND fv.user_id = $${pIdx}
+          AND fv.visit_type = 'Collection'
+          AND fv.scheduled_date = (CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Manila')::date
+      )`);
+      params.push(req.currentUser.id);
       pIdx += 1;
     }
 
@@ -242,6 +297,45 @@ router.get('/', async (req, res) => {
           COALESCE((SELECT outstanding_balance FROM customer_activity WHERE customer_id = c.customer_id), 0) AS "outstandingBalance",
           COALESCE(TO_CHAR((SELECT last_sales_visit FROM customer_activity WHERE customer_id = c.customer_id), 'YYYY-MM-DD'), '') AS "lastVisitDate",
           COALESCE(TO_CHAR((SELECT last_collection_date FROM customer_activity WHERE customer_id = c.customer_id), 'YYYY-MM-DD'), '') AS "lastCollectionDate",
+          (
+            SELECT TO_CHAR(MIN(si.due_date), 'YYYY-MM-DD')
+            FROM sales_invoices si
+            LEFT JOIN (
+              SELECT sales_id, COALESCE(SUM(payment_amount), 0) AS paid
+              FROM credit_history WHERE sales_id IS NOT NULL GROUP BY sales_id
+            ) ip ON ip.sales_id = si.sales_invoices_id
+            WHERE si.customer_id = c.customer_id
+              AND si.status IN ('Confirmed', 'Pending Review')
+              AND si.due_date IS NOT NULL
+              AND COALESCE(ip.paid, 0) < si.total_amount
+          ) AS "earliestDueDate",
+          (${OVERDUE_CUSTOMER_SQL}) AS "hasOverdueInvoice",
+          CASE
+            WHEN NOT (${OVERDUE_CUSTOMER_SQL})
+              THEN 0
+            ELSE COALESCE(
+              GREATEST(
+                0,
+                (
+                  (CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Manila')::date
+                  - (
+                    SELECT MIN(si.due_date)::date
+                    FROM sales_invoices si
+                    LEFT JOIN (
+                      SELECT sales_id, COALESCE(SUM(payment_amount), 0) AS paid
+                      FROM credit_history WHERE sales_id IS NOT NULL GROUP BY sales_id
+                    ) ip ON ip.sales_id = si.sales_invoices_id
+                    WHERE si.customer_id = c.customer_id
+                      AND si.status IN ('Confirmed', 'Pending Review')
+                      AND si.due_date IS NOT NULL
+                      AND si.due_date < (CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Manila')::date
+                      AND COALESCE(ip.paid, 0) < si.total_amount
+                  )
+                )
+              ),
+              0
+            )
+          END AS "daysOverdue",
           (SELECT updated_at FROM customer_activity WHERE customer_id = c.customer_id) AS "activityUpdatedAt",
         `;
       }
@@ -265,15 +359,65 @@ router.get('/', async (req, res) => {
       [...params, Number(limit), offset]
     );
 
+    const data = result.rows.map((row) => {
+      const outstandingBalance = Number(row.outstandingBalance) || 0;
+      const hasOverdueInvoice = Boolean(row.hasOverdueInvoice);
+      const paymentStatus = paymentStandingFromFlags({
+        outstandingBalance,
+        hasOverdueInvoice,
+      });
+      return {
+        ...row,
+        outstanding_balance: outstandingBalance,
+        has_overdue_invoice: hasOverdueInvoice,
+        paymentStatus,
+        paymentStanding: paymentStatus,
+      };
+    });
+
+    let stats = null;
+    if (String(include_stats || '') === '1' || String(include_stats || '').toLowerCase() === 'true') {
+      const statsParams = [];
+      const statsConditions = [];
+      if (branch_id) {
+        statsParams.push(Number(branch_id));
+        statsConditions.push(`c.branch_id = $1`);
+      }
+      const statsWhere = statsConditions.length ? `WHERE ${statsConditions.join(' AND ')}` : '';
+      const statsResult = await pool.query(
+        `SELECT
+           COUNT(*)::int AS total_customers,
+           COUNT(*) FILTER (WHERE c.status = 'Active')::int AS active_customers,
+           COUNT(*) FILTER (WHERE ${OVERDUE_CUSTOMER_SQL})::int AS overdue_customers,
+           COUNT(*) FILTER (
+             WHERE ${OUTSTANDING_BALANCE_SQL} > 0
+               AND NOT (${OVERDUE_CUSTOMER_SQL})
+           )::int AS has_balance_customers,
+           COALESCE(SUM(${OUTSTANDING_BALANCE_SQL}), 0)::float AS total_outstanding
+         FROM customers c
+         ${statsWhere}`,
+        statsParams
+      );
+      const row = statsResult.rows[0] || {};
+      stats = {
+        totalCustomers: Number(row.total_customers) || 0,
+        activeCustomers: Number(row.active_customers) || 0,
+        overdueCustomers: Number(row.overdue_customers) || 0,
+        hasBalanceCustomers: Number(row.has_balance_customers) || 0,
+        totalOutstanding: Number(row.total_outstanding) || 0,
+      };
+    }
+
     return res.status(200).json({
       success: true,
-      data: result.rows,
+      data,
       pagination: {
         total,
         page: Number(page),
         limit: Number(limit),
-        totalPages: Math.ceil(total / Number(limit)),
+        totalPages: Math.ceil(total / Number(limit)) || 0,
       },
+      meta: stats ? { stats } : undefined,
     });
   } catch (err) {
     console.error('[Customers] GET / error:', err.message);
@@ -396,8 +540,11 @@ router.get('/:id', async (req, res) => {
     let recentSales = [];
     let unpaidInvoiceCount = 0;
     let hasOverdueInvoice = false;
+    let earliestDueDate = null;
+    let lastFieldVisitDate = null;
+    let todayVisit = null;
     try {
-      const [salesResult, countResult, overdue] = await Promise.all([
+      const [salesResult, countResult, overdue, earliestDueRes, lastVisitRes, todayVisitRes] = await Promise.all([
         pool.query(
           `SELECT si.sales_invoices_id,
                   si.invoice_number,
@@ -405,8 +552,13 @@ router.get('/:id', async (req, res) => {
                   si.status,
                   si.invoices_date::text AS invoices_date,
                   si.due_date::text AS due_date,
-                  si.pay_type
+                  si.pay_type,
+                  GREATEST(0, si.total_amount - COALESCE(ip.paid, 0))::float AS balance
            FROM sales_invoices si
+           LEFT JOIN (
+             SELECT sales_id, COALESCE(SUM(payment_amount), 0) AS paid
+             FROM credit_history WHERE sales_id IS NOT NULL GROUP BY sales_id
+           ) ip ON ip.sales_id = si.sales_invoices_id
            WHERE si.customer_id = $1
              AND si.status IN ('Pending Review', 'Confirmed')
            ORDER BY si.invoices_date DESC, si.sales_invoices_id DESC
@@ -416,27 +568,96 @@ router.get('/:id', async (req, res) => {
         pool.query(
           `SELECT COUNT(*)::int AS count
            FROM sales_invoices si
+           LEFT JOIN (
+             SELECT sales_id, COALESCE(SUM(payment_amount), 0) AS paid
+             FROM credit_history WHERE sales_id IS NOT NULL GROUP BY sales_id
+           ) ip ON ip.sales_id = si.sales_invoices_id
            WHERE si.customer_id = $1
-             AND si.status IN ('Pending Review', 'Confirmed')`,
+             AND si.status IN ('Pending Review', 'Confirmed')
+             AND COALESCE(ip.paid, 0) < si.total_amount`,
           [req.params.id]
         ),
         pool.query(
           `SELECT EXISTS (
              SELECT 1
              FROM sales_invoices si
+             LEFT JOIN (
+               SELECT sales_id, SUM(payment_amount) AS paid
+               FROM credit_history
+               WHERE sales_id IS NOT NULL
+               GROUP BY sales_id
+             ) paid ON paid.sales_id = si.sales_invoices_id
              WHERE si.customer_id = $1
-               AND si.status IN ('Pending Review', 'Confirmed')
+               AND si.status IN ('Confirmed', 'Pending Review')
                AND si.due_date IS NOT NULL
                AND si.due_date < (CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Manila')::date
+               AND COALESCE(paid.paid, 0) < si.total_amount
            ) AS has_overdue`,
           [req.params.id]
         ),
+        pool.query(
+          `SELECT TO_CHAR(MIN(si.due_date), 'YYYY-MM-DD') AS earliest_due_date
+           FROM sales_invoices si
+           LEFT JOIN (
+             SELECT sales_id, COALESCE(SUM(payment_amount), 0) AS paid
+             FROM credit_history WHERE sales_id IS NOT NULL GROUP BY sales_id
+           ) ip ON ip.sales_id = si.sales_invoices_id
+           WHERE si.customer_id = $1
+             AND si.status IN ('Pending Review', 'Confirmed')
+             AND si.due_date IS NOT NULL
+             AND COALESCE(ip.paid, 0) < si.total_amount`,
+          [req.params.id]
+        ),
+        pool.query(
+          `SELECT TO_CHAR(MAX(scheduled_date), 'YYYY-MM-DD') AS last_visit_date
+           FROM field_visits
+           WHERE customer_id = $1
+             AND status = 'Completed'
+             AND visit_type = 'Collection'`,
+          [req.params.id]
+        ),
+        req.currentUser?.id
+          ? pool.query(
+              `SELECT visit_id, customer_id, visit_type, scheduled_date::text AS scheduled_date,
+                      status, visit_outcome, visit_remarks, visited_at
+               FROM field_visits
+               WHERE customer_id = $1
+                 AND user_id = $2
+                 AND visit_type = 'Collection'
+                 AND scheduled_date = (CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Manila')::date
+               ORDER BY visit_id DESC
+               LIMIT 1`,
+              [req.params.id, req.currentUser.id]
+            )
+          : Promise.resolve({ rows: [] }),
       ]);
       recentSales = salesResult.rows;
       unpaidInvoiceCount = countResult.rows[0]?.count || 0;
       hasOverdueInvoice = Boolean(overdue.rows[0]?.has_overdue);
+      earliestDueDate = earliestDueRes.rows[0]?.earliest_due_date || null;
+      lastFieldVisitDate = lastVisitRes.rows[0]?.last_visit_date || null;
+      todayVisit = todayVisitRes.rows[0] || null;
     } catch (err) {
       console.error('[Customers] recent sales lookup failed:', err.message);
+    }
+
+    const outstandingBalance = Number(activityResult.rows[0]?.outstanding_balance) || 0;
+    const paymentStatus = paymentStandingFromFlags({
+      outstandingBalance,
+      hasOverdueInvoice,
+    });
+    let daysOverdue = 0;
+    if (hasOverdueInvoice && earliestDueDate) {
+      const manilaToday = new Intl.DateTimeFormat('en-CA', {
+        timeZone: 'Asia/Manila',
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+      }).format(new Date());
+      const diff = Math.floor(
+        (new Date(`${manilaToday}T12:00:00`) - new Date(`${earliestDueDate}T12:00:00`)) / 86400000
+      );
+      daysOverdue = Math.max(0, diff);
     }
 
     return res.status(200).json({
@@ -449,6 +670,14 @@ router.get('/:id', async (req, res) => {
         recentSales,
         unpaidInvoiceCount,
         hasOverdueInvoice,
+        earliestDueDate,
+        lastFieldVisitDate,
+        todayVisit,
+        outstandingBalance,
+        outstanding_balance: outstandingBalance,
+        daysOverdue,
+        paymentStatus,
+        paymentStanding: paymentStatus,
       },
     });
   } catch (err) {
@@ -472,10 +701,20 @@ router.post('/', async (req, res) => {
     id_type, id_number, id_photo,
   } = req.body;
 
-  const resolvedBranchId = branch_id
-    ? Number(branch_id)
-    : (req.currentUser?.branchId ?? null);
   const isSalesAgent = req.currentUser?.roleSlug === 'sales_staff';
+  const actorBranchId = req.currentUser?.branchId != null ? Number(req.currentUser.branchId) : null;
+  // Branch ownership is never inferred from GPS. Sales / BM / collector always
+  // inherit the authenticated user's branch. Only unscoped roles may set branch_id.
+  let resolvedBranchId = null;
+  if (isSalesAgent || req.currentUser?.roleSlug === 'branch_manager' || req.currentUser?.roleSlug === 'collector') {
+    resolvedBranchId = actorBranchId;
+  } else if (!isUnscoped(req.currentUser) && actorBranchId != null) {
+    resolvedBranchId = actorBranchId;
+  } else if (branch_id != null && branch_id !== '') {
+    resolvedBranchId = Number(branch_id);
+  } else {
+    resolvedBranchId = actorBranchId;
+  }
 
   const addressParts = {
     address_region: cleanPart(address_region),
@@ -523,8 +762,11 @@ router.post('/', async (req, res) => {
     return res.status(400).json({ success: false, message: 'Government ID number is required.' });
   }
 
-  if (!resolvedBranchId) {
+  if (!resolvedBranchId || !Number.isFinite(resolvedBranchId)) {
     return res.status(400).json({ success: false, message: 'branch_id is required to create a customer.' });
+  }
+  if ((isSalesAgent || req.currentUser?.roleSlug === 'branch_manager') && actorBranchId == null) {
+    return res.status(403).json({ success: false, message: 'No branch assigned. Cannot create a customer.' });
   }
 
   // SA canvassing registration does not create portal accounts from this screen.
@@ -548,9 +790,60 @@ router.post('/', async (req, res) => {
 
     await client.query('BEGIN');
 
+    const customerStatus = isSalesAgent ? 'Active' : (status || 'Active');
+    let resolvedTerritoryId = territory_id ? Number(territory_id) : null;
+    let territoryDefaultCollectorId = null;
+
+    if (customerStatus === 'Active' && !resolvedTerritoryId) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({
+        success: false,
+        message: 'An Active customer must be assigned to an Active territory in the same branch.',
+      });
+    }
+
+    if (resolvedTerritoryId) {
+      const territoryCheck = await client.query(
+        `SELECT territory_id, branch_id, COALESCE(status, 'Active') AS status, default_collector_id
+         FROM territories
+         WHERE territory_id = $1`,
+        [resolvedTerritoryId]
+      );
+      if (!territoryCheck.rows.length) {
+        await client.query('ROLLBACK');
+        return res.status(400).json({ success: false, message: 'Territory not found.' });
+      }
+      if (Number(territoryCheck.rows[0].branch_id) !== Number(resolvedBranchId)) {
+        await client.query('ROLLBACK');
+        return res.status(400).json({
+          success: false,
+          message: 'Territory belongs to a different branch than the customer.',
+        });
+      }
+      if (customerStatus === 'Active' && territoryCheck.rows[0].status !== 'Active') {
+        await client.query('ROLLBACK');
+        return res.status(400).json({
+          success: false,
+          message: 'Active customers can only be assigned to Active territories.',
+        });
+      }
+      territoryDefaultCollectorId = territoryCheck.rows[0].default_collector_id != null
+        ? Number(territoryCheck.rows[0].default_collector_id)
+        : null;
+    }
+
     const assignedSalesAgentId = isSalesAgent
       ? req.currentUser.id
       : null;
+
+    // Permanent Account Manager is the Collector relationship — not the creating Sales Agent.
+    let resolvedAccountManagerId = account_manager_id ? Number(account_manager_id) : null;
+    if (!resolvedAccountManagerId && territoryDefaultCollectorId) {
+      resolvedAccountManagerId = territoryDefaultCollectorId;
+    }
+    if (!resolvedAccountManagerId && !isSalesAgent && req.currentUser?.roleSlug === 'collector') {
+      resolvedAccountManagerId = req.currentUser.id;
+    }
 
     const result = await client.query(
       `INSERT INTO customers
@@ -567,9 +860,9 @@ router.post('/', async (req, res) => {
        RETURNING customer_id, created_at`,
       [
         resolvedBranchId,
-        account_manager_id ? Number(account_manager_id) : (req.currentUser?.id ?? null),
+        resolvedAccountManagerId,
         assignedSalesAgentId,
-        territory_id ? Number(territory_id) : null,
+        resolvedTerritoryId,
         first_name.trim(),
         middle_name ? String(middle_name).trim() : null,
         last_name.trim(),
@@ -594,7 +887,7 @@ router.post('/', async (req, res) => {
         secondary_contact_lname?.trim() || null,
         secondary_contact_phone?.trim() || null,
         secondary_contact_relationship?.trim() || null,
-        isSalesAgent ? 'Active' : (status || 'Active'),
+        customerStatus,
         idType,
         idNumber,
         idPhotoValue,
@@ -670,6 +963,15 @@ router.post('/', async (req, res) => {
         createMessage += ` (${emailResult.error})`;
       }
     }
+
+    await writeAuditFromReq(req.app.locals.pool, req, {
+      module: 'Customer Management',
+      activity: 'Create Customer',
+      action: 'Create Customer',
+      description: `Created customer ${first_name} ${last_name}.`,
+      status: AUDIT_STATUS.CREATED,
+      affectedRecord: `customer:${customerId}`,
+    });
 
     return res.status(201).json({
       success: true,
@@ -859,8 +1161,40 @@ router.put('/:id', async (req, res) => {
     if (!isSalesAgent && branch_id !== undefined) {
       addField('branch_id', branch_id ? Number(branch_id) : null, 'branch');
     }
-    if (!isSalesAgent && territory_id !== undefined) {
-      addField('territory_id', territory_id ? Number(territory_id) : null, 'territory');
+    if (territory_id !== undefined) {
+      const nextTerritoryId = territory_id ? Number(territory_id) : null;
+      if (!nextTerritoryId && String(before.status || 'Active') === 'Active') {
+        return res.status(400).json({
+          success: false,
+          message: 'Active customers require an Active territory in the same branch.',
+        });
+      }
+      if (nextTerritoryId) {
+        const territoryCheck = await req.app.locals.pool.query(
+          `SELECT territory_id, branch_id, COALESCE(status, 'Active') AS status
+           FROM territories WHERE territory_id = $1`,
+          [nextTerritoryId]
+        );
+        if (!territoryCheck.rows.length) {
+          return res.status(400).json({ success: false, message: 'Territory not found.' });
+        }
+        const customerBranchId = branch_id !== undefined && !isSalesAgent
+          ? Number(branch_id)
+          : Number(before.branch_id);
+        if (Number(territoryCheck.rows[0].branch_id) !== Number(customerBranchId)) {
+          return res.status(400).json({
+            success: false,
+            message: 'Territory belongs to a different branch than the customer.',
+          });
+        }
+        if (territoryCheck.rows[0].status !== 'Active' && String(before.status || 'Active') === 'Active') {
+          return res.status(400).json({
+            success: false,
+            message: 'Active customers can only be assigned to Active territories.',
+          });
+        }
+      }
+      addField('territory_id', nextTerritoryId, 'territory');
     }
     if (!isSalesAgent && account_manager_id !== undefined) {
       addField('account_manager_id', account_manager_id ? Number(account_manager_id) : null, 'account manager');
@@ -951,6 +1285,15 @@ router.put('/:id', async (req, res) => {
         await notifyCustomerAccountStatus(pool, { customerId, status: after.status });
       }
     }
+
+    await writeAuditFromReq(pool, req, {
+      module: 'Customer Management',
+      activity: 'Update Customer',
+      action: 'Update Customer',
+      description: `Updated customer ${after.first_name || ''} ${after.last_name || ''}`.trim(),
+      status: AUDIT_STATUS.UPDATED,
+      affectedRecord: `customer:${after.customer_id}`,
+    });
 
     return res.status(200).json({ success: true, message: 'Customer updated.', data: after });
   } catch (err) {

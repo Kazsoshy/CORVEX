@@ -96,12 +96,22 @@ export async function buildCustomerCreditEvidence(client, customerId) {
   );
 
   const invoicesRes = await client.query(
-    `SELECT sales_invoices_id, invoice_number, total_amount, status, invoices_date, due_date,
-            pay_type, down_payment, term_months, monthly_amount, first_due_date
-     FROM sales_invoices
-     WHERE customer_id = $1
-       AND status NOT IN ('Cancelled', 'Draft')
-     ORDER BY invoices_date DESC, sales_invoices_id DESC
+    `SELECT si.sales_invoices_id, si.invoice_number, si.total_amount, si.status, si.invoices_date, si.due_date,
+            si.pay_type, si.down_payment, si.term_months, si.monthly_amount, si.first_due_date,
+            COALESCE((
+              SELECT SUM(ch.payment_amount) FROM credit_history ch WHERE ch.sales_id = si.sales_invoices_id
+            ), 0)::float AS amount_paid,
+            COALESCE((
+              SELECT ch.remaining_balance
+              FROM credit_history ch
+              WHERE ch.sales_id = si.sales_invoices_id
+              ORDER BY ch.transaction_date DESC, ch.credit_id DESC
+              LIMIT 1
+            ), si.total_amount)::float AS remaining_balance
+     FROM sales_invoices si
+     WHERE si.customer_id = $1
+       AND si.status NOT IN ('Cancelled', 'Draft')
+     ORDER BY si.invoices_date DESC, si.sales_invoices_id DESC
      LIMIT 20`,
     [customerId]
   );
@@ -188,16 +198,22 @@ export async function buildCustomerCreditEvidence(client, customerId) {
       last_sales_visit: customer.last_sales_visit || null,
       payment_history: paymentHistory,
       open_invoices: openInvoices.map((row) => ({
+        sales_invoices_id: row.sales_invoices_id,
         invoice_number: row.invoice_number,
         total_amount: money(row.total_amount),
+        amount_paid: money(row.amount_paid),
+        remaining_balance: money(row.remaining_balance),
         status: row.status,
         invoices_date: row.invoices_date,
         due_date: row.due_date,
         pay_type: row.pay_type,
+        term_months: row.term_months,
       })),
       overdue_invoices: overdueInvoices.map((row) => ({
         invoice_number: row.invoice_number,
         total_amount: money(row.total_amount),
+        amount_paid: money(row.amount_paid),
+        remaining_balance: money(row.remaining_balance),
         status: row.status,
         due_date: row.due_date,
       })),
@@ -321,7 +337,7 @@ export function assessCreditRisk(evidence) {
   return { level, score, reasons };
 }
 
-function buildLimitSuggestion(evidence, risk) {
+export function buildLimitSuggestion(evidence, risk) {
   const financial = evidence.financial || {};
   const hasLimit = financial.credit_limit != null && financial.credit_limit > 0;
   const payments = (financial.payment_history || []).filter((p) => {
@@ -468,6 +484,140 @@ export async function createCreditReview(client, {
 }
 
 /**
+ * In-place resubmit after BM requested revision.
+ * Updates the same CI row back to Pending with a fresh snapshot (previous snapshot preserved in revision history).
+ */
+export async function resubmitCreditReview(client, {
+  ciId,
+  submittedBy,
+  requestReason,
+  requestedCreditLimit,
+  requestRemarks,
+}) {
+  const existing = await client.query(
+    `SELECT ci.*, c.branch_id AS customer_branch_id
+     FROM credit_investigations ci
+     JOIN customers c ON c.customer_id = ci.customer_id
+     WHERE ci.ci_id = $1
+     FOR UPDATE`,
+    [Number(ciId)]
+  );
+  if (!existing.rows.length) {
+    const err = new Error('Credit review not found.');
+    err.status = 404;
+    throw err;
+  }
+
+  const review = existing.rows[0];
+  if (Number(review.submitted_by) !== Number(submittedBy)) {
+    const err = new Error('Only the original submitter can resubmit this credit review.');
+    err.status = 403;
+    throw err;
+  }
+  if (review.status !== 'Revision Requested') {
+    const err = new Error(
+      review.status === 'Pending'
+        ? 'This credit review is already pending Branch Manager decision.'
+        : `This credit review cannot be resubmitted while status is ${review.status}.`
+    );
+    err.status = 409;
+    err.existingId = review.ci_id;
+    throw err;
+  }
+
+  const reason = cleanText(requestReason) || cleanText(review.request_reason) || cleanText(review.purpose);
+  if (!reason || !CREDIT_REVIEW_REASONS.includes(reason)) {
+    const err = new Error('A valid request reason is required.');
+    err.status = 400;
+    throw err;
+  }
+
+  const evidence = await buildCustomerCreditEvidence(client, review.customer_id);
+  if (!evidence) {
+    const err = new Error('Customer not found.');
+    err.status = 404;
+    throw err;
+  }
+
+  const snapshot = freezeCreditSnapshot(evidence);
+  const risk = evidence.risk;
+  let requested = null;
+  if (requestedCreditLimit !== undefined && requestedCreditLimit !== null && requestedCreditLimit !== '') {
+    requested = money(requestedCreditLimit);
+    if (!(requested > 0)) {
+      const err = new Error('Requested credit limit must be a positive amount.');
+      err.status = 400;
+      throw err;
+    }
+  } else if (review.requested_credit_limit != null) {
+    requested = money(review.requested_credit_limit);
+  }
+
+  const previousHistory = parseJson(review.revision_history_json, []);
+  const history = Array.isArray(previousHistory) ? [...previousHistory] : [];
+  history.push({
+    event: 'sales_resubmit',
+    at: new Date().toISOString(),
+    by: submittedBy,
+    previous_status: review.status,
+    previous_snapshot: parseJson(review.financial_snapshot_json, {}),
+    previous_decision_remarks: review.decision_remarks || null,
+    previous_rejection_reason: review.rejection_reason || null,
+  });
+
+  const result = await client.query(
+    `UPDATE credit_investigations SET
+       status = 'Pending',
+       purpose = $1,
+       request_reason = $1,
+       requested_credit_limit = $2,
+       request_remarks = $3,
+       form_remarks = $3,
+       monthly_income = $4,
+       financial_snapshot_json = $5::jsonb,
+       risk_level = $6,
+       risk_score = $7,
+       risk_reasons_json = $8::jsonb,
+       leaflet_classification = $6,
+       delinquency_status = $9,
+       delinquency_flags_json = $10::jsonb,
+       payment_history_json = $11::jsonb,
+       revision_history_json = $12::jsonb,
+       approved_by = NULL,
+       approved_credit_limit = NULL,
+       decided_at = NULL,
+       updated_at = CURRENT_TIMESTAMP,
+       resubmitted_at = CURRENT_TIMESTAMP,
+       resubmitted_by = $13
+     WHERE ci_id = $14
+     RETURNING ci_id, status, created_at, updated_at, risk_level, requested_credit_limit, customer_id`,
+    [
+      reason,
+      requested,
+      cleanText(requestRemarks),
+      evidence.financial.monthly_income || 0,
+      JSON.stringify(snapshot),
+      risk.level,
+      risk.score,
+      JSON.stringify(risk.reasons),
+      risk.level === 'High' ? 'Review' : 'Clear',
+      JSON.stringify(risk.reasons),
+      JSON.stringify(evidence.financial.payment_history || []),
+      JSON.stringify(history),
+      submittedBy,
+      review.ci_id,
+    ]
+  );
+
+  return {
+    row: result.rows[0],
+    evidence,
+    snapshot,
+    resubmitted: true,
+  };
+}
+
+/**
  * Apply BM decision. Approval UPSERTS customer_credit_info.credit_limit.
  * @param {object} opts
  * @param {number|null} opts.branchId - null/undefined means unscoped (OM/super admin)
@@ -524,6 +674,11 @@ export async function applyCreditReviewDecision(client, {
     err.status = 400;
     throw err;
   }
+  if (status === 'Revision Requested' && !remarks && !rejectText) {
+    const err = new Error('Revision instructions are required.');
+    err.status = 400;
+    throw err;
+  }
 
   let approvedLimit = null;
   if (status === 'Approved') {
@@ -549,6 +704,18 @@ export async function applyCreditReviewDecision(client, {
     }
   }
 
+  const previousHistory = parseJson(review.revision_history_json, []);
+  const history = Array.isArray(previousHistory) ? [...previousHistory] : [];
+  history.push({
+    event: 'bm_decision',
+    at: new Date().toISOString(),
+    by: reviewerId,
+    previous_status: review.status,
+    new_status: status,
+    remarks: remarks || rejectText || null,
+    approved_credit_limit: status === 'Approved' ? approvedLimit : null,
+  });
+
   const updated = await client.query(
     `UPDATE credit_investigations
      SET status = $1,
@@ -557,10 +724,11 @@ export async function applyCreditReviewDecision(client, {
          decision_remarks = COALESCE($4, decision_remarks),
          approved_credit_limit = CASE WHEN $1 = 'Approved' THEN $5 ELSE approved_credit_limit END,
          decided_at = CURRENT_TIMESTAMP,
+         revision_history_json = $7::jsonb,
          updated_at = CURRENT_TIMESTAMP
      WHERE ci_id = $6
      RETURNING *`,
-    [status, reviewerId, rejectText, remarks, approvedLimit, ciId]
+    [status, reviewerId, rejectText, remarks, approvedLimit, ciId, JSON.stringify(history)]
   );
 
   if (status === 'Approved') {
@@ -588,6 +756,7 @@ export async function applyCreditReviewDecision(client, {
     customerName: review.customer_name,
     submittedBy: review.submitted_by,
     approvedLimit,
+    branchId: review.branch_id ?? updated.rows[0]?.branch_id ?? null,
   };
 }
 
@@ -597,7 +766,10 @@ export function mapCreditReviewApiRow(row, { liveEvidence = null } = {}) {
   const flags = parseJson(row.delinquency_flags_json, []);
   const payments = parseJson(row.payment_history_json, []);
 
-  const displayStatus = row.status === 'Pending' ? 'Needs BM' : row.status;
+  const displayStatus = (row.status === 'Pending' || row.status === 'Revision Requested')
+    ? 'Needs BM'
+    : row.status;
+  const revisionHistory = parseJson(row.revision_history_json, []);
 
   return {
     ci_id: row.ci_id,
@@ -619,11 +791,19 @@ export function mapCreditReviewApiRow(row, { liveEvidence = null } = {}) {
     decided_at: row.decided_at || null,
     created_at: row.created_at,
     updated_at: row.updated_at,
+    resubmitted_at: row.resubmitted_at || null,
     customer_name: row.customer_name,
     customer_code: row.customer_code,
+    contact_phone: row.contact_phone || null,
     branch_name: row.branch_name,
     submitted_by_name: row.submitted_by_name,
     approved_by_name: row.approved_by_name,
+    assigned_sales_agent_id: row.assigned_sales_agent_id || null,
+    assigned_sales_agent_name: row.assigned_sales_agent_name || null,
+    account_manager_name: row.account_manager_name || null,
+    outstanding_balance: row.outstanding_balance != null ? money(row.outstanding_balance) : null,
+    live_credit_limit: row.live_credit_limit != null ? money(row.live_credit_limit) : null,
+    revision_history: Array.isArray(revisionHistory) ? revisionHistory : [],
     snapshot,
     live: liveEvidence || null,
     // legacy compatibility fields used by older UI mappers

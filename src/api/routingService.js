@@ -11,14 +11,17 @@ export async function fetchRouteDepot() {
 }
 
 /**
- * @param {'saw'|'travel'} orderMode
- * @param {Array<object>} stops — route stops with id, latitude, longitude, rank, etc.
+ * Fetch the Priority-Aware optimized driving route on OpenStreetMap roads.
+ * @param {'recommended'|'saw'|'travel'} [orderMode='recommended']
+ * @param {Array<object>} stops — route stops with id, latitude, longitude, rank, saw_score, etc.
+ * @param {{ latitude: number, longitude: number } | null} [origin=null]
  */
-export async function fetchDrivingRoute(orderMode, stops) {
+export async function fetchDrivingRoute(orderMode = 'recommended', stops = [], origin = null) {
   try {
     const response = await apiClient.post('/collector/route/driving', {
-      order_mode: orderMode,
+      order_mode: orderMode || 'recommended',
       stops,
+      ...(origin ? { origin } : {}),
     });
     return response.data;
   } catch (error) {

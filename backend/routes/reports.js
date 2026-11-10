@@ -1,8 +1,18 @@
 import express from 'express';
 import { requireAuth, requireRole, requireAssignedBranch, isUnscoped, ROLE_SETS } from '../middleware/auth.js';
-import { inventoryHealthPercent } from '../lib/inventoryHealth.js';
+import {
+  inventoryHealthPercent,
+  rateAgainstDailyTarget,
+  stockAlertsCount,
+  STOCK_STATUS_CASE_SQL,
+  STOCK_STATUS_CASE_SQL_BI,
+} from '../lib/inventoryHealth.js';
 import { parseTargetAmount, readPerformanceTargets, savePerformanceTargets } from '../lib/performanceTargets.js';
 import { readCreditExposure } from '../lib/creditExposure.js';
+import {
+  OVERDUE_CUSTOMER_SQL,
+  overdueCustomerAsOfSql,
+} from '../lib/customerStanding.js';
 
 /** Branch roles are always scoped; only OM / super_admin may see all branches. */
 function branchScope(user, queryBranchId) {
@@ -20,12 +30,16 @@ function branchScope(user, queryBranchId) {
 
 const router = express.Router();
 const ORG_REPORT_PATHS = new Set(['/executive', '/operating-manager', '/performance-history', '/targets']);
-const CREDIT_HISTORY_PATHS = new Set(['/credit-history']);
 const CHART_DETAILS_PATHS = new Set(['/chart-details']);
+
+function isCreditHistoryPath(path) {
+  return path === '/credit-history' || path.startsWith('/credit-history/');
+}
+
 router.use((req, res, next) => {
   const allowed = ORG_REPORT_PATHS.has(req.path)
     ? ROLE_SETS.reportsOrg
-    : CREDIT_HISTORY_PATHS.has(req.path)
+    : isCreditHistoryPath(req.path)
       ? ROLE_SETS.creditHistory
       : CHART_DETAILS_PATHS.has(req.path)
         ? [...ROLE_SETS.reportsBranch, 'sales_staff']
@@ -34,24 +48,88 @@ router.use((req, res, next) => {
 });
 router.use(requireAssignedBranch);
 
+/** Shared customer payment ledger SELECT (credit_history). */
+const CREDIT_HISTORY_SELECT = `
+  ch.credit_id,
+  ch.customer_id,
+  COALESCE(NULLIF(TRIM(CONCAT_WS(' ', c.first_name, c.middle_name, c.last_name)), ''), 'Customer') AS customer_name,
+  c.customer_code,
+  c.assigned_sales_agent_id,
+  b.name AS branch_name,
+  c.branch_id,
+  ch.sales_id,
+  si.invoice_number,
+  si.total_amount AS invoice_amount,
+  si.due_date AS invoice_due_date,
+  ch.collection_id,
+  cp.receipt_number,
+  cp.notes AS collection_notes,
+  cp.status AS collection_status,
+  cp.branch_id AS payment_branch_id,
+  pm.method_name AS payment_method,
+  COALESCE(NULLIF(TRIM(collector.full_name), ''), collector.email) AS collector_name,
+  ch.previous_balance,
+  ch.payment_amount,
+  ch.remaining_balance,
+  ch.payment_status,
+  CASE
+    WHEN ch.remaining_balance > 0
+      AND si.due_date IS NOT NULL
+      AND si.due_date < CURRENT_DATE
+    THEN 'Overdue'
+    WHEN ch.remaining_balance <= 0 THEN 'Paid'
+    WHEN ch.payment_status = 'Paid' AND ch.remaining_balance > 0 THEN 'Partial'
+    ELSE ch.payment_status
+  END AS display_status,
+  ch.transaction_date
+`;
+
+const CREDIT_HISTORY_FROM = `
+  FROM credit_history ch
+  JOIN customers c ON c.customer_id = ch.customer_id
+  JOIN branches b ON b.id = c.branch_id
+  LEFT JOIN sales_invoices si ON si.sales_invoices_id = ch.sales_id
+  LEFT JOIN collection_payment cp ON cp.collectionpayment_id = ch.collection_id
+  LEFT JOIN payment_methods pm ON pm.payment_method_id = cp.payment_method_id
+  LEFT JOIN users collector ON collector.id = cp.collector_id
+`;
+
+/**
+ * Branch + role scope for the shared payment ledger.
+ * Sales: assigned customer portfolio. BM: branch customers.
+ * Always require payment branch consistency when a collection_payment exists.
+ */
+function creditHistoryScope(user, { queryBranchId } = {}) {
+  const conditions = [];
+  const params = [];
+  let pIdx = 1;
+
+  const { bid: branchId } = branchScope(user, queryBranchId);
+  if (branchId !== null && Number.isFinite(Number(branchId))) {
+    conditions.push(`c.branch_id = $${pIdx++}`);
+    params.push(Number(branchId));
+  }
+
+  if (user.roleSlug === 'sales_staff') {
+    conditions.push(`c.assigned_sales_agent_id = $${pIdx++}`);
+    params.push(Number(user.id));
+  }
+
+  // Do not expose payments whose collection_payment belongs to another branch.
+  conditions.push(`(cp.collectionpayment_id IS NULL OR cp.branch_id = c.branch_id)`);
+  if (branchId !== null && Number.isFinite(Number(branchId))) {
+    conditions.push(`(cp.collectionpayment_id IS NULL OR cp.branch_id = $${pIdx++})`);
+    params.push(Number(branchId));
+  }
+
+  return { conditions, params, pIdx, branchId };
+}
+
 const MANILA_TIME_ZONE = 'Asia/Manila';
 const COUNTED_INVOICE_STATUS = `status IN ('Confirmed', 'Pending Review')`;
 const COUNTED_INVOICE_STATUS_SI = `si.status IN ('Confirmed', 'Pending Review')`;
-const OVERDUE_CUSTOMER = `EXISTS (
-  SELECT 1
-  FROM sales_invoices si
-  LEFT JOIN (
-    SELECT sales_id, SUM(payment_amount) AS paid
-    FROM credit_history
-    WHERE sales_id IS NOT NULL
-    GROUP BY sales_id
-  ) paid ON paid.sales_id = si.sales_invoices_id
-  WHERE si.customer_id = c.customer_id
-    AND si.status IN ('Confirmed', 'Pending Review')
-    AND si.due_date IS NOT NULL
-    AND si.due_date < (CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Manila')::date
-    AND COALESCE(paid.paid, 0) < si.total_amount
-)`;
+/** Prefer shared overdue definition (invoice due date + unpaid balance). */
+const OVERDUE_CUSTOMER = OVERDUE_CUSTOMER_SQL;
 
 function toManilaDateString(date = new Date()) {
   return new Intl.DateTimeFormat('en-CA', {
@@ -357,7 +435,8 @@ router.get('/collection', requireAuth, async (req, res) => {
          TO_CHAR(payment_date, 'Dy') AS day,
          COALESCE(SUM(amount), 0) AS amount
        FROM collection_payment
-       WHERE payment_date >= (CURRENT_TIMESTAMP AT TIME ZONE '+08')::DATE - INTERVAL '7 days'
+       WHERE payment_date >= (CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Manila')::DATE - INTERVAL '6 days'
+         AND status = 'Completed'
          ${isBranchScoped ? 'AND branch_id = $1' : ''}
        GROUP BY TO_CHAR(payment_date, 'Dy'), payment_date
        ORDER BY MIN(payment_date)`,
@@ -366,7 +445,7 @@ router.get('/collection', requireAuth, async (req, res) => {
 
     const targets = await readPerformanceTargets(pool);
     const daily = days.map((day) => {
-      const found = result.rows.find((r) => r.day === day);
+      const found = result.rows.find((r) => String(r.day || '').startsWith(day.slice(0, 2)));
       return {
         day,
         amount: found ? Number(found.amount) : 0,
@@ -375,14 +454,22 @@ router.get('/collection', requireAuth, async (req, res) => {
     });
 
     const totalCollected = daily.reduce((sum, d) => sum + d.amount, 0);
-    const totalTarget = daily.reduce((sum, d) => sum + d.target, 0);
-    // Cap at 100 — target is a reference line, not a ceiling; actual can exceed it
-    const collectionRate = totalTarget > 0 ? Math.min(100, Math.round((totalCollected / totalTarget) * 100)) : 0;
+    const totalTarget = targets.collectionDaily * 7;
+    const collectionRate = rateAgainstDailyTarget(totalCollected, targets.collectionDaily, 7);
+    const today = toManilaDateString();
+    const startDate = (() => {
+      const d = new Date(`${today}T12:00:00+08:00`);
+      d.setDate(d.getDate() - 6);
+      return toManilaDateString(d);
+    })();
 
     return res.status(200).json({
       success: true,
       data: {
         daily,
+        dateFrom: startDate,
+        dateTo: today,
+        periodLabel: 'Last 7 days',
         summary: {
           totalCollected,
           totalTarget,
@@ -414,7 +501,7 @@ router.get('/sales', requireAuth, async (req, res) => {
          COUNT(*) AS invoices,
          COALESCE(SUM(total_amount), 0) AS actual
        FROM sales_invoices
-       WHERE invoices_date >= (CURRENT_TIMESTAMP AT TIME ZONE '+08')::DATE - INTERVAL '7 days'
+       WHERE invoices_date >= (CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Manila')::DATE - INTERVAL '6 days'
          AND ${COUNTED_INVOICE_STATUS}
          ${isBranchScoped ? 'AND branch_id = $1' : ''}
        GROUP BY TO_CHAR(invoices_date, 'Dy'), invoices_date
@@ -424,7 +511,7 @@ router.get('/sales', requireAuth, async (req, res) => {
 
     const targets = await readPerformanceTargets(pool);
     const weekly = days.map((day) => {
-      const found = result.rows.find((r) => r.day === day);
+      const found = result.rows.find((r) => String(r.day || '').startsWith(day.slice(0, 2)));
       return {
         day,
         actual: found ? Number(found.actual) : 0,
@@ -434,14 +521,22 @@ router.get('/sales', requireAuth, async (req, res) => {
     });
 
     const totalActual = weekly.reduce((sum, d) => sum + d.actual, 0);
-    const totalTarget = weekly.reduce((sum, d) => sum + d.target, 0);
-    // Cap at 100 — target is a reference line, not a ceiling; actual can exceed it
-    const salesEfficiency = totalTarget > 0 ? Math.min(100, Math.round((totalActual / totalTarget) * 100)) : 0;
+    const totalTarget = targets.salesDaily * 7;
+    const salesEfficiency = rateAgainstDailyTarget(totalActual, targets.salesDaily, 7);
+    const today = toManilaDateString();
+    const startDate = (() => {
+      const d = new Date(`${today}T12:00:00+08:00`);
+      d.setDate(d.getDate() - 6);
+      return toManilaDateString(d);
+    })();
 
     return res.status(200).json({
       success: true,
       data: {
         weekly,
+        dateFrom: startDate,
+        dateTo: today,
+        periodLabel: 'Last 7 days',
         summary: {
           totalActual,
           totalTarget,
@@ -468,11 +563,7 @@ router.get('/inventory', requireAuth, async (req, res) => {
 
     const statusResult = await pool.query(
       `SELECT
-         CASE 
-           WHEN available_stock <= 0 THEN 'Out of Stock'
-           WHEN available_stock <= reorder_level THEN 'Low Stock'
-           ELSE 'Sufficient'
-         END AS stock_status,
+         (${STOCK_STATUS_CASE_SQL}) AS stock_status,
          COUNT(*) AS count
        FROM branch_inventory
        ${isBranchScoped ? 'WHERE branch_id = $1' : ''}
@@ -482,14 +573,10 @@ router.get('/inventory', requireAuth, async (req, res) => {
 
     const lowStockResult = await pool.query(
       `SELECT p.name AS product_name, p.sku, bi.available_stock, bi.reorder_level,
-         CASE 
-           WHEN bi.available_stock <= 0 THEN 'Out of Stock'
-           WHEN bi.available_stock <= bi.reorder_level THEN 'Low Stock'
-           ELSE 'Sufficient'
-         END AS status
+         (${STOCK_STATUS_CASE_SQL_BI}) AS status
        FROM branch_inventory bi
        JOIN products p ON p.id = bi.product_id
-       WHERE bi.available_stock <= bi.reorder_level
+       WHERE (${STOCK_STATUS_CASE_SQL_BI}) IN ('Low Stock', 'Critical Stock', 'Out of Stock')
          ${isBranchScoped ? 'AND bi.branch_id = $1' : ''}
        ORDER BY bi.available_stock ASC`,
       isBranchScoped ? [bid] : []
@@ -505,11 +592,12 @@ router.get('/inventory', requireAuth, async (req, res) => {
       if (r.stock_status === 'Sufficient') summary.sufficient = Number(r.count);
       else if (r.stock_status === 'Low Stock') summary.low = Number(r.count);
       else if (r.stock_status === 'Out of Stock') summary.outOfStock = Number(r.count);
-      else summary.critical = Number(r.count);
+      else if (r.stock_status === 'Critical Stock') summary.critical = Number(r.count);
     });
 
     const totalProducts = Object.values(summary).reduce((a, b) => a + b, 0);
-    const healthPct = totalProducts > 0 ? Math.round((summary.sufficient / totalProducts) * 100) : 0;
+    const healthPct = inventoryHealthPercent(summary.sufficient, totalProducts);
+    const alertsCount = stockAlertsCount(summary);
 
     return res.status(200).json({
       success: true,
@@ -518,7 +606,7 @@ router.get('/inventory', requireAuth, async (req, res) => {
         healthPct,
         lowStockItems: lowStockResult.rows,
         totalProducts,
-        alertsCount: summary.low + summary.critical + summary.outOfStock,
+        alertsCount,
       },
     });
   } catch (err) {
@@ -537,58 +625,71 @@ router.get('/delinquency', requireAuth, async (req, res) => {
     const user = req.currentUser;
     const { isBranchScoped, bid } = branchScope(user, req.query.branch_id);
 
-    const weeks = ['W1', 'W2', 'W3', 'W4', 'W5', 'W6', 'W7'];
+    const today = toManilaDateString();
     const delinquency = [];
-    const today = new Date();
 
+    // Historical weekly snapshots: distinct customers overdue as of each week-end (Manila).
     for (let i = 6; i >= 0; i--) {
-      const weekStart = new Date(today);
-      weekStart.setDate(today.getDate() - (i + 1) * 7);
-      weekStart.setHours(0, 0, 0, 0);
-      const weekEnd = new Date(weekStart);
-      weekEnd.setDate(weekStart.getDate() + 7);
+      const asOfDate = new Date(`${today}T12:00:00+08:00`);
+      asOfDate.setDate(asOfDate.getDate() - (i * 7));
+      const asOf = toManilaDateString(asOfDate);
+      const overdueSql = overdueCustomerAsOfSql(1);
+      const params = [asOf];
+      let branchSql = '';
+      if (isBranchScoped) {
+        params.push(bid);
+        branchSql = 'AND c.branch_id = $2';
+      }
 
-      const result = await pool.query(
-        `SELECT
-           COUNT(*) AS overdue_accounts,
-           COUNT(*) FILTER (WHERE outstanding_balance > 0) AS rate_count
-         FROM customers c
-         LEFT JOIN customer_activity ca ON c.customer_id = ca.customer_id
-         WHERE c.status = 'Active'
-           AND (ca.last_collection_date < $1 OR ca.last_collection_date IS NULL)
-           ${isBranchScoped ? 'AND c.branch_id = $2' : ''}`,
-        isBranchScoped ? [weekStart.toISOString().split('T')[0], bid] : [weekStart.toISOString().split('T')[0]]
-      );
+      const [overdueResult, totalResult] = await Promise.all([
+        pool.query(
+          `SELECT COUNT(*)::int AS overdue_accounts
+           FROM customers c
+           WHERE c.status = 'Active'
+             AND ${overdueSql}
+             ${branchSql}`,
+          params
+        ),
+        pool.query(
+          `SELECT COUNT(*)::int AS count FROM customers c
+           WHERE c.status = 'Active' ${isBranchScoped ? 'AND c.branch_id = $1' : ''}`,
+          isBranchScoped ? [bid] : []
+        ),
+      ]);
 
-      const row = result.rows[0];
-      const totalCustomers = await pool.query(
-        `SELECT COUNT(*) AS count FROM customers WHERE status = 'Active' ${isBranchScoped ? 'AND branch_id = $1' : ''}`,
-        isBranchScoped ? [bid] : []
-      );
-      const total = Number(totalCustomers.rows[0].count);
-      const overdue = Number(row.overdue_accounts);
+      const total = Number(totalResult.rows[0].count) || 0;
+      const overdue = Number(overdueResult.rows[0].overdue_accounts) || 0;
       const rate = total > 0 ? Math.round((overdue / total) * 100) : 0;
-
       delinquency.push({
-        week: weeks[6 - i],
+        week: asOf,
+        weekLabel: asOf,
         accounts: overdue,
         rate,
+        asOf,
       });
     }
 
-    const totalOverdue = delinquency.reduce((sum, d) => sum + d.accounts, 0);
-    const avgRate = delinquency.length > 0
-      ? Math.round(delinquency.reduce((sum, d) => sum + d.rate, 0) / delinquency.length)
+    // Current overdue KPI = latest snapshot (today), NOT the sum of weekly counts.
+    const currentOverdue = delinquency.length
+      ? delinquency[delinquency.length - 1].accounts
       : 0;
+    const currentRate = delinquency.length
+      ? delinquency[delinquency.length - 1].rate
+      : 0;
+    const prior = delinquency.length >= 2 ? delinquency[delinquency.length - 2].accounts : currentOverdue;
+    const trend = currentOverdue > prior ? 'increasing' : currentOverdue < prior ? 'decreasing' : 'stable';
 
     return res.status(200).json({
       success: true,
       data: {
         delinquency,
+        dateTo: today,
+        snapshotMode: 'historical_week_end',
         summary: {
-          totalOverdue,
-          avgRate,
-          trend: delinquency.length >= 2 && delinquency[delinquency.length - 1].accounts > delinquency[0].accounts ? 'increasing' : 'stable',
+          totalOverdue: currentOverdue,
+          currentOverdue,
+          avgRate: currentRate,
+          trend,
         },
       },
     });
@@ -618,50 +719,53 @@ router.get('/compliance', requireAuth, async (req, res) => {
       isBranchScoped ? [bid] : []
     );
 
-    const weeks = ['W1', 'W2', 'W3', 'W4'];
     const compliance = [];
+    const weekLabels = [];
+    const today = toManilaDateString();
 
-    for (const collector of collectorsResult.rows) {
-      const collectorWeeks = [];
-      const today = new Date();
+    for (let i = 3; i >= 0; i--) {
+      const weekEndDate = new Date(`${today}T12:00:00+08:00`);
+      weekEndDate.setDate(weekEndDate.getDate() - (i * 7));
+      const weekStartDate = new Date(weekEndDate);
+      weekStartDate.setDate(weekStartDate.getDate() - 6);
+      const weekStart = toManilaDateString(weekStartDate);
+      const weekEnd = toManilaDateString(weekEndDate);
+      weekLabels.push(weekEnd);
 
-      for (let i = 3; i >= 0; i--) {
-        const weekStart = new Date(today);
-        weekStart.setDate(today.getDate() - (i + 1) * 7);
-        weekStart.setHours(0, 0, 0, 0);
-        const weekEnd = new Date(weekStart);
-        weekEnd.setDate(weekStart.getDate() + 7);
+      for (const collector of collectorsResult.rows) {
+        let entry = compliance.find((c) => c.name === collector.name);
+        if (!entry) {
+          entry = { name: collector.name, data: [] };
+          compliance.push(entry);
+        }
 
         const result = await pool.query(
           `SELECT
-             COUNT(*) AS assigned,
+             COUNT(*) FILTER (WHERE status IN ('Pending', 'Completed')) AS assigned,
              COUNT(*) FILTER (WHERE status = 'Completed') AS completed
            FROM field_visits
            WHERE user_id = $1
-             AND scheduled_date >= $2
-             AND scheduled_date < $3`,
-          [collector.id, weekStart.toISOString().split('T')[0], weekEnd.toISOString().split('T')[0]]
+             AND visit_type = 'Collection'
+             AND scheduled_date >= $2::date
+             AND scheduled_date <= $3::date`,
+          [collector.id, weekStart, weekEnd]
         );
 
         const row = result.rows[0];
         const assigned = Number(row.assigned) || 0;
         const completed = Number(row.completed) || 0;
-        const rate = assigned > 0 ? Math.round((completed / assigned) * 100) : 100;
-
-        collectorWeeks.push({ week: weeks[3 - i], rate });
+        const rate = assigned > 0 ? Math.round((completed / assigned) * 100) : null;
+        entry.data.push({ week: weekEnd, weekStart, weekEnd, rate, assigned, completed });
       }
-
-      compliance.push({
-        name: collector.name,
-        data: collectorWeeks,
-      });
     }
 
     return res.status(200).json({
       success: true,
       data: {
         compliance,
-        weeks,
+        weeks: weekLabels,
+        metric: 'visit_completion',
+        metricLabel: 'Visit Completion Rate',
       },
     });
   } catch (err) {
@@ -711,8 +815,10 @@ router.get('/kpi', requireAuth, async (req, res) => {
       pool.query(
         `SELECT
            COUNT(*) AS product_count,
-           COUNT(*) FILTER (WHERE available_stock <= 0) AS stockout_count,
-           COUNT(*) FILTER (WHERE available_stock <= reorder_level) AS low_stock_count
+           COUNT(*) FILTER (WHERE (${STOCK_STATUS_CASE_SQL}) = 'Out of Stock') AS stockout_count,
+           COUNT(*) FILTER (WHERE (${STOCK_STATUS_CASE_SQL}) = 'Low Stock') AS low_stock_count,
+           COUNT(*) FILTER (WHERE (${STOCK_STATUS_CASE_SQL}) = 'Critical Stock') AS critical_count,
+           COUNT(*) FILTER (WHERE (${STOCK_STATUS_CASE_SQL}) = 'Sufficient') AS sufficient_count
          FROM branch_inventory
          ${isBranchScoped ? 'WHERE branch_id = $1' : ''}`,
         isBranchScoped ? [bid] : []
@@ -722,7 +828,8 @@ router.get('/kpi', requireAuth, async (req, res) => {
            COUNT(*) AS total_collections,
            COALESCE(SUM(amount), 0) AS total_amount_collected
          FROM collection_payment
-         WHERE payment_date >= (CURRENT_TIMESTAMP AT TIME ZONE '+08')::DATE - INTERVAL '7 days'
+         WHERE payment_date >= (CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Manila')::DATE - INTERVAL '6 days'
+           AND status = 'Completed'
            ${isBranchScoped ? 'AND branch_id = $1' : ''}`,
         isBranchScoped ? [bid] : []
       ),
@@ -731,7 +838,7 @@ router.get('/kpi', requireAuth, async (req, res) => {
            COUNT(*) AS total_invoices,
            COALESCE(SUM(total_amount), 0) AS total_sales_amount
          FROM sales_invoices
-         WHERE invoices_date >= (CURRENT_TIMESTAMP AT TIME ZONE '+08')::DATE - INTERVAL '7 days'
+         WHERE invoices_date >= (CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Manila')::DATE - INTERVAL '6 days'
            AND ${COUNTED_INVOICE_STATUS}
            ${isBranchScoped ? 'AND branch_id = $1' : ''}`,
         isBranchScoped ? [bid] : []
@@ -744,38 +851,50 @@ router.get('/kpi', requireAuth, async (req, res) => {
     const collections = collectionResult.rows[0];
     const sales = salesResult.rows[0];
 
-    const healthScore = Math.min(100, Math.max(0,
-      50 +
-      (Number(customers.active_customers) / Math.max(1, Number(customers.total_customers)) * 20) +
-      (Number(collections.total_amount_collected) > 0 ? 15 : 0) +
-      (Number(inventory.stockout_count) === 0 ? 15 : 0)
-    ));
-
     const targets = await readPerformanceTargets(pool);
     const credit = await readCreditExposure(pool, isBranchScoped ? bid : null);
+    const collectionRate = rateAgainstDailyTarget(
+      collections.total_amount_collected,
+      targets.collectionDaily,
+      7
+    );
+    const salesEfficiency = rateAgainstDailyTarget(
+      sales.total_sales_amount,
+      targets.salesDaily,
+      7
+    );
+    const alerts = stockAlertsCount({
+      low: inventory.low_stock_count,
+      critical: inventory.critical_count,
+      outOfStock: inventory.stockout_count,
+    });
 
     return res.status(200).json({
       success: true,
       data: {
-        healthScore: Math.round(healthScore),
+        // Opaque composite removed — expose clear indicators instead.
         activeCollectors: Number(staff.active_collectors) || 0,
         activeSalesAgents: Number(staff.active_sales_agents) || 0,
         totalCustomers: Number(customers.total_customers) || 0,
         activeCustomers: Number(customers.active_customers) || 0,
         overdueCount: Number(customers.overdue_count) || 0,
         totalOutstanding: Number(customers.total_outstanding) || 0,
-        stockAlertsCount: Number(inventory.low_stock_count) + Number(inventory.stockout_count),
+        stockAlertsCount: alerts,
         totalCollectionsWeek: Number(collections.total_collections) || 0,
         totalCollectionsAmount: Number(collections.total_amount_collected) || 0,
         totalSalesWeek: Number(sales.total_invoices) || 0,
         totalSalesAmount: Number(sales.total_sales_amount) || 0,
-        // Cap at 100 — target is a reference, not a ceiling; actual collections can exceed it
-        collectionRate: collections.total_collections > 0 ? Math.min(100, Math.round((Number(collections.total_amount_collected) / targets.collectionDaily) * 100)) : 0,
-        salesEfficiency: sales.total_sales_amount > 0 ? Math.min(100, Math.round((Number(sales.total_sales_amount) / targets.salesDaily) * 100)) : 0,
-        inventoryHealth: inventoryHealthPercent(inventory.stockout_count, inventory.product_count),
+        collectionRate,
+        salesEfficiency,
+        inventoryHealth: inventoryHealthPercent(
+          inventory.sufficient_count,
+          inventory.product_count
+        ),
         totalCreditLimit: credit.totalCreditLimit,
         creditUsed: credit.creditUsed,
         creditRemaining: credit.creditRemaining,
+        periodDays: 7,
+        periodLabel: 'Last 7 days',
       },
     });
   } catch (err) {
@@ -989,8 +1108,10 @@ router.get('/executive', requireAuth, async (req, res) => {
         `SELECT b.name AS branch_name, b.id AS branch_id,
                 COUNT(*) AS product_count,
                 COALESCE(SUM(bi.available_stock), 0) AS total_available,
-                COUNT(*) FILTER (WHERE bi.available_stock <= 0) AS out_of_stock,
-                COUNT(*) FILTER (WHERE bi.available_stock <= bi.reorder_level AND bi.available_stock > 0) AS low_stock
+                COUNT(*) FILTER (WHERE (${STOCK_STATUS_CASE_SQL_BI}) = 'Out of Stock') AS out_of_stock,
+                COUNT(*) FILTER (WHERE (${STOCK_STATUS_CASE_SQL_BI}) = 'Low Stock') AS low_stock,
+                COUNT(*) FILTER (WHERE (${STOCK_STATUS_CASE_SQL_BI}) = 'Critical Stock') AS critical_stock,
+                COUNT(*) FILTER (WHERE (${STOCK_STATUS_CASE_SQL_BI}) = 'Sufficient') AS sufficient
          FROM branch_inventory bi
          JOIN branches b ON b.id = bi.branch_id
          WHERE 1=1 ${inventoryBranchWhere}
@@ -1033,9 +1154,16 @@ router.get('/executive', requireAuth, async (req, res) => {
 
     const invBranches     = inventoryBranchResult.rows;
     const totalProducts   = invBranches.reduce((s, b) => s + Number(b.product_count), 0);
-    const totalOutOfStock = invBranches.reduce((s, b) => s + Number(b.out_of_stock),  0);
-    const inventoryHealth = inventoryHealthPercent(totalOutOfStock, totalProducts);
-    const stockAlerts     = invBranches.reduce((s, b) => s + Number(b.low_stock) + Number(b.out_of_stock), 0);
+    const totalSufficient = invBranches.reduce((s, b) => s + Number(b.sufficient), 0);
+    const inventoryHealth = inventoryHealthPercent(totalSufficient, totalProducts);
+    const stockAlerts     = invBranches.reduce(
+      (s, b) => s + stockAlertsCount({
+        low: b.low_stock,
+        critical: b.critical_stock,
+        outOfStock: b.out_of_stock,
+      }),
+      0
+    );
 
     return res.status(200).json({
       success: true,
@@ -1118,7 +1246,9 @@ router.get('/invoices', requireAuth, async (req, res) => {
     }
 
     const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
-    const offset = (Number(page) - 1) * Number(limit);
+    const pageNum = Math.max(1, Number(page) || 1);
+    const limitNum = Math.min(200, Math.max(1, Number(limit) || 50));
+    const offset = (pageNum - 1) * limitNum;
 
     const result = await pool.query(
       `SELECT
@@ -1147,22 +1277,35 @@ router.get('/invoices', requireAuth, async (req, res) => {
        ${where}
        ORDER BY si.invoices_date DESC
        LIMIT $${pIdx++} OFFSET $${pIdx++}`,
-      [...params, Number(limit), offset]
+      [...params, limitNum, offset]
     );
 
     const countResult = await pool.query(
-      `SELECT COUNT(*) FROM sales_invoices si ${where}`,
+      `SELECT
+         COUNT(*)::int AS total,
+         COUNT(*) FILTER (WHERE si.status = 'Confirmed')::int AS confirmed,
+         COUNT(*) FILTER (WHERE si.status = 'Pending Review')::int AS pending_review,
+         COALESCE(SUM(si.total_amount), 0)::float AS total_value
+       FROM sales_invoices si ${where}`,
       params
     );
+    const totals = countResult.rows[0] || {};
+    const total = Number(totals.total) || 0;
 
     return res.status(200).json({
       success: true,
       data: result.rows,
+      summary: {
+        total,
+        confirmed: Number(totals.confirmed) || 0,
+        pendingReview: Number(totals.pending_review) || 0,
+        totalValue: Number(totals.total_value) || 0,
+      },
       pagination: {
-        total: Number(countResult.rows[0].count),
-        page: Number(page),
-        limit: Number(limit),
-        totalPages: Math.ceil(Number(countResult.rows[0].count) / Number(limit)),
+        total,
+        page: pageNum,
+        limit: limitNum,
+        totalPages: Math.max(1, Math.ceil(total / limitNum)),
       },
     });
   } catch (err) {
@@ -1313,7 +1456,7 @@ router.get('/operating-manager', requireAuth, async (req, res) => {
       pool.query(`SELECT TO_CHAR(invoices_date, 'YYYY-MM-DD') AS day, COALESCE(SUM(total_amount), 0) AS amount, COUNT(*) AS invoices FROM sales_invoices WHERE ${currentWhereInvoice} AND ${COUNTED_INVOICE_STATUS} ${branchFilter} GROUP BY TO_CHAR(invoices_date, 'YYYY-MM-DD') ORDER BY day`),
       pool.query(`SELECT TO_CHAR(invoices_date, 'YYYY-MM-DD') AS day, COALESCE(SUM(total_amount), 0) AS amount, COUNT(*) AS invoices FROM sales_invoices WHERE ${previousWhereInvoice} AND ${COUNTED_INVOICE_STATUS} ${branchFilter} GROUP BY TO_CHAR(invoices_date, 'YYYY-MM-DD') ORDER BY day`),
       pool.query(`SELECT b.id, b.name AS branch_name, COALESCE((SELECT SUM(cp.amount) FROM collection_payment cp WHERE cp.branch_id = b.id AND ${currentWherePayment.replace(/payment_date/g, 'cp.payment_date')}), 0) AS total_collections, COALESCE((SELECT SUM(si.total_amount) FROM sales_invoices si WHERE si.branch_id = b.id AND ${currentWhereInvoice.replace(/invoices_date/g, 'si.invoices_date')} AND ${COUNTED_INVOICE_STATUS_SI}), 0) AS total_sales, COALESCE((SELECT SUM(ca.outstanding_balance) FROM customers c2 JOIN customer_activity ca ON ca.customer_id = c2.customer_id WHERE c2.branch_id = b.id), 0) AS total_outstanding, (SELECT COUNT(*) FROM customers c3 WHERE c3.branch_id = b.id) AS customer_count, (SELECT COUNT(*) FROM customers c4 WHERE c4.branch_id = b.id AND c4.status = 'Active') AS active_customers, (SELECT COUNT(*) FROM branch_inventory bi WHERE bi.branch_id = b.id AND bi.available_stock <= bi.reorder_level) AS stock_alerts, (SELECT COUNT(*) FROM branch_inventory bi WHERE bi.branch_id = b.id AND bi.available_stock <= 0) AS stockouts, (SELECT COUNT(*) FROM field_visits fv JOIN users u ON u.id = fv.user_id WHERE u.branch_id = b.id AND ${currentWhereVisit.replace(/scheduled_date/g, 'fv.scheduled_date')}) AS total_visits, (SELECT COUNT(*) FROM field_visits fv JOIN users u ON u.id = fv.user_id WHERE u.branch_id = b.id AND fv.status = 'Completed' AND ${currentWhereVisit.replace(/scheduled_date/g, 'fv.scheduled_date')}) AS completed_visits FROM branches b WHERE b.status = 'Active' ${Number.isFinite(branchId) ? `AND b.id = ${branchId}` : ''} ORDER BY b.name`),
-      pool.query(`SELECT b.id AS branch_id, b.name AS branch_name, COUNT(*) AS product_count, COALESCE(SUM(bi.available_stock), 0) AS total_available, COUNT(*) FILTER (WHERE bi.available_stock <= 0) AS out_of_stock, COUNT(*) FILTER (WHERE bi.available_stock <= bi.reorder_level AND bi.available_stock > 0) AS low_stock FROM branch_inventory bi JOIN branches b ON b.id = bi.branch_id WHERE 1=1 ${inventoryBranchFilter} GROUP BY b.id, b.name ORDER BY b.name`),
+      pool.query(`SELECT b.id AS branch_id, b.name AS branch_name, COUNT(*) AS product_count, COALESCE(SUM(bi.available_stock), 0) AS total_available, COUNT(*) FILTER (WHERE (${STOCK_STATUS_CASE_SQL_BI}) = 'Out of Stock') AS out_of_stock, COUNT(*) FILTER (WHERE (${STOCK_STATUS_CASE_SQL_BI}) = 'Low Stock') AS low_stock, COUNT(*) FILTER (WHERE (${STOCK_STATUS_CASE_SQL_BI}) = 'Critical Stock') AS critical_stock, COUNT(*) FILTER (WHERE (${STOCK_STATUS_CASE_SQL_BI}) = 'Sufficient') AS sufficient FROM branch_inventory bi JOIN branches b ON b.id = bi.branch_id WHERE 1=1 ${inventoryBranchFilter} GROUP BY b.id, b.name ORDER BY b.name`),
       pool.query(`SELECT c.customer_id, c.first_name || ' ' || c.last_name AS customer_name, b.name AS branch_name, ca.outstanding_balance, ca.purchase_volume, ca.last_collection_date, ca.last_sales_visit, COALESCE(CURRENT_DATE - ca.last_collection_date, 0) AS days_since_collection FROM customer_activity ca JOIN customers c ON c.customer_id = ca.customer_id JOIN branches b ON b.id = c.branch_id WHERE ca.outstanding_balance > 0 ${customerBranchFilter} ORDER BY ca.outstanding_balance DESC LIMIT 10`),
       pool.query(`SELECT p.id AS product_id, p.name AS product_name, COALESCE(pc.category_name, 'Uncategorized') AS category_name, SUM(sii.quantity) AS quantity_sold, COALESCE(SUM(sii.line_total), 0) AS revenue FROM sales_invoice_items sii JOIN sales_invoices si ON si.sales_invoices_id = sii.invoices_id JOIN products p ON p.id = sii.product_id LEFT JOIN product_categories pc ON pc.category_id = p.category_id WHERE ${currentWhereInvoice.replace(/invoices_date/g, 'si.invoices_date')} AND ${COUNTED_INVOICE_STATUS_SI} ${branchFilter.replace(/branch_id/g, 'si.branch_id')} GROUP BY p.id, p.name, pc.category_name ORDER BY revenue DESC LIMIT 10`),
       pool.query(`SELECT COALESCE(pc.category_name, 'Uncategorized') AS category_name, SUM(sii.quantity) AS quantity_sold, COALESCE(SUM(sii.line_total), 0) AS revenue FROM sales_invoice_items sii JOIN sales_invoices si ON si.sales_invoices_id = sii.invoices_id JOIN products p ON p.id = sii.product_id LEFT JOIN product_categories pc ON pc.category_id = p.category_id WHERE ${currentWhereInvoice.replace(/invoices_date/g, 'si.invoices_date')} AND ${COUNTED_INVOICE_STATUS_SI} ${branchFilter.replace(/branch_id/g, 'si.branch_id')} GROUP BY pc.category_name ORDER BY revenue DESC`),
@@ -1375,7 +1518,9 @@ router.get('/operating-manager', requireAuth, async (req, res) => {
       const completedVisits = Number(row.completed_visits || 0);
       const compliance = visits > 0 ? Math.round((completedVisits / visits) * 100) : 0;
       const inventoryRow = inventorySummaryResult.rows.find((entry) => Number(entry.branch_id) === Number(row.id));
-      const inventoryHealth = inventoryRow ? inventoryHealthPercent(inventoryRow.out_of_stock, inventoryRow.product_count) : 100;
+      const inventoryHealth = inventoryRow
+        ? inventoryHealthPercent(inventoryRow.sufficient, inventoryRow.product_count)
+        : 0;
 
       return {
         branchId: Number(row.id),
@@ -1395,8 +1540,8 @@ router.get('/operating-manager', requireAuth, async (req, res) => {
     });
 
     const totalProducts = inventorySummaryResult.rows.reduce((sum, row) => sum + Number(row.product_count || 0), 0);
-    const totalOutOfStock = inventorySummaryResult.rows.reduce((sum, row) => sum + Number(row.out_of_stock || 0), 0);
-    const inventoryHealth = inventoryHealthPercent(totalOutOfStock, totalProducts);
+    const totalSufficient = inventorySummaryResult.rows.reduce((sum, row) => sum + Number(row.sufficient || 0), 0);
+    const inventoryHealth = inventoryHealthPercent(totalSufficient, totalProducts);
     const stockAlerts = inventorySummaryResult.rows.reduce((sum, row) => sum + Number(row.low_stock || 0) + Number(row.out_of_stock || 0), 0);
     const collectionsGrowthRate = dateWindow.comparisonEnabled && collectionPrevious > 0 ? Math.round((((collectionCurrent - collectionPrevious) / collectionPrevious) * 100) * 10) / 10 : null;
     const salesGrowthRate = dateWindow.comparisonEnabled && salesPrevious > 0 ? Math.round((((salesCurrent - salesPrevious) / salesPrevious) * 100) * 10) / 10 : null;
@@ -1524,6 +1669,7 @@ router.get('/chart-details', requireAuth, async (req, res) => {
     const branchId = isBranchScoped ? bid : (req.query.branch_id ? Number(req.query.branch_id) : null);
     const day = String(req.query.day || '').trim();
     const date = String(req.query.date || '').trim();
+    const asOf = String(req.query.asOf || '').trim();
     const status = String(req.query.status || '').trim();
     const metric = String(req.query.metric || '').trim();
     const name = String(req.query.name || '').trim();
@@ -1656,18 +1802,20 @@ router.get('/chart-details', requireAuth, async (req, res) => {
       }
       let statusSql = '';
       if (status === 'Sufficient') {
-        statusSql = `AND bi.available_stock > bi.reorder_level`;
-      } else if (status === 'Low Stock' || status === 'Critical') {
-        statusSql = `AND bi.available_stock > 0 AND bi.available_stock <= bi.reorder_level`;
+        statusSql = `AND (${STOCK_STATUS_CASE_SQL_BI}) = 'Sufficient'`;
+      } else if (status === 'Low Stock') {
+        statusSql = `AND (${STOCK_STATUS_CASE_SQL_BI}) = 'Low Stock'`;
+      } else if (status === 'Critical' || status === 'Critical Stock') {
+        statusSql = `AND (${STOCK_STATUS_CASE_SQL_BI}) = 'Critical Stock'`;
       } else if (status === 'Out of Stock') {
-        statusSql = `AND bi.available_stock <= 0`;
+        statusSql = `AND (${STOCK_STATUS_CASE_SQL_BI}) = 'Out of Stock'`;
       } else if (status) {
-        statusSql = `AND bi.stock_status = $${p++}`;
+        statusSql = `AND (${STOCK_STATUS_CASE_SQL_BI}) = $${p++}`;
         params.push(status);
       }
       const result = await pool.query(
         `SELECT p.name AS product_name, p.sku, bi.available_stock, bi.reorder_level,
-                bi.stock_status AS status, b.name AS branch_name
+                (${STOCK_STATUS_CASE_SQL_BI}) AS status, b.name AS branch_name
          FROM branch_inventory bi
          JOIN products p ON p.id = bi.product_id
          JOIN branches b ON b.id = bi.branch_id
@@ -1691,11 +1839,21 @@ router.get('/chart-details', requireAuth, async (req, res) => {
     if (type === 'delinquency') {
       const params = [];
       let p = 1;
+      const useAsOf = /^\d{4}-\d{2}-\d{2}$/.test(asOf);
+      let overdueSql = OVERDUE_CUSTOMER;
+      if (useAsOf) {
+        overdueSql = overdueCustomerAsOfSql(p);
+        params.push(asOf);
+        p += 1;
+      }
       let bidSql = '';
       if (Number.isFinite(Number(branchId))) {
         bidSql = `AND c.branch_id = $${p++}`;
         params.push(Number(branchId));
       }
+      const earliestDueCutoff = useAsOf
+        ? '$1::date'
+        : `(CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Manila')::date`;
       const result = await pool.query(
         `SELECT c.customer_id,
                 COALESCE(NULLIF(CONCAT_WS(' ', c.first_name, c.last_name), ''), 'Customer') AS customer_name,
@@ -1705,12 +1863,13 @@ router.get('/chart-details', requireAuth, async (req, res) => {
                 (
                   SELECT MIN(si.due_date)::text FROM sales_invoices si
                   WHERE si.customer_id = c.customer_id AND ${COUNTED_INVOICE_STATUS_SI}
-                    AND si.due_date < (CURRENT_TIMESTAMP AT TIME ZONE '+08')::DATE
+                    AND si.due_date IS NOT NULL
+                    AND si.due_date < ${earliestDueCutoff}
                 ) AS earliest_due_date
          FROM customers c
          JOIN branches b ON b.id = c.branch_id
          LEFT JOIN customer_activity ca ON ca.customer_id = c.customer_id
-         WHERE c.status = 'Active' AND ${OVERDUE_CUSTOMER}
+         WHERE c.status = 'Active' AND ${overdueSql}
            ${bidSql}
          ORDER BY ca.outstanding_balance DESC NULLS LAST
          LIMIT 500`,
@@ -1721,8 +1880,8 @@ router.get('/chart-details', requireAuth, async (req, res) => {
         success: true,
         data: {
           title: 'Overdue accounts',
-          category: 'Delinquency',
-          dateRange: 'Current',
+          category: useAsOf ? `As of ${asOf}` : 'Current overdue',
+          dateRange: useAsOf ? asOf : 'Current',
           rows: result.rows,
           totals: [
             { label: 'Accounts', value: result.rows.length },
@@ -1920,20 +2079,11 @@ router.get('/credit-history', requireAuth, async (req, res) => {
   try {
     const pool = req.app.locals.pool;
     const user = req.currentUser;
+    const scope = creditHistoryScope(user, { queryBranchId: req.query.branch_id });
+    const conditions = [...scope.conditions];
+    const params = [...scope.params];
+    let pIdx = scope.pIdx;
 
-    // Branch scoping: branch-level roles see only their branch's customers
-    const { bid: branchId } = branchScope(user, req.query.branch_id);
-
-    const conditions = [];
-    const params = [];
-    let pIdx = 1;
-
-    if (branchId !== null && Number.isFinite(Number(branchId))) {
-      conditions.push(`c.branch_id = $${pIdx++}`);
-      params.push(Number(branchId));
-    }
-
-    // Optional filters from query string
     if (req.query.customer_id) {
       conditions.push(`ch.customer_id = $${pIdx++}`);
       params.push(Number(req.query.customer_id));
@@ -1941,8 +2091,14 @@ router.get('/credit-history', requireAuth, async (req, res) => {
     if (req.query.payment_status && req.query.payment_status !== 'All') {
       const status = String(req.query.payment_status).trim();
       if (status === 'Overdue') {
-        // Only when an invoice due date exists and balance remains after this payment
         conditions.push(`ch.remaining_balance > 0 AND si.due_date IS NOT NULL AND si.due_date < CURRENT_DATE`);
+      } else if (status === 'Partial') {
+        conditions.push(`ch.remaining_balance > 0 AND (
+          ch.payment_status = 'Partial'
+          OR (ch.payment_status = 'Paid' AND ch.remaining_balance > 0)
+        )`);
+      } else if (status === 'Paid') {
+        conditions.push(`ch.remaining_balance <= 0`);
       } else {
         conditions.push(`ch.payment_status = $${pIdx++}`);
         params.push(status);
@@ -1961,8 +2117,10 @@ router.get('/credit-history', requireAuth, async (req, res) => {
       if (q) {
         conditions.push(`(
           CONCAT_WS(' ', c.first_name, c.middle_name, c.last_name) ILIKE $${pIdx}
+          OR COALESCE(c.customer_code, '') ILIKE $${pIdx}
           OR COALESCE(si.invoice_number, '') ILIKE $${pIdx}
           OR COALESCE(cp.receipt_number, '') ILIKE $${pIdx}
+          OR COALESCE(NULLIF(TRIM(collector.full_name), ''), collector.email, '') ILIKE $${pIdx}
         )`);
         params.push(`%${q}%`);
         pIdx += 1;
@@ -1971,59 +2129,71 @@ router.get('/credit-history', requireAuth, async (req, res) => {
 
     const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
     const limit = Math.min(Math.max(Number(req.query.limit) || 500, 1), 1000);
+    const page = Math.max(1, Number(req.query.page) || 1);
+    const offset = (page - 1) * limit;
+
+    const countResult = await pool.query(
+      `SELECT COUNT(*)::int AS total ${CREDIT_HISTORY_FROM} ${where}`,
+      params
+    );
+    const total = Number(countResult.rows[0]?.total) || 0;
 
     const result = await pool.query(
-      `SELECT
-         ch.credit_id,
-         ch.customer_id,
-         COALESCE(NULLIF(TRIM(CONCAT_WS(' ', c.first_name, c.middle_name, c.last_name)), ''), 'Customer') AS customer_name,
-         c.customer_code,
-         b.name AS branch_name,
-         ch.sales_id,
-         si.invoice_number,
-         si.total_amount AS invoice_amount,
-         si.due_date AS invoice_due_date,
-         ch.collection_id,
-         cp.receipt_number,
-         cp.notes AS collection_notes,
-         cp.status AS collection_status,
-         pm.method_name AS payment_method,
-         COALESCE(NULLIF(TRIM(collector.full_name), ''), collector.email) AS collector_name,
-         ch.previous_balance,
-         ch.payment_amount,
-         ch.remaining_balance,
-         ch.payment_status,
-         CASE
-           WHEN ch.remaining_balance > 0
-             AND si.due_date IS NOT NULL
-             AND si.due_date < CURRENT_DATE
-           THEN 'Overdue'
-           WHEN ch.remaining_balance <= 0 THEN 'Paid'
-           WHEN ch.payment_status = 'Paid' AND ch.remaining_balance > 0 THEN 'Partial'
-           ELSE ch.payment_status
-         END AS display_status,
-         ch.transaction_date
-       FROM credit_history ch
-       JOIN customers c ON c.customer_id = ch.customer_id
-       JOIN branches b ON b.id = c.branch_id
-       LEFT JOIN sales_invoices si ON si.sales_invoices_id = ch.sales_id
-       LEFT JOIN collection_payment cp ON cp.collectionpayment_id = ch.collection_id
-       LEFT JOIN payment_methods pm ON pm.payment_method_id = cp.payment_method_id
-       LEFT JOIN users collector ON collector.id = cp.collector_id
+      `SELECT ${CREDIT_HISTORY_SELECT}
+       ${CREDIT_HISTORY_FROM}
        ${where}
        ORDER BY ch.transaction_date DESC, ch.credit_id DESC
-       LIMIT ${limit}`,
-      params
+       LIMIT $${pIdx++} OFFSET $${pIdx++}`,
+      [...params, limit, offset]
     );
 
     return res.status(200).json({
       success: true,
       data: result.rows,
       count: result.rows.length,
+      pagination: {
+        total,
+        page,
+        limit,
+        totalPages: Math.ceil(total / limit) || 0,
+      },
     });
   } catch (err) {
     console.error('[Reports] GET /credit-history error:', err.message);
     return res.status(500).json({ success: false, message: 'Failed to fetch payment history.' });
+  }
+});
+
+router.get('/credit-history/:id', requireAuth, async (req, res) => {
+  try {
+    const pool = req.app.locals.pool;
+    const user = req.currentUser;
+    const creditId = Number(req.params.id);
+    if (!Number.isFinite(creditId) || creditId <= 0) {
+      return res.status(400).json({ success: false, message: 'Invalid payment record id.' });
+    }
+
+    const scope = creditHistoryScope(user, { queryBranchId: req.query.branch_id });
+    const conditions = [...scope.conditions, `ch.credit_id = $${scope.pIdx}`];
+    const params = [...scope.params, creditId];
+    const where = `WHERE ${conditions.join(' AND ')}`;
+
+    const result = await pool.query(
+      `SELECT ${CREDIT_HISTORY_SELECT}
+       ${CREDIT_HISTORY_FROM}
+       ${where}
+       LIMIT 1`,
+      params
+    );
+
+    if (!result.rows.length) {
+      return res.status(404).json({ success: false, message: 'Payment record not found.' });
+    }
+
+    return res.status(200).json({ success: true, data: result.rows[0] });
+  } catch (err) {
+    console.error('[Reports] GET /credit-history/:id error:', err.message);
+    return res.status(500).json({ success: false, message: 'Failed to fetch payment record.' });
   }
 });
 
