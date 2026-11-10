@@ -4,7 +4,6 @@ const menu = [
   { label: 'Outstanding Balances', to: '/customer/balances' },
   { label: 'Payment History', to: '/customer/payment-history' },
   { label: 'Notifications', to: '/customer/notifications' },
-  { label: 'Customer Support', to: '/customer/support' },
 ];
 
 const accountMenu = [
@@ -21,7 +20,6 @@ export const customerRole = {
   accent: 'Balances, purchases, and payments',
   navSections: [
     { title: 'Home', items: menu },
-    { title: 'Account', items: accountMenu },
   ],
   navPages: [...menu, ...accountMenu],
   routes: {},

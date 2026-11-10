@@ -26,6 +26,21 @@ const INVOICE_SELECT = `
       JOIN products p ON p.id = sii.product_id
       WHERE sii.invoices_id = si.sales_invoices_id
     ) AS products_summary,
+    (
+      SELECT COALESCE(
+        json_agg(
+          json_build_object(
+            'product_name', p.name,
+            'image_url', NULLIF(TRIM(p.image_url), '')
+          )
+          ORDER BY p.name
+        ),
+        '[]'::json
+      )
+      FROM sales_invoice_items sii
+      JOIN products p ON p.id = sii.product_id
+      WHERE sii.invoices_id = si.sales_invoices_id
+    ) AS product_previews,
     CASE
       WHEN si.status = 'Cancelled' THEN 'Cancelled'
       WHEN si.status <> 'Confirmed' THEN si.status
@@ -98,6 +113,17 @@ export function nextOpenDueDate(invoice) {
   return `${due.getFullYear()}-${month}-${day}`;
 }
 
+function productPreviews(value) {
+  if (Array.isArray(value)) return value;
+  if (typeof value !== 'string' || !value.trim()) return [];
+  try {
+    const parsed = JSON.parse(value);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
 function mapInvoice(row) {
   const invoice = {
     sales_invoices_id: row.sales_invoices_id,
@@ -116,6 +142,7 @@ function mapInvoice(row) {
     payment_status: row.payment_status,
     sales_agent_name: row.sales_agent_name,
     products_summary: row.products_summary || '',
+    product_previews: productPreviews(row.product_previews),
     notes: row.notes || '',
     payment_method: row.payment_method || '',
   };
@@ -144,7 +171,7 @@ export async function getCustomerInvoice(pool, customerId, invoiceId) {
   const invoice = mapInvoice(result.rows[0]);
   const items = await pool.query(
     `SELECT sii.sales_invoices_items_id, sii.quantity, sii.unit_price, sii.line_total,
-            p.name AS product_name, p.sku
+            p.name AS product_name, p.sku, NULLIF(TRIM(p.image_url), '') AS image_url
      FROM sales_invoice_items sii
      JOIN products p ON p.id = sii.product_id
      WHERE sii.invoices_id = $1
@@ -155,6 +182,7 @@ export async function getCustomerInvoice(pool, customerId, invoiceId) {
     item_id: item.sales_invoices_items_id,
     product_name: item.product_name,
     sku: item.sku,
+    image_url: item.image_url || '',
     quantity: Number(item.quantity),
     unit_price: money(item.unit_price),
     line_total: money(item.line_total),

@@ -790,28 +790,6 @@ function AccountSettingsPage({
   return <CustomerProfilePanel mode="settings" showToast={showToast} />;
 }
 
-function SupportPage() {
-  const [account, setAccount] = useState(null);
-  useEffect(() => {
-    let active = true;
-    fetchCustomerPortalMe().then((result) => {
-      if (active && result.success) setAccount(result.data);
-    });
-    return () => { active = false; };
-  }, []);
-  return (
-    <section className="cp-card cp-support">
-      <h3>Customer Support</h3>
-      <p>Questions about a payment, a purchase, or your profile go to your branch. This portal does not open a ticket.</p>
-      <dl>
-        <div><dt>Branch</dt><dd>{account?.branch_name || 'Your assigned branch'}</dd></div>
-        <div><dt>Account</dt><dd>{account?.customer_code || '—'}</dd></div>
-        <div><dt>What to include</dt><dd>Your customer ID, the invoice or receipt number, and what looks incorrect.</dd></div>
-      </dl>
-    </section>
-  );
-}
-
 export function CustomerPageBody({
   page,
   navigate,
@@ -851,9 +829,6 @@ export function CustomerPageBody({
       break;
     case 'notifications':
       body = <NotificationsPage {...props} />;
-      break;
-    case 'support':
-      body = <SupportPage />;
       break;
     case 'settings':
       body = <AccountSettingsPage {...props} />;

@@ -1,6 +1,6 @@
 .app-shell.customer-portal {
   --sidebar-width: 272px;
-  --sidebar-bg: #071428;
+  --sidebar-bg: #153450;
   --text: #0f2744;
   --ink: #0f2744;
   --navy: #0f2744;
@@ -34,9 +34,9 @@
 }
 
 .app-shell.customer-portal .sidebar {
-  background: #071428 !important;
-  border-right: 0;
-  color: #fff;
+  background: #153450 !important;
+  border-right: 1px solid #0B2133;
+  color: #F5FAFC;
 }
 
 .app-shell.customer-portal .brand-card {
@@ -88,10 +88,12 @@
 }
 
 .app-shell.customer-portal .nav-link {
-  border-radius: 12px;
-  padding: 10px 12px;
-  color: #f4f7fb !important;
-  font-weight: 600;
+  border-radius: 6px;
+  padding: 9px 12px;
+  color: rgba(245, 250, 252, 0.88) !important;
+  font-weight: 500;
+  border: 1px solid transparent !important;
+  border-left: 3px solid transparent !important;
 }
 
 .app-shell.customer-portal .nav-link-icon,
@@ -109,14 +111,17 @@
 }
 
 .app-shell.customer-portal .nav-link.active {
-  background: #2f6fed !important;
-  color: #fff !important;
-  box-shadow: 0 8px 18px rgba(47, 111, 237, 0.28);
+  background: #0B2133 !important;
+  color: #F5FAFC !important;
+  box-shadow: none;
+  border: 1px solid rgba(245, 250, 252, 0.14) !important;
+  border-left: 3px solid #F5FAFC !important;
 }
 
 .app-shell.customer-portal .nav-link:hover {
-  background: rgba(255, 255, 255, 0.1) !important;
-  color: #fff !important;
+  background: rgba(11, 33, 51, 0.5) !important;
+  color: #F5FAFC !important;
+  border-left-color: rgba(245, 250, 252, 0.45) !important;
 }
 
 .app-shell.customer-portal .nav-link.active .nav-link-icon,
@@ -180,56 +185,6 @@
   display: grid;
   gap: 16px;
   padding: 8px 8px 28px;
-}
-
-.cp-bell {
-  border: 0;
-  background: #fff;
-  box-shadow: 0 6px 18px rgba(15, 35, 70, 0.06);
-  cursor: pointer;
-}
-
-.cp-bell {
-  position: relative;
-  width: 42px;
-  height: 42px;
-  border-radius: 999px;
-  display: grid;
-  place-items: center;
-  color: #1e3a5f;
-}
-
-.cp-bell span {
-  position: absolute;
-  top: -2px;
-  right: -2px;
-  min-width: 18px;
-  height: 18px;
-  border-radius: 999px;
-  background: #ef4444;
-  color: #fff;
-  font-size: 0.68rem;
-  font-weight: 700;
-  display: grid;
-  place-items: center;
-}
-
-.cp-hero .cp-bell {
-  position: absolute;
-  top: 18px;
-  right: 18px;
-  z-index: 1;
-  background: #f4f7fb;
-  color: #1d4e89;
-  box-shadow: none;
-  border: 1px solid #d7e0ea;
-}
-
-.cp-bell .nav-svg,
-.cp-hero .cp-bell .nav-svg {
-  width: 18px;
-  height: 18px;
-  color: #1d4e89;
 }
 
 .cp-page-head h2 {
@@ -422,6 +377,42 @@
   cursor: pointer;
 }
 
+.cp-product-cell {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.cp-photo-row {
+  display: inline-flex;
+  flex-shrink: 0;
+  gap: 6px;
+}
+
+.cp-photo {
+  width: 44px;
+  height: 44px;
+  flex-shrink: 0;
+  object-fit: cover;
+  border-radius: 8px;
+  border: 1px solid #d7e0ea;
+  background: #f4f7fb;
+}
+
+.cp-photo--lg {
+  width: 72px;
+  height: 72px;
+  border-radius: 12px;
+}
+
+.cp-photo--empty {
+  display: grid;
+  place-items: center;
+  color: #1d4e89;
+  font-weight: 700;
+}
+
 .cp-pill {
   display: inline-flex;
   align-items: center;
@@ -594,25 +585,6 @@
   cursor: pointer;
 }
 
-.cp-support p,
-.cp-support dd {
-  color: #526277;
-}
-
-.cp-support dl {
-  display: grid;
-  gap: 12px;
-  margin: 16px 0 8px;
-}
-
-.cp-support dt {
-  font-size: 0.75rem;
-  font-weight: 700;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  color: #64748b;
-}
-
 .app-shell.customer-portal .panel {
   border: 0;
 }
@@ -709,7 +681,7 @@
 
 .app-shell.customer-portal .sidebar-footer {
   flex-shrink: 0;
-  background: #071428;
+  background: #153450;
 }
 
 @media (max-width: 1100px) {
@@ -752,8 +724,6 @@ html[data-theme="dark"] .app-shell.customer-portal .cp-stat--green,
 html[data-theme="dark"] .app-shell.customer-portal .cp-stat--lilac,
 html[data-theme="dark"] .app-shell.customer-portal .cp-card,
 html[data-theme="dark"] .app-shell.customer-portal .cp-due,
-html[data-theme="dark"] .app-shell.customer-portal .cp-bell,
-html[data-theme="dark"] .app-shell.customer-portal .cp-hero .cp-bell,
 html[data-theme="dark"] .app-shell.customer-portal .cp-due-date,
 html[data-theme="dark"] .app-shell.customer-portal .cp-balance-total,
 html[data-theme="dark"] .app-shell.customer-portal .cp-download,
@@ -809,9 +779,6 @@ html[data-theme="dark"] .app-shell.customer-portal .cp-stat > span:not(.cp-stat-
 html[data-theme="dark"] .app-shell.customer-portal .cp-page-head p,
 html[data-theme="dark"] .app-shell.customer-portal .cp-terms,
 html[data-theme="dark"] .app-shell.customer-portal .cp-balance-list small,
-html[data-theme="dark"] .app-shell.customer-portal .cp-support p,
-html[data-theme="dark"] .app-shell.customer-portal .cp-support dd,
-html[data-theme="dark"] .app-shell.customer-portal .cp-support dt,
 html[data-theme="dark"] .app-shell.customer-portal .muted,
 html[data-theme="dark"] .app-shell.customer-portal .settings-hero p,
 html[data-theme="dark"] .app-shell.customer-portal .settings-nav-btn small,
@@ -822,10 +789,6 @@ html[data-theme="dark"] .app-shell.customer-portal .profile-fact span {
 html[data-theme="dark"] .app-shell.customer-portal .cp-card header button,
 html[data-theme="dark"] .app-shell.customer-portal .cp-stat-icon,
 html[data-theme="dark"] .app-shell.customer-portal .cp-stat-icon .nav-svg,
-html[data-theme="dark"] .app-shell.customer-portal .cp-bell,
-html[data-theme="dark"] .app-shell.customer-portal .cp-bell .nav-svg,
-html[data-theme="dark"] .app-shell.customer-portal .cp-hero .cp-bell,
-html[data-theme="dark"] .app-shell.customer-portal .cp-hero .cp-bell .nav-svg,
 html[data-theme="dark"] .app-shell.customer-portal .cp-download,
 html[data-theme="dark"] .app-shell.customer-portal .cp-download .nav-svg,
 html[data-theme="dark"] .app-shell.customer-portal .icon-action-button {
@@ -840,7 +803,6 @@ html[data-theme="dark"] .app-shell.customer-portal .corvex-table th {
 html[data-theme="dark"] .app-shell.customer-portal .cp-due-date,
 html[data-theme="dark"] .app-shell.customer-portal .cp-balance-total,
 html[data-theme="dark"] .app-shell.customer-portal .cp-stat > .cp-stat-icon,
-html[data-theme="dark"] .app-shell.customer-portal .cp-hero .cp-bell,
 html[data-theme="dark"] .app-shell.customer-portal .profile-fact {
   background: #242b46 !important;
 }
@@ -860,4 +822,11 @@ html[data-theme="dark"] .app-shell.customer-portal .settings-tab.active,
 html[data-theme="dark"] .app-shell.customer-portal .settings-nav-btn.active {
   background: #2f6fed !important;
   color: #fff !important;
+}
+
+html[data-theme="dark"] .app-shell.customer-portal .cp-photo,
+html[data-theme="dark"] .app-shell.customer-portal .cp-photo--empty {
+  background: #242b46;
+  border-color: #3c4462;
+  color: #8eb8dc;
 }

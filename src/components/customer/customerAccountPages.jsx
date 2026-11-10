@@ -18,7 +18,45 @@ import {
   fetchCustomerPortalPayments,
 } from '../../api/customerPortalService.js';
 import { getCurrentUser } from '../../api/authService.js';
-import { fetchNotifications } from '../../api/notificationService.js';
+import { resolveProductImage } from '../../utils/productImage.js';
+
+function PurchasePhoto({ name, imageUrl, large = false }) {
+  const [failed, setFailed] = useState(false);
+  const src = failed ? '' : resolveProductImage({ product_name: name, image_url: imageUrl });
+  const initial = String(name || '?').trim().charAt(0).toUpperCase() || '?';
+  const className = `cp-photo${large ? ' cp-photo--lg' : ''}`;
+  if (!src) {
+    return <span className={`${className} cp-photo--empty`} aria-hidden="true">{initial}</span>;
+  }
+  return (
+    <img
+      className={className}
+      src={src}
+      alt=""
+      onError={() => setFailed(true)}
+    />
+  );
+}
+
+function PurchasePreview({ invoice }) {
+  const previews = Array.isArray(invoice.product_previews) ? invoice.product_previews.slice(0, 3) : [];
+  return (
+    <div className="cp-product-cell">
+      {previews.length ? (
+        <span className="cp-photo-row" aria-hidden="true">
+          {previews.map((item, index) => (
+            <PurchasePhoto
+              key={`${item.product_name || 'product'}-${index}`}
+              name={item.product_name}
+              imageUrl={item.image_url}
+            />
+          ))}
+        </span>
+      ) : null}
+      <span className="cp-clip" title={invoice.products_summary || ''}>{invoice.products_summary || '—'}</span>
+    </div>
+  );
+}
 
 function isInstallment(invoice) {
   return String(invoice?.pay_type || '').toLowerCase() === 'installment';
@@ -145,25 +183,6 @@ function greetingName(name, date = new Date()) {
   return `${timeGreeting(date)}, ${first}!`;
 }
 
-function CustomerNotifyBell() {
-  const navigate = useNavigate();
-  const [unread, setUnread] = useState(0);
-  useEffect(() => {
-    let active = true;
-    fetchNotifications().then((result) => {
-      if (!active || !result.success) return;
-      setUnread((result.data || []).filter((item) => item.status !== 'Read').length);
-    });
-    return () => { active = false; };
-  }, []);
-  return (
-    <button className="cp-bell" type="button" aria-label={`${unread} unread notifications`} onClick={() => navigate('/customer/notifications')}>
-      <NavIcon name="bell" />
-      {unread > 0 ? <span>{unread > 9 ? '9+' : unread}</span> : null}
-    </button>
-  );
-}
-
 export function CustomerDashboardPage() {
   const navigate = useNavigate();
   const user = getCurrentUser();
@@ -216,7 +235,6 @@ export function CustomerDashboardPage() {
   return (
     <div className="cp-dash">
       <section className="cp-hero">
-        <CustomerNotifyBell />
         <h2>{greetingName(displayName)}</h2>
         <p>Here's an overview of your account.</p>
       </section>
@@ -257,7 +275,7 @@ export function CustomerDashboardPage() {
                     <tr key={invoice.sales_invoices_id} onClick={() => navigate(`/customer/purchases/${invoice.sales_invoices_id}`)}>
                       <td>{invoice.invoice_number}</td>
                       <td>{formatDisplayDate(invoice.invoices_date)}</td>
-                      <td className="cp-clip" title={invoice.products_summary || ''}>{invoice.products_summary || '—'}</td>
+                      <td><PurchasePreview invoice={invoice} /></td>
                       <td>{termsLabel(invoice)}</td>
                       <td>{formatCurrency(invoice.total_amount)}</td>
                       <td><span className={paymentPill(invoice.payment_status)}>{invoice.payment_status}</span></td>
@@ -399,7 +417,7 @@ export function CustomerPurchasesPage({ showToast }) {
                     <tr key={invoice.sales_invoices_id}>
                       <td>{invoice.invoice_number}</td>
                       <td>{formatDisplayDate(invoice.invoices_date)}</td>
-                      <td className="cp-clip" title={invoice.products_summary || ''}>{invoice.products_summary || '—'}</td>
+                      <td><PurchasePreview invoice={invoice} /></td>
                       <td>{formatCurrency(invoice.total_amount)}</td>
                       <td>{termsLabel(invoice)}</td>
                       <td className="cp-clip" title={invoice.sales_agent_name || ''}>{invoice.sales_agent_name || '—'}</td>
@@ -489,7 +507,12 @@ export function CustomerPurchaseDetailPage({ invoiceId, showToast }) {
               <tbody>
                 {invoice.items.map((item) => (
                   <tr key={item.item_id}>
-                    <td>{item.product_name}</td>
+                    <td>
+                      <div className="cp-product-cell">
+                        <PurchasePhoto name={item.product_name} imageUrl={item.image_url} large />
+                        <span>{item.product_name}</span>
+                      </div>
+                    </td>
                     <td>{item.quantity}</td>
                     <td>{formatCurrency(item.unit_price)}</td>
                     <td>{formatCurrency(item.line_total)}</td>

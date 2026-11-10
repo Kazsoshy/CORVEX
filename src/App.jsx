@@ -101,8 +101,16 @@ function notificationsPathForRole(role) {
 function settingsPathForRole(role) {
   const prefix = rolePathPrefix(role);
   if (!prefix) return null;
+  if (prefix === 'customer') return '/customer/account-settings?tab=settings';
   if (PERSONAL_SETTINGS_PREFIXES.has(prefix)) return `/${prefix}/settings`;
   return `/${prefix}/profile?tab=settings`;
+}
+
+function customerAccountMenuPath(itemId) {
+  if (itemId === 'security') return '/customer/account-settings?tab=security';
+  if (itemId === 'session') return '/customer/account-settings?tab=activity';
+  if (itemId === 'settings') return '/customer/account-settings?tab=settings';
+  return '/customer/my-profile';
 }
 
 function profileTabPath(profilePath, tab) {
@@ -114,6 +122,20 @@ function profileTabPath(profilePath, tab) {
 function resolveAccountMenuActiveId(pathname, search, profilePath, settingsPath) {
   const params = new URLSearchParams(search || '');
   const tab = String(params.get('tab') || '').trim().toLowerCase();
+
+  if (
+    pathname === '/customer/my-profile'
+    || pathname === '/customer/profile'
+    || pathname === '/customer/account-details'
+  ) {
+    return 'account';
+  }
+  if (pathname === '/customer/account-settings' || pathname === '/customer/settings') {
+    if (tab === 'security') return 'security';
+    if (tab === 'session' || tab === 'activity') return 'session';
+    if (tab === 'settings') return 'settings';
+    return 'account';
+  }
 
   if (settingsPath && !settingsPath.includes('?') && pathname === settingsPath) {
     return 'settings';
@@ -388,13 +410,17 @@ function PrototypeShell() {
 
   const handleAccountMenuSelect = useCallback((itemId) => {
     closeMobileSidebar();
+    if (currentRole?.key === 'customer') {
+      navigate(customerAccountMenuPath(itemId));
+      return;
+    }
     if (!profilePath) return;
     if (itemId === 'settings' && settingsPath) {
       navigate(settingsPath);
       return;
     }
     navigate(profileTabPath(profilePath, itemId));
-  }, [closeMobileSidebar, navigate, profilePath, settingsPath]);
+  }, [closeMobileSidebar, currentRole, navigate, profilePath, settingsPath]);
 
   const handleAccountMenuLogout = useCallback(() => {
     setShowLogoutConfirm(true);
@@ -494,7 +520,25 @@ function PrototypeShell() {
 
                     return (
                       <>
-                        {dashboardLink && (
+                        {isCustomer ? sidebarSections.flatMap((section) => section.items).map((link) => (
+                          <Link
+                            key={link.to}
+                            to={link.to}
+                            onClick={closeMobileSidebar}
+                            className={isNavItemActive(link.to) ? 'nav-link active' : 'nav-link'}
+                            aria-current={isNavItemActive(link.to) ? 'page' : undefined}
+                            data-tooltip={link.label}
+                          >
+                            <span className="nav-link-icon">
+                              <NavIcon label={link.label} />
+                            </span>
+                            <span className="nav-link-text">{link.label}</span>
+                            {link.label === 'Notifications' && customerUnread > 0 ? (
+                              <span className="cp-nav-badge">{customerUnread > 9 ? '9+' : customerUnread}</span>
+                            ) : null}
+                          </Link>
+                        )) : null}
+                        {!isCustomer && dashboardLink && (
                           <Link
                             key={dashboardLink.to}
                             to={dashboardLink.to}
@@ -509,7 +553,7 @@ function PrototypeShell() {
                             <span className="nav-link-text">{dashboardLink.label || 'Dashboard'}</span>
                           </Link>
                         )}
-                        {otherSections.map((section) => (
+                        {!isCustomer && otherSections.map((section) => (
                           <details key={section.title} className="nav-group" open={isSidebarCollapsed ? true : undefined}>
                             <summary
                               className="nav-group-summary"
@@ -585,52 +629,6 @@ function PrototypeShell() {
             </nav>
           )}
         </div>
-        {currentRole?.key === 'customer' && !isAuthPath(location.pathname) && !isCustomerLogin && (
-          <div className="sidebar-footer">
-            <div
-              className={`sidebar-profile${isProfileActive ? ' active' : ''}`}
-              onClick={() => {
-                if (!profilePath) return;
-                closeMobileSidebar();
-                navigate(profilePath);
-              }}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter' || e.key === ' ') {
-                  e.preventDefault();
-                  if (!profilePath) return;
-                  closeMobileSidebar();
-                  navigate(profilePath);
-                }
-              }}
-              role="button"
-              tabIndex={0}
-              aria-label="Open profile"
-              aria-current={isProfileActive ? 'page' : undefined}
-              title="Profile"
-            >
-              <div className="sidebar-profile-avatar">
-                {avatarSrc ? <img src={avatarSrc} alt="" /> : <NavIcon name="accounts" />}
-              </div>
-              <div className="sidebar-profile-info">
-                <div className="sidebar-profile-name">{currentUser?.fullName || currentUser?.name || 'User'}</div>
-                <div className="sidebar-profile-role">{currentRole.label}</div>
-                <div className="sidebar-profile-location" title={userAssignedLocation}>
-                  {userAssignedLocation}
-                </div>
-              </div>
-            </div>
-            <button
-              className="button sidebar-logout"
-              type="button"
-              onClick={() => setShowLogoutConfirm(true)}
-            >
-              <span className="sidebar-switch-icon">
-                <NavIcon name="login" />
-              </span>
-              <span className="sidebar-switch-text">Sign Out</span>
-            </button>
-          </div>
-        )}
       </aside>
 
       {showTopNavbar ? (

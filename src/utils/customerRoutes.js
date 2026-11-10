@@ -10,7 +10,6 @@ const ROUTE_DEFINITIONS = [
   { pattern: /^\/customer\/receipts$/, pageType: 'receipts' },
   { pattern: /^\/customer\/receipts\/([^/]+)$/, pageType: 'receiptDetail', params: ['receiptId'] },
   { pattern: /^\/customer\/notifications$/, pageType: 'notifications' },
-  { pattern: /^\/customer\/support$/, pageType: 'support' },
   { pattern: /^\/customer\/(?:account-settings|settings)$/, pageType: 'settings' },
 ];
 
@@ -53,8 +52,6 @@ export function buildCustomerBreadcrumbs(pageType, params = {}) {
       return [...crumbs, { label: 'Payment History', to: '/customer/payment-history' }, { label: receiptLabel, to: `/customer/receipts/${params.receiptId}` }];
     case 'notifications':
       return [...crumbs, { label: 'Notifications', to: '/customer/notifications' }];
-    case 'support':
-      return [...crumbs, { label: 'Customer Support', to: '/customer/support' }];
     case 'settings':
       return [...crumbs, { label: 'Account Settings', to: '/customer/account-settings' }];
     default:
@@ -77,7 +74,6 @@ export function resolveCustomerPage(pathname) {
     receipts: 'Payment Receipts',
     receiptDetail: 'Receipt Detail',
     notifications: 'Notifications',
-    support: 'Customer Support',
     settings: 'Account Settings',
   };
 
@@ -91,7 +87,6 @@ export function resolveCustomerPage(pathname) {
     paymentHistory: 'Payments, the invoices they covered, and receipts.',
     receipts: 'Digital receipts for confirmed payments.',
     notifications: 'Payment, invoice, due date, and account updates.',
-    support: 'How to reach your branch about this account.',
     settings: 'Password, contact details, notifications, and sign out.',
   };
 

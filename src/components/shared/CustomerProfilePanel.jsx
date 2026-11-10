@@ -15,6 +15,7 @@ import { describeIdlePolicy, IDLE_TIMEOUT_MS } from '../../api/sessionActivity';
 import {
   ProfileFact,
   ProfilePasswordForm,
+  ProfileTabs,
   browserLabel,
   copyProfileValue,
   formatIdleRemaining,
@@ -114,6 +115,16 @@ export function CustomerProfilePanel({ showToast, mode = 'profile' }) {
     }
     setSection(next);
   }, [searchParams, section, contactDirty, passwordDirty, showToast, syncTabToUrl]);
+
+  const changeSection = (next) => {
+    if (next === section) return;
+    if (contactDirty || passwordDirty) {
+      showToast?.('Save or clear your changes before leaving this section.', 'error');
+      return;
+    }
+    setSection(next);
+    syncTabToUrl(next);
+  };
 
   const cancelEdit = () => {
     setContact({
@@ -238,8 +249,20 @@ export function CustomerProfilePanel({ showToast, mode = 'profile' }) {
         </div>
       </header>
 
-      <div className="settings-shell profile-shell">
-        <div className="settings-stage" id={`customer-profile-panel-${section}`}>
+      <div className="settings-shell">
+        <ProfileTabs
+          label="Account settings sections"
+          tabs={TABS}
+          active={section}
+          onChange={changeSection}
+          idPrefix="customer-profile"
+        />
+        <div
+          className="settings-stage"
+          role="tabpanel"
+          id={`customer-profile-panel-${section}`}
+          aria-labelledby={`customer-profile-tab-${section}`}
+        >
           {section !== 'account' ? (
             <div className="settings-stage-head">
               <h3>{activeTab.label}</h3>
