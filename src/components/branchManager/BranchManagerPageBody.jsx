@@ -224,12 +224,12 @@ function FieldOperationsHub({
                   });
                 }}
               >
-                <CartesianGrid strokeDasharray="3 3" stroke="#BADBE9" />
+                <CartesianGrid strokeDasharray="3 3" stroke="#E2E8F0" />
                 <XAxis dataKey="name" tick={{ fontSize: 12 }} />
                 <YAxis allowDecimals={false} tick={{ fontSize: 12 }} />
                 <Tooltip /><Legend />
-                <Bar dataKey="stops" name="Stops Assigned" fill="#1A4162" radius={[4, 4, 0, 0]} />
-                <Bar dataKey="completed" name="Stops Completed" fill="#0B1E30" radius={[4, 4, 0, 0]} />
+                <Bar dataKey="stops" name="Stops Assigned" fill="#153450" radius={[4, 4, 0, 0]} />
+                <Bar dataKey="completed" name="Stops Completed" fill="#0B2133" radius={[4, 4, 0, 0]} />
               </BarChart>
             </ResponsiveContainer>
           </Card>
@@ -257,12 +257,12 @@ function FieldOperationsHub({
                   });
                 }}
               >
-                <CartesianGrid strokeDasharray="3 3" stroke="#BADBE9" />
+                <CartesianGrid strokeDasharray="3 3" stroke="#E2E8F0" />
                 <XAxis dataKey="name" tick={{ fontSize: 12 }} />
                 <YAxis allowDecimals={false} tick={{ fontSize: 12 }} />
                 <Tooltip /><Legend />
-                <Bar dataKey="areas" name="Areas Assigned" fill="#1A4162" radius={[4, 4, 0, 0]} />
-                <Bar dataKey="salesToday" name="Sales Today" fill="#0B1E30" radius={[4, 4, 0, 0]} />
+                <Bar dataKey="areas" name="Areas Assigned" fill="#153450" radius={[4, 4, 0, 0]} />
+                <Bar dataKey="salesToday" name="Sales Today" fill="#0B2133" radius={[4, 4, 0, 0]} />
               </BarChart>
             </ResponsiveContainer>
           </Card>
@@ -618,7 +618,7 @@ function ReportsHubPage({
                     );
                   }}
                 >
-                  <CartesianGrid strokeDasharray="3 3" stroke="#BADBE9" />
+                  <CartesianGrid strokeDasharray="3 3" stroke="#E2E8F0" />
                   <XAxis dataKey="day" tick={{
                 fontSize: 12
               }} />
@@ -627,8 +627,8 @@ function ReportsHubPage({
               }} tickFormatter={v => `${(v / 1000).toFixed(0)}k`} />
                   <Tooltip formatter={v => formatCurrency(v)} />
                   <Legend />
-                  <Area type="monotone" dataKey="target" name="Target" stroke="#BADBE9" fill="#BADBE9" strokeWidth={2} strokeDasharray="5 5" />
-                  <Area type="monotone" dataKey="amount" name="Collected" stroke="#1A4162" fill="#1A4162" fillOpacity={0.12} strokeWidth={2} />
+                  <Area type="monotone" dataKey="target" name="Target" stroke="#E2E8F0" fill="#E2E8F0" strokeWidth={2} strokeDasharray="5 5" />
+                  <Area type="monotone" dataKey="amount" name="Collected" stroke="#153450" fill="#153450" fillOpacity={0.12} strokeWidth={2} />
                 </AreaChart>
               </ResponsiveContainer>
             </Card>
@@ -656,14 +656,14 @@ function ReportsHubPage({
                     });
                   }}
                 >
-                  <CartesianGrid strokeDasharray="3 3" stroke="#BADBE9" />
+                  <CartesianGrid strokeDasharray="3 3" stroke="#E2E8F0" />
                   <XAxis dataKey="name" tick={{ fontSize: 12 }} />
                   <YAxis yAxisId="l" tick={{ fontSize: 11 }} tickFormatter={v => `${(v / 1000).toFixed(0)}k`} />
                   <YAxis yAxisId="r" orientation="right" domain={[0, 100]} unit="%" tick={{ fontSize: 12 }} />
                   <Tooltip />
                   <Legend />
-                  <Bar yAxisId="l" dataKey="amount" name="Collected (₱)" fill="#1A4162" radius={[4, 4, 0, 0]} />
-                  <Bar yAxisId="r" dataKey="visitCompletion" name="Visit Completion %" fill="#0B1E30" radius={[4, 4, 0, 0]} />
+                  <Bar yAxisId="l" dataKey="amount" name="Collected (₱)" fill="#153450" radius={[4, 4, 0, 0]} />
+                  <Bar yAxisId="r" dataKey="visitCompletion" name="Visit Completion %" fill="#0B2133" radius={[4, 4, 0, 0]} />
                 </BarChart>
               </ResponsiveContainer>
             </Card>
@@ -702,7 +702,7 @@ function ReportsHubPage({
                     );
                   }}
                 >
-                  <CartesianGrid strokeDasharray="3 3" stroke="#BADBE9" />
+                  <CartesianGrid strokeDasharray="3 3" stroke="#E2E8F0" />
                   <XAxis dataKey="day" tick={{
                 fontSize: 12
               }} />
@@ -711,8 +711,8 @@ function ReportsHubPage({
               }} tickFormatter={v => `${(v / 1000).toFixed(0)}k`} />
                   <Tooltip formatter={v => formatCurrency(v)} />
                   <Legend />
-                  <Bar dataKey="target" name="Target" fill="#BADBE9" radius={[4, 4, 0, 0]} />
-                  <Bar dataKey="actual" name="Actual" fill="#1A4162" radius={[4, 4, 0, 0]} />
+                  <Bar dataKey="target" name="Target" fill="#E2E8F0" radius={[4, 4, 0, 0]} />
+                  <Bar dataKey="actual" name="Actual" fill="#153450" radius={[4, 4, 0, 0]} />
                 </BarChart>
               </ResponsiveContainer>
             </Card>
@@ -741,7 +741,7 @@ function ReportsHubPage({
                     });
                   }}
                 >
-                  <CartesianGrid strokeDasharray="3 3" stroke="#BADBE9" />
+                  <CartesianGrid strokeDasharray="3 3" stroke="#E2E8F0" />
                   <XAxis dataKey="name" tick={{
                 fontSize: 12
               }} />
@@ -753,8 +753,8 @@ function ReportsHubPage({
               }} />
                   <Tooltip />
                   <Legend />
-                  <Bar yAxisId="l" dataKey="revenue" name="Revenue" fill="#1A4162" radius={[4, 4, 0, 0]} />
-                  <Bar yAxisId="r" dataKey="visits" name="Visit Completion %" fill="#0B1E30" radius={[4, 4, 0, 0]} />
+                  <Bar yAxisId="l" dataKey="revenue" name="Revenue" fill="#153450" radius={[4, 4, 0, 0]} />
+                  <Bar yAxisId="r" dataKey="visits" name="Visit Completion %" fill="#0B2133" radius={[4, 4, 0, 0]} />
                 </BarChart>
               </ResponsiveContainer>
             </Card>
@@ -786,7 +786,7 @@ function ReportsHubPage({
                 <PieChart>
                   <Pie
                     data={[
-                      { name: 'Sufficient', value: inventoryData?.summary?.sufficient || 0, color: '#1A4162' },
+                      { name: 'Sufficient', value: inventoryData?.summary?.sufficient || 0, color: '#153450' },
                       { name: 'Low Stock', value: inventoryData?.summary?.low || 0, color: '#f59e0b' },
                       { name: 'Critical Stock', value: inventoryData?.summary?.critical || 0, color: '#ef4444' },
                       { name: 'Out of Stock', value: inventoryData?.summary?.outOfStock || 0, color: '#5F7385' },
@@ -808,7 +808,7 @@ function ReportsHubPage({
                     }}
                   >
                     {[
-                      { name: 'Sufficient', color: '#1A4162' },
+                      { name: 'Sufficient', color: '#153450' },
                       { name: 'Low Stock', color: '#f59e0b' },
                       { name: 'Critical Stock', color: '#ef4444' },
                       { name: 'Out of Stock', color: '#5F7385' },
@@ -877,7 +877,7 @@ function ReportsHubPage({
                     );
                   }}
                 >
-                  <CartesianGrid strokeDasharray="3 3" stroke="#BADBE9" />
+                  <CartesianGrid strokeDasharray="3 3" stroke="#E2E8F0" />
                   <XAxis dataKey="week" tick={{ fontSize: 12 }} />
                   <YAxis yAxisId="l" tick={{ fontSize: 12 }} allowDecimals={false} />
                   <YAxis yAxisId="r" orientation="right" domain={[0, 100]} unit="%" tick={{ fontSize: 12 }} />
@@ -903,7 +903,7 @@ function ReportsHubPage({
               });
               return point;
             }) || []}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#BADBE9" />
+                  <CartesianGrid strokeDasharray="3 3" stroke="#E2E8F0" />
                   <XAxis dataKey="week" tick={{ fontSize: 12 }} />
                   <YAxis domain={[0, 100]} unit="%" tick={{ fontSize: 12 }} />
                   <Tooltip formatter={(v) => (v == null ? 'N/A' : `${v}%`)} />
@@ -913,7 +913,7 @@ function ReportsHubPage({
                       key={c.name}
                       type="monotone"
                       dataKey={c.name}
-                      stroke={['#1A4162', '#0B1E30', '#5F7385', '#f59e0b', '#ef4444'][i % 5]}
+                      stroke={['#153450', '#0B2133', '#5F7385', '#f59e0b', '#ef4444'][i % 5]}
                       strokeWidth={2}
                       dot={false}
                       connectNulls={false}
@@ -957,7 +957,7 @@ function ReportsHubPage({
           }].map(s => <div key={s.label} style={{
             padding: 14,
             background: '#eef0f4',
-            border: '1px solid #BADBE9',
+            border: '1px solid #E2E8F0',
             borderRadius: 8
           }}>
                     <span style={{
@@ -1785,7 +1785,6 @@ function ProfilePage({
   return <AccountProfilePanel
     showToast={showToast}
     title="Branch profile"
-    subtitle="Your name, contact details, and sign-in for this CORVEX account."
     extraActions={<>
       <button className="button ghost" type="button" onClick={() => navigate(`${opsBase}/audit-log`)}>Audit log</button>
       <button className="button ghost" type="button" onClick={() => navigate(`${opsBase}/approval-center`)}>Approval center</button>

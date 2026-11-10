@@ -354,7 +354,7 @@ export function FieldActivityReportsPage({ navigate, showToast }) {
               <img
                 src={form.photo}
                 alt="Report preview"
-                style={{ marginTop: 8, maxWidth: 200, maxHeight: 140, borderRadius: 8, border: '1px solid #BADBE9' }}
+                style={{ marginTop: 8, maxWidth: 200, maxHeight: 140, borderRadius: 8, border: '1px solid #E2E8F0' }}
               />
             ) : null}
             {errors.photo ? <p className="form-error">{errors.photo}</p> : null}
@@ -422,7 +422,7 @@ export function FieldActivityReportsPage({ navigate, showToast }) {
                           <img
                             src={report.photo}
                             alt="Report"
-                            style={{ width: 48, height: 48, objectFit: 'cover', borderRadius: 6, border: '1px solid #BADBE9' }}
+                            style={{ width: 48, height: 48, objectFit: 'cover', borderRadius: 6, border: '1px solid #E2E8F0' }}
                           />
                         ) : '—'}
                       </td>
@@ -540,7 +540,7 @@ export function FieldActivityReportDetailPage({ reportId, navigate, showToast })
             <img
               src={report.photo}
               alt="Field evidence"
-              style={{ maxWidth: '100%', maxHeight: 480, borderRadius: 8, border: '1px solid #BADBE9' }}
+              style={{ maxWidth: '100%', maxHeight: 480, borderRadius: 8, border: '1px solid #E2E8F0' }}
             />
           </a>
         ) : (

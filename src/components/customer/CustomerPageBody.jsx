@@ -371,10 +371,6 @@ function HomePage() {
           <h2>{customerName}</h2>
           <p className="text-ink/70">Account {accountNumber}</p>
         </div>
-        <Link to="/customer/notifications" className="relative p-2 text-ink/70 hover:text-blue hover:bg-blue/5 rounded-full transition-colors cursor-pointer" aria-label={`${unread} unread notifications`}>
-          <NavIcon name="bell" />
-          {unread > 0 ? <span className="absolute top-0 right-0 min-w-[18px] h-[18px] px-1 flex justify-center items-center rounded-full bg-red text-white text-[0.7rem] font-bold border-2 border-mint">{unread}</span> : null}
-        </Link>
       </section>
 
       <StatsGrid stats={[{

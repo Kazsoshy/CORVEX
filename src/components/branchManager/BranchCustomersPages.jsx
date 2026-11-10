@@ -505,7 +505,7 @@ export function BranchCustomerDetailPage({
                 id: customer.customer_id,
                 position: [Number(customer.latitude), Number(customer.longitude)],
                 label: name.substring(0, 2).toUpperCase(),
-                color: standing === 'Overdue' ? '#dc2626' : standing === 'Has Balance' ? '#d97706' : '#1A4162',
+                color: standing === 'Overdue' ? '#dc2626' : standing === 'Has Balance' ? '#d97706' : '#153450',
                 popup: name,
               }]}
             />

@@ -408,7 +408,7 @@ export function AccountDetailPage({
               <img
                 src={customer.id_photo}
                 alt="Government ID"
-                style={{ maxWidth: 240, maxHeight: 160, borderRadius: 8, border: '1px solid #BADBE9' }}
+                style={{ maxWidth: 240, maxHeight: 160, borderRadius: 8, border: '1px solid #E2E8F0' }}
               />
             </a>
           </div>
@@ -527,7 +527,7 @@ export function AccountDetailPage({
               id: customer.customer_id || customer.id,
               position: [Number(customer.latitude), Number(customer.longitude)],
               popup: `<strong>${ownerName}</strong><br/>${customer.address || ''}`,
-              color: '#0B1E30',
+              color: '#0B2133',
             }]}
           />
         ) : (

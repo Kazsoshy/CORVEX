@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { Lock, LogOut, MonitorSmartphone, Settings, UserRound } from 'lucide-react';
+import { ChevronRight, Lock, LogOut, MonitorSmartphone, Settings, UserRound } from 'lucide-react';
 
 const MENU_ITEMS = [
   { id: 'account', label: 'Account', detail: 'Profile and personal details', icon: UserRound },
@@ -9,16 +9,29 @@ const MENU_ITEMS = [
   { id: 'settings', label: 'Settings', detail: 'Display, reading, and alerts', icon: Settings },
 ];
 
-const MENU_WIDTH = 280;
+const MENU_WIDTH = 310;
 const GAP = 10;
-const VIEWPORT_PAD = 8;
+const VIEWPORT_PAD = 12;
 
 function computePosition(anchorEl, menuEl) {
   const rect = anchorEl.getBoundingClientRect();
   const menuWidth = menuEl?.offsetWidth || MENU_WIDTH;
-  const menuHeight = menuEl?.offsetHeight || 360;
+  const menuHeight = menuEl?.offsetHeight || 380;
   const vw = window.innerWidth;
   const vh = window.innerHeight;
+
+  // When anchored in the top navbar (top half of viewport), open below & right-align to anchor
+  if (rect.top < vh / 2) {
+    const left = Math.min(
+      Math.max(VIEWPORT_PAD, rect.right - menuWidth),
+      vw - VIEWPORT_PAD - menuWidth
+    );
+    let top = rect.bottom + GAP;
+    if (top + menuHeight > vh - VIEWPORT_PAD) {
+      top = Math.max(VIEWPORT_PAD, vh - VIEWPORT_PAD - menuHeight);
+    }
+    return { top, left, placement: 'below' };
+  }
 
   let left;
   let top;
@@ -34,7 +47,7 @@ function computePosition(anchorEl, menuEl) {
     }
   } else {
     placement = 'above';
-    left = Math.min(Math.max(VIEWPORT_PAD, rect.left), vw - VIEWPORT_PAD - menuWidth);
+    left = Math.min(Math.max(VIEWPORT_PAD, rect.right - menuWidth), vw - VIEWPORT_PAD - menuWidth);
     top = rect.top - GAP - menuHeight;
     if (top < VIEWPORT_PAD) {
       placement = 'below';
@@ -49,8 +62,8 @@ function computePosition(anchorEl, menuEl) {
 }
 
 /**
- * Facebook-style account menu anchored to the sidebar profile row.
- * Rendered via portal so it is not clipped by the sidebar / app-shell overflow.
+ * Enterprise Account Menu Popover anchored to the top navbar profile button.
+ * Rendered via portal so it is never clipped by container overflow.
  */
 export function AccountMenuPopover({
   open,
@@ -60,13 +73,15 @@ export function AccountMenuPopover({
   activeItemId = null,
   userName,
   userRole,
+  userLocation,
+  userEmail,
   avatarSrc,
   avatarFallback = null,
   anchorRef,
 }) {
   const menuId = useId();
   const menuRef = useRef(null);
-  const [coords, setCoords] = useState({ top: 0, left: 0, placement: 'right' });
+  const [coords, setCoords] = useState({ top: 0, left: 0, placement: 'below' });
 
   const updatePosition = useCallback(() => {
     const anchor = anchorRef?.current;
@@ -80,7 +95,7 @@ export function AccountMenuPopover({
     updatePosition();
     const frame = window.requestAnimationFrame(updatePosition);
     return () => window.cancelAnimationFrame(frame);
-  }, [open, updatePosition, userName, userRole, avatarSrc]);
+  }, [open, updatePosition, userName, userRole, userLocation, userEmail, avatarSrc]);
 
   useEffect(() => {
     if (!open) return undefined;
@@ -113,12 +128,6 @@ export function AccountMenuPopover({
     };
   }, [open, onClose, anchorRef, updatePosition]);
 
-  useEffect(() => {
-    if (!open || !menuRef.current) return;
-    const first = menuRef.current.querySelector('button');
-    first?.focus();
-  }, [open]);
-
   if (!open || typeof document === 'undefined') return null;
 
   return createPortal(
@@ -130,15 +139,24 @@ export function AccountMenuPopover({
       aria-label="Account menu"
       style={{ top: coords.top, left: coords.left }}
     >
-      <div className="account-menu-header">
+      <button
+        type="button"
+        role="menuitem"
+        className="account-menu-profile-card"
+        onClick={() => onSelect?.('account')}
+        title="View your account profile"
+      >
         <div className="account-menu-avatar" aria-hidden="true">
           {avatarSrc ? <img src={avatarSrc} alt="" /> : avatarFallback}
         </div>
         <div className="account-menu-identity">
           <div className="account-menu-name">{userName || 'User'}</div>
           {userRole ? <div className="account-menu-role">{userRole}</div> : null}
+          {userLocation || userEmail ? (
+            <div className="account-menu-meta">{userLocation || userEmail}</div>
+          ) : null}
         </div>
-      </div>
+      </button>
 
       <div className="account-menu-divider" role="separator" />
 
@@ -156,11 +174,14 @@ export function AccountMenuPopover({
               onClick={() => onSelect?.(item.id)}
             >
               <span className="account-menu-item-icon" aria-hidden="true">
-                <Icon size={18} strokeWidth={1.75} />
+                <Icon size={18} strokeWidth={1.85} />
               </span>
               <span className="account-menu-item-copy">
                 <strong>{item.label}</strong>
                 <small>{item.detail}</small>
+              </span>
+              <span className="account-menu-item-chevron" aria-hidden="true">
+                <ChevronRight size={16} strokeWidth={1.85} />
               </span>
             </button>
           );
@@ -176,7 +197,7 @@ export function AccountMenuPopover({
         onClick={() => onLogout?.()}
       >
         <span className="account-menu-item-icon" aria-hidden="true">
-          <LogOut size={18} strokeWidth={1.75} />
+          <LogOut size={18} strokeWidth={1.85} />
         </span>
         <span className="account-menu-item-copy">
           <strong>Log out</strong>

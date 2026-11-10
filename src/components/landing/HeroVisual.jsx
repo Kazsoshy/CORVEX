@@ -1,4 +1,4 @@
-import logo from '../../assets/corvex-logo.png';
+import logo from '../../assets/corvex-white-logo.png';
 
 function GridLines() {
   const vertical = Array.from({ length: 13 }, (_, index) => {

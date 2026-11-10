@@ -1,12 +1,12 @@
 .cvx-site {
-  --cvx-ink: #071422;
-  --cvx-navy: #0c2340;
-  --cvx-navy-deep: #06101c;
-  --cvx-blue: #2f7bff;
-  --cvx-blue-soft: #7eb6ff;
-  --cvx-muted: #5c6d80;
-  --cvx-line: rgba(12, 35, 64, 0.12);
-  --cvx-paper: #f5f7fb;
+  --cvx-ink: #0B2133;
+  --cvx-navy: #153450;
+  --cvx-navy-deep: #0B2133;
+  --cvx-blue: #153450;
+  --cvx-blue-soft: #E2E8F0;
+  --cvx-muted: #475569;
+  --cvx-line: rgba(21, 52, 80, 0.14);
+  --cvx-paper: #F5FAFC;
   --cvx-white: #ffffff;
   --cvx-display: "Plus Jakarta Sans", system-ui, sans-serif;
   --cvx-sans: "Plus Jakarta Sans", system-ui, sans-serif;
@@ -144,7 +144,7 @@
 }
 
 .cvx-btn-light:hover {
-  box-shadow: 0 16px 36px rgba(47, 123, 255, 0.28);
+  box-shadow: 0 16px 36px rgba(64, 143, 176, 0.28);
 }
 
 .cvx-btn-ghost {
@@ -166,11 +166,9 @@
 }
 
 .cvx-wordmark-mark {
-  width: 28px;
-  height: 28px;
+  width: 50px;
+  height: 50px;
   object-fit: contain;
-  flex-shrink: 0;
-  display: block;
 }
 
 .cvx-wordmark-mark--dark {
@@ -183,13 +181,6 @@
 
 .cvx-nav.is-solid .cvx-wordmark-mark--dark {
   display: block;
-}
-
-.cvx-wordmark-bar {
-  width: 2px;
-  height: 16px;
-  background: var(--cvx-blue);
-  box-shadow: 0 0 10px rgba(47, 123, 255, 0.85);
 }
 
 .cvx-wordmark-type {
@@ -284,7 +275,7 @@
   bottom: 6px;
   height: 2px;
   background: var(--cvx-blue);
-  box-shadow: 0 0 12px rgba(47, 123, 255, 0.85);
+  box-shadow: 0 0 12px rgba(64, 143, 176, 0.85);
   pointer-events: none;
   transition: transform 0.4s var(--cvx-ease), width 0.4s var(--cvx-ease), opacity 0.3s ease;
 }
@@ -428,13 +419,28 @@
   min-height: 100dvh;
   display: flex;
   align-items: center;
-  padding: calc(var(--cvx-nav-h) + 12px) 0 48px;
+  justify-content: center;
+  padding: calc(var(--cvx-nav-h) + 16px) 0 56px;
   overflow: hidden;
   color: #fff;
-  background:
-    radial-gradient(900px 520px at 82% 18%, rgba(47, 123, 255, 0.32), transparent 58%),
-    radial-gradient(640px 420px at 8% 90%, rgba(64, 141, 173, 0.2), transparent 55%),
-    linear-gradient(165deg, #071628 0%, #0c2340 52%, #06101c 100%);
+  background-color: #153450;
+  background-image:
+    linear-gradient(
+      180deg,
+      rgba(226, 230, 233, 0.384) 0%,  
+      rgba(205, 211, 218, 0) 32%,
+      rgba(3, 33, 57, 0.553) 60%,
+      rgba(25, 63, 99, 0) 100%
+    ),
+    radial-gradient(
+      circle at 50% 48%,
+      rgba(64, 143, 176, 0.22) 0%,
+      transparent 70%
+    ),
+    url('../../assets/corvex-bg.png');
+  background-size: cover;
+  background-position: center;
+  background-repeat: no-repeat;
 }
 
 .cvx-hero::after {
@@ -445,49 +451,70 @@
   background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.2), transparent);
 }
 
-.cvx-hero-grid {
+.cvx-hero-grid,
+.cvx-hero-wrap {
   position: relative;
   z-index: 1;
-  display: grid;
-  grid-template-columns: minmax(0, 1.05fr) minmax(300px, 0.95fr);
-  gap: 36px;
+  display: flex;
+  flex-direction: column;
   align-items: center;
-  width: min(1180px, calc(100% - 80px));
+  justify-content: center;
+  text-align: center;
+  width: min(880px, calc(100% - 48px));
+  margin: 0 auto;
+}
+
+.cvx-hero-copy {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  width: 100%;
+  max-width: 820px;
+  margin: 0 auto;
 }
 
 .cvx-hero h1 {
   display: flex;
   flex-direction: column;
+  align-items: center;
+  text-align: center;
   color: #fff;
   font-family: var(--cvx-sans);
-  font-size: clamp(2.6rem, 4.6vw, 4.25rem);
-  font-weight: 600;
+  font-size: clamp(2.8rem, 5.2vw, 4.5rem);
+  font-weight: 700;
   line-height: 1.12;
-  letter-spacing: -0.02em;
+  letter-spacing: -0.025em;
+  text-shadow: 0 2px 14px rgba(15, 34, 54, 0.5);
 }
 
 .cvx-hero-accent {
-  font-weight: 600;
-  letter-spacing: -0.02em;
+  font-weight: 700;
+  letter-spacing: -0.025em;
   color: inherit;
 }
 
 .cvx-hero .cvx-kicker {
   color: rgba(255, 255, 255, 0.74);
+  justify-content: center;
 }
 
 .cvx-lede {
-  max-width: 34rem;
-  margin-top: 28px;
-  color: rgba(255, 255, 255, 0.76);
-  font-size: 1.125rem;
+  max-width: 40rem;
+  margin: 24px auto 0;
+  color: #fdfdfd;
+  font-size: clamp(1.05rem, 1.8vw, 1.25rem);
   line-height: 1.65;
+  text-align: center;
+  text-shadow: 0 1px 8px rgba(15, 34, 54, 0.45);
 }
 
 .cvx-hero-actions {
   display: flex;
   flex-wrap: wrap;
-  gap: 12px;
+  justify-content: center;
+  align-items: center;
+  gap: 16px;
   margin-top: 36px;
 }
 
@@ -505,7 +532,7 @@
   height: 58%;
   right: 0;
   top: 8%;
-  background: radial-gradient(circle, rgba(47, 123, 255, 0.72), rgba(47, 123, 255, 0) 68%);
+  background: radial-gradient(circle, rgba(64, 143, 176, 0.45), rgba(64, 143, 176, 0) 68%);
   filter: blur(10px);
   pointer-events: none;
 }
@@ -1262,8 +1289,10 @@
     padding-top: calc(var(--cvx-nav-h) + 28px);
   }
 
-  .cvx-hero-grid {
-    align-items: start;
+  .cvx-hero-grid,
+  .cvx-hero-wrap {
+    align-items: center;
+    text-align: center;
   }
 
   .cvx-visual {

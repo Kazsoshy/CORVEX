@@ -58,19 +58,24 @@ export function getStatusTextClass(status) {
 }
 
 /**
- * Renders a status as plain colored text (no badge/pill background).
- * `variant` is accepted for backward compatibility but always renders text.
+ * Renders a consistent enterprise status indicator with both shape and text.
+ * Avoids relying on color alone for accessibility and fast operational scanning.
  */
 export function StatusBadge({ status, className = '', variant: _variant }) {
   const { prefs } = usePreferences();
   if (status === null || status === undefined || status === '') return null;
   const tone = getStatusTone(status);
-  const mark = (prefs.colorPalette === 'colorblind' || prefs.highContrast) ? STATUS_MARKS[tone] : '';
+  const isColorblindOrHighContrast = prefs.colorPalette === 'colorblind' || prefs.highContrast;
+  const mark = isColorblindOrHighContrast ? STATUS_MARKS[tone] : '';
 
   return (
-    <span className={`${getStatusTextClass(status)} ${className}`.trim()}>
-      {mark ? <span aria-hidden="true">{mark} </span> : null}
-      {status}
+    <span className={`status-badge-wrap ${getStatusTextClass(status)} ${className}`.trim()}>
+      {mark ? (
+        <span className="status-mark" aria-hidden="true">{mark} </span>
+      ) : (
+        <span className={`status-indicator-dot tone-${tone}`} aria-hidden="true" />
+      )}
+      <span className="status-label-text">{status}</span>
     </span>
   );
 }

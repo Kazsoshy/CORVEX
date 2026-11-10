@@ -558,7 +558,7 @@ export function SalesAgentDispatchDetailPage({
         <div className="form-group" style={{ marginTop: 8 }}>
           <label>Products to push</label>
           {products.length ? (
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: 8, maxHeight: 180, overflow: 'auto', padding: 8, border: '1px solid #BADBE9', borderRadius: 8 }}>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: 8, maxHeight: 180, overflow: 'auto', padding: 8, border: '1px solid #E2E8F0', borderRadius: 8 }}>
               {products.map((product) => {
                 const id = Number(product.id || product.product_id);
                 return (
@@ -621,14 +621,14 @@ export function SalesAgentDispatchDetailPage({
               id: 'draft-pin',
               position: [Number(form.latitude), Number(form.longitude)],
               label: 'A',
-              color: '#1A4162',
+              color: '#153450',
               popup: 'Proposed canvassing location',
             }] : []}
             circles={formHasPin ? [{
               id: 'draft-radius',
               center: [Number(form.latitude), Number(form.longitude)],
               radius: Number(form.radius_meters) || 800,
-              color: '#1A4162',
+              color: '#153450',
             }] : []}
           />
           {!formHasPin ? <p className="muted" style={{ marginTop: 8 }}>No map location assigned.</p> : null}
@@ -747,14 +747,14 @@ export function SalesAgentDispatchDetailPage({
                   id: `assign-${selectedAssignment.assignment_id}`,
                   position: [Number(selectedAssignment.latitude), Number(selectedAssignment.longitude)],
                   label: 'A',
-                  color: '#1A4162',
+                  color: '#153450',
                   popup: selectedAssignment.area_name,
                 }]}
                 circles={[{
                   id: `radius-${selectedAssignment.assignment_id}`,
                   center: [Number(selectedAssignment.latitude), Number(selectedAssignment.longitude)],
                   radius: Number(selectedAssignment.radius_meters) || 800,
-                  color: '#1A4162',
+                  color: '#153450',
                 }]}
               />
             </div>

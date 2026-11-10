@@ -180,7 +180,7 @@ function standingOf(account) {
 function standingColor(standing) {
   if (standing === 'Overdue') return '#dc2626';
   if (standing === 'Has Balance') return '#d97706';
-  return '#1A4162';
+  return '#153450';
 }
 
 function accountPopupContent(account, { navigate, opsBase } = {}) {
@@ -329,7 +329,7 @@ export function buildBranchLeafletView({
         });
         bounds.push([area.lat, area.lng]);
       });
-      legend.push({ color: '#408DAD', label: 'Canvass area pin' });
+      legend.push({ color: '#0B2133', label: 'Canvass area pin' });
       legend.push({ color: '#2A9B6A', label: 'Completed area' });
     }
 
@@ -412,7 +412,7 @@ export function buildBranchLeafletView({
         drawPlannedRoad(road, staffColor(collectorIndex.get(key) ?? 0));
       });
 
-      legend.push({ color: '#1A4162', label: 'Planned collection route' });
+      legend.push({ color: '#153450', label: 'Planned collection route' });
       legend.push({ color: '#2A9B6A', label: 'Completed stop' });
       legend.push({ color: '#dc2626', label: 'Missed stop' });
     }
@@ -431,7 +431,7 @@ export function buildBranchLeafletView({
       });
       bounds.push([account.lat, account.lng]);
     });
-    legend.push({ color: '#1A4162', label: 'Current' });
+    legend.push({ color: '#153450', label: 'Current' });
     legend.push({ color: '#d97706', label: 'With balance' });
     legend.push({ color: '#dc2626', label: 'Overdue' });
   }
@@ -510,7 +510,7 @@ export function buildBranchLeafletView({
       });
       bounds.push(center);
     });
-    legend.push({ color: '#1A4162', label: 'Approximate Territory Coverage' });
+    legend.push({ color: '#153450', label: 'Approximate Territory Coverage' });
   }
 
   const overdueCount = accounts.filter((account) => standingOf(account) === 'Overdue').length;

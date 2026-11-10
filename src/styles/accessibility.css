@@ -333,12 +333,11 @@ html[data-contrast="high"] .reading-guide {
   justify-content: space-between;
   align-items: flex-end;
   gap: 18px;
-  padding: 22px 24px;
+  padding: 20px 24px;
   border: 1px solid var(--border);
-  border-radius: 18px;
-  background:
-    radial-gradient(900px 220px at 100% 0%, rgba(37, 86, 132, 0.16), transparent 55%),
-    var(--surface);
+  border-left: 3px solid var(--brand, #153450);
+  border-radius: 10px;
+  background: var(--surface);
   box-shadow: var(--shadow-level-1);
 }
 
@@ -1067,12 +1066,12 @@ html[data-contrast="high"] .reading-guide {
   display: grid;
   place-items: center;
   flex: none;
-  width: 72px;
-  height: 72px;
+  width: 68px;
+  height: 68px;
   overflow: hidden;
-  border-radius: 22px;
-  background: linear-gradient(160deg, var(--brand), #0c1031);
-  color: #fff;
+  border-radius: 12px;
+  background: var(--brand, #153450);
+  color: #F5FAFC;
   font-size: 1.15rem;
   font-weight: 700;
   letter-spacing: 0.04em;
@@ -1488,11 +1487,9 @@ html[data-contrast="high"] .reading-guide {
   display: grid;
   place-items: center;
   object-fit: cover;
-  background:
-    linear-gradient(145deg, rgba(37, 86, 132, 0.18), transparent 60%),
-    var(--surface-2);
-  color: var(--brand);
-  font-weight: 750;
+  background: var(--surface-2, #F5FAFC);
+  color: var(--brand, #153450);
+  font-weight: 700;
 }
 
 .pos-photo-card {
@@ -1943,3 +1940,32 @@ html[data-contrast="high"] .reading-guide {
     justify-content: flex-start;
   }
 }
+
+html[data-theme="dark"] .top-navbar {
+  background: var(--surface);
+  border-bottom-color: var(--border);
+}
+
+html[data-theme="dark"] .top-navbar__icon-btn,
+html[data-theme="dark"] .top-navbar__menu-btn,
+html[data-theme="dark"] .account-menu-profile-card,
+html[data-theme="dark"] .notifications-popover__footer {
+  background: var(--surface-2);
+  border-color: var(--border);
+  color: var(--text);
+}
+
+html[data-theme="dark"] .top-navbar__avatar-chevron {
+  background: var(--surface);
+  border-color: var(--border);
+  color: var(--text);
+}
+
+html[data-theme="dark"] .notifications-popover,
+html[data-theme="dark"] .account-menu-popover {
+  background: var(--surface);
+  border-color: var(--border);
+  color: var(--text);
+  box-shadow: 0 14px 36px rgba(0, 0, 0, 0.45);
+}
+

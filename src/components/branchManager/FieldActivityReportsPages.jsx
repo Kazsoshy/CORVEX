@@ -426,7 +426,7 @@ export function FieldActivityReportDetailPage({
             <img
               src={photoSrc}
               alt="Report evidence"
-              style={{ maxWidth: '100%', maxHeight: 420, borderRadius: 8, border: '1px solid #BADBE9' }}
+              style={{ maxWidth: '100%', maxHeight: 420, borderRadius: 8, border: '1px solid #E2E8F0' }}
             />
           </a>
         ) : (

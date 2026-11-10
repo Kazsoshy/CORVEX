@@ -172,7 +172,7 @@ function MapPinPicker({ latitude, longitude, onChange, warning }) {
           position: center,
           draggable: true,
           onDragEnd: setPin,
-          color: '#0B1E30',
+          color: '#0B2133',
           popup: 'Customer location',
         }] : []}
       />
@@ -423,7 +423,7 @@ export function CustomerDetailPage({
               <img
                 src={customer.id_photo}
                 alt="Government ID"
-                style={{ maxWidth: 240, maxHeight: 160, borderRadius: 8, border: '1px solid #BADBE9' }}
+                style={{ maxWidth: 240, maxHeight: 160, borderRadius: 8, border: '1px solid #E2E8F0' }}
               />
             </a>
           </div>
@@ -473,7 +473,7 @@ export function CustomerDetailPage({
               id: customer.customer_id,
               position: [Number(customer.latitude), Number(customer.longitude)],
               popup: `<strong>${ownerName}</strong><br/>${customer.address || ''}`,
-              color: '#0B1E30',
+              color: '#0B2133',
             }]}
           />
         ) : (
@@ -1149,7 +1149,7 @@ export function CustomerFormPage({
             <img
               src={form.id_photo}
               alt="ID preview"
-              style={{ marginTop: 8, maxWidth: 200, maxHeight: 140, borderRadius: 8, border: '1px solid #BADBE9' }}
+              style={{ marginTop: 8, maxWidth: 200, maxHeight: 140, borderRadius: 8, border: '1px solid #E2E8F0' }}
             />
           ) : null}
           {errors.id_photo ? <p className="form-error">{errors.id_photo}</p> : null}

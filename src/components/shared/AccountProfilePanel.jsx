@@ -54,7 +54,7 @@ function fullNameFrom(profile) {
 export function AccountProfilePanel({
   showToast,
   title = 'Profile',
-  subtitle = 'Your name, contact details, and sign-in for this CORVEX account.',
+  subtitle = 'View and update your personal account details.',
   extraActions = null,
   settingsRole = 'personal',
   settings = null,

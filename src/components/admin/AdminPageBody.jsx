@@ -176,7 +176,7 @@ function DashboardPage({
         <Card title="User Growth" sub="Monthly registered users">
           <ResponsiveContainer width="100%" height={200}>
             <AreaChart data={USER_GROWTH}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#BADBE9" />
+              <CartesianGrid strokeDasharray="3 3" stroke="#E2E8F0" />
               <XAxis dataKey="month" tick={{
               fontSize: 12
             }} />
@@ -184,7 +184,7 @@ function DashboardPage({
               fontSize: 12
             }} />
               <Tooltip />
-              <Area type="monotone" dataKey="users" name="Users" stroke="#1A4162" fill="#1A4162" fillOpacity={0.1} strokeWidth={2} />
+              <Area type="monotone" dataKey="users" name="Users" stroke="#153450" fill="#153450" fillOpacity={0.1} strokeWidth={2} />
             </AreaChart>
           </ResponsiveContainer>
         </Card>
@@ -192,7 +192,7 @@ function DashboardPage({
         <Card title="Branch Overview" sub="Performance scores">
           <ResponsiveContainer width="100%" height={200}>
             <BarChart data={BRANCH_PERFORMANCE_CHART}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#BADBE9" />
+              <CartesianGrid strokeDasharray="3 3" stroke="#E2E8F0" />
               <XAxis dataKey="branch" tick={{
               fontSize: 12
             }} />
@@ -201,7 +201,7 @@ function DashboardPage({
             }} />
               <Tooltip />
               <Legend />
-              <Bar dataKey="performance" name="Performance" fill="#1A4162" radius={[4, 4, 0, 0]} />
+              <Bar dataKey="performance" name="Performance" fill="#153450" radius={[4, 4, 0, 0]} />
               <Bar dataKey="risk" name="Risk Score" fill="#ef4444" radius={[4, 4, 0, 0]} />
             </BarChart>
           </ResponsiveContainer>
@@ -1757,14 +1757,14 @@ function ReportsPage({
         <Card title="Collections Trend" sub={analytics.scope || 'All branches'}>
           <ResponsiveContainer width="100%" height={240}>
             <AreaChart data={analytics.trends?.collections || []}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#BADBE9" />
+              <CartesianGrid strokeDasharray="3 3" stroke="#E2E8F0" />
               <XAxis dataKey="day" tick={{
               fontSize: 12
             }} /><YAxis tick={{
               fontSize: 11
             }} tickFormatter={v => `${(v / 1000).toFixed(0)}k`} />
               <Tooltip formatter={v => formatCurrency(v)} />
-              <Area type="monotone" dataKey="amount" name="Collections" stroke="#1A4162" fill="#1A4162" fillOpacity={0.1} strokeWidth={2} />
+              <Area type="monotone" dataKey="amount" name="Collections" stroke="#153450" fill="#153450" fillOpacity={0.1} strokeWidth={2} />
             </AreaChart>
           </ResponsiveContainer>
         </Card>
@@ -1802,15 +1802,15 @@ function ReportsPage({
               compliance: row.routeCompliance,
               inventory: row.inventoryHealth,
             }))}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#BADBE9" />
+              <CartesianGrid strokeDasharray="3 3" stroke="#E2E8F0" />
               <XAxis dataKey="branch" tick={{
               fontSize: 12
             }} /><YAxis domain={[0, 100]} tick={{
               fontSize: 12
             }} />
               <Tooltip /><Legend />
-              <Bar dataKey="compliance" name="Route Compliance" fill="#1A4162" radius={[4, 4, 0, 0]} />
-              <Bar dataKey="inventory" name="Inventory Health" fill="#1A4162" radius={[4, 4, 0, 0]} />
+              <Bar dataKey="compliance" name="Route Compliance" fill="#153450" radius={[4, 4, 0, 0]} />
+              <Bar dataKey="inventory" name="Inventory Health" fill="#153450" radius={[4, 4, 0, 0]} />
             </BarChart>
           </ResponsiveContainer>
         </Card>
@@ -2091,7 +2091,6 @@ function ProfilePage({
   return <AccountProfilePanel
     showToast={showToast}
     title="Admin profile"
-    subtitle="Your name, contact details, and sign-in for this CORVEX account."
   />;
 }
 

@@ -1,5 +1,13 @@
 import apiClient from './apiClient.js';
 
+export const NOTIFICATIONS_EVENT = 'corvex-notifications-updated';
+
+function emitNotificationsUpdated() {
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new Event(NOTIFICATIONS_EVENT));
+  }
+}
+
 export async function fetchNotifications() {
   try {
     const response = await apiClient.get('/notifications');
@@ -13,6 +21,7 @@ export async function fetchNotifications() {
 export async function markNotificationRead(id) {
   try {
     const response = await apiClient.patch(`/notifications/${id}/read`);
+    if (response.data?.success) emitNotificationsUpdated();
     return response.data;
   } catch (error) {
     console.error('Failed to mark notification read:', error);
@@ -23,6 +32,7 @@ export async function markNotificationRead(id) {
 export async function markAllNotificationsRead() {
   try {
     const response = await apiClient.patch('/notifications/read-all');
+    if (response.data?.success) emitNotificationsUpdated();
     return response.data;
   } catch (error) {
     console.error('Failed to mark all notifications read:', error);
@@ -90,4 +100,56 @@ export function mapNotificationRow(row, { opsBase = '/branch-manager', orgBase =
 
 export function countUnreadNotifications(rows = []) {
   return rows.filter((row) => row.status !== 'Read' && !row.read).length;
+}
+
+export function resolveNotificationTargetForRole(row, roleKey) {
+  if (!row || !roleKey) return null;
+  if (row.relatedTo) return row.relatedTo;
+  const cat = String(row.category || row.type || '').toLowerCase();
+
+  switch (roleKey) {
+    case 'collector':
+      if (cat.includes('schedule') || cat.includes('route') || cat.includes('visit')) return '/collector/route';
+      if (cat.includes('receipt') || cat.includes('collection')) return '/collector/history';
+      if (cat.includes('ci') || cat.includes('credit')) return '/collector/accounts';
+      return '/collector/notifications';
+
+    case 'sales': {
+      const mapped = mapNotificationRow(row, { opsBase: '/sales', orgBase: '/sales' });
+      return mapped.relatedTo || '/sales/notifications';
+    }
+
+    case 'warehouse':
+      if (cat.includes('inventory') || cat.includes('stock')) return '/warehouse/branch-stock';
+      if (cat.includes('transfer')) return '/warehouse/transfers';
+      if (cat.includes('restock')) return '/warehouse/restock-history';
+      return '/warehouse/notifications';
+
+    case 'branchManager': {
+      const mapped = mapNotificationRow(row, { opsBase: '/branch-manager', orgBase: '/branch-manager' });
+      return mapped.relatedTo || '/branch-manager/notifications';
+    }
+
+    case 'operatingManager': {
+      const mapped = mapNotificationRow(row, { opsBase: '/operating-manager/operations', orgBase: '/operating-manager' });
+      return mapped.relatedTo || '/operating-manager/notifications';
+    }
+
+    case 'customer':
+      if (cat.includes('receipt') || cat.includes('payment')) return '/customer/receipts';
+      if (cat.includes('statement')) return '/customer/statements';
+      if (cat.includes('purchase') || cat.includes('request')) return '/customer/purchase-requests';
+      if (cat.includes('account') || cat.includes('overdue')) return '/customer/account-details';
+      return '/customer/notifications';
+
+    case 'superAdmin':
+      if (cat.includes('security') || cat.includes('login')) return '/super-admin/security';
+      if (cat.includes('backup')) return '/super-admin/backup';
+      if (cat.includes('user') || cat.includes('role')) return '/super-admin/users';
+      if (cat.includes('audit')) return '/super-admin/audit-logs';
+      return '/super-admin/notifications';
+
+    default:
+      return null;
+  }
 }

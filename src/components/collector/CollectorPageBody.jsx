@@ -209,14 +209,6 @@ function DashboardPage({
           <p className="muted">{todayLabel}</p>
           <p className="muted" style={{ marginTop: 4 }}>{greetingSub}</p>
         </div>
-        <Link
-          to="/collector/notifications"
-          className="notification-bell"
-          aria-label={`${unreadCount} unread notifications`}
-        >
-          <NavIcon name="bell" />
-          {unreadCount > 0 ? <span className="notification-badge">{unreadCount}</span> : null}
-        </Link>
       </section>
 
       {loadError && !dashboard ? (
@@ -839,7 +831,7 @@ function CustomerMapPage({
       id: 'depot',
       position: [depot.latitude, depot.longitude],
       label: 'B',
-      color: '#1A4162',
+      color: '#153450',
       popup: `<strong>${depot.name || 'Branch'}</strong><br/>Starting location`,
     });
   }
@@ -847,12 +839,12 @@ function CustomerMapPage({
     id: account.id,
     position: center,
     label: isRouteNav ? '1' : (account.customerName || 'CU').substring(0, 2).toUpperCase(),
-    color: '#0B1E30',
+    color: '#0B2133',
     popup: `<strong>${account.customerName}</strong><br/>${account.address || ''}`,
   });
   const fitBounds = markers.map((m) => m.position);
   const polylines = roadLeg?.positions?.length
-    ? [{ id: 'nav-leg', positions: roadLeg.positions, color: '#0B1E30', weight: 4 }]
+    ? [{ id: 'nav-leg', positions: roadLeg.positions, color: '#0B2133', weight: 4 }]
     : [];
 
   return <div className="page">
@@ -1440,7 +1432,6 @@ function ProfilePage({
   return <AccountProfilePanel
     showToast={showToast}
     title="Collector profile"
-    subtitle="Your name, contact details, and sign-in for this CORVEX account."
     settings={<SettingsPage embedded showToast={showToast} />}
   />;
 }

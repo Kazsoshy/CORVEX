@@ -307,7 +307,7 @@ export function BranchLeafletPage({
           </div>
         ) : null}
 
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12, marginBottom: 12, fontSize: '0.85rem', color: 'var(--ink, #0B1E30)' }}>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12, marginBottom: 12, fontSize: '0.85rem', color: 'var(--ink, #0B2133)' }}>
           {mode === 'customers' ? (
             <>
               <span>Customers on map: <strong>{view.accountCount}</strong></span>

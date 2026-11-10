@@ -956,7 +956,7 @@ function RolesPage({
             })} style={{
               width: '100%',
               padding: '8px 12px',
-              border: '1px solid #BADBE9',
+              border: '1px solid #E2E8F0',
               borderRadius: 8
             }} /></div>
               <div style={{
@@ -1475,7 +1475,6 @@ function ProfilePage({
   return <AccountProfilePanel
     showToast={showToast}
     title="Super admin profile"
-    subtitle="Your name, contact details, and sign-in for this CORVEX account."
     settingsRole="personal"
   />;
 }
@@ -1630,7 +1629,7 @@ function UsersPage({
                       width: 32,
                       height: 32,
                       borderRadius: "50%",
-                      background: "#0B1E30",
+                      background: "#0B2133",
                       color: "#fff",
                       display: "grid",
                       placeItems: "center",

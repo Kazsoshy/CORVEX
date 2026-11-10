@@ -29,7 +29,7 @@ export const landingContent = {
     kicker: 'CORVEX Furniture',
     titleLead: 'Furniture for',
     titleEmphasis: 'daily life.',
-    lede: 'A collection for living, sleeping, dining, work, and the outdoors — kept in view across every CORVEX branch.',
+    lede: 'A collection for living, sleeping, dining, work, and the outdoors — kept in view across every BH Marketing branch.',
     primaryCta: { label: 'Our Products', href: '#products' },
     secondaryCta: { label: 'Get in Touch', href: '#contact' },
   },

@@ -156,14 +156,14 @@ export function TerritoriesPage({ showToast, navigate, opsBase }) {
   const hasPin = Number.isFinite(Number(form.latitude)) && Number.isFinite(Number(form.longitude));
   const mapCenter = hasPin ? [Number(form.latitude), Number(form.longitude)] : DEFAULT_CENTER;
   const mapMarkers = hasPin
-    ? [{ id: 'territory-pin', position: mapCenter, label: 'T', color: '#1A4162', popup: form.territory_name || 'Territory center' }]
+    ? [{ id: 'territory-pin', position: mapCenter, label: 'T', color: '#153450', popup: form.territory_name || 'Territory center' }]
     : [];
   const mapCircles = hasPin
     ? [{
       id: 'territory-radius',
       center: mapCenter,
       radius: Number(form.radius_meters) || DEFAULT_RADIUS,
-      color: '#1A4162',
+      color: '#153450',
       fillOpacity: 0.14,
       popup: 'Approximate Territory Coverage',
     }]

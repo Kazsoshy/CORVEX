@@ -1,6 +1,4 @@
 import { landingContent } from '../../content/landingContent';
-import { HeroVisual } from './HeroVisual';
-import { Kicker } from './Kicker';
 import { Reveal } from './Reveal';
 
 export function HeroSection() {
@@ -8,9 +6,8 @@ export function HeroSection() {
 
   return (
     <section className="cvx-hero" id="home" aria-labelledby="hero-title">
-      <div className="cvx-wrap cvx-hero-grid">
+      <div className="cvx-wrap cvx-hero-wrap">
         <Reveal as="div" className="cvx-hero-copy" immediate>
-          <Kicker>{hero.kicker}</Kicker>
           <h1 id="hero-title">
             <span>{hero.titleLead}</span>
             <span className="cvx-hero-accent">{hero.titleEmphasis}</span>
@@ -25,7 +22,6 @@ export function HeroSection() {
             </a>
           </div>
         </Reveal>
-        <HeroVisual />
       </div>
     </section>
   );

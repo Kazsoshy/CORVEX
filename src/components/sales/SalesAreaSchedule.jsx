@@ -25,8 +25,8 @@ function manilaToday() {
 }
 
 function statusColor(status) {
-  if (status === 'Done') return '#1A4162';
-  if (status === 'In Progress') return '#0B1E30';
+  if (status === 'Done') return '#153450';
+  if (status === 'In Progress') return '#0B2133';
   return '#64748b';
 }
 

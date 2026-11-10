@@ -594,7 +594,7 @@ export function DigitalReceiptPage({ receiptId, navigate, showToast }) {
         <div
           className="receipt-slip"
           style={{
-            border: '1px solid #BADBE9',
+            border: '1px solid #E2E8F0',
             borderRadius: 12,
             padding: 20,
             background: '#fff',

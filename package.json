@@ -15,6 +15,7 @@
     "check:schema": "node scripts/check_schema.mjs",
     "check:suppliers": "node scripts/check_suppliers.js",
     "check:territories": "node scripts/check_territories.js",
+    "test": "node --test backend/tests/*.test.js",
     "build": "vite build",
     "preview": "vite preview"
   },

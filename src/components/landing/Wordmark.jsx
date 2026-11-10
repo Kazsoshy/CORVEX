@@ -1,5 +1,5 @@
 import logo from '../../assets/corvex-logo.png';
-import whiteLogo from '../../assets/corvex-white-logo.png';
+import whiteLogo from '../../assets/corvex-logo.png';
 
 export function Wordmark() {
   return (

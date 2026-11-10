@@ -72,7 +72,7 @@ export function issueSessionToken(userId, issuedAt = Date.now(), lastActivity = 
   return `${payload}.${signature}`;
 }
 
-function readSessionToken(header) {
+export function readSessionToken(header) {
   if (!header || !header.startsWith('Bearer ')) return null;
   const token = header.slice('Bearer '.length).trim();
   const parts = token.split('.');

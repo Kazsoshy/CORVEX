@@ -210,18 +210,6 @@ export function BranchManagerDashboardPage({
         </div>
         <div className="flex items-center gap-2">
           <button className="button ghost" type="button" onClick={refresh}>Refresh</button>
-          <Link
-            to={`${opsBase}/notifications`}
-            className="relative p-2 text-ink/70 hover:text-blue hover:bg-blue/5 rounded-full transition-colors"
-            aria-label={`${unread} unread notifications`}
-          >
-            <NavIcon name="bell" />
-            {unread > 0 ? (
-              <span className="absolute top-0 right-0 min-w-[18px] h-[18px] px-1 flex justify-center items-center rounded-full bg-red text-white text-[0.7rem] font-bold border-2 border-mint">
-                {unread}
-              </span>
-            ) : null}
-          </Link>
         </div>
       </section>
 
@@ -392,13 +380,13 @@ export function BranchManagerDashboardPage({
                       );
                     }}
                   >
-                    <CartesianGrid strokeDasharray="3 3" stroke="#BADBE9" />
+                    <CartesianGrid strokeDasharray="3 3" stroke="#E2E8F0" />
                     <XAxis dataKey="day" tick={{ fontSize: 12 }} />
                     <YAxis tick={{ fontSize: 11 }} tickFormatter={(v) => `${(v / 1000).toFixed(0)}k`} />
                     <Tooltip formatter={(v) => formatCurrency(v)} />
                     <Legend />
-                    <Area type="monotone" dataKey="target" name="Target" stroke="#BADBE9" fill="#BADBE9" strokeWidth={2} strokeDasharray="5 5" />
-                    <Area type="monotone" dataKey="amount" name="Collected" stroke="#1A4162" fill="#1A4162" fillOpacity={0.12} strokeWidth={2} />
+                    <Area type="monotone" dataKey="target" name="Target" stroke="#E2E8F0" fill="#E2E8F0" strokeWidth={2} strokeDasharray="5 5" />
+                    <Area type="monotone" dataKey="amount" name="Collected" stroke="#153450" fill="#153450" fillOpacity={0.12} strokeWidth={2} />
                   </AreaChart>
                 </ResponsiveContainer>
               )}
@@ -427,13 +415,13 @@ export function BranchManagerDashboardPage({
                       );
                     }}
                   >
-                    <CartesianGrid strokeDasharray="3 3" stroke="#BADBE9" />
+                    <CartesianGrid strokeDasharray="3 3" stroke="#E2E8F0" />
                     <XAxis dataKey="day" tick={{ fontSize: 12 }} />
                     <YAxis tick={{ fontSize: 11 }} tickFormatter={(v) => `${(v / 1000).toFixed(0)}k`} />
                     <Tooltip formatter={(v) => formatCurrency(v)} />
                     <Legend />
-                    <Bar dataKey="target" name="Target" fill="#BADBE9" radius={[4, 4, 0, 0]} />
-                    <Bar dataKey="actual" name="Actual" fill="#1A4162" radius={[4, 4, 0, 0]} />
+                    <Bar dataKey="target" name="Target" fill="#E2E8F0" radius={[4, 4, 0, 0]} />
+                    <Bar dataKey="actual" name="Actual" fill="#153450" radius={[4, 4, 0, 0]} />
                   </BarChart>
                 </ResponsiveContainer>
               )}
