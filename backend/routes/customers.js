@@ -6,7 +6,7 @@ import {
   dispatchPortalActivationEmail,
 } from '../lib/customerPortal.js';
 import { isMailConfigured } from '../lib/mail.js';
-import { notifyCustomerProfileUpdated, writeCustomerAudit } from '../lib/customerNotifications.js';
+import { notifyCustomerAccountStatus, notifyCustomerProfileUpdated, writeCustomerAudit } from '../lib/customerNotifications.js';
 
 const GOVERNMENT_ID_TYPES = new Set([
   'Philippine National ID',
@@ -947,6 +947,9 @@ router.put('/:id', async (req, res) => {
         actorName,
         changedFields: uniqueChanges,
       });
+      if (uniqueChanges.includes('account status')) {
+        await notifyCustomerAccountStatus(pool, { customerId, status: after.status });
+      }
     }
 
     return res.status(200).json({ success: true, message: 'Customer updated.', data: after });

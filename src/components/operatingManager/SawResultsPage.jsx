@@ -18,6 +18,7 @@ import { NavIcon } from '../../navIcons';
 import { fetchSawResults, recomputeOrgSawResults } from '../../api/sawResultsService';
 import { formatCurrency, formatDisplayDate, formatDisplayDateTime } from '../../utils/formatters.js';
 import { downloadPdf } from '../../utils/dataExport.js';
+import { confirmAction } from '../shared/confirmAction.jsx';
 import { chartSeries } from '../../theme/palette.js';
 import { ChartDrilldownModal } from '../shared/ChartDrilldownModal.jsx';
 import { useChartDrilldown } from '../../hooks/useChartDrilldown.js';
@@ -149,7 +150,7 @@ function ranksFollowScores(rows) {
   return ordered.every((row, index) => Number(row.ranking) === index + 1);
 }
 
-function exportSawPdf(rows) {
+function exportSawPdf(rows, { branchName = '' } = {}) {
   const exportRows = rows.map((row) => ({
     Rank: row.ranking,
     Customer: row.customer_name || '',
@@ -168,14 +169,22 @@ function exportSawPdf(rows) {
     Longitude: row.longitude ?? '',
     Generated: row.generated_at || '',
   }));
+  const scopeLabel = branchName ? ` — ${branchName}` : '';
   return downloadPdf(exportRows, {
     filename: `saw-priority-${new Date().toISOString().slice(0, 10)}.pdf`,
-    title: 'SAW Collection Priority',
-    subtitle: 'Customer prioritization ranking',
+    title: `SAW Collection Priority${scopeLabel}`,
+    subtitle: branchName ? `Customer prioritization for ${branchName}` : 'Customer prioritization ranking',
   });
 }
 
-export function SawResultsPage({ navigate, showToast }) {
+export function SawResultsPage({ navigate, showToast, scope = 'organization', branchName = '' }) {
+  const branchScoped = scope === 'branch';
+  const customerPath = (id) => (
+    branchScoped
+      ? `/branch-manager/customers/${id}`
+      : `/operating-manager/operations/customers/${id}`
+  );
+  const mapPath = branchScoped ? '/branch-manager/leaflet' : '/operating-manager/leaflet';
   const { drilldown, closeDrilldown, openLocalDrilldown } = useChartDrilldown({ showToast });
   const [results, setResults] = useState([]);
   const [summary, setSummary] = useState(null);
@@ -196,7 +205,7 @@ export function SawResultsPage({ navigate, showToast }) {
       try {
         const params = {};
         if (search.trim()) params.search = search.trim();
-        if (branchId !== 'all') params.branch_id = branchId;
+        if (!branchScoped && branchId !== 'all') params.branch_id = branchId;
         params.limit = 5000;
         const result = await fetchSawResults(params);
         if (cancelled) return;
@@ -219,10 +228,20 @@ export function SawResultsPage({ navigate, showToast }) {
       cancelled = true;
       clearTimeout(timer);
     };
-  }, [search, branchId, showToast, reloadKey]);
+  }, [search, branchId, branchScoped, showToast, reloadKey]);
 
   async function handleRecompute() {
+    if (recomputing) return;
     setRecomputing(true);
+    const confirmed = await confirmAction({
+      title: 'Recompute SAW results',
+      message: 'This recalculates organization SAW scores and replaces the current ranking.',
+      confirmLabel: 'Recompute',
+    });
+    if (!confirmed) {
+      setRecomputing(false);
+      return;
+    }
     try {
       const result = await recomputeOrgSawResults();
       if (result.success) {
@@ -311,7 +330,7 @@ export function SawResultsPage({ navigate, showToast }) {
   const topScore = Number(summary?.topScore || 0);
   const missingFactors = Number(summary?.missingFactors ?? results.filter((row) => !hasStoredFactors(row)).length);
   const fullQueueLoaded = !search.trim()
-    && branchId === 'all'
+    && (branchScoped || branchId === 'all')
     && scoreBand === 'all'
     && results.length > 0
     && results.length === Number(summary?.total || 0);
@@ -329,23 +348,29 @@ export function SawResultsPage({ navigate, showToast }) {
             <p className="saw-eyebrow">Customer Prioritization</p>
             <h3 style={{ margin: 0 }}>SAW Collection Priority</h3>
             <p className="text-ink/70" style={{ margin: '6px 0 0', fontSize: '0.88rem', maxWidth: 560 }}>
-              Each saved row keeps the balance, days overdue, distance, and normalized values that produced its score. Rank is the order of those scores.
+              {branchScoped
+                ? `Priority order for ${branchName || 'your branch'} only. Rank follows the saved scores inside this branch.`
+                : 'Each saved row keeps the balance, days overdue, distance, and normalized values that produced its score. Rank is the order of those scores.'}
             </p>
           </div>
           <div className="saw-results-actions">
-            <button
-              className="button"
-              type="button"
-              onClick={handleRecompute}
-              disabled={recomputing}
-            >
-              {recomputing ? 'Recomputing…' : 'Recompute Org SAW'}
-            </button>
+            {branchScoped ? null : (
+              <button
+                className="button"
+                type="button"
+                onClick={handleRecompute}
+                disabled={recomputing}
+              >
+                {recomputing ? 'Recomputing…' : 'Recompute Org SAW'}
+              </button>
+            )}
             <button
               className="button secondary"
               type="button"
               onClick={() => {
-                if (exportSawPdf(sorted)) showToast?.('SAW priority exported as PDF.', 'success');
+                if (exportSawPdf(sorted, { branchName: branchScoped ? branchName : '' })) {
+                  showToast?.('SAW priority exported as PDF.', 'success');
+                }
               }}
               disabled={!sorted.length}
             >
@@ -354,9 +379,9 @@ export function SawResultsPage({ navigate, showToast }) {
             <button
               className="button secondary"
               type="button"
-              onClick={() => navigate('/operating-manager/leaflet')}
+              onClick={() => navigate(mapPath)}
             >
-              Network Map
+              {branchScoped ? 'Field Map' : 'Network Map'}
             </button>
           </div>
         </div>
@@ -396,8 +421,8 @@ export function SawResultsPage({ navigate, showToast }) {
             <strong>{topScore.toFixed(3)}</strong>
           </div>
           <div className="saw-stat">
-            <span>Branches covered</span>
-            <strong>{summary?.branchesCovered ?? byBranch.length}</strong>
+            <span>{branchScoped ? 'Branch' : 'Branches covered'}</span>
+            <strong className={branchScoped ? 'saw-stat-name' : undefined}>{branchScoped ? (branchName || byBranch[0]?.branchName || 'Your branch') : (summary?.branchesCovered ?? byBranch.length)}</strong>
           </div>
         </div>
       </section>
@@ -426,7 +451,7 @@ export function SawResultsPage({ navigate, showToast }) {
                 className="icon-action-button"
                 type="button"
                 title="Open customer"
-                onClick={() => navigate(`/operating-manager/operations/customers/${row.customer_id}`)}
+                onClick={() => navigate(customerPath(row.customer_id))}
               >
                 <NavIcon name="view" />
               </button>
@@ -442,17 +467,19 @@ export function SawResultsPage({ navigate, showToast }) {
             <input
               className="search-input"
               type="search"
-              placeholder="Search customer, branch, or territory…"
+              placeholder={branchScoped ? 'Search customer or territory…' : 'Search customer, branch, or territory…'}
               value={search}
               onChange={(e) => setSearch(e.target.value)}
             />
           </div>
-          <select className="filter-select" value={branchId} onChange={(e) => setBranchId(e.target.value)}>
-            <option value="all">All Branches</option>
-            {byBranch.map((branch) => (
-              <option key={branch.branchId} value={branch.branchId}>{branch.branchName}</option>
-            ))}
-          </select>
+          {branchScoped ? null : (
+            <select className="filter-select" value={branchId} onChange={(e) => setBranchId(e.target.value)}>
+              <option value="all">All Branches</option>
+              {byBranch.map((branch) => (
+                <option key={branch.branchId} value={branch.branchId}>{branch.branchName}</option>
+              ))}
+            </select>
+          )}
           <select className="filter-select" value={sortKey} onChange={(e) => setSortKey(e.target.value)}>
             <option value="ranking">Sort: SAW Rank</option>
             <option value="score">Sort: Score</option>
@@ -466,6 +493,7 @@ export function SawResultsPage({ navigate, showToast }) {
           </select>
         </div>
 
+        {branchScoped ? null : (
         <div className="org-leaflet-branch-chips">
           <button
             type="button"
@@ -491,6 +519,7 @@ export function SawResultsPage({ navigate, showToast }) {
             </button>
           ))}
         </div>
+        )}
 
         <div className="saw-band-legend">
           <button type="button" className={`saw-band high${scoreBand === 'high' ? ' active' : ''}`} onClick={() => setScoreBand(scoreBand === 'high' ? 'all' : 'high')}>
@@ -505,7 +534,8 @@ export function SawResultsPage({ navigate, showToast }) {
         </div>
       </section>
 
-      <div className="saw-split-grid saw-split-3">
+      <div className={`saw-split-grid${branchScoped ? '' : ' saw-split-3'}`}>
+        {branchScoped ? null : (
         <section className="panel content-panel relative overflow-hidden">
           <div className="flex flex-col md:flex-row justify-between gap-4 items-start md:items-center mb-4">
             <h3 style={{ margin: 0 }}>Ranked by Branch</h3>
@@ -560,6 +590,7 @@ export function SawResultsPage({ navigate, showToast }) {
             <EmptyState title="No branch breakdown yet" description="SAW results will appear here after collectors recompute priority." />
           )}
         </section>
+        )}
 
         <section className="panel content-panel relative overflow-hidden">
           <div className="flex flex-col md:flex-row justify-between gap-4 items-start md:items-center mb-4">
@@ -627,7 +658,7 @@ export function SawResultsPage({ navigate, showToast }) {
               <div className="org-leaflet-map-shell">
                 <LeafletMap
                   center={mapCenter}
-                  zoom={branchId === 'all' ? 8 : 12}
+                  zoom={branchScoped || branchId !== 'all' ? 12 : 8}
                   height={200}
                   fitBounds={mapBounds.length ? mapBounds : null}
                   markers={mapMarkers}
@@ -657,12 +688,14 @@ export function SawResultsPage({ navigate, showToast }) {
         {results.length > 0 ? (
           <p className={`saw-audit-note${scoresCheckOut && ranksCheckOut ? ' ok' : ''}`}>
             {missingFactors > 0
-              ? `${missingFactors} saved row${missingFactors === 1 ? '' : 's'} still have only a score and rank. Recompute Org SAW to store the balance, days overdue, distance, and normalized values.`
+              ? `${missingFactors} saved row${missingFactors === 1 ? '' : 's'} still have only a score and rank.`
               : scoresCheckOut && ranksCheckOut
                 ? 'Saved scores match the stored weights and normalized values, and the displayed ranks follow those scores.'
                 : fullQueueLoaded
-                  ? 'A saved score or rank does not match the stored factors. Recompute Org SAW and review the highlighted rows.'
-                  : 'Clear the search, branch, and score filters to check that every displayed rank follows the saved scores.'}
+                  ? 'A saved score or rank does not match the stored factors.'
+                  : branchScoped
+                    ? 'Clear the search and score filters to check that every displayed rank follows the saved scores.'
+                    : 'Clear the search, branch, and score filters to check that every displayed rank follows the saved scores.'}
           </p>
         ) : null}
 
@@ -738,7 +771,7 @@ export function SawResultsPage({ navigate, showToast }) {
                             className="icon-action-button"
                             type="button"
                             title="Open customer"
-                            onClick={() => navigate(`/operating-manager/operations/customers/${row.customer_id}`)}
+                            onClick={() => navigate(customerPath(row.customer_id))}
                           >
                             <NavIcon name="view" />
                           </button>
@@ -746,7 +779,7 @@ export function SawResultsPage({ navigate, showToast }) {
                             className="icon-action-button"
                             type="button"
                             title="View map"
-                            onClick={() => navigate('/operating-manager/leaflet')}
+                            onClick={() => navigate(mapPath)}
                           >
                             <NavIcon name="map" />
                           </button>

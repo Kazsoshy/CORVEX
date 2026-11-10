@@ -1,16 +1,17 @@
 
 const ROUTE_DEFINITIONS = [
   { pattern: /^\/customer\/login$/, pageType: 'login' },
-  { pattern: /^\/customer\/home$/, pageType: 'home' },
-  { pattern: /^\/customer\/account-details$/, pageType: 'accountDetails' },
+  { pattern: /^\/customer\/(?:dashboard|home)$/, pageType: 'dashboard' },
+  { pattern: /^\/customer\/(?:my-profile|profile|account-details)$/, pageType: 'profile' },
+  { pattern: /^\/customer\/purchases$/, pageType: 'purchases' },
+  { pattern: /^\/customer\/purchases\/([^/]+)$/, pageType: 'purchaseDetail', params: ['invoiceId'] },
+  { pattern: /^\/customer\/balances$/, pageType: 'balances' },
   { pattern: /^\/customer\/payment-history$/, pageType: 'paymentHistory' },
   { pattern: /^\/customer\/receipts$/, pageType: 'receipts' },
   { pattern: /^\/customer\/receipts\/([^/]+)$/, pageType: 'receiptDetail', params: ['receiptId'] },
-  { pattern: /^\/customer\/statements$/, pageType: 'statements' },
-  { pattern: /^\/customer\/statements\/([^/]+)$/, pageType: 'statementDetail', params: ['statementId'] },
   { pattern: /^\/customer\/notifications$/, pageType: 'notifications' },
-  { pattern: /^\/customer\/settings$/, pageType: 'settings' },
-  { pattern: /^\/customer\/profile$/, pageType: 'profile' },
+  { pattern: /^\/customer\/support$/, pageType: 'support' },
+  { pattern: /^\/customer\/(?:account-settings|settings)$/, pageType: 'settings' },
 ];
 
 export function matchCustomerRoute(pathname) {
@@ -27,32 +28,35 @@ export function matchCustomerRoute(pathname) {
 }
 
 export function buildCustomerBreadcrumbs(pageType, params = {}) {
-  const crumbs = [{ label: 'Home', to: '/customer/home' }];
+  const crumbs = [{ label: 'Dashboard', to: '/customer/dashboard' }];
   const receiptLabel = params.receiptId ? `Receipt #${params.receiptId}` : 'Receipt';
+  const invoiceLabel = params.invoiceId ? `Invoice ${params.invoiceId}` : 'Invoice';
 
   switch (pageType) {
     case 'login':
       return [{ label: 'Login', to: '/customer/login' }];
-    case 'home':
-      return [{ label: 'Home', to: '/customer/home' }];
-    case 'accountDetails':
-      return [...crumbs, { label: 'Account Details', to: '/customer/account-details' }];
+    case 'dashboard':
+      return [{ label: 'Dashboard', to: '/customer/dashboard' }];
+    case 'profile':
+      return [...crumbs, { label: 'My Profile', to: '/customer/my-profile' }];
+    case 'purchases':
+      return [...crumbs, { label: 'My Purchases', to: '/customer/purchases' }];
+    case 'purchaseDetail':
+      return [...crumbs, { label: 'My Purchases', to: '/customer/purchases' }, { label: invoiceLabel, to: `/customer/purchases/${params.invoiceId}` }];
+    case 'balances':
+      return [...crumbs, { label: 'Outstanding Balances', to: '/customer/balances' }];
     case 'paymentHistory':
       return [...crumbs, { label: 'Payment History', to: '/customer/payment-history' }];
     case 'receipts':
-      return [...crumbs, { label: 'Digital Receipts', to: '/customer/receipts' }];
+      return [...crumbs, { label: 'Payment History', to: '/customer/payment-history' }, { label: 'Receipts', to: '/customer/receipts' }];
     case 'receiptDetail':
-      return [...crumbs, { label: 'Digital Receipts', to: '/customer/receipts' }, { label: receiptLabel, to: `/customer/receipts/${params.receiptId}` }];
-    case 'statements':
-      return [...crumbs, { label: 'Statements', to: '/customer/statements' }];
-    case 'statementDetail':
-      return [...crumbs, { label: 'Statements', to: '/customer/statements' }, { label: 'Statement', to: `/customer/statements/${params.statementId}` }];
+      return [...crumbs, { label: 'Payment History', to: '/customer/payment-history' }, { label: receiptLabel, to: `/customer/receipts/${params.receiptId}` }];
     case 'notifications':
       return [...crumbs, { label: 'Notifications', to: '/customer/notifications' }];
+    case 'support':
+      return [...crumbs, { label: 'Customer Support', to: '/customer/support' }];
     case 'settings':
-      return [...crumbs, { label: 'Settings', to: '/customer/settings' }];
-    case 'profile':
-      return [...crumbs, { label: 'Profile', to: '/customer/profile' }];
+      return [...crumbs, { label: 'Account Settings', to: '/customer/account-settings' }];
     default:
       return crumbs;
   }
@@ -64,28 +68,31 @@ export function resolveCustomerPage(pathname) {
 
   const titles = {
     login: 'Customer Login',
-    home: 'Home',
-    accountDetails: 'Account Details',
+    dashboard: 'Dashboard',
+    profile: 'My Profile',
+    purchases: 'My Purchases',
+    purchaseDetail: 'Invoice Details',
+    balances: 'Outstanding Balances',
     paymentHistory: 'Payment History',
-    receipts: 'Digital Receipts',
+    receipts: 'Payment Receipts',
     receiptDetail: 'Receipt Detail',
-    statements: 'Statements',
-    statementDetail: 'Statement Detail',
     notifications: 'Notifications',
-    settings: 'Settings',
-    profile: 'Profile',
+    support: 'Customer Support',
+    settings: 'Account Settings',
   };
 
   const descriptions = {
-    login: 'Sign in with your account number and password or OTP.',
-    home: 'Your account overview and quick actions.',
-    accountDetails: 'View and update your account information.',
-    paymentHistory: 'Complete record of payments received.',
-    receipts: 'Digital receipts for all confirmed payments.',
-    statements: 'Monthly account statements and summaries.',
-    notifications: 'Payment reminders and account updates.',
-    settings: 'Accessibility, appearance, and notification preferences for this device.',
-    profile: 'Personal information and security settings.',
+    login: 'Sign in with your account number and password.',
+    dashboard: 'Outstanding balance, purchases, payments, and upcoming due dates.',
+    profile: 'Your customer record and account status.',
+    purchases: 'Invoices, products, and payment status.',
+    purchaseDetail: 'Products, quantities, and amounts on this invoice.',
+    balances: 'Unpaid, partially paid, and overdue invoices.',
+    paymentHistory: 'Payments, the invoices they covered, and receipts.',
+    receipts: 'Digital receipts for confirmed payments.',
+    notifications: 'Payment, invoice, due date, and account updates.',
+    support: 'How to reach your branch about this account.',
+    settings: 'Password, contact details, notifications, and sign out.',
   };
 
   return {
@@ -100,14 +107,20 @@ export function resolveCustomerPage(pathname) {
 
 export function isCustomerNavActive(fullPath, navTo) {
   const pathname = fullPath.split('?')[0];
-  if (navTo === '/customer/home') {
-    return pathname === '/customer/home';
+  if (navTo === '/customer/dashboard') {
+    return pathname === '/customer/dashboard' || pathname === '/customer/home';
   }
-  if (navTo === '/customer/receipts') {
-    return pathname.startsWith('/customer/receipts');
+  if (navTo === '/customer/my-profile') {
+    return pathname === '/customer/my-profile' || pathname === '/customer/profile' || pathname === '/customer/account-details';
   }
-  if (navTo === '/customer/statements') {
-    return pathname.startsWith('/customer/statements');
+  if (navTo === '/customer/purchases') {
+    return pathname.startsWith('/customer/purchases');
+  }
+  if (navTo === '/customer/payment-history') {
+    return pathname === '/customer/payment-history' || pathname.startsWith('/customer/receipts');
+  }
+  if (navTo === '/customer/account-settings') {
+    return pathname === '/customer/account-settings' || pathname === '/customer/settings';
   }
   return pathname === navTo;
 }

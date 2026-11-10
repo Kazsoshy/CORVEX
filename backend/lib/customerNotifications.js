@@ -15,6 +15,81 @@ export async function writeCustomerAudit(pool, {
   );
 }
 
+export async function notifyLinkedCustomer(pool, customerId, { title, message, category = 'Account' }) {
+  if (!customerId || !title || !message) return;
+  const found = await pool.query(
+    `SELECT user_id FROM customers WHERE customer_id = $1`,
+    [customerId]
+  );
+  const userId = found.rows[0]?.user_id;
+  if (!userId) return;
+  await insertUserNotification(pool, {
+    userId,
+    title: String(title).slice(0, 150),
+    message: String(message).slice(0, 500),
+    category,
+  });
+}
+
+function peso(value) {
+  return `PHP ${Number(value || 0).toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+}
+
+export async function notifyCustomerPaymentEvent(pool, {
+  customerId,
+  receiptNumber,
+  amount,
+  kind,
+  reason = '',
+}) {
+  const receipt = receiptNumber || 'your payment';
+  const sum = peso(amount);
+  const note = reason ? ` Reason: ${reason}` : '';
+  const copy = {
+    submitted: {
+      title: 'Collection recorded',
+      message: `A collection of ${sum} (${receipt}) was recorded and is waiting for confirmation. Your balance changes after the branch confirms it.`,
+      category: 'Collection',
+    },
+    confirmed: {
+      title: 'Payment confirmed',
+      message: `Your payment of ${sum} (${receipt}) was confirmed.`,
+      category: 'Payment',
+    },
+    rejected: {
+      title: 'Collection not accepted',
+      message: `The collection ${receipt} for ${sum} was not accepted.${note}`,
+      category: 'Collection',
+    },
+    reversed: {
+      title: 'Payment reversed',
+      message: `The confirmed payment ${receipt} for ${sum} was reversed and returned to your balance.${note}`,
+      category: 'Collection',
+    },
+  };
+  const event = copy[kind];
+  if (!event) return;
+  await notifyLinkedCustomer(pool, customerId, event);
+}
+
+export async function notifyCustomerInvoiceConfirmed(pool, { customerId, invoiceNumber, amount, dueDate }) {
+  const due = dueDate ? ` Due ${String(dueDate).slice(0, 10)}.` : '';
+  await notifyLinkedCustomer(pool, customerId, {
+    title: `Invoice ${invoiceNumber}`,
+    message: `Invoice ${invoiceNumber} for ${peso(amount)} was added to your account.${due}`,
+    category: 'Invoice',
+  });
+}
+
+export async function notifyCustomerAccountStatus(pool, { customerId, status }) {
+  if (!status) return;
+  await notifyLinkedCustomer(pool, customerId, {
+    title: 'Account status updated',
+    message: `Your account status is now ${status}.`,
+    category: 'Account',
+  });
+}
+
 /** Notify BM/OM that a sales agent updated customer profile fields. */
 export async function notifyCustomerProfileUpdated(pool, {
   branchId,

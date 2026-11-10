@@ -240,6 +240,7 @@ export const notifyOverdueAccounts = guard('overdue', async (pool) => {
   const overdue = await pool.query(
     `SELECT
        c.customer_id,
+       c.user_id,
        COALESCE(NULLIF(TRIM(CONCAT_WS(' ', c.first_name, c.last_name)), ''), 'Customer') AS customer_name,
        b.name AS branch_name,
        ca.outstanding_balance,
@@ -253,11 +254,27 @@ export const notifyOverdueAccounts = guard('overdue', async (pool) => {
        AND si.status IN ('Confirmed', 'Pending Review')
        AND si.due_date IS NOT NULL
        AND si.due_date < $1::date
-     GROUP BY c.customer_id, c.first_name, c.last_name, b.name, ca.outstanding_balance
+     GROUP BY c.customer_id, c.user_id, c.first_name, c.last_name, b.name, ca.outstanding_balance
      ORDER BY ca.outstanding_balance DESC, MIN(si.due_date) ASC`,
     [today]
   );
   if (!overdue.rows.length) return;
+
+  for (const row of overdue.rows) {
+    if (!row.user_id) continue;
+    const fresh = await claimDedup(pool, `overdue-customer:${row.customer_id}:${row.due_date}`);
+    if (!fresh) continue;
+    const balance = Number(row.outstanding_balance || 0).toLocaleString('en-PH', {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    });
+    await insertUserNotification(pool, {
+      userId: row.user_id,
+      title: 'Payment overdue',
+      message: `Your account is overdue since ${row.due_date}. Outstanding balance is ₱${balance}.`,
+      category: 'Overdue',
+    });
+  }
 
   const managers = await pool.query(
     `SELECT u.id
@@ -305,11 +322,49 @@ export const notifyOverdueAccounts = guard('overdue', async (pool) => {
   }
 });
 
+export const notifyCustomerUpcomingDues = guard('customer due dates', async (pool) => {
+  const due = await pool.query(
+    `SELECT si.sales_invoices_id,
+            si.invoice_number,
+            COALESCE(si.due_date, si.first_due_date)::text AS due_date,
+            c.user_id,
+            GREATEST(si.total_amount - COALESCE(paid.amount_paid, 0), 0) AS remaining
+     FROM sales_invoices si
+     JOIN customers c ON c.customer_id = si.customer_id
+     LEFT JOIN (
+       SELECT sales_id, SUM(payment_amount) AS amount_paid
+       FROM credit_history
+       WHERE sales_id IS NOT NULL
+       GROUP BY sales_id
+     ) paid ON paid.sales_id = si.sales_invoices_id
+     WHERE c.user_id IS NOT NULL
+       AND c.status = 'Active'
+       AND si.status = 'Confirmed'
+       AND COALESCE(si.due_date, si.first_due_date) BETWEEN CURRENT_DATE AND CURRENT_DATE + INTERVAL '3 days'
+       AND GREATEST(si.total_amount - COALESCE(paid.amount_paid, 0), 0) > 0`
+  );
+  for (const row of due.rows) {
+    const fresh = await claimDedup(pool, `due-soon:${row.sales_invoices_id}:${row.due_date}`);
+    if (!fresh) continue;
+    const remaining = Number(row.remaining || 0).toLocaleString('en-PH', {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    });
+    await insertUserNotification(pool, {
+      userId: row.user_id,
+      title: 'Payment due soon',
+      message: `Invoice ${row.invoice_number} is due on ${row.due_date}. Remaining balance is ₱${remaining}.`,
+      category: 'Due',
+    });
+  }
+});
+
 export const clearOverdueDedup = guard('overdue clear', async (pool, customerId) => {
   if (!customerId) return;
   await pool.query(
-    `DELETE FROM notification_dedup WHERE dedup_key LIKE $1`,
-    [`overdue:${customerId}:%`]
+    `DELETE FROM notification_dedup
+     WHERE dedup_key LIKE $1 OR dedup_key LIKE $2`,
+    [`overdue:${customerId}:%`, `overdue-customer:${customerId}:%`]
   );
 });
 
@@ -390,6 +445,7 @@ export function startOperationalNotificationSweep(pool) {
       await notifyTodaysSchedules(pool);
       await notifyLowStockDigest(pool);
       await notifyOverdueAccounts(pool);
+      await notifyCustomerUpcomingDues(pool);
     } finally {
       running = false;
     }

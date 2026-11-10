@@ -6,6 +6,7 @@ import { OfflineProvider } from './offline/OfflineProvider.jsx';
 import { PreferencesProvider } from './settings/PreferencesProvider.jsx';
 import './styles.css';
 import './modern-overrides.css';
+import './customer-portal.css';
 import './styles/accessibility.css';
 
 ReactDOM.createRoot(document.getElementById('root')).render(

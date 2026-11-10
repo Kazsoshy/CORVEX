@@ -9,7 +9,7 @@ import { CustomerPageBody } from './components/customer/CustomerPageBody';
 import { SuperAdminPageBody } from './components/superAdmin/SuperAdminPageBody';
 import { Toast, useToast } from './components/shared/Toast';
 import { getEntryPathForRole, logout, getCurrentUser, getUserAssignedLocation } from './api/authService.js';
-import { startIdleSessionWatch } from './api/sessionActivity.js';
+import { IdleSessionMonitor } from './components/IdleSessionMonitor.jsx';
 import logo from './assets/corvex-logo.png';
 import { LoginPage } from './components/auth/LoginPage';
 import { LandingPage } from './components/landing/LandingPage';
@@ -19,6 +19,7 @@ import { StatusBadge } from './components/StatusBadge';
 import { StatsGrid } from './components/shared/StatsGrid';
 import LeafletMap from './components/common/LeafletMap';
 import { LogoutConfirmDialog } from './components/LogoutConfirmDialog';
+import { ConfirmHost } from './components/shared/confirmAction.jsx';
 import { collectorRole } from './rolePages/collector';
 import { isCollectorNavActive, resolveCollectorPage } from './utils/collectorRoutes';
 import { isSalesNavActive, resolveSalesPage } from './utils/salesRoutes';
@@ -36,6 +37,7 @@ import { isBranchManagerNavActive, resolveBranchManagerPage } from './utils/bran
 import { SIDEBAR_EVENT } from './settings/preferences.js';
 import { ShortcutDialog } from './components/shared/ShortcutDialog';
 import { useMyAvatar } from './components/shared/ProfilePhoto.jsx';
+import { fetchNotifications } from './api/notificationService.js';
 
 const ROLES = [collectorRole, salesRole, warehouseRole, operatingManagerRole, branchManagerRole, customerRole, superAdminRole];
 const ROLE_BY_KEY = Object.fromEntries(ROLES.map((role) => [role.key, role]));
@@ -63,6 +65,7 @@ function sidebarSectionsWithoutProfile(sections = []) {
 }
 
 function profilePathForRole(role) {
+  if (role?.key === 'customer') return '/customer/my-profile';
   if (!role?.entryPath) return null;
   const prefix = String(role.entryPath).split('/').filter(Boolean)[0];
   return prefix ? `/${prefix}/profile` : null;
@@ -70,6 +73,9 @@ function profilePathForRole(role) {
 
 function App() {
   return (
+    <>
+    <ConfirmHost />
+    <IdleSessionMonitor />
     <Routes>
       <Route path="/" element={<LandingPage />} />
       <Route path="/login" element={<LoginPage />} />
@@ -84,6 +90,7 @@ function App() {
       <Route path="/super-admin" element={<Navigate to={superAdminRole.entryPath} replace />} />
       <Route path="*" element={<PrototypeShell />} />
     </Routes>
+    </>
   );
 }
 
@@ -128,9 +135,20 @@ function PrototypeShell() {
   const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const [announce, setAnnounce] = useState('');
+  const [customerUnread, setCustomerUnread] = useState(0);
 
   const closeMobileSidebar = useCallback(() => setIsMobileSidebarOpen(false), []);
   const openMobileSidebar = useCallback(() => setIsMobileSidebarOpen(true), []);
+
+  useEffect(() => {
+    if (!isCustomer || isCustomerLogin) return undefined;
+    let active = true;
+    fetchNotifications().then((result) => {
+      if (!active || !result.success) return;
+      setCustomerUnread((result.data || []).filter((item) => item.status !== 'Read').length);
+    });
+    return () => { active = false; };
+  }, [isCustomer, isCustomerLogin, location.pathname]);
 
   useEffect(() => {
     localStorage.setItem('corvex_sidebar_collapsed', String(isSidebarCollapsed));
@@ -214,16 +232,9 @@ function PrototypeShell() {
 
   useEffect(() => {
     const handleRequestLogout = () => setShowLogoutConfirm(true);
-    const handleSessionEnded = () => navigate('/login', { replace: true });
     window.addEventListener('request-logout', handleRequestLogout);
-    window.addEventListener('session-ended', handleSessionEnded);
-    const stopIdleWatch = startIdleSessionWatch();
-    return () => {
-      window.removeEventListener('request-logout', handleRequestLogout);
-      window.removeEventListener('session-ended', handleSessionEnded);
-      stopIdleWatch();
-    };
-  }, [navigate]);
+    return () => window.removeEventListener('request-logout', handleRequestLogout);
+  }, []);
 
   const handleLogoutConfirm = () => {
     logout();
@@ -288,7 +299,7 @@ function PrototypeShell() {
   }, [location.pathname, pageTitle]);
 
   return (
-    <div className={`app-shell ${isSidebarCollapsed ? 'collapsed' : ''} ${isMobileSidebarOpen ? 'mobile-open' : ''}`}>
+    <div className={`app-shell ${isSidebarCollapsed ? 'collapsed' : ''} ${isMobileSidebarOpen ? 'mobile-open' : ''} ${isCustomer && !isCustomerLogin ? 'customer-portal' : ''}`}>
       <a className="skip-link" href="#corvex-main">Skip to content</a>
       <div className="sr-only" role="status" aria-live="polite">{announce}</div>
       <ShortcutDialog open={shortcutsOpen} onClose={() => setShortcutsOpen(false)} />
@@ -372,6 +383,9 @@ function PrototypeShell() {
                               <NavIcon label={link.label} />
                             </span>
                             <span className="nav-link-text">{link.label}</span>
+                            {isCustomer && link.label === 'Notifications' && customerUnread > 0 ? (
+                              <span className="cp-nav-badge">{customerUnread > 9 ? '9+' : customerUnread}</span>
+                            ) : null}
                           </Link>
                         ))}
                       </div>
@@ -438,36 +452,36 @@ function PrototypeShell() {
           <div className="sidebar-footer">
             <div
               className={`sidebar-profile${isProfileActive ? ' active' : ''}`}
-                onClick={() => {
+              onClick={() => {
+                if (!profilePath) return;
+                closeMobileSidebar();
+                navigate(profilePath);
+              }}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                  e.preventDefault();
                   if (!profilePath) return;
                   closeMobileSidebar();
                   navigate(profilePath);
-                }}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter' || e.key === ' ') {
-                    e.preventDefault();
-                    if (!profilePath) return;
-                    closeMobileSidebar();
-                    navigate(profilePath);
-                  }
-                }}
-                role="button"
-                tabIndex={0}
-                aria-label="Open profile"
-                aria-current={isProfileActive ? 'page' : undefined}
-                title="Profile"
-              >
-                <div className="sidebar-profile-avatar">
-                  {avatarSrc ? <img src={avatarSrc} alt="" /> : <NavIcon name="accounts" />}
-                </div>
-                <div className="sidebar-profile-info">
-                  <div className="sidebar-profile-name">{currentUser?.fullName || currentUser?.name || 'User'}</div>
-                  <div className="sidebar-profile-role">{currentRole.label}</div>
-                  <div className="sidebar-profile-location" title={userAssignedLocation}>
-                    {userAssignedLocation}
-                  </div>
+                }
+              }}
+              role="button"
+              tabIndex={0}
+              aria-label="Open profile"
+              aria-current={isProfileActive ? 'page' : undefined}
+              title="Profile"
+            >
+              <div className="sidebar-profile-avatar">
+                {avatarSrc ? <img src={avatarSrc} alt="" /> : <NavIcon name="accounts" />}
+              </div>
+              <div className="sidebar-profile-info">
+                <div className="sidebar-profile-name">{currentUser?.fullName || currentUser?.name || 'User'}</div>
+                <div className="sidebar-profile-role">{currentRole.label}</div>
+                <div className="sidebar-profile-location" title={userAssignedLocation}>
+                  {userAssignedLocation}
                 </div>
               </div>
+            </div>
             <button
               className="button sidebar-logout"
               type="button"
@@ -476,7 +490,7 @@ function PrototypeShell() {
               <span className="sidebar-switch-icon">
                 <NavIcon name="login" />
               </span>
-              <span className="sidebar-switch-text">Logout</span>
+              <span className="sidebar-switch-text">{currentRole?.key === 'customer' ? 'Sign Out' : 'Logout'}</span>
             </button>
           </div>
         )}
@@ -537,6 +551,8 @@ function PrototypeShell() {
                   <BranchManagerPageBody page={page} navigate={navigate} showToast={showToast} currentUser={getCurrentUser()} />
                   <Toast toast={toast} onDismiss={clearToast} />
                 </>
+              ) : isCustomer && location.pathname.startsWith('/customer/statements') ? (
+                <Navigate to="/customer/dashboard" replace />
               ) : isCustomer ? (
                 <>
                   <CustomerPageBody page={page} navigate={navigate} showToast={showToast} />

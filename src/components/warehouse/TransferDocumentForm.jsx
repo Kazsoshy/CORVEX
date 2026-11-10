@@ -10,6 +10,7 @@ import { LoadingState } from '../shared/LoadingState';
 import { QuantityStepper } from '../shared/QuantityStepper.jsx';
 import { NavIcon } from '../../navIcons';
 import { ProductSearchSelect } from './ProductSearchSelect.jsx';
+import { confirmAction } from '../shared/confirmAction.jsx';
 
 /**
  * Multi-product transfer request form.
@@ -126,6 +127,21 @@ export function TransferDocumentForm({
       showToast('Please fix the errors.', 'error');
       return;
     }
+    if (submitting) return;
+
+    const destinationName = branches.find((branch) => String(branch.branch_id) === String(destination))?.branch_name
+      || 'the selected branch';
+    const preview = normalized.slice(0, 4).map((line) => {
+      const name = lines.find((item) => Number(item.product_id) === Number(line.product_id))?.product_name || 'Product';
+      return `${name} · ${line.quantity}`;
+    }).join(', ');
+    const confirmed = await confirmAction({
+      title: 'Submit transfer request',
+      message: `This sends ${normalized.length} product line${normalized.length === 1 ? '' : 's'} from ${user?.branch?.name || 'your branch'} to ${destinationName} for approval.`,
+      detail: preview,
+      confirmLabel: 'Submit request',
+    });
+    if (!confirmed) return;
 
     setSubmitting(true);
     const result = await createInventoryTransfer({

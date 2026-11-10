@@ -47,6 +47,7 @@ export const branchManagerRole = {
     {
       title: 'Results',
       items: [
+        { label: 'SAW Results', to: '/branch-manager/saw-results' },
         { label: 'Team Scorecards', to: '/branch-manager/staff-performance' },
         { label: 'Reports & Analytics', to: '/branch-manager/reports' },
       ],
@@ -73,6 +74,7 @@ export const branchManagerRole = {
     { label: 'Credit History', to: '/branch-manager/credit-history' },
     { label: 'Approval Center', to: '/branch-manager/approval-center' },
     { label: 'Branch Inventory', to: '/branch-manager/branch-inventory' },
+    { label: 'SAW Results', to: '/branch-manager/saw-results' },
     { label: 'Team Scorecards', to: '/branch-manager/staff-performance' },
     { label: 'Reports & Analytics', to: '/branch-manager/reports' },
     { label: 'Alerts & Exceptions', to: '/branch-manager/alerts' },

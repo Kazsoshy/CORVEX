@@ -7,6 +7,7 @@ import { LoadingState } from '../shared/LoadingState';
 import { QuantityStepper } from '../shared/QuantityStepper.jsx';
 import { NavIcon } from '../../navIcons';
 import { ProductSearchSelect } from './ProductSearchSelect.jsx';
+import { confirmAction } from '../shared/confirmAction.jsx';
 
 /**
  * Multi-product goods receipt form.
@@ -154,15 +155,15 @@ export function RestockDocumentForm({
       showToast('Please fix the errors.', 'error');
       return;
     }
+    if (submitting) return;
 
-    if (totals.lineCount >= 5 || totals.totalUnits >= 50) {
-      const ok = window.confirm(
-        `Record restock for ${user?.branch?.name || 'your branch'}?\n\n`
-        + `${totals.lineCount} product line(s), +${totals.totalUnits} total units.\n\n`
-        + 'Stock will increase immediately when you confirm.'
-      );
-      if (!ok) return;
-    }
+    const confirmed = await confirmAction({
+      title: 'Record restock',
+      message: `Stock at ${user?.branch?.name || 'your branch'} increases as soon as this receipt is saved.`,
+      detail: `${activeSupplier?.supplier_name || 'Supplier'} · ${totals.lineCount} product line${totals.lineCount === 1 ? '' : 's'} · ${totals.totalUnits} units`,
+      confirmLabel: 'Record restock',
+    });
+    if (!confirmed) return;
 
     setSubmitting(true);
     const result = await createRestock({

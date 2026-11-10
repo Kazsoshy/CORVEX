@@ -1,4 +1,5 @@
 import apiClient from './apiClient.js';
+import { clearIdleMarkers, stampSessionActivity } from './sessionActivity.js';
 
 /**
  * Login with email and password.
@@ -14,6 +15,7 @@ export async function login(email, password) {
   if (data.success && data.user && data.token) {
     localStorage.setItem('corvex_user', JSON.stringify(data.user));
     localStorage.setItem('corvex_token', data.token);
+    stampSessionActivity();
     window.dispatchEvent(new Event('corvex-session-ready'));
   }
 
@@ -22,11 +24,16 @@ export async function login(email, password) {
 
 /**
  * Clear the current session from localStorage.
+ * `notice` is shown on the next login screen.
+ * `broadcastEnd` redirects every open view of this app to the login page.
  */
-export function logout() {
+export function logout({ notice, broadcastEnd = false } = {}) {
+  if (notice) sessionStorage.setItem('corvex_auth_notice', notice);
   localStorage.removeItem('corvex_user');
   localStorage.removeItem('corvex_token');
+  clearIdleMarkers();
   window.dispatchEvent(new Event('corvex-signed-out'));
+  if (broadcastEnd) window.dispatchEvent(new Event('session-ended'));
 }
 
 /**
@@ -101,7 +108,7 @@ const ROLE_SLUG_TO_PATH = {
   inventory_staff:   '/warehouse/dashboard',
   sales_staff:       '/sales/dashboard',
   collector:         '/collector/dashboard',
-  customer:            '/customer/home',
+  customer:            '/customer/dashboard',
 };
 
 /**

@@ -5,11 +5,13 @@ import { fetchMyProfile } from '../../api/profileService';
 import { fetchCustomerPortalMe, updateCustomerPortalContact } from '../../api/customerPortalService';
 import { requestLogout } from '../../api/authService';
 import { formatCurrency, formatDisplayDate, formatDisplayDateTime } from '../../utils/formatters';
+import { confirmAction } from './confirmAction.jsx';
 import { LoadingState } from './LoadingState';
 import { EmptyState } from './EmptyState';
 import { StatusBadge } from '../StatusBadge';
 import { ProfilePhotoEditor } from './ProfilePhoto';
 import { UserSettingsPanel } from './UserSettingsPanel';
+import { describeIdlePolicy, IDLE_TIMEOUT_MS } from '../../api/sessionActivity';
 import {
   ProfileFact,
   ProfilePasswordForm,
@@ -32,7 +34,7 @@ function customerName(account) {
   return [account?.first_name, account?.middle_name, account?.last_name].filter(Boolean).join(' ').replace(/\s+/g, ' ').trim();
 }
 
-export function CustomerProfilePanel({ showToast }) {
+export function CustomerProfilePanel({ showToast, mode = 'profile' }) {
   const navigate = useNavigate();
   const [account, setAccount] = useState(null);
   const [sessionUser, setSessionUser] = useState(null);
@@ -117,6 +119,14 @@ export function CustomerProfilePanel({ showToast }) {
       showToast?.('Enter a valid email address.', 'error');
       return;
     }
+    if (saving) return;
+    const confirmed = await confirmAction({
+      title: 'Update contact information',
+      message: 'This saves the phone number and contact email on your customer record. The email you use to sign in stays the same.',
+      detail: [contact.phone, email].filter(Boolean).join(' · '),
+      confirmLabel: 'Save contact',
+    });
+    if (!confirmed) return;
     setSaving(true);
     const result = await updateCustomerPortalContact({
       contact_phone: String(contact.phone || '').trim(),
@@ -146,9 +156,48 @@ export function CustomerProfilePanel({ showToast }) {
   }
 
   const name = customerName(account) || 'Customer';
-  const signInEmail = sessionUser?.email || '';
+  const signInEmail = sessionUser?.email || account.sign_in_email || '';
   const portalEmail = account.portal_email || '';
   const emailsDiffer = signInEmail && portalEmail && signInEmail.toLowerCase() !== portalEmail.toLowerCase();
+  const completeAddress = account.complete_address || account.address || '—';
+
+  if (mode === 'profile') {
+    return (
+      <div className="page customer-page settings-page profile-page">
+        <header className="settings-hero profile-hero">
+          <div className="profile-identity">
+            <ProfilePhotoEditor name={name} showToast={showToast} />
+            <div>
+              <p className="settings-kicker">My profile</p>
+              <h2>{name}</h2>
+              <p className="muted">These details come from your customer record. Contact changes are saved in Account Settings.</p>
+            </div>
+          </div>
+          <div className="settings-hero-meta">
+            <StatusBadge status={account.status || '—'} />
+            <span className="settings-pill">{account.customer_code || `Account ${account.customer_id}`}</span>
+          </div>
+        </header>
+        <section className="panel content-panel">
+          <div className="profile-facts">
+            <ProfileFact label="Customer ID" value={account.customer_code || String(account.customer_id)} copyText={account.customer_code || String(account.customer_id)} onCopy={(value, label) => copyProfileValue(value, label, showToast)} />
+            <ProfileFact label="Full Name" value={name} />
+            <ProfileFact label="Email Address" value={portalEmail || '—'} copyText={portalEmail} onCopy={(value, label) => copyProfileValue(value, label, showToast)} />
+            <ProfileFact label="Sign-in email" value={signInEmail || '—'} copyText={signInEmail} onCopy={(value, label) => copyProfileValue(value, label, showToast)} />
+            <ProfileFact label="Contact Number" value={account.contact_phone || '—'} copyText={account.contact_phone || ''} onCopy={(value, label) => copyProfileValue(value, label, showToast)} />
+            <ProfileFact label="Complete Address" value={completeAddress} />
+            <ProfileFact label="Assigned Territory" value={account.territory_name || 'Unassigned'} />
+            <ProfileFact label="Account Registration Date" value={formatDisplayDate(account.created_at)} />
+            <ProfileFact label="Account Status" value={<StatusBadge status={account.status || '—'} />} />
+          </div>
+          <div className="settings-card-footer">
+            <button className="button secondary" type="button" onClick={() => navigate('/customer/account-settings')}>Update contact information</button>
+          </div>
+        </section>
+      </div>
+    );
+  }
+
   const activeTab = TABS.find((tab) => tab.id === section) || TABS[0];
   const idleLabel = formatIdleRemaining(remaining);
 
@@ -158,9 +207,9 @@ export function CustomerProfilePanel({ showToast }) {
         <div className="profile-identity">
           <ProfilePhotoEditor name={name} showToast={showToast} />
           <div>
-            <p className="settings-kicker">Customer profile</p>
-            <h2>{name}</h2>
-            <p className="muted">Contact details for your branch, and the password you use to sign in.</p>
+              <p className="settings-kicker">Account settings</p>
+              <h2>{name}</h2>
+              <p className="muted">Update your contact details, password, notification preferences, and sign out of this device.</p>
           </div>
         </div>
         <div className="settings-hero-meta">
@@ -257,7 +306,7 @@ export function CustomerProfilePanel({ showToast }) {
               <section className="settings-card">
                 <header>
                   <h4>Account snapshot</h4>
-                  <p>A short view of this customer record. Open the full pages for payments and statements.</p>
+                  <p>A short view of this customer record. Open the full pages for payments and purchases.</p>
                 </header>
                 <div className="settings-card-body">
                   <div className="profile-facts">
@@ -275,12 +324,12 @@ export function CustomerProfilePanel({ showToast }) {
               <section className="settings-card">
                 <header>
                   <h4>This sign-in</h4>
-                  <p>CORVEX ends a sign-in after 15 minutes without activity.</p>
+                  <p>{describeIdlePolicy()}</p>
                 </header>
                 <div className="settings-card-body">
                   <div className="profile-facts">
                     <ProfileFact label="Browser" value={browserLabel()} />
-                    <ProfileFact label="Time left if you step away" value={idleLabel || 'Ends after 15 minutes of inactivity'} />
+                    <ProfileFact label="Time until we ask" value={remaining === 0 ? 'Confirm to stay signed in' : (idleLabel || `After ${Math.round(IDLE_TIMEOUT_MS / 60000)} minutes away`)} />
                     <ProfileFact label="Last sign-in recorded" value={formatDisplayDateTime(sessionUser?.last_login)} />
                   </div>
                 </div>

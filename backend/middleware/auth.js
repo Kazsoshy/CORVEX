@@ -10,7 +10,6 @@
 import crypto from 'crypto';
 
 const TOKEN_TTL_MS = 12 * 60 * 60 * 1000;
-const IDLE_TTL_MS = 15 * 60 * 1000;
 
 export const UNSCOPED_ROLES = ['super_admin', 'operating_manager'];
 
@@ -86,7 +85,6 @@ function readSessionToken(header) {
     const exp = Number(data?.exp);
     if (!Number.isInteger(userId) || userId <= 0 || !iat || !la || !exp) return null;
     if (Date.now() > exp) return { error: 'expired' };
-    if (Date.now() - la > IDLE_TTL_MS) return { error: 'idle' };
     return { userId, iat };
   } catch {
     return null;
@@ -104,9 +102,7 @@ export async function requireAuth(req, res, next) {
   if (!session?.userId) {
     return res.status(401).json({
       success: false,
-      message: session?.error === 'idle'
-        ? 'Your session ended after 15 minutes of inactivity. Sign in again.'
-        : 'Authentication required. No valid user session found.',
+      message: 'Authentication required. No valid user session found.',
     });
   }
   const userId = session.userId;

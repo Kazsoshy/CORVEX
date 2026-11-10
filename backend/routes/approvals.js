@@ -13,6 +13,7 @@ import {
 import { upsertBranchInventoryStock, insertStockMovement } from '../lib/branchInventoryStock.js';
 import { reverseCustomerSaleCharge } from '../lib/salesInvoiceWrite.js';
 import { publishStockAlerts, notifyInvoiceReviewDecision, clearOverdueDedup, notifyOverdueAccounts } from '../lib/operationalNotifications.js';
+import { notifyCustomerInvoiceConfirmed, notifyCustomerPaymentEvent } from '../lib/customerNotifications.js';
 import { manilaDateString } from '../lib/sawCollection.js';
 import {
   confirmCollectionPayment,
@@ -297,7 +298,7 @@ router.patch('/sales-invoices/:id', async (req, res) => {
     }
     const existing = await client.query(
       `SELECT si.sales_invoices_id, si.invoice_number, si.sales_agent_id, si.branch_id,
-              si.customer_id, si.total_amount
+              si.customer_id, si.total_amount, si.due_date, si.first_due_date
        FROM sales_invoices si
        WHERE si.sales_invoices_id = $1
          AND si.status = 'Pending Review'
@@ -371,6 +372,14 @@ router.patch('/sales-invoices/:id', async (req, res) => {
       reviewNote,
       reopenedRequest,
     });
+    if (status === 'Confirmed') {
+      await notifyCustomerInvoiceConfirmed(pool, {
+        customerId: invoice.customer_id,
+        invoiceNumber: invoice.invoice_number,
+        amount: invoice.total_amount,
+        dueDate: invoice.due_date || invoice.first_due_date,
+      });
+    }
 
     return res.status(200).json({
       success: true,
@@ -456,6 +465,13 @@ router.patch('/collections/:id', async (req, res) => {
       await clearOverdueDedup(pool, result.customerId);
     }
     if (action === 'confirm' || action === 'reverse') await notifyOverdueAccounts(pool);
+    await notifyCustomerPaymentEvent(pool, {
+      customerId: result.customerId,
+      receiptNumber: result.payment.receipt_number,
+      amount: result.payment.amount,
+      kind: action === 'confirm' ? 'confirmed' : action === 'reject' ? 'rejected' : 'reversed',
+      reason: reviewNote,
+    });
     const message = action === 'confirm'
       ? `Collection ${result.payment.receipt_number} confirmed. The balance is updated.`
       : action === 'reject'

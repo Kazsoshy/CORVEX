@@ -4871,6 +4871,12 @@ select {
   font-variant-numeric: tabular-nums;
 }
 
+.saw-stat strong.saw-stat-name {
+  font-size: 0.95rem;
+  font-variant-numeric: normal;
+  line-height: 1.25;
+}
+
 .saw-weight-card.muted strong {
   font-size: 0.92rem;
   font-weight: 600;

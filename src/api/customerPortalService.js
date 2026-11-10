@@ -49,6 +49,45 @@ export async function updateCustomerPortalContact({ contact_phone, portal_email 
   }
 }
 
+export async function fetchCustomerPortalDashboard() {
+  try {
+    const response = await apiClient.get('/customer-portal/dashboard');
+    return response.data;
+  } catch (error) {
+    return { success: false, data: null };
+  }
+}
+
+export async function fetchCustomerPortalInvoices() {
+  try {
+    const response = await apiClient.get('/customer-portal/invoices');
+    return response.data;
+  } catch (error) {
+    return { success: false, data: [] };
+  }
+}
+
+export async function fetchCustomerPortalInvoice(invoiceId) {
+  try {
+    const response = await apiClient.get(`/customer-portal/invoices/${invoiceId}`);
+    return response.data;
+  } catch (error) {
+    return {
+      success: false,
+      message: error.response?.data?.message || 'Invoice not found.',
+    };
+  }
+}
+
+export async function fetchCustomerPortalBalances() {
+  try {
+    const response = await apiClient.get('/customer-portal/balances');
+    return response.data;
+  } catch (error) {
+    return { success: false, data: null };
+  }
+}
+
 export async function fetchCustomerPortalProducts() {
   try {
     const response = await apiClient.get('/customer-portal/products');
@@ -115,15 +154,6 @@ export async function fetchCustomerPortalReceiptById(receiptId) {
       success: false,
       message: error.response?.data?.message || 'Receipt not found.',
     };
-  }
-}
-
-export async function fetchCustomerStatementSummary() {
-  try {
-    const response = await apiClient.get('/customer-portal/statements/summary');
-    return response.data;
-  } catch (error) {
-    return { success: false, data: null };
   }
 }
 

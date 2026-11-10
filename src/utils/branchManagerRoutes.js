@@ -28,6 +28,7 @@ const ROUTE_DEFINITIONS = [
   { pattern: /^\/branch-manager\/reports\/sales$/, pageType: 'reportSales' },
   { pattern: /^\/branch-manager\/reports\/inventory$/, pageType: 'reportInventory' },
   { pattern: /^\/branch-manager\/reports\/delinquency$/, pageType: 'reportDelinquency' },
+  { pattern: /^\/branch-manager\/saw-results$/, pageType: 'sawResults' },
   { pattern: /^\/branch-manager\/staff-performance$/, pageType: 'staffPerformance' },
   { pattern: /^\/branch-manager\/staff-performance\/collectors$/, pageType: 'staffCollectors' },
   { pattern: /^\/branch-manager\/staff-performance\/sales$/, pageType: 'staffSales' },
@@ -96,6 +97,7 @@ export function buildBranchManagerBreadcrumbs(pageType, params = {}) {
     case 'reportSales': return [...crumbs, ...reportsCrumbs, { label: 'Sales Reports', to: '/branch-manager/reports/sales' }];
     case 'reportInventory': return [...crumbs, ...reportsCrumbs, { label: 'Inventory Reports', to: '/branch-manager/reports/inventory' }];
     case 'reportDelinquency': return [...crumbs, ...reportsCrumbs, { label: 'Delinquency Reports', to: '/branch-manager/reports/delinquency' }];
+    case 'sawResults': return [...crumbs, { label: 'SAW Results', to: '/branch-manager/saw-results' }];
     case 'staffPerformance': return [...crumbs, ...staffCrumbs];
     case 'staffCollectors': return [...crumbs, ...staffCrumbs, { label: 'Collectors', to: '/branch-manager/staff-performance/collectors' }];
     case 'staffSales': return [...crumbs, ...staffCrumbs, { label: 'Sales Agents', to: '/branch-manager/staff-performance/sales' }];
@@ -139,6 +141,7 @@ export function resolveBranchManagerPage(pathname) {
     reportSales: 'Sales Reports',
     reportInventory: 'Inventory Reports',
     reportDelinquency: 'Delinquency Reports',
+    sawResults: 'SAW Results',
     staffPerformance: 'Team Scorecards',
     staffCollectors: 'Collector Scorecards',
     staffSales: 'Sales Agent Scorecards',
@@ -183,6 +186,7 @@ export function isBranchManagerNavActive(fullPath, navTo) {
   if (navTo === '/branch-manager/ci-approvals') return pathname.startsWith('/branch-manager/ci-approvals');
   if (navTo === '/branch-manager/leaflet') return pathname.startsWith('/branch-manager/leaflet');
   if (navTo === '/branch-manager/reports') return pathname.startsWith('/branch-manager/reports');
+  if (navTo === '/branch-manager/saw-results') return pathname === '/branch-manager/saw-results';
   if (navTo === '/branch-manager/staff-performance') return pathname.startsWith('/branch-manager/staff-performance');
   if (navTo === '/branch-manager/credit-history') return pathname.startsWith('/branch-manager/credit-history');
   if (navTo === '/branch-manager/approval-center') return pathname === '/branch-manager/approval-center';

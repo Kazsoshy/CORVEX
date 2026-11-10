@@ -1,6 +1,13 @@
 import express from 'express';
 import { requireRole } from '../middleware/auth.js';
 import { resolveSalesAgentIdForCustomer } from '../lib/purchaseRequests.js';
+import {
+  formatCompleteAddress,
+  getCustomerInvoice,
+  listCustomerInvoices,
+  loadCustomerDashboard,
+  summarizeBalances,
+} from '../lib/customerPortalData.js';
 
 const router = express.Router();
 
@@ -9,7 +16,11 @@ router.use(requireRole(['customer']));
 async function getLinkedCustomer(pool, userId) {
   const result = await pool.query(
     `SELECT c.customer_id, c.customer_code, c.branch_id, c.first_name, c.middle_name, c.last_name,
-            c.address, c.contact_phone, c.portal_email, c.portal_status, c.status,
+            c.address, c.address_street, c.address_barangay, c.address_city, c.address_province,
+            c.address_region, c.address_zip, c.contact_phone, c.portal_email, c.portal_status,
+            c.status, c.created_at, c.territory_id,
+            t.territory_name,
+            u.email AS sign_in_email,
             b.name AS branch_name,
             COALESCE(ca.outstanding_balance, 0) AS outstanding_balance,
             COALESCE(ca.purchase_volume, 0) AS purchase_volume,
@@ -17,6 +28,8 @@ async function getLinkedCustomer(pool, userId) {
             ca.last_sales_visit
      FROM customers c
      LEFT JOIN branches b ON b.id = c.branch_id
+     LEFT JOIN territories t ON t.territory_id = c.territory_id
+     LEFT JOIN users u ON u.id = c.user_id
      LEFT JOIN customer_activity ca ON ca.customer_id = c.customer_id
      WHERE c.user_id = $1
      LIMIT 1`,
@@ -32,7 +45,10 @@ router.get('/me', async (req, res) => {
     if (!customer) {
       return res.status(404).json({ success: false, message: 'No customer record is linked to this account.' });
     }
-    return res.status(200).json({ success: true, data: customer });
+    return res.status(200).json({
+      success: true,
+      data: { ...customer, complete_address: formatCompleteAddress(customer) },
+    });
   } catch (err) {
     console.error('[CustomerPortal] GET /me error:', err.message);
     return res.status(500).json({ success: false, message: 'Failed to load account.' });
@@ -66,10 +82,84 @@ router.put('/me', async (req, res) => {
     );
 
     const updated = await getLinkedCustomer(pool, req.currentUser.id);
-    return res.status(200).json({ success: true, message: 'Contact information updated.', data: updated });
+    return res.status(200).json({
+      success: true,
+      message: 'Contact information updated.',
+      data: updated ? { ...updated, complete_address: formatCompleteAddress(updated) } : updated,
+    });
   } catch (err) {
     console.error('[CustomerPortal] PUT /me error:', err.message);
     return res.status(500).json({ success: false, message: 'Failed to update contact information.' });
+  }
+});
+
+router.get('/dashboard', async (req, res) => {
+  try {
+    const pool = req.app.locals.pool;
+    const customer = await getLinkedCustomer(pool, req.currentUser.id);
+    if (!customer) {
+      return res.status(404).json({ success: false, message: 'Customer record not found.' });
+    }
+    const data = await loadCustomerDashboard(pool, customer);
+    return res.status(200).json({ success: true, data });
+  } catch (err) {
+    console.error('[CustomerPortal] GET /dashboard error:', err.message);
+    return res.status(500).json({ success: false, message: 'Failed to load dashboard.' });
+  }
+});
+
+router.get('/invoices', async (req, res) => {
+  try {
+    const pool = req.app.locals.pool;
+    const customer = await getLinkedCustomer(pool, req.currentUser.id);
+    if (!customer) {
+      return res.status(404).json({ success: false, message: 'Customer record not found.' });
+    }
+    const data = await listCustomerInvoices(pool, customer.customer_id);
+    return res.status(200).json({ success: true, data, count: data.length });
+  } catch (err) {
+    console.error('[CustomerPortal] GET /invoices error:', err.message);
+    return res.status(500).json({ success: false, message: 'Failed to load purchases.' });
+  }
+});
+
+router.get('/invoices/:id', async (req, res) => {
+  try {
+    const pool = req.app.locals.pool;
+    const customer = await getLinkedCustomer(pool, req.currentUser.id);
+    if (!customer) {
+      return res.status(404).json({ success: false, message: 'Customer record not found.' });
+    }
+    const invoiceId = Number(req.params.id);
+    if (!Number.isInteger(invoiceId) || invoiceId <= 0) {
+      return res.status(400).json({ success: false, message: 'Invalid invoice.' });
+    }
+    const data = await getCustomerInvoice(pool, customer.customer_id, invoiceId);
+    if (!data) {
+      return res.status(404).json({ success: false, message: 'Invoice not found.' });
+    }
+    return res.status(200).json({ success: true, data });
+  } catch (err) {
+    console.error('[CustomerPortal] GET /invoices/:id error:', err.message);
+    return res.status(500).json({ success: false, message: 'Failed to load invoice.' });
+  }
+});
+
+router.get('/balances', async (req, res) => {
+  try {
+    const pool = req.app.locals.pool;
+    const customer = await getLinkedCustomer(pool, req.currentUser.id);
+    if (!customer) {
+      return res.status(404).json({ success: false, message: 'Customer record not found.' });
+    }
+    const invoices = await listCustomerInvoices(pool, customer.customer_id);
+    return res.status(200).json({
+      success: true,
+      data: summarizeBalances(invoices, customer.outstanding_balance),
+    });
+  } catch (err) {
+    console.error('[CustomerPortal] GET /balances error:', err.message);
+    return res.status(500).json({ success: false, message: 'Failed to load outstanding balances.' });
   }
 });
 
@@ -230,7 +320,19 @@ const PAYMENT_SELECT = `
   COALESCE(NULLIF(CONCAT_WS(' ', col.first_name, col.last_name), ''), 'Collector') AS collector_name,
   dr.receipts_id,
   COALESCE(dr.receipt_number, cp.receipt_number) AS receipt_number,
-  dr.receipt_date
+  dr.receipt_date,
+  (
+    SELECT COALESCE(json_agg(json_build_object(
+      'sales_invoices_id', linked.sales_invoices_id,
+      'invoice_number', linked.invoice_number
+    ) ORDER BY linked.invoice_number), '[]'::json)
+    FROM (
+      SELECT DISTINCT si.sales_invoices_id, si.invoice_number
+      FROM credit_history ch
+      JOIN sales_invoices si ON si.sales_invoices_id = ch.sales_id
+      WHERE ch.collection_id = cp.collectionpayment_id
+    ) linked
+  ) AS invoices
 `;
 
 router.get('/payments', async (req, res) => {

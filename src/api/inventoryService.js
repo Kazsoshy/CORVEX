@@ -172,7 +172,7 @@ export async function fetchWarehouseDashboard() {
     const response = await apiClient.get('/inventory/dashboard');
     return response.data;
   } catch (err) {
-    console.error('Failed to fetch warehouse dashboard:', err);
+    if (err.response?.status !== 401) console.error('Failed to fetch warehouse dashboard:', err);
     return { success: false, data: null };
   }
 }

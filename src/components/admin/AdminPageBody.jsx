@@ -18,6 +18,7 @@ import { AccountProfilePanel } from '../shared/AccountProfilePanel';
 import { StatusBadge } from '../StatusBadge';
 import { CentralInventoryPanel } from '../inventory/CentralInventoryPanel';
 import { ProductImagePicker } from '../shared/ProductImagePicker';
+import { confirmAction as askConfirm } from '../shared/confirmAction.jsx';
 import { deleteProductImage, uploadProductImage } from '../../api/inventoryService';
 import { DetailRowsTable } from '../shared/DetailRowsTable';
 
@@ -683,6 +684,17 @@ function UserFormPage({
       setErrors(newErrors);
       return;
     }
+    if (submitting) return;
+    const personName = [form.first_name, form.middle_name, form.last_name].map((part) => part.trim()).filter(Boolean).join(' ');
+    const confirmed = await askConfirm({
+      title: userId ? 'Confirm changes' : 'Create user',
+      message: userId
+        ? 'This saves the account details, role, branch, and status.'
+        : 'This creates a new user who can sign in with the email and password you entered.',
+      detail: personName,
+      confirmLabel: userId ? 'Save changes' : 'Create user',
+    });
+    if (!confirmed) return;
     try {
       setSubmitting(true);
       const payload = {
@@ -895,6 +907,16 @@ function BranchListPage({
       showToast('Branch name and address are required.', 'error');
       return;
     }
+    if (savingBranch) return;
+    const confirmed = await askConfirm({
+      title: editingBranchId ? 'Confirm changes' : 'Create branch',
+      message: editingBranchId
+        ? 'This saves the branch name, address, contact, status, and manager.'
+        : 'This adds a new branch to the organization.',
+      detail: branchForm.branch_name.trim(),
+      confirmLabel: editingBranchId ? 'Save changes' : 'Create branch',
+    });
+    if (!confirmed) return;
     setSavingBranch(true);
     try {
       const payload = {
@@ -920,6 +942,22 @@ function BranchListPage({
       showToast(err.response?.data?.message || 'Failed to save branch.', 'error');
     } finally {
       setSavingBranch(false);
+    }
+  };
+  const restoreBranch = async (branch) => {
+    const confirmed = await askConfirm({
+      title: 'Restore branch',
+      message: 'This sets the branch back to Active so it can be used again.',
+      detail: branch.branch_name,
+      confirmLabel: 'Restore',
+    });
+    if (!confirmed) return;
+    try {
+      await apiClient.put(`/branches/${branch.branch_id}`, { status: 'Active' });
+      showToast(`${branch.branch_name} restored.`, 'success');
+      loadBranches();
+    } catch (err) {
+      showToast(err.response?.data?.message || 'Failed to restore branch.', 'error');
     }
   };
   const archiveBranch = async () => {
@@ -1030,15 +1068,7 @@ function BranchListPage({
                           type="button"
                           title="Restore"
                           aria-label={`Restore ${b.branch_name}`}
-                          onClick={async () => {
-                            try {
-                              await apiClient.put(`/branches/${b.branch_id}`, { status: 'Active' });
-                              showToast(`${b.branch_name} restored.`, 'success');
-                              loadBranches();
-                            } catch (err) {
-                              showToast(err.response?.data?.message || 'Failed to restore branch.', 'error');
-                            }
-                          }}
+                          onClick={() => restoreBranch(b)}
                         >
                           <NavIcon name="reset" />
                         </button>
@@ -1169,6 +1199,19 @@ function BranchDetailPage({
   if (loading) return <LoadingState message="Loading branch…" />;
   if (!branch) return <EmptyState title="Branch not found" actionLabel="Back" onAction={() => navigate(`${adminBase}/branches`)} />;
   const assignManager = async () => {
+    const manager = managers.find((user) => String(user.user_id ?? user.id) === String(managerId));
+    const managerName = manager
+      ? [manager.first_name, manager.last_name].filter(Boolean).join(' ') || manager.full_name || manager.email
+      : 'No manager';
+    const confirmed = await askConfirm({
+      title: 'Assign branch manager',
+      message: managerId
+        ? 'This sets the manager responsible for the branch.'
+        : 'This clears the manager assigned to the branch.',
+      detail: `${branch?.branch_name || 'Branch'} · ${managerName}`,
+      confirmLabel: 'Save assignment',
+    });
+    if (!confirmed) return;
     try {
       await apiClient.put(`/branches/${branchId}`, { manager_id: managerId ? Number(managerId) : null });
       showToast('Branch manager assigned.', 'success');
@@ -1193,6 +1236,17 @@ function BranchDetailPage({
   };
   const saveEdit = async (e) => {
     e.preventDefault();
+    if (!branchForm.branch_name.trim() || !branchForm.address.trim()) {
+      showToast('Branch name and address are required.', 'error');
+      return;
+    }
+    const confirmed = await askConfirm({
+      title: 'Confirm changes',
+      message: 'This saves the branch record.',
+      detail: branchForm.branch_name.trim(),
+      confirmLabel: 'Save changes',
+    });
+    if (!confirmed) return;
     try {
       await apiClient.put(`/branches/${branchId}`, {
         branch_name: branchForm.branch_name.trim(),
@@ -1399,6 +1453,15 @@ function InventoryPage({
   const handleProductSubmit = async e => {
     e.preventDefault();
     if (!productForm.name.trim() || !productForm.sku.trim()) return showToast('Name and SKU are required.', 'error');
+    const confirmed = await askConfirm({
+      title: editingProductId ? 'Confirm changes' : 'Create product',
+      message: editingProductId
+        ? 'This saves the product details, status, and photo.'
+        : 'This adds a new product to the catalog.',
+      detail: productForm.name.trim(),
+      confirmLabel: editingProductId ? 'Save changes' : 'Create product',
+    });
+    if (!confirmed) return;
     try {
       const payload = {
         name: productForm.name.trim(),
@@ -1433,6 +1496,17 @@ function InventoryPage({
     }
   };
   const updateTransferStatus = async (transferId, status) => {
+    const transfer = transfers.find((item) => String(item.transfer_id) === String(transferId));
+    const confirmed = await askConfirm({
+      title: status === 'Approved' ? 'Approve transfer' : 'Reject transfer',
+      message: status === 'Approved'
+        ? 'The source branch can ship this transfer after approval. Stock does not move until they confirm shipment.'
+        : 'This rejects the transfer request. Stock is not moved.',
+      detail: transfer?.transfer_ref || `Transfer ${transferId}`,
+      confirmLabel: status === 'Approved' ? 'Approve' : 'Reject',
+      tone: status === 'Rejected' ? 'danger' : 'default',
+    });
+    if (!confirmed) return;
     try {
       await apiClient.patch(`/inventory/transfers/${transferId}`, { status });
       showToast(`Transfer ${status.toLowerCase()}.`, 'success');
@@ -1452,6 +1526,13 @@ function InventoryPage({
     }
   };
   const handleRestoreProduct = async (product) => {
+    const confirmed = await askConfirm({
+      title: 'Restore product',
+      message: 'This sets the product back to Active.',
+      detail: product.product_name,
+      confirmLabel: 'Restore',
+    });
+    if (!confirmed) return;
     try {
       await apiClient.put(`/products/${product.product_id}`, { status: 'Active' });
       showToast('Product restored.', 'success');
@@ -2056,10 +2137,16 @@ function ProductCategoriesPage({
   };
   const handleArchive = async c => {
     const count = Number(c.product_count) || 0;
-    const warn = count > 0
-      ? `\n\n${count} product(s) are filed under this category. Archiving hides it from Active pickers but keeps those product assignments.`
-      : '';
-    if (!window.confirm(`Archive category "${c.category_name}"?${warn}`)) return;
+    const confirmed = await askConfirm({
+      title: 'Archive category',
+      message: count > 0
+        ? `${count} product${count === 1 ? '' : 's'} stay filed under this category. Archiving hides it from active pickers.`
+        : 'Archiving hides this category from active pickers. The record is kept.',
+      detail: c.category_name,
+      confirmLabel: 'Archive',
+      tone: 'danger',
+    });
+    if (!confirmed) return;
     try {
       const res = await apiClient.delete(`/product-categories/${c.category_id}`);
       showToast(res.data?.message || 'Category archived.', 'success');
@@ -2068,9 +2155,32 @@ function ProductCategoriesPage({
       showToast(err.response?.data?.message || 'Failed to archive.', 'error');
     }
   };
+  const restoreCategory = async (category) => {
+    const confirmed = await askConfirm({
+      title: 'Restore category',
+      message: 'This sets the category back to Active.',
+      detail: category.category_name,
+      confirmLabel: 'Restore',
+    });
+    if (!confirmed) return;
+    try {
+      await apiClient.put(`/product-categories/${category.category_id}`, { status: 'Active' });
+      showToast('Category restored.', 'success');
+      loadData();
+    } catch (err) {
+      showToast(err.response?.data?.message || 'Failed to restore.', 'error');
+    }
+  };
   const handleSubmit = async e => {
     e.preventDefault();
     if (!formName.trim()) return showToast('Category name is required.', 'error');
+    const confirmed = await askConfirm({
+      title: editing ? 'Confirm changes' : 'Create category',
+      message: editing ? 'This renames the product category.' : 'This adds a product category to the catalog.',
+      detail: formName.trim(),
+      confirmLabel: editing ? 'Save changes' : 'Create category',
+    });
+    if (!confirmed) return;
     try {
       if (editing) {
         await apiClient.put(`/product-categories/${editing.category_id}`, {
@@ -2142,15 +2252,7 @@ function ProductCategoriesPage({
                           className="icon-action-button"
                           type="button"
                           title="Restore"
-                          onClick={async () => {
-                            try {
-                              await apiClient.put(`/product-categories/${c.category_id}`, { status: 'Active' });
-                              showToast('Category restored.', 'success');
-                              loadData();
-                            } catch (err) {
-                              showToast(err.response?.data?.message || 'Failed to restore.', 'error');
-                            }
-                          }}
+                          onClick={() => restoreCategory(c)}
                         >
                           <NavIcon name="reset" />
                         </button>
@@ -2278,6 +2380,16 @@ function SuppliersAdminPage({
       setErrors(nextErrors);
       return;
     }
+    if (submitting) return;
+    const confirmed = await askConfirm({
+      title: editingSupplierId ? 'Confirm changes' : 'Add supplier',
+      message: editingSupplierId
+        ? 'This saves the supplier name, contact, and status.'
+        : 'This adds a supplier that warehouse staff can use on restocks.',
+      detail: form.supplier_name.trim(),
+      confirmLabel: editingSupplierId ? 'Save changes' : 'Add supplier',
+    });
+    if (!confirmed) return;
     try {
       setSubmitting(true);
       const payload = {
@@ -2307,6 +2419,22 @@ function SuppliersAdminPage({
       showToast(message, 'error');
     } finally {
       setSubmitting(false);
+    }
+  };
+  const restoreSupplier = async (supplier) => {
+    const confirmed = await askConfirm({
+      title: 'Restore supplier',
+      message: 'This sets the supplier back to Active so restocks can use them again.',
+      detail: supplier.supplier_name,
+      confirmLabel: 'Restore',
+    });
+    if (!confirmed) return;
+    try {
+      await apiClient.put(`/suppliers/${supplier.suppliers_id ?? supplier.supplier_id}`, { status: 'Active' });
+      showToast('Supplier restored.', 'success');
+      loadData();
+    } catch (err) {
+      showToast(err.response?.data?.message || 'Failed to restore supplier.', 'error');
     }
   };
   const pagination_suppliers = usePagination(suppliers, {
@@ -2364,15 +2492,7 @@ function SuppliersAdminPage({
                           className="icon-action-button"
                           type="button"
                           title="Restore"
-                          onClick={async () => {
-                            try {
-                              await apiClient.put(`/suppliers/${s.suppliers_id ?? s.supplier_id}`, { status: 'Active' });
-                              showToast('Supplier restored.', 'success');
-                              loadData();
-                            } catch (err) {
-                              showToast(err.response?.data?.message || 'Failed to restore supplier.', 'error');
-                            }
-                          }}
+                          onClick={() => restoreSupplier(s)}
                         >
                           <NavIcon name="reset" />
                         </button>

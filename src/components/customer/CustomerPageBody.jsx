@@ -10,8 +10,13 @@ import {
   fetchCustomerPortalProducts,
   fetchCustomerPortalReceiptById,
   fetchCustomerPortalReceipts,
-  fetchCustomerStatementSummary,
 } from '../../api/customerPortalService.js';
+import {
+  CustomerBalancesPage,
+  CustomerDashboardPage,
+  CustomerPurchaseDetailPage,
+  CustomerPurchasesPage,
+} from './customerAccountPages.jsx';
 import { downloadPdf } from '../../utils/dataExport.js';
 import { NotificationsInbox } from '../shared/NotificationsInbox';
 import { fetchNotifications } from '../../api/notificationService.js';
@@ -21,7 +26,6 @@ import { LoadingState } from '../shared/LoadingState';
 import { DetailRowsTable } from '../shared/DetailRowsTable';
 import { StatusBadge } from '../StatusBadge';
 import { NavIcon } from '../../navIcons';
-import { UserSettingsPanel } from '../shared/UserSettingsPanel';
 import { CustomerProfilePanel } from '../shared/CustomerProfilePanel';
 function portalStatusLabel(status) {
   switch (String(status || '').toLowerCase()) {
@@ -106,18 +110,6 @@ function LoginPage({
       </section>
     </div>;
 }
-function formatStatementMonth(monthStart) {
-  if (!monthStart) return '—';
-  const d = new Date(monthStart);
-  if (Number.isNaN(d.getTime())) return String(monthStart);
-  return d.toLocaleDateString(undefined, { month: 'long', year: 'numeric' });
-}
-
-function monthStartKey(monthStart) {
-  if (!monthStart) return '';
-  return String(monthStart).slice(0, 10);
-}
-
 const CAROUSEL_MAX_SLIDES = 10;
 const CAROUSEL_SWIPE_THRESHOLD = 48;
 
@@ -530,6 +522,7 @@ function PaymentHistoryPage({
       method: p.payment_method,
       collector: p.collector_name || '',
       receipt: p.receipt_number || '',
+      invoices: linkedInvoices(p),
     }));
     if (downloadPdf(rows, { filename: 'payment-history.pdf', title: 'Payment History' })) {
       showToast('Payment history exported as PDF.', 'success');
@@ -544,6 +537,7 @@ function PaymentHistoryPage({
       method: selectedPayment.payment_method,
       collector: selectedPayment.collector_name || '',
       receipt: selectedPayment.receipt_number || '',
+      invoices: linkedInvoices(selectedPayment),
       status: selectedPayment.status || '',
     }];
     const ref = selectedPayment.receipt_number || selectedPayment.collectionpayment_id;
@@ -603,13 +597,15 @@ function PaymentHistoryPage({
         </div>
         {filtered.length === 0 ? <EmptyState title="No payments found" description="Try adjusting your search or filters." /> : <><div className="corvex-table-wrapper">
             <table className="corvex-table">
-              <thead><tr><th>Payment Date</th><th>Amount</th><th>Collector</th><th>Receipt #</th><th>Actions</th></tr></thead>
+              <thead><tr><th>Payment Reference</th><th>Payment Date</th><th>Amount Paid</th><th>Associated Invoice</th><th>Collection Method</th><th>Collector Name</th><th>Actions</th></tr></thead>
               <tbody>
                 {paginated_filtered.map(p => <tr key={p.collectionpayment_id}>
+                    <td>{p.receipt_number || '—'}</td>
                     <td>{formatDisplayDate(p.payment_date)}</td>
                     <td>{formatCurrency(Number(p.amount))}</td>
+                    <td>{linkedInvoices(p)}</td>
+                    <td>{p.payment_method || '—'}</td>
                     <td>{p.collector_name || '—'}</td>
-                    <td>{p.receipt_number || '—'}</td>
                     <td className="table-actions">
                       <button
                         className="icon-action-button"
@@ -648,9 +644,10 @@ function PaymentHistoryPage({
             <DetailRowsTable rows={[
               { label: 'Payment Date', value: formatDisplayDate(selectedPayment.payment_date) },
               { label: 'Amount', value: <strong>{formatCurrency(Number(selectedPayment.amount))}</strong> },
-              { label: 'Payment Method', value: selectedPayment.payment_method || '—' },
-              { label: 'Collector', value: selectedPayment.collector_name || '—' },
-              { label: 'Receipt #', value: <span className="mono-cell">{selectedPayment.receipt_number || '—'}</span> },
+              { label: 'Collection Method', value: selectedPayment.payment_method || '—' },
+              { label: 'Collector Name', value: selectedPayment.collector_name || '—' },
+              { label: 'Associated Invoice', value: linkedInvoices(selectedPayment) },
+              { label: 'Payment Reference', value: <span className="mono-cell">{selectedPayment.receipt_number || '—'}</span> },
               ...(selectedPayment.notes ? [{ label: 'Notes', value: selectedPayment.notes }] : []),
             ]} />
             <div className="modal-actions">
@@ -698,6 +695,20 @@ function ReceiptsPage({
                       <button className="icon-action-button" type="button" title="View" onClick={() => navigate(`/customer/receipts/${r.receipts_id}`)}>
                         <NavIcon name="view" />
                       </button>
+                      <button className="icon-action-button" type="button" title="Download PDF" onClick={() => {
+                        const ok = downloadPdf([{
+                          receipt: r.receipt_number,
+                          date: formatDisplayDate(r.receipt_date || r.payment_date),
+                          amount: r.amount,
+                          method: r.payment_method || '',
+                          collector: r.collector_name || '',
+                          invoices: linkedInvoices(r),
+                        }], { filename: `receipt-${r.receipt_number || r.receipts_id}.pdf`, title: `Receipt ${r.receipt_number || ''}` });
+                        if (ok) showToast('Receipt exported as PDF.', 'success');
+                        else showToast('Nothing to export.', 'error');
+                      }}>
+                        <NavIcon name="download" />
+                      </button>
                     </td>
                   </tr>)}
               </tbody>
@@ -732,116 +743,25 @@ function ReceiptDetailPage({
           { label: 'Collector', value: receipt.collector_name || '—' },
           { label: 'Account', value: receipt.customer_code || '—' },
           { label: 'Branch', value: receipt.branch_name || '—' },
+          { label: 'Associated Invoice', value: linkedInvoices(receipt) },
           { label: 'Status', value: <StatusBadge status={receipt.status || '—'} /> },
         ]} />
+        <div className="flex justify-end mt-4">
+          <button className="button" type="button" onClick={() => {
+            const ok = downloadPdf([{
+              receipt: receipt.receipt_number,
+              date: formatDisplayDate(receipt.receipt_date || receipt.payment_date),
+              amount: receipt.amount,
+              method: receipt.payment_method || '',
+              collector: receipt.collector_name || '',
+              invoices: linkedInvoices(receipt),
+              account: receipt.customer_code || '',
+            }], { filename: `receipt-${receipt.receipt_number || receiptId}.pdf`, title: `Receipt ${receipt.receipt_number || ''}` });
+            if (ok) showToast('Receipt exported as PDF.', 'success');
+            else showToast('Nothing to export.', 'error');
+          }}>Download PDF</button>
+        </div>
       </section>
-    </div>;
-}
-function StatementsPage({
-  navigate,
-  showToast
-}) {
-  const [summary, setSummary] = useState(null);
-  const [loading, setLoading] = useState(true);
-  useEffect(() => {
-    async function load() {
-      const res = await fetchCustomerStatementSummary();
-      if (res.success) setSummary(res.data);
-      setLoading(false);
-    }
-    load();
-  }, []);
-  const months = summary?.months || [];
-  const pagination_STATEMENTS = usePagination(months);
-  const paginated_STATEMENTS = pagination_STATEMENTS.paginatedData;
-  if (loading) return <LoadingState message="Loading statements…" />;
-  return <div className="page customer-page">
-      {!months.length ? <EmptyState title="No statements" description="Monthly payment totals will appear here after collections are recorded." /> : <section className="panel content-panel relative overflow-hidden">
-          <div className="flex flex-col md:flex-row justify-between gap-4 items-start md:items-center mb-4"><h3>Monthly Payment Summary</h3></div>
-          <><div className="corvex-table-wrapper">
-            <table className="corvex-table">
-              <thead><tr><th>Month</th><th>Total Paid</th><th>Actions</th></tr></thead>
-              <tbody>
-                {paginated_STATEMENTS.map(s => {
-                  const id = monthStartKey(s.month_start);
-                  const label = formatStatementMonth(s.month_start);
-                  return <tr key={id}>
-                    <td>{label}</td>
-                    <td>{formatCurrency(Number(s.total_paid || 0))}</td>
-                    <td className="table-actions">
-                      <button className="icon-action-button" type="button" title="View" onClick={() => navigate(`/customer/statements/${encodeURIComponent(id)}`)}>
-                        <NavIcon name="view" />
-                      </button>
-                      <button className="icon-action-button" type="button" title="Export PDF" onClick={() => {
-                        const ok = downloadPdf([{
-                          month: label,
-                          total_paid: s.total_paid,
-                          outstanding_balance: summary?.outstanding_balance || 0,
-                        }], { filename: `statement-${id}.pdf`, title: `${label} Statement` });
-                        if (ok) showToast('Statement exported as PDF.', 'success');
-                        else showToast('Nothing to export.', 'error');
-                      }}>
-                        <NavIcon name="download" />
-                      </button>
-                    </td>
-                  </tr>;
-                })}
-              </tbody>
-            </table>
-          </div><Pagination {...pagination_STATEMENTS} /></>
-        </section>}
-    </div>;
-}
-function StatementDetailPage({
-  statementId,
-  showToast
-}) {
-  const [account, setAccount] = useState(null);
-  const [monthRow, setMonthRow] = useState(null);
-  const [loading, setLoading] = useState(true);
-  const monthKey = decodeURIComponent(statementId || '').slice(0, 10);
-  useEffect(() => {
-    async function load() {
-      const [meRes, summaryRes] = await Promise.all([
-        fetchCustomerPortalMe(),
-        fetchCustomerStatementSummary(),
-      ]);
-      if (meRes.success) setAccount(meRes.data);
-      if (summaryRes.success) {
-        const match = (summaryRes.data?.months || []).find(
-          (m) => monthStartKey(m.month_start) === monthKey
-        );
-        setMonthRow(match || null);
-      }
-      setLoading(false);
-    }
-    load();
-  }, [monthKey]);
-  if (loading) return <LoadingState message="Loading statement…" />;
-  if (!monthRow) return <EmptyState title="Statement not found" description="Select a month from the Statements page." />;
-  const label = formatStatementMonth(monthRow.month_start);
-  return <div className="page customer-page">
-      <section className="panel content-panel relative overflow-hidden">
-        <div className="flex flex-col md:flex-row justify-between gap-4 items-start md:items-center mb-4"><h3>{label}</h3></div>
-        <DetailRowsTable rows={[
-          { label: 'Period', value: label },
-          { label: 'Total Paid This Month', value: formatCurrency(Number(monthRow.total_paid || 0)) },
-          { label: 'Current Outstanding Balance', value: formatCurrency(Number(account?.outstanding_balance || 0)) },
-          { label: 'Account', value: account?.customer_code || '—' },
-        ]} />
-      </section>
-      <div className="flex justify-end mt-4">
-        <button className="button" type="button" onClick={() => {
-          const ok = downloadPdf([{
-            period: label,
-            total_paid: monthRow.total_paid,
-            outstanding_balance: account?.outstanding_balance || 0,
-            account: account?.customer_code || '',
-          }], { filename: `statement-${monthKey}.pdf`, title: `${label} Statement` });
-          if (ok) showToast('Statement exported as PDF.', 'success');
-          else showToast('Nothing to export.', 'error');
-        }}>Export PDF</button>
-      </div>
     </div>;
 }
 function NotificationsPage({
@@ -850,15 +770,50 @@ function NotificationsPage({
 }) {
   return <NotificationsInbox navigate={navigate} showToast={showToast} resolveRelatedPath={(item) => {
     const category = String(item.category || '').toLowerCase();
-    if (category.includes('receipt')) return '/customer/receipts';
-    if (category.includes('payment')) return '/customer/payment-history';
+    if (category.includes('receipt') || category.includes('payment') || category.includes('collection')) return '/customer/payment-history';
+    if (category.includes('invoice') || category.includes('purchase')) return '/customer/purchases';
+    if (category.includes('overdue') || category.includes('due')) return '/customer/balances';
+    if (category.includes('account')) return '/customer/my-profile';
     return null;
   }} />;
 }
+function linkedInvoices(payment) {
+  const invoices = Array.isArray(payment?.invoices) ? payment.invoices : [];
+  return invoices.map((invoice) => invoice.invoice_number).filter(Boolean).join(', ') || '—';
+}
+
 function ProfilePage({
   showToast
 }) {
-  return <CustomerProfilePanel showToast={showToast} />;
+  return <CustomerProfilePanel mode="profile" showToast={showToast} />;
+}
+
+function AccountSettingsPage({
+  showToast
+}) {
+  return <CustomerProfilePanel mode="settings" showToast={showToast} />;
+}
+
+function SupportPage() {
+  const [account, setAccount] = useState(null);
+  useEffect(() => {
+    let active = true;
+    fetchCustomerPortalMe().then((result) => {
+      if (active && result.success) setAccount(result.data);
+    });
+    return () => { active = false; };
+  }, []);
+  return (
+    <section className="cp-card cp-support">
+      <h3>Customer Support</h3>
+      <p>Questions about a payment, a purchase, or your profile go to your branch. This portal does not open a ticket.</p>
+      <dl>
+        <div><dt>Branch</dt><dd>{account?.branch_name || 'Your assigned branch'}</dd></div>
+        <div><dt>Account</dt><dd>{account?.customer_code || '—'}</dd></div>
+        <div><dt>What to include</dt><dd>Your customer ID, the invoice or receipt number, and what looks incorrect.</dd></div>
+      </dl>
+    </section>
+  );
 }
 
 export function CustomerPageBody({
@@ -867,36 +822,61 @@ export function CustomerPageBody({
   showToast
 }) {
   if (!page) return <EmptyState title="Page not found" description="Use the menu to open a supported screen." />;
+  if (page.pageType === 'login') return <LoginPage navigate={navigate} showToast={showToast} />;
   const props = {
     receiptId: page.params?.receiptId,
-    statementId: page.params?.statementId,
+    invoiceId: page.params?.invoiceId,
     navigate,
     showToast
   };
+  let body;
   switch (page.pageType) {
-    case 'login':
-      return <LoginPage {...props} />;
+    case 'dashboard':
     case 'home':
-      return <HomePage {...props} />;
-    case 'accountDetails':
-      return <AccountDetailsPage {...props} />;
+      body = <CustomerDashboardPage {...props} />;
+      break;
+    case 'purchases':
+      body = <CustomerPurchasesPage {...props} />;
+      break;
+    case 'purchaseDetail':
+      body = <CustomerPurchaseDetailPage {...props} />;
+      break;
+    case 'balances':
+      body = <CustomerBalancesPage {...props} />;
+      break;
     case 'paymentHistory':
-      return <PaymentHistoryPage {...props} />;
+      body = <PaymentHistoryPage {...props} />;
+      break;
     case 'receipts':
-      return <ReceiptsPage {...props} />;
+      body = <ReceiptsPage {...props} />;
+      break;
     case 'receiptDetail':
-      return <ReceiptDetailPage {...props} />;
-    case 'statements':
-      return <StatementsPage {...props} />;
-    case 'statementDetail':
-      return <StatementDetailPage {...props} />;
+      body = <ReceiptDetailPage {...props} />;
+      break;
     case 'notifications':
-      return <NotificationsPage {...props} />;
+      body = <NotificationsPage {...props} />;
+      break;
+    case 'support':
+      body = <SupportPage />;
+      break;
     case 'settings':
-      return <UserSettingsPanel role="customer" showToast={showToast} />;
+      body = <AccountSettingsPage {...props} />;
+      break;
     case 'profile':
-      return <ProfilePage {...props} />;
+      body = <ProfilePage {...props} />;
+      break;
     default:
-      return <EmptyState title="Page not found" description="This screen is not configured yet." />;
+      body = <EmptyState title="Page not found" description="This screen is not configured yet." />;
   }
+  return (
+    <div className="cp-canvas">
+      {page.pageType !== 'dashboard' && page.pageType !== 'home' ? (
+        <header className="cp-page-head">
+          <h2>{page.title}</h2>
+          {page.description ? <p>{page.description}</p> : null}
+        </header>
+      ) : null}
+      {body}
+    </div>
+  );
 }

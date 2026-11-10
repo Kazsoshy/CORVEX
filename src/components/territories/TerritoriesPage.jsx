@@ -12,6 +12,7 @@ import { getCurrentUser } from '../../api/authService';
 import apiClient from '../../api/apiClient';
 import { usePagination } from '../../hooks/usePagination';
 import { Pagination } from '../shared/Pagination';
+import { confirmAction } from '../shared/confirmAction.jsx';
 
 function formatPersonName(user) {
   if (!user) return '';
@@ -342,7 +343,15 @@ export function TerritoriesPage({ showToast }) {
   };
 
   const handleArchive = async (id) => {
-    if (!window.confirm('Archive this territory? The record is preserved. Related customer history is not removed.')) return;
+    const territory = territories.find((item) => item.territory_id === id);
+    const confirmed = await confirmAction({
+      title: 'Archive territory',
+      message: 'The territory record is preserved. Related customer history is not removed.',
+      detail: territory?.territory_name || `Territory ${id}`,
+      confirmLabel: 'Archive',
+      tone: 'danger',
+    });
+    if (!confirmed) return;
     try {
       await deleteTerritory(id);
       showToast('Territory archived successfully', 'success');
@@ -356,6 +365,16 @@ export function TerritoriesPage({ showToast }) {
     e.preventDefault();
     const validation = validateForm();
     if (!validation) return;
+    if (submitting) return;
+    const confirmed = await confirmAction({
+      title: editing ? 'Confirm changes' : 'Create territory',
+      message: editing
+        ? 'This saves the territory name, branch, coverage, and assigned staff.'
+        : 'This adds a territory that can be assigned to field staff.',
+      detail: form.territory_name.trim(),
+      confirmLabel: editing ? 'Save changes' : 'Create territory',
+    });
+    if (!confirmed) return;
 
     try {
       setSubmitting(true);

@@ -5,7 +5,7 @@ export async function fetchMyProfile() {
     const response = await apiClient.get('/auth/me');
     return response.data;
   } catch (error) {
-    console.error('Failed to fetch profile:', error);
+    if (error.response?.status !== 401) console.error('Failed to fetch profile:', error);
     return {
       success: false,
       data: null,

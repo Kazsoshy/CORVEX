@@ -14,6 +14,7 @@ import {
   setSidebarCollapsedPref,
 } from '../../settings/preferences.js';
 import { usePreferences } from '../../settings/PreferencesProvider.jsx';
+import { confirmAction } from './confirmAction.jsx';
 
 const TABS = [
   { id: 'accessibility', label: 'Accessibility', detail: 'Reading, contrast, and motion', icon: Accessibility },
@@ -144,6 +145,15 @@ export function UserSettingsPanel({
   const [section, setSection] = useState('accessibility');
   const [sidebarCollapsed, setSidebarCollapsed] = useState(isSidebarCollapsedPref);
   const [notificationPermission, setNotificationPermission] = useState(desktopNotificationSupport);
+
+  const confirmRestore = async (label, apply) => {
+    const confirmed = await confirmAction({
+      title: 'Restore defaults',
+      message: `This resets your saved ${label} on this device.`,
+      confirmLabel: 'Restore defaults',
+    });
+    if (confirmed) apply();
+  };
 
   useEffect(() => {
     const onSidebar = (event) => setSidebarCollapsed(Boolean(event.detail));
@@ -343,7 +353,7 @@ export function UserSettingsPanel({
                   </div>
                 </aside>
                 <div className="settings-actions">
-                  <button className="button secondary" type="button" onClick={() => resetGroup('accessibility')}>
+                  <button className="button secondary" type="button" onClick={() => confirmRestore('accessibility settings', () => resetGroup('accessibility'))}>
                     Restore accessibility defaults
                   </button>
                 </div>
@@ -358,11 +368,11 @@ export function UserSettingsPanel({
                 <button
                   className="button secondary"
                   type="button"
-                  onClick={() => {
+                  onClick={() => confirmRestore('appearance settings', () => {
                     setSidebarCollapsed(false);
                     setSidebarCollapsedPref(false);
                     resetGroup('appearance');
-                  }}
+                  })}
                 >
                   Restore appearance defaults
                 </button>
@@ -427,7 +437,7 @@ export function UserSettingsPanel({
                   >
                     Send test notification
                   </button>
-                  <button className="button ghost" type="button" onClick={() => resetGroup('notifications')}>
+                  <button className="button ghost" type="button" onClick={() => confirmRestore('notification settings', () => resetGroup('notifications'))}>
                     Restore notification defaults
                   </button>
                 </>
@@ -455,7 +465,7 @@ export function UserSettingsPanel({
                   title="This role"
                   description="These controls change how this device handles field work and warehouse tasks."
                   footer={(
-                    <button className="button secondary" type="button" onClick={() => resetGroup('workspace')}>
+                    <button className="button secondary" type="button" onClick={() => confirmRestore('workspace settings', () => resetGroup('workspace'))}>
                       Restore workspace defaults
                     </button>
                   )}

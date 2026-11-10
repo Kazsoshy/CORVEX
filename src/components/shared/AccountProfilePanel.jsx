@@ -2,11 +2,13 @@ import { useCallback, useEffect, useState } from 'react';
 import { Lock, MonitorSmartphone, Settings, UserRound } from 'lucide-react';
 import { persistCurrentUserFromProfile, requestLogout } from '../../api/authService';
 import { fetchMyProfile, updateMyProfile } from '../../api/profileService';
+import { confirmAction } from './confirmAction.jsx';
 import { formatDisplayDate, formatDisplayDateTime } from '../../utils/formatters';
 import { LoadingState } from './LoadingState';
 import { StatusBadge } from '../StatusBadge';
 import { ProfilePhotoEditor } from './ProfilePhoto';
 import { UserSettingsPanel } from './UserSettingsPanel';
+import { describeIdlePolicy, IDLE_TIMEOUT_MS } from '../../api/sessionActivity';
 import {
   ProfileFact,
   ProfilePasswordForm,
@@ -132,6 +134,15 @@ export function AccountProfilePanel({
       showToast?.('Enter a valid email address.', 'error');
       return;
     }
+    if (saving) return;
+    const name = [draft.first_name, draft.middle_name, draft.last_name].map((part) => String(part || '').trim()).filter(Boolean).join(' ');
+    const confirmed = await confirmAction({
+      title: 'Confirm changes',
+      message: 'This updates the name, email, and phone saved on your account.',
+      detail: name,
+      confirmLabel: 'Save changes',
+    });
+    if (!confirmed) return;
     setSaving(true);
     const res = await updateMyProfile({
       first_name: String(draft.first_name).trim(),
@@ -297,12 +308,12 @@ export function AccountProfilePanel({
             <section className="settings-card">
               <header>
                 <h4>This sign-in</h4>
-                <p>CORVEX ends a sign-in after 15 minutes without activity. Use a shared computer only while you are at it, then sign out.</p>
+                <p>{describeIdlePolicy()} Sign out when you leave a shared computer.</p>
               </header>
               <div className="settings-card-body">
                 <div className="profile-facts">
                   <ProfileFact label="Browser" value={browserLabel()} />
-                  <ProfileFact label="Time left if you step away" value={idleLabel || 'Ends after 15 minutes of inactivity'} />
+                  <ProfileFact label="Time until we ask" value={remaining === 0 ? 'Confirm to stay signed in' : (idleLabel || `After ${Math.round(IDLE_TIMEOUT_MS / 60000)} minutes away`)} />
                   <ProfileFact label="Last sign-in recorded" value={formatDisplayDateTime(profile.last_login)} />
                   <ProfileFact label="Signed in as" value={profile.email} />
                 </div>

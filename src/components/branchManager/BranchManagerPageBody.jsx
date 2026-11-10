@@ -1,7 +1,8 @@
 import { Pagination } from '../shared/Pagination';
 import { StatsGrid, Stats } from '../shared/StatsGrid';
 import { usePagination } from '../../hooks/usePagination';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { confirmAction } from '../shared/confirmAction.jsx';
 import { Link } from 'react-router-dom';
 import { AreaChart, Area, BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
 import { formatCurrency, formatDisplayDate, formatDisplayDateTime, formatPhone } from '../../data/branchManagerMockData';
@@ -22,6 +23,7 @@ import { fetchOperationalAlerts, patchOperationalAlert, mapOperationalAlertRow }
 import { fetchNotifications, markNotificationRead, markAllNotificationsRead, mapNotificationRow } from '../../api/notificationService.js';
 import { fetchInventoryTransfers, fetchInventoryTransferById, patchInventoryTransfer, mapInventoryTransferRow } from '../../api/inventoryService.js';
 import { BranchInventoryViewPage } from '../inventory/BranchInventoryViewPage.jsx';
+import { SawResultsPage } from '../operatingManager/SawResultsPage.jsx';
 import { EmptyState } from '../shared/EmptyState';
 import { LoadingState } from '../shared/LoadingState';
 import { DetailRowsTable } from '../shared/DetailRowsTable';
@@ -663,6 +665,7 @@ function CollectorDetailPage({
   const [selectedIds, setSelectedIds] = useState(() => new Set());
   const [scheduledDate, setScheduledDate] = useState(manilaDateInputValue);
   const [assignBusy, setAssignBusy] = useState(false);
+  const assignLock = useRef(false);
   const [loading, setLoading] = useState(true);
   async function reloadSaw(date) {
     const sawRes = await fetchCollectorSawPriority(collectorId, { scheduled_date: date });
@@ -711,20 +714,39 @@ function CollectorDetailPage({
   }
 
   async function submitAssignment(payload) {
-    setAssignBusy(true);
-    const res = await assignCollectorCollectionRoute(collectorId, {
-      scheduled_date: scheduledDate,
-      ...payload,
+    if (assignBusy || assignLock.current) return;
+    assignLock.current = true;
+    const stopCount = payload.assign_top_n
+      ? `the top ${payload.assign_top_n} SAW stops`
+      : `${payload.customer_ids?.length || 0} selected customer${payload.customer_ids?.length === 1 ? '' : 's'}`;
+    const confirmed = await confirmAction({
+      title: 'Assign collection route',
+      message: `This schedules collection visits for ${stopCount} on ${scheduledDate}.`,
+      detail: c?.name || 'Collector',
+      confirmLabel: 'Assign route',
     });
-    setAssignBusy(false);
-    if (res.success) {
-      showToast?.(res.message || 'Collection visits scheduled.', 'success');
-      setSelectedIds(new Set());
-      await reloadSaw(scheduledDate);
-      const detailResult = await getBranchCollectorDetail(collectorId);
-      if (detailResult.success) setRouteDetail(detailResult.data);
-    } else {
-      showToast?.(res.message || 'Could not assign visits.', 'error');
+    if (!confirmed) {
+      assignLock.current = false;
+      return;
+    }
+    setAssignBusy(true);
+    try {
+      const res = await assignCollectorCollectionRoute(collectorId, {
+        scheduled_date: scheduledDate,
+        ...payload,
+      });
+      if (res.success) {
+        showToast?.(res.message || 'Collection visits scheduled.', 'success');
+        setSelectedIds(new Set());
+        await reloadSaw(scheduledDate);
+        const detailResult = await getBranchCollectorDetail(collectorId);
+        if (detailResult.success) setRouteDetail(detailResult.data);
+      } else {
+        showToast?.(res.message || 'Could not assign visits.', 'error');
+      }
+    } finally {
+      setAssignBusy(false);
+      assignLock.current = false;
     }
   }
 
@@ -2069,7 +2091,39 @@ function CIDetailPage({
       showToast('Rejection reason is required.', 'error');
       return;
     }
+    if (submitting) return;
+    const decisionCopy = status === 'Approved'
+      ? {
+          title: 'Approve credit review',
+          message: `This sets the customer's credit limit to ${formatCurrency(Number(approvedLimit))}.`,
+          confirmLabel: 'Approve',
+          tone: 'default',
+        }
+      : status === 'Revision Requested'
+        ? {
+            title: 'Request revision',
+            message: 'This sends the credit review back for revision. The credit limit stays unchanged.',
+            confirmLabel: 'Request revision',
+            tone: 'default',
+          }
+        : {
+            title: 'Reject credit review',
+            message: 'This rejects the credit review. The customer limit is not increased.',
+            confirmLabel: 'Reject',
+            tone: 'danger',
+          };
     setSubmitting(true);
+    const confirmed = await confirmAction({
+      title: decisionCopy.title,
+      message: decisionCopy.message,
+      detail: review?.customerName || `Review ${ciId}`,
+      confirmLabel: decisionCopy.confirmLabel,
+      tone: decisionCopy.tone,
+    });
+    if (!confirmed) {
+      setSubmitting(false);
+      return;
+    }
     const result = await patchCreditInvestigation(ciId, {
       status,
       approved_credit_limit: status === 'Approved' ? Number(approvedLimit) : undefined,
@@ -2576,15 +2630,44 @@ function AlertsPage({
   }, [alerts, filter]);
   const pagination = usePagination(filtered);
   const rows = pagination.paginatedData;
+  const alertLock = useRef(false);
   const assignAlert = async (alertId) => {
+    if (alertLock.current) return;
+    alertLock.current = true;
+    const alert = alerts.find((item) => item.id === alertId);
+    const confirmed = await confirmAction({
+      title: 'Assign alert',
+      message: 'This assigns the follow-up to you.',
+      detail: alert?.title || alert?.message || `Alert ${alertId}`,
+      confirmLabel: 'Assign to me',
+    });
+    if (!confirmed) {
+      alertLock.current = false;
+      return;
+    }
     const result = await patchOperationalAlert(alertId, { assigned_to: currentUser?.id });
+    alertLock.current = false;
     if (result.success) {
       showToast('Follow-up assigned to you.', 'success');
       load();
     } else showToast(result.message || 'Assign failed.', 'error');
   };
   const resolveAlert = async (alertId) => {
+    if (alertLock.current) return;
+    alertLock.current = true;
+    const alert = alerts.find((item) => item.id === alertId);
+    const confirmed = await confirmAction({
+      title: 'Resolve alert',
+      message: 'This marks the alert as resolved.',
+      detail: alert?.title || alert?.message || `Alert ${alertId}`,
+      confirmLabel: 'Resolve',
+    });
+    if (!confirmed) {
+      alertLock.current = false;
+      return;
+    }
     const result = await patchOperationalAlert(alertId, { status: 'Resolved' });
+    alertLock.current = false;
     if (result.success) {
       showToast('Resolved.', 'success');
       load();
@@ -2767,20 +2850,49 @@ function ApprovalCenterPage({
     else showToast(result.message || 'Could not load transfer lines.', 'error');
     setTransferDetailLoading(false);
   };
-  const approveTransfer = async (transferId) => {
+  const actionLock = useRef(false);
+  const withAction = async (work) => {
+    if (actionLock.current) return;
+    actionLock.current = true;
+    try {
+      await work();
+    } finally {
+      actionLock.current = false;
+    }
+  };
+  const approveTransfer = (transferId) => withAction(async () => {
+    const row = transferList.find((item) => String(item.id) === String(transferId));
+    const label = row?.ref || transferDetail?.transfer_ref || `Transfer ${transferId}`;
+    const confirmed = await confirmAction({
+      title: 'Approve transfer',
+      message: 'The source branch can ship after approval. Stock does not move until they confirm shipment.',
+      detail: label,
+      confirmLabel: 'Approve',
+    });
+    if (!confirmed) return;
     const result = await patchInventoryTransfer(transferId, { status: 'Approved' });
     if (result.success) {
       showToast('Transfer approved. Source warehouse can confirm shipment.', 'success');
       setTransferDetail(null);
       reload();
     } else showToast(result.message || 'Approve failed.', 'error');
-  };
-  const rejectTransfer = async (transferId) => {
+  });
+  const rejectTransfer = (transferId) => withAction(async () => {
     const reason = window.prompt('Rejection reason (required):');
     if (!reason?.trim()) {
       showToast('Reason required.', 'error');
       return;
     }
+    const row = transferList.find((item) => String(item.id) === String(transferId));
+    const label = row?.ref || transferDetail?.transfer_ref || `Transfer ${transferId}`;
+    const confirmed = await confirmAction({
+      title: 'Reject transfer',
+      message: 'This rejects the transfer request. Stock is not moved.',
+      detail: `${label} · ${reason.trim()}`,
+      confirmLabel: 'Reject',
+      tone: 'danger',
+    });
+    if (!confirmed) return;
     const result = await patchInventoryTransfer(transferId, {
       status: 'Rejected',
       approval_info: reason.trim(),
@@ -2790,71 +2902,133 @@ function ApprovalCenterPage({
       setTransferDetail(null);
       reload();
     } else showToast(result.message || 'Reject failed.', 'error');
-  };
-  const approveSpecial = async (requestId) => {
+  });
+  const approveSpecial = (requestId) => withAction(async () => {
+    const row = specialList.find((item) => String(item.requestId) === String(requestId));
+    const confirmed = await confirmAction({
+      title: 'Approve special collection',
+      message: 'This approves the special collection request.',
+      detail: [row?.customerName, row?.amount != null ? formatCurrency(row.amount) : ''].filter(Boolean).join(' · ') || `Request ${requestId}`,
+      confirmLabel: 'Approve',
+    });
+    if (!confirmed) return;
     const result = await patchSpecialCollectionRequest(requestId, { status: 'Approved' });
     if (result.success) {
       showToast('Special collection approved.', 'success');
       reload();
     } else showToast(result.message || 'Approve failed.', 'error');
-  };
-  const rejectSpecial = async (requestId) => {
+  });
+  const rejectSpecial = (requestId) => withAction(async () => {
+    const row = specialList.find((item) => String(item.requestId) === String(requestId));
+    const confirmed = await confirmAction({
+      title: 'Reject special collection',
+      message: 'This rejects the special collection request.',
+      detail: row?.customerName || `Request ${requestId}`,
+      confirmLabel: 'Reject',
+      tone: 'danger',
+    });
+    if (!confirmed) return;
     const result = await patchSpecialCollectionRequest(requestId, { status: 'Rejected' });
     if (result.success) {
       showToast('Special collection rejected.', 'success');
       reload();
     } else showToast(result.message || 'Reject failed.', 'error');
-  };
-  const confirmInvoice = async (invoiceId) => {
+  });
+  const confirmInvoice = (invoiceId) => withAction(async () => {
+    const invoice = invoiceList.find((item) => String(item.sales_invoices_id) === String(invoiceId));
+    const confirmed = await confirmAction({
+      title: 'Acknowledge invoice',
+      message: 'This confirms the sales invoice.',
+      detail: [invoice?.invoice_number, invoice?.customer_name].filter(Boolean).join(' · ') || `Invoice ${invoiceId}`,
+      confirmLabel: 'Acknowledge',
+    });
+    if (!confirmed) return;
     const result = await patchSalesInvoiceReview(invoiceId, { status: 'Confirmed' });
     if (result.success) {
       showToast(result.message || 'Invoice acknowledged.', 'success');
       reload();
     } else showToast(result.message || 'Acknowledge failed.', 'error');
-  };
-  const rejectInvoice = async (invoiceId) => {
+  });
+  const rejectInvoice = (invoiceId) => withAction(async () => {
     const reason = window.prompt('Rejection reason (required):');
     if (!reason?.trim()) {
       showToast('Reason required.', 'error');
       return;
     }
+    const invoice = invoiceList.find((item) => String(item.sales_invoices_id) === String(invoiceId));
+    const confirmed = await confirmAction({
+      title: 'Reject invoice',
+      message: 'This cancels the sales invoice.',
+      detail: [invoice?.invoice_number || `Invoice ${invoiceId}`, reason.trim()].join(' · '),
+      confirmLabel: 'Reject',
+      tone: 'danger',
+      warning: 'The invoice will be cancelled.',
+    });
+    if (!confirmed) return;
     const result = await patchSalesInvoiceReview(invoiceId, { status: 'Cancelled', review_note: reason.trim() });
     if (result.success) {
       showToast(result.message || 'Invoice rejected.', 'success');
       reload();
     } else showToast(result.message || 'Reject failed.', 'error');
-  };
-  const confirmCollection = async (paymentId) => {
+  });
+  const confirmCollection = (paymentId) => withAction(async () => {
+    const payment = collectionList.find((item) => String(item.collectionpayment_id) === String(paymentId));
+    const confirmed = await confirmAction({
+      title: 'Confirm collection',
+      message: 'This accepts the pending collection.',
+      detail: [payment?.receipt_number, payment?.customer_name].filter(Boolean).join(' · ') || `Collection ${paymentId}`,
+      confirmLabel: 'Confirm collection',
+    });
+    if (!confirmed) return;
     const result = await patchCollectionReview(paymentId, { action: 'confirm' });
     if (result.success) {
       showToast(result.message || 'Collection confirmed.', 'success');
       reload();
     } else showToast(result.message || 'Confirm failed.', 'error');
-  };
-  const rejectCollection = async (paymentId) => {
+  });
+  const rejectCollection = (paymentId) => withAction(async () => {
     const reason = window.prompt('Rejection reason (required):');
     if (!reason?.trim()) {
       showToast('Reason required.', 'error');
       return;
     }
+    const payment = collectionList.find((item) => String(item.collectionpayment_id) === String(paymentId));
+    const confirmed = await confirmAction({
+      title: 'Reject collection',
+      message: 'This rejects the pending collection.',
+      detail: [payment?.receipt_number || `Collection ${paymentId}`, reason.trim()].filter(Boolean).join(' · '),
+      confirmLabel: 'Reject',
+      tone: 'danger',
+    });
+    if (!confirmed) return;
     const result = await patchCollectionReview(paymentId, { action: 'reject', review_note: reason.trim() });
     if (result.success) {
       showToast(result.message || 'Collection rejected.', 'success');
       reload();
     } else showToast(result.message || 'Reject failed.', 'error');
-  };
-  const reverseCollection = async (paymentId) => {
+  });
+  const reverseCollection = (paymentId) => withAction(async () => {
     const reason = window.prompt('Reversal reason (required):');
     if (!reason?.trim()) {
       showToast('Reason required.', 'error');
       return;
     }
+    const payment = confirmedCollections.find((item) => String(item.collectionpayment_id) === String(paymentId));
+    const confirmed = await confirmAction({
+      title: 'Reverse collection',
+      message: 'This reverses a collection that was already confirmed.',
+      detail: [payment?.receipt_number || `Collection ${paymentId}`, reason.trim()].filter(Boolean).join(' · '),
+      confirmLabel: 'Reverse',
+      tone: 'danger',
+      warning: 'The recorded collection will be reversed.',
+    });
+    if (!confirmed) return;
     const result = await patchCollectionReview(paymentId, { action: 'reverse', review_note: reason.trim() });
     if (result.success) {
       showToast(result.message || 'Collection reversed.', 'success');
       reload();
     } else showToast(result.message || 'Reverse failed.', 'error');
-  };
+  });
   const RiskBadge = ({
     score
   }) => {
@@ -3561,6 +3735,8 @@ export function BranchManagerPageBody({
     case 'reportInventory':
     case 'reportDelinquency':
       return <ReportsHubPage {...p} />;
+    case 'sawResults':
+      return <SawResultsPage navigate={navigate} showToast={showToast} scope="branch" branchName={branchName} />;
     case 'staffPerformance':
     case 'staffCollectors':
     case 'staffSales':

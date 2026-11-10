@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { persistCurrentUserFromProfile } from '../../api/authService';
 import { updateMyProfile } from '../../api/profileService';
+import { confirmAction } from './confirmAction.jsx';
 import { getSessionIdleRemainingMs } from '../../api/sessionActivity';
 
 export function initialsFrom(name) {
@@ -72,8 +73,15 @@ export function formatIdleRemaining(ms) {
 export function useIdleRemaining() {
   const [remaining, setRemaining] = useState(() => getSessionIdleRemainingMs());
   useEffect(() => {
-    const id = window.setInterval(() => setRemaining(getSessionIdleRemainingMs()), 15000);
-    return () => window.clearInterval(id);
+    const tick = () => setRemaining(getSessionIdleRemainingMs());
+    const id = window.setInterval(tick, 5000);
+    window.addEventListener('corvex-idle-prompt', tick);
+    window.addEventListener('corvex-idle-cleared', tick);
+    return () => {
+      window.clearInterval(id);
+      window.removeEventListener('corvex-idle-prompt', tick);
+      window.removeEventListener('corvex-idle-cleared', tick);
+    };
   }, []);
   return remaining;
 }
@@ -205,6 +213,13 @@ export function ProfilePasswordForm({ showToast, onUpdated, onDirtyChange }) {
       showToast?.('New password and confirmation do not match.', 'error');
       return;
     }
+    if (saving) return;
+    const confirmed = await confirmAction({
+      title: 'Change password',
+      message: 'You will use the new password the next time you sign in.',
+      confirmLabel: 'Change password',
+    });
+    if (!confirmed) return;
     setSaving(true);
     const res = await updateMyProfile({
       current_password: currentPassword,

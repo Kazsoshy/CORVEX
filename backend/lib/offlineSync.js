@@ -1,4 +1,5 @@
 import { applyCollectionPayment } from './collectionPayment.js';
+import { notifyCustomerPaymentEvent } from './customerNotifications.js';
 import { clearOverdueDedup, notifyInvoicePendingReview, notifyOverdueAccounts, publishStockAlerts } from './operationalNotifications.js';
 import { applySalesInvoice } from './salesInvoiceWrite.js';
 import { SyncConflict } from './syncErrors.js';
@@ -224,6 +225,12 @@ async function afterCommit(pool, applied) {
   if (applied.kind === 'payment') {
     if (applied.remainingBalance === 0) await clearOverdueDedup(pool, applied.customerId);
     await notifyOverdueAccounts(pool);
+    await notifyCustomerPaymentEvent(pool, {
+      customerId: applied.customerId,
+      receiptNumber: applied.payment?.receipt_number,
+      amount: applied.payment?.amount,
+      kind: 'submitted',
+    });
   }
   if (applied.kind === 'invoice') {
     await publishStockAlerts(pool, applied.stockAlerts);

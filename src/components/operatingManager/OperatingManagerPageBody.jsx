@@ -2,7 +2,7 @@ import { Pagination } from '../shared/Pagination';
 import { StatsGrid, Stats } from '../shared/StatsGrid';
 import { usePagination, DEFAULT_PAGE_SIZE } from '../../hooks/usePagination';
 import { StatusBadge } from '../../components/StatusBadge';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { AreaChart, Area, BarChart, Bar, LineChart, Line, RadarChart, Radar, PolarGrid, PolarAngleAxis, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
 import { AdminPageBody } from '../admin/AdminPageBody';
@@ -12,6 +12,7 @@ import { SawResultsPage } from './SawResultsPage';
 import { fetchOperationalAlerts, patchOperationalAlert, mapOperationalAlertRow } from '../../api/operationalAlertsService.js';
 import { fetchNotifications, markNotificationRead, markAllNotificationsRead, mapNotificationRow, countUnreadNotifications } from '../../api/notificationService.js';
 import { AccountProfilePanel } from '../shared/AccountProfilePanel';
+import { confirmAction } from '../shared/confirmAction.jsx';
 import { formatCurrency, formatDisplayDate, formatDisplayDateTime, formatPhone } from '../../utils/formatters.js';
 import { getPresetDateRange } from '../../utils/analyticsDateRange.js';
 import { formatMiddleNameDisplay } from '../../utils/customerDisplay.js';
@@ -132,10 +133,27 @@ function DashboardPage({
 
   async function saveTargets(event) {
     event.preventDefault();
+    if (savingTargets) return;
     setSavingTargets(true);
+    const confirmed = await confirmAction({
+      title: 'Save targets',
+      message: 'This updates the daily collection and sales targets shown on the dashboard.',
+      detail: `Collection ${targetForm.collectionDaily || '—'} · Sales ${targetForm.salesDaily || '—'}`,
+      confirmLabel: 'Save targets',
+    });
+    if (!confirmed) {
+      setSavingTargets(false);
+      return;
+    }
     setTargetNote('');
-    const result = await savePerformanceTargets(Number(targetForm.collectionDaily), Number(targetForm.salesDaily));
-    setSavingTargets(false);
+    let result;
+    try {
+      result = await savePerformanceTargets(Number(targetForm.collectionDaily), Number(targetForm.salesDaily));
+    } catch {
+      result = { success: false, message: 'Failed to save targets.' };
+    } finally {
+      setSavingTargets(false);
+    }
     if (!result.success) {
       setTargetNote(result.message || 'Failed to save targets.');
       return;
@@ -1113,6 +1131,7 @@ function AlertsPage({
   const [alerts, setAlerts] = useState([]);
   const [loading, setLoading] = useState(true);
   const [severityFilter, setSeverityFilter] = useState('All');
+  const resolveLock = useRef(false);
   const load = async () => {
     setLoading(true);
     const res = await fetchOperationalAlerts();
@@ -1124,7 +1143,21 @@ function AlertsPage({
   }, []);
   const filtered = useMemo(() => severityFilter === 'All' ? alerts : alerts.filter(a => a.severity === severityFilter), [alerts, severityFilter]);
   const resolveAlert = async (id) => {
+    if (resolveLock.current) return;
+    resolveLock.current = true;
+    const alert = alerts.find((item) => item.id === id);
+    const confirmed = await confirmAction({
+      title: 'Resolve alert',
+      message: 'This marks the alert as resolved.',
+      detail: alert?.message || alert?.type || `Alert ${id}`,
+      confirmLabel: 'Resolve',
+    });
+    if (!confirmed) {
+      resolveLock.current = false;
+      return;
+    }
     const result = await patchOperationalAlert(id, { status: 'Resolved' });
+    resolveLock.current = false;
     if (result.success) {
       showToast('Alert resolved.', 'success');
       load();
@@ -2946,6 +2979,7 @@ function DigitalReceiptsPage({
   const [reviewModal, setReviewModal] = useState(null);
   const [reviewReason, setReviewReason] = useState('');
   const [reviewSubmitting, setReviewSubmitting] = useState(false);
+  const confirmLock = useRef(false);
   useEffect(() => {
     apiClient.get('/branches').then((res) => {
       if (res.data?.success) setBranches(res.data.data || []);
@@ -2999,7 +3033,26 @@ function DigitalReceiptsPage({
     showToast(result.message || 'Update failed.', 'error');
     return false;
   };
-  const confirmReceipt = (collectionId) => reviewReceipt(collectionId, 'confirm');
+  const confirmReceipt = async (collectionId) => {
+    if (confirmLock.current) return;
+    confirmLock.current = true;
+    const receipt = receipts.find((item) => item.collection_id === collectionId);
+    const confirmed = await confirmAction({
+      title: 'Confirm collection',
+      message: 'This accepts the pending collection and records it as confirmed.',
+      detail: [receipt?.receipt_number, receipt?.customer_name].filter(Boolean).join(' · ') || `Collection ${collectionId}`,
+      confirmLabel: 'Confirm collection',
+    });
+    if (!confirmed) {
+      confirmLock.current = false;
+      return;
+    }
+    try {
+      await reviewReceipt(collectionId, 'confirm');
+    } finally {
+      confirmLock.current = false;
+    }
+  };
   const submitReviewModal = async (event) => {
     event.preventDefault();
     if (!reviewModal) return;

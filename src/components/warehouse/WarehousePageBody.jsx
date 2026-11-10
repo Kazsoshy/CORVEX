@@ -65,6 +65,7 @@ import { ProductImagePicker } from '../shared/ProductImagePicker';
 import { TransferDocumentForm } from './TransferDocumentForm.jsx';
 import { RestockDocumentForm } from './RestockDocumentForm.jsx';
 import { StockCountDocumentForm } from './StockCountDocumentForm.jsx';
+import { confirmAction } from '../shared/confirmAction.jsx';
 const PAGE_SIZE = 10;
 function DashboardPage({
   navigate,
@@ -890,6 +891,14 @@ function EditProductPage({
       showToast('Please fix the errors before submitting.', 'error');
       return;
     }
+    if (submitting) return;
+    const confirmed = await confirmAction({
+      title: 'Confirm changes',
+      message: 'This saves your edits to the product record, including price, status, and photo.',
+      detail: form.productName.trim(),
+      confirmLabel: 'Save changes',
+    });
+    if (!confirmed) return;
     setSubmitting(true);
     try {
       const payload = {
@@ -1054,6 +1063,14 @@ function AddProductPage({
       showToast('Please fix the errors before submitting.', 'error');
       return;
     }
+    if (submitting) return;
+    const confirmed = await confirmAction({
+      title: 'Create product',
+      message: 'This adds a new product to the catalog and can set its starting quantity at your branch.',
+      detail: form.productName.trim(),
+      confirmLabel: 'Create product',
+    });
+    if (!confirmed) return;
 
     setSubmitting(true);
     try {
@@ -2407,14 +2424,17 @@ function TransferDetailPage({
       showToast('This transfer has no product lines to ship. Contact support to repair the document.', 'error');
       return;
     }
-    const linePreview = lines.slice(0, 8).map((l) => `• ${l.product_name}: ${l.quantity}`).join('\n');
-    const more = lines.length > 8 ? `\n…and ${lines.length - 8} more` : '';
-    const ok = window.confirm(
-      `Confirm shipment for ${transfer.transfer_ref}?\n\n`
-      + `This will deduct stock at ${transfer.source_branch} and add at ${transfer.destination_branch}.\n\n`
-      + `${lineCount} product(s), ${totalQty} total units:\n${linePreview}${more}`
-    );
-    if (!ok) return;
+    if (completing) return;
+    const preview = lines.slice(0, 4).map((line) => `${line.product_name} · ${line.quantity}`).join(', ');
+    const extra = lines.length > 4 ? ` and ${lines.length - 4} more` : '';
+    const confirmed = await confirmAction({
+      title: 'Complete transfer',
+      message: `This deducts stock at ${transfer.source_branch} and adds it at ${transfer.destination_branch}.`,
+      detail: `${formatDocumentRef(transfer.transfer_ref)} · ${lineCount} product${lineCount === 1 ? '' : 's'} · ${totalQty} units${preview ? ` · ${preview}${extra}` : ''}`,
+      confirmLabel: 'Complete transfer',
+      warning: 'Stock quantities change as soon as you confirm.',
+    });
+    if (!confirmed) return;
     setCompleting(true);
     const result = await patchInventoryTransfer(transferId, { status: 'Completed' });
     setCompleting(false);

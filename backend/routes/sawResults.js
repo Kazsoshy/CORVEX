@@ -7,7 +7,8 @@ import {
 import { SAW_WEIGHTS } from '../lib/sawCollection.js';
 
 const router = express.Router();
-router.use(allow(ROLE_SETS.receipts));
+const SAW_READ_ROLES = [...ROLE_SETS.receipts, 'branch_manager'];
+router.use(allow(SAW_READ_ROLES, ROLE_SETS.receipts));
 
 const SAW_FROM = `
   FROM saw_results sr
@@ -24,7 +25,29 @@ const SAW_FROM = `
 router.get('/', async (req, res) => {
   try {
     const pool = req.app.locals.pool;
+    const user = req.currentUser;
+    const isBranchManager = user?.roleSlug === 'branch_manager';
     const { search, branch_id: branchId, page = 1, limit = 100 } = req.query;
+
+    let scopedBranchId = null;
+    if (isBranchManager) {
+      if (user.branchId == null) {
+        return res.status(403).json({
+          success: false,
+          message: 'Access denied: no branch is assigned to this account.',
+        });
+      }
+      const requested = branchId !== undefined && branchId !== '' && branchId !== 'all'
+        ? Number(branchId)
+        : null;
+      if (requested != null && requested !== Number(user.branchId)) {
+        return res.status(403).json({
+          success: false,
+          message: 'Access denied: you can only access data for your assigned branch.',
+        });
+      }
+      scopedBranchId = Number(user.branchId);
+    }
 
     const conditions = [];
     const params = [];
@@ -42,10 +65,24 @@ router.get('/', async (req, res) => {
       pIdx += 1;
     }
 
-    if (branchId !== undefined && branchId !== '' && branchId !== 'all') {
+    const selectedBranchId = scopedBranchId != null
+      ? scopedBranchId
+      : (branchId !== undefined && branchId !== '' && branchId !== 'all' ? Number(branchId) : null);
+    let branchParamIndex = null;
+    if (selectedBranchId != null) {
+      branchParamIndex = pIdx;
       conditions.push(`c.branch_id = $${pIdx++}`);
-      params.push(Number(branchId));
+      params.push(selectedBranchId);
     }
+    const branchRankJoin = scopedBranchId != null
+      ? `JOIN (
+           SELECT sr2.result_id,
+                  ROW_NUMBER() OVER (ORDER BY sr2.score DESC NULLS LAST, sr2.customer_id ASC) AS branch_rank
+           FROM saw_results sr2
+           JOIN customers c2 ON c2.customer_id = sr2.customer_id
+           WHERE c2.branch_id = $${branchParamIndex}
+         ) br ON br.result_id = sr.result_id`
+      : '';
 
     const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
     const filterParams = [...params];
@@ -80,11 +117,14 @@ router.get('/', async (req, res) => {
            sr.weight_distance::float AS weight_distance,
            COALESCE(NULLIF(TRIM(mgr.full_name), ''), TRIM(CONCAT_WS(' ', mgr.first_name, mgr.last_name))) AS collector_name,
            sr.score::float AS score,
-           sr.ranking,
+           ${scopedBranchId != null ? 'br.branch_rank' : 'sr.ranking'} AS ranking,
            sr.generated_at
          ${SAW_FROM}
+         ${branchRankJoin}
          ${where}
-         ORDER BY sr.ranking ASC NULLS LAST, sr.score DESC NULLS LAST, sr.generated_at DESC
+         ORDER BY ${scopedBranchId != null
+           ? 'br.branch_rank ASC'
+           : 'sr.ranking ASC NULLS LAST, sr.score DESC NULLS LAST, sr.generated_at DESC'}
          LIMIT $${limitIdx} OFFSET $${offsetIdx}`,
         params
       ),
@@ -114,8 +154,10 @@ router.get('/', async (req, res) => {
          LEFT JOIN customers c ON c.branch_id = b.id
          LEFT JOIN saw_results sr ON sr.customer_id = c.customer_id
          WHERE COALESCE(b.status, 'Active') = 'Active'
+           ${scopedBranchId != null ? 'AND b.id = $1' : ''}
          GROUP BY b.id, b.name
-         ORDER BY ranked_count DESC, b.name`
+         ORDER BY ranked_count DESC, b.name`,
+        scopedBranchId != null ? [scopedBranchId] : []
       ),
     ]);
 
@@ -141,6 +183,8 @@ router.get('/', async (req, res) => {
         topScore: Number(row.top_score) || 0,
       })),
       weights: SAW_WEIGHTS,
+      scope: isBranchManager ? 'branch' : 'organization',
+      branchId: scopedBranchId,
     });
   } catch (err) {
     console.error('[SawResults] GET / error:', err.message);

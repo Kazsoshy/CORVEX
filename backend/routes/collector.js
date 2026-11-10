@@ -11,6 +11,7 @@ import { osrmDrivingRoute, osrmDrivingTrip } from '../lib/osrm.js';
 import { nearestNeighborOrder, sortStopsBySaw } from '../lib/routeOrder.js';
 import { manilaDateString } from '../lib/sawCollection.js';
 import { applyCollectionPayment, assertCollectorCustomerAccess, manilaNow } from '../lib/collectionPayment.js';
+import { notifyCustomerPaymentEvent } from '../lib/customerNotifications.js';
 
 const router = express.Router();
 
@@ -784,6 +785,12 @@ router.post('/payments', async (req, res) => {
     await client.query('BEGIN');
     const applied = await applyCollectionPayment(client, user, req.body, req.ip);
     await client.query('COMMIT');
+    await notifyCustomerPaymentEvent(pool, {
+      customerId: applied.customerId,
+      receiptNumber: applied.payment?.receipt_number,
+      amount: applied.payment?.amount,
+      kind: 'submitted',
+    });
 
     return res.status(201).json({
       success: true,

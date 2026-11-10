@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { persistCurrentUserFromProfile } from '../../api/authService';
 import { deleteMyAvatar, fetchMyAvatarBlob, uploadMyAvatar } from '../../api/profileService';
+import { confirmAction } from './confirmAction.jsx';
 import { initialsFrom } from './profileParts';
 
 let currentUrl = '';
@@ -85,6 +86,14 @@ export function ProfilePhotoEditor({ name, showToast, onUpdated }) {
       showToast?.('Photo must be 2 MB or smaller.', 'error');
       return;
     }
+    if (busy) return;
+    const confirmed = await confirmAction({
+      title: 'Update profile photo',
+      message: 'This replaces the photo on your account.',
+      detail: file.name,
+      confirmLabel: 'Save photo',
+    });
+    if (!confirmed) return;
     setBusy(true);
     const result = await uploadMyAvatar(file);
     setBusy(false);
@@ -99,6 +108,15 @@ export function ProfilePhotoEditor({ name, showToast, onUpdated }) {
   };
 
   const remove = async () => {
+    if (busy) return;
+    const confirmed = await confirmAction({
+      title: 'Remove profile photo',
+      message: 'Your account will show initials instead of a photo.',
+      detail: name || 'Your account',
+      confirmLabel: 'Remove photo',
+      tone: 'danger',
+    });
+    if (!confirmed) return;
     setBusy(true);
     const result = await deleteMyAvatar();
     setBusy(false);
