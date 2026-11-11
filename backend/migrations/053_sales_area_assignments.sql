@@ -45,139 +45,189 @@ CREATE TABLE IF NOT EXISTS sales_area_assignment_products (
   PRIMARY KEY (assignment_id, product_id)
 );
 
--- Seed: today's + nearby assignments for active sales agents using branch territories/coords
+-- Seed: today's + nearby assignments for active sales agents using branch territories/coords.
+-- Only the first agent per branch/day gets territory_id so later unique indexes
+-- (uq_sales_area_territory_day) are not violated by demo seed rows.
 INSERT INTO sales_area_assignments (
   branch_id, sales_agent_id, assigned_by, territory_id, area_name, coverage_notes,
   work_date, status, latitude, longitude, radius_meters
 )
 SELECT
-  u.branch_id,
-  u.id,
-  bm.id,
-  t.territory_id,
-  COALESCE(t.territory_name, b.name || ' Canvass Area'),
+  ranked.branch_id,
+  ranked.id,
+  ranked.assigned_by,
+  CASE WHEN ranked.agent_rank = 1 THEN ranked.territory_id ELSE NULL END,
+  CASE
+    WHEN ranked.agent_rank = 1 THEN COALESCE(ranked.territory_name, ranked.branch_name || ' Canvass Area')
+    ELSE COALESCE(ranked.branch_name || ' Canvass Area', 'Canvass Area') || ' #' || ranked.agent_rank::text
+  END,
   COALESCE(
-    NULLIF(TRIM(t.coverage_area), ''),
+    NULLIF(TRIM(ranked.coverage_area), ''),
     'Canvass this area and register new customers. Focus on furniture prospects.'
   ),
   (CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Manila')::date,
   'Assigned',
-  b.latitude,
-  b.longitude,
+  ranked.latitude,
+  ranked.longitude,
   900
-FROM users u
-JOIN roles r ON r.role_id = u.role_id AND r.slug = 'sales_staff'
-JOIN branches b ON b.id = u.branch_id
-LEFT JOIN LATERAL (
-  SELECT t.territory_id, t.territory_name, t.coverage_area
-  FROM territories t
-  WHERE t.branch_id = u.branch_id
-  ORDER BY t.territory_id
-  LIMIT 1
-) t ON TRUE
-LEFT JOIN LATERAL (
-  SELECT bm.id
-  FROM users bm
-  JOIN roles bmr ON bmr.role_id = bm.role_id AND bmr.slug = 'branch_manager'
-  WHERE bm.branch_id = u.branch_id AND bm.status = 'Active'
-  ORDER BY bm.id
-  LIMIT 1
-) bm ON TRUE
-WHERE u.status = 'Active'
-  AND u.branch_id IS NOT NULL
-  AND NOT EXISTS (
-    SELECT 1 FROM sales_area_assignments saa
-    WHERE saa.sales_agent_id = u.id
-      AND saa.work_date = (CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Manila')::date
-  );
+FROM (
+  SELECT
+    u.branch_id,
+    u.id,
+    bm.id AS assigned_by,
+    t.territory_id,
+    t.territory_name,
+    t.coverage_area,
+    b.name AS branch_name,
+    b.latitude,
+    b.longitude,
+    ROW_NUMBER() OVER (PARTITION BY u.branch_id ORDER BY u.id) AS agent_rank
+  FROM users u
+  JOIN roles r ON r.role_id = u.role_id AND r.slug = 'sales_staff'
+  JOIN branches b ON b.id = u.branch_id
+  LEFT JOIN LATERAL (
+    SELECT t.territory_id, t.territory_name, t.coverage_area
+    FROM territories t
+    WHERE t.branch_id = u.branch_id
+    ORDER BY t.territory_id
+    LIMIT 1
+  ) t ON TRUE
+  LEFT JOIN LATERAL (
+    SELECT bm.id
+    FROM users bm
+    JOIN roles bmr ON bmr.role_id = bm.role_id AND bmr.slug = 'branch_manager'
+    WHERE bm.branch_id = u.branch_id AND bm.status = 'Active'
+    ORDER BY bm.id
+    LIMIT 1
+  ) bm ON TRUE
+  WHERE u.status = 'Active'
+    AND u.branch_id IS NOT NULL
+    AND NOT EXISTS (
+      SELECT 1 FROM sales_area_assignments saa
+      WHERE saa.sales_agent_id = u.id
+        AND saa.work_date = (CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Manila')::date
+    )
+) ranked;
 
--- One past Done assignment per agent (history demo) when none exist
+-- One past Done assignment per agent (history demo) when none exist.
+-- Same territory_id rule: only first agent per branch keeps the territory link.
 INSERT INTO sales_area_assignments (
   branch_id, sales_agent_id, assigned_by, territory_id, area_name, coverage_notes,
   work_date, status, latitude, longitude, radius_meters, started_at, completed_at
 )
 SELECT
-  u.branch_id,
-  u.id,
-  bm.id,
-  t.territory_id,
-  COALESCE(t.territory_name, b.name || ' Prior Area') || ' (prior)',
+  ranked.branch_id,
+  ranked.id,
+  ranked.assigned_by,
+  CASE WHEN ranked.agent_rank = 1 THEN ranked.territory_id ELSE NULL END,
+  CASE
+    WHEN ranked.agent_rank = 1 THEN COALESCE(ranked.territory_name, ranked.branch_name || ' Prior Area') || ' (prior)'
+    ELSE COALESCE(ranked.branch_name || ' Prior Area', 'Prior Area') || ' #' || ranked.agent_rank::text || ' (prior)'
+  END,
   'Previous canvass day — recorded for schedule history.',
   (CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Manila')::date - 3,
   'Done',
-  b.latitude,
-  b.longitude,
+  ranked.latitude,
+  ranked.longitude,
   800,
   ((CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Manila')::date - 3) + TIME '08:30',
   ((CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Manila')::date - 3) + TIME '16:00'
-FROM users u
-JOIN roles r ON r.role_id = u.role_id AND r.slug = 'sales_staff'
-JOIN branches b ON b.id = u.branch_id
-LEFT JOIN LATERAL (
-  SELECT t.territory_id, t.territory_name
-  FROM territories t
-  WHERE t.branch_id = u.branch_id
-  ORDER BY t.territory_id
-  LIMIT 1
-) t ON TRUE
-LEFT JOIN LATERAL (
-  SELECT bm.id
-  FROM users bm
-  JOIN roles bmr ON bmr.role_id = bm.role_id AND bmr.slug = 'branch_manager'
-  WHERE bm.branch_id = u.branch_id AND bm.status = 'Active'
-  ORDER BY bm.id
-  LIMIT 1
-) bm ON TRUE
-WHERE u.status = 'Active'
-  AND u.branch_id IS NOT NULL
-  AND NOT EXISTS (
-    SELECT 1 FROM sales_area_assignments saa
-    WHERE saa.sales_agent_id = u.id AND saa.status = 'Done'
-  );
+FROM (
+  SELECT
+    u.branch_id,
+    u.id,
+    bm.id AS assigned_by,
+    t.territory_id,
+    t.territory_name,
+    b.name AS branch_name,
+    b.latitude,
+    b.longitude,
+    ROW_NUMBER() OVER (PARTITION BY u.branch_id ORDER BY u.id) AS agent_rank
+  FROM users u
+  JOIN roles r ON r.role_id = u.role_id AND r.slug = 'sales_staff'
+  JOIN branches b ON b.id = u.branch_id
+  LEFT JOIN LATERAL (
+    SELECT t.territory_id, t.territory_name
+    FROM territories t
+    WHERE t.branch_id = u.branch_id
+    ORDER BY t.territory_id
+    LIMIT 1
+  ) t ON TRUE
+  LEFT JOIN LATERAL (
+    SELECT bm.id
+    FROM users bm
+    JOIN roles bmr ON bmr.role_id = bm.role_id AND bmr.slug = 'branch_manager'
+    WHERE bm.branch_id = u.branch_id AND bm.status = 'Active'
+    ORDER BY bm.id
+    LIMIT 1
+  ) bm ON TRUE
+  WHERE u.status = 'Active'
+    AND u.branch_id IS NOT NULL
+    AND NOT EXISTS (
+      SELECT 1 FROM sales_area_assignments saa
+      WHERE saa.sales_agent_id = u.id AND saa.status = 'Done'
+    )
+) ranked;
 
--- Upcoming sample (day after tomorrow) for agents that have a second territory
+-- Upcoming sample (day after tomorrow). Prefer a second territory when available;
+-- only first agent per branch keeps territory_id to avoid day conflicts.
 INSERT INTO sales_area_assignments (
   branch_id, sales_agent_id, assigned_by, territory_id, area_name, coverage_notes,
   work_date, status, latitude, longitude, radius_meters
 )
 SELECT
-  u.branch_id,
-  u.id,
-  bm.id,
-  t.territory_id,
-  t.territory_name,
-  COALESCE(NULLIF(TRIM(t.coverage_area), ''), 'Upcoming canvass assignment from Branch Head.'),
+  ranked.branch_id,
+  ranked.id,
+  ranked.assigned_by,
+  CASE WHEN ranked.agent_rank = 1 THEN ranked.territory_id ELSE NULL END,
+  CASE
+    WHEN ranked.agent_rank = 1 THEN COALESCE(ranked.territory_name, ranked.branch_name || ' Upcoming Area')
+    ELSE COALESCE(ranked.branch_name || ' Upcoming Area', 'Upcoming Area') || ' #' || ranked.agent_rank::text
+  END,
+  COALESCE(NULLIF(TRIM(ranked.coverage_area), ''), 'Upcoming canvass assignment from Branch Head.'),
   (CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Manila')::date + 2,
   'Assigned',
-  b.latitude,
-  b.longitude,
+  ranked.latitude,
+  ranked.longitude,
   850
-FROM users u
-JOIN roles r ON r.role_id = u.role_id AND r.slug = 'sales_staff'
-JOIN branches b ON b.id = u.branch_id
-JOIN LATERAL (
-  SELECT t.territory_id, t.territory_name, t.coverage_area
-  FROM territories t
-  WHERE t.branch_id = u.branch_id
-  ORDER BY t.territory_id DESC
-  LIMIT 1
-) t ON TRUE
-LEFT JOIN LATERAL (
-  SELECT bm.id
-  FROM users bm
-  JOIN roles bmr ON bmr.role_id = bm.role_id AND bmr.slug = 'branch_manager'
-  WHERE bm.branch_id = u.branch_id AND bm.status = 'Active'
-  ORDER BY bm.id
-  LIMIT 1
-) bm ON TRUE
-WHERE u.status = 'Active'
-  AND u.branch_id IS NOT NULL
-  AND NOT EXISTS (
-    SELECT 1 FROM sales_area_assignments saa
-    WHERE saa.sales_agent_id = u.id
-      AND saa.work_date = (CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Manila')::date + 2
-  );
-
+FROM (
+  SELECT
+    u.branch_id,
+    u.id,
+    bm.id AS assigned_by,
+    t.territory_id,
+    t.territory_name,
+    t.coverage_area,
+    b.name AS branch_name,
+    b.latitude,
+    b.longitude,
+    ROW_NUMBER() OVER (PARTITION BY u.branch_id ORDER BY u.id) AS agent_rank
+  FROM users u
+  JOIN roles r ON r.role_id = u.role_id AND r.slug = 'sales_staff'
+  JOIN branches b ON b.id = u.branch_id
+  JOIN LATERAL (
+    SELECT t.territory_id, t.territory_name, t.coverage_area
+    FROM territories t
+    WHERE t.branch_id = u.branch_id
+    ORDER BY t.territory_id DESC
+    LIMIT 1
+  ) t ON TRUE
+  LEFT JOIN LATERAL (
+    SELECT bm.id
+    FROM users bm
+    JOIN roles bmr ON bmr.role_id = bm.role_id AND bmr.slug = 'branch_manager'
+    WHERE bm.branch_id = u.branch_id AND bm.status = 'Active'
+    ORDER BY bm.id
+    LIMIT 1
+  ) bm ON TRUE
+  WHERE u.status = 'Active'
+    AND u.branch_id IS NOT NULL
+    AND NOT EXISTS (
+      SELECT 1 FROM sales_area_assignments saa
+      WHERE saa.sales_agent_id = u.id
+        AND saa.work_date = (CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Manila')::date + 2
+    )
+) ranked;
 -- Attach up to 2 active products as "products to push" on today's assignments
 INSERT INTO sales_area_assignment_products (assignment_id, product_id)
 SELECT saa.assignment_id, p.id
