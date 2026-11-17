@@ -1,6 +1,7 @@
 import { insertStockMovement, upsertBranchInventoryStock } from './branchInventoryStock.js';
 import { manilaDateString } from './sawCollection.js';
 import { ApplyError, SyncConflict } from './syncErrors.js';
+import { calculateSalesPricing, POLICY_VERSION } from './salesPricingPolicy.js';
 
 function positiveInteger(value) {
   const parsed = Number(value);
@@ -17,18 +18,19 @@ function money(value) {
   return Math.round(Number(value) * 100) / 100;
 }
 
-export async function chargeCustomerForSale(client, { customerId, amount }) {
+export async function chargeCustomerForSale(client, { customerId, amount, purchaseAmount = amount }) {
   const charge = money(amount);
-  if (!customerId || charge <= 0) return null;
+  const purchase = money(purchaseAmount);
+  if (!customerId || (charge <= 0 && purchase <= 0)) return null;
   const updated = await client.query(
     `INSERT INTO customer_activity (customer_id, outstanding_balance, purchase_volume)
-     VALUES ($1, $2, $2)
+     VALUES ($1, $2, $3)
      ON CONFLICT (customer_id) DO UPDATE
        SET outstanding_balance = customer_activity.outstanding_balance + EXCLUDED.outstanding_balance,
            purchase_volume = customer_activity.purchase_volume + EXCLUDED.purchase_volume,
            updated_at = NOW()
      RETURNING outstanding_balance, purchase_volume`,
-    [customerId, charge]
+    [customerId, charge, purchase]
   );
   return {
     outstandingBalance: money(updated.rows[0].outstanding_balance),
@@ -154,20 +156,8 @@ export async function applySalesInvoice(client, user, body) {
   let paymentMethodId = positiveInteger(body.payment_method_id);
   if (payType === 'full') {
     if (!paymentMethodId) throw new ApplyError('payment_method_id is required for pay-in-full sales.');
-  } else if (downPayment > 0) {
-    if (!paymentMethodId) throw new ApplyError('payment_method_id is required when down payment is greater than zero.');
   } else {
-    const creditMethod = await client.query(
-      `SELECT payment_method_id FROM payment_methods
-       WHERE LOWER(method_name) = 'credit' AND status = 'Active'
-       ORDER BY payment_method_id ASC
-       LIMIT 1`
-    );
-    if (creditMethod.rows.length) {
-      paymentMethodId = creditMethod.rows[0].payment_method_id;
-    } else if (!paymentMethodId) {
-      throw new ApplyError('No Credit payment method is configured for installment sales.');
-    }
+    if (!paymentMethodId) throw new ApplyError('payment_method_id is required for installment sales.');
   }
 
   const paymentResult = await client.query(
@@ -176,6 +166,9 @@ export async function applySalesInvoice(client, user, body) {
     [paymentMethodId]
   );
   if (!paymentResult.rows.length) throw new ApplyError('Invalid payment method.');
+  if (!['cash', 'gcash'].includes(String(paymentResult.rows[0].method_name || '').trim().toLowerCase())) {
+    throw new ApplyError('Only Cash and GCash payment methods are supported for Log Sale.');
+  }
 
   const lineItems = [];
   const stockAlerts = [];
@@ -216,8 +209,15 @@ export async function applySalesInvoice(client, user, body) {
     });
   }
 
-  const totalAmount = money(lineItems.reduce((sum, item) => sum + item.lineTotal, 0));
-  if (totalAmount <= 0) throw new ApplyError('Invoice total must be greater than zero.');
+  const originalTotal = money(lineItems.reduce((sum, item) => sum + item.lineTotal, 0));
+  if (originalTotal <= 0) throw new ApplyError('Invoice total must be greater than zero.');
+  const pricing = calculateSalesPricing({
+    total: originalTotal,
+    arrangement: payType,
+    invoiceDate: invoicesDate,
+    firstDueDate,
+  });
+  if (pricing.error) throw new ApplyError(pricing.error);
 
   let resolvedDueDate = dueDate && isValidDate(dueDate) ? dueDate : null;
   let resolvedFirstDue = null;
@@ -230,10 +230,13 @@ export async function applySalesInvoice(client, user, body) {
       throw new ApplyError('due_date cannot be earlier than invoices_date.');
     }
   } else {
-    if (!Number.isInteger(termMonths) || termMonths < 1 || termMonths > 24) {
-      throw new ApplyError('term_months must be a whole number between 1 and 24.');
+    if (downPayment > 0) {
+      throw new ApplyError('Down payments are not supported by the current installment policy.');
     }
-    if (downPayment >= totalAmount) {
+    if (pricing.termMonths !== termMonths) {
+      throw new ApplyError(`Installment term is determined by the purchase amount: ${pricing.termMonths} months.`);
+    }
+    if (downPayment >= originalTotal) {
       throw new ApplyError('down_payment must be less than the invoice total.');
     }
     resolvedFirstDue = firstDueDate && isValidDate(firstDueDate) ? firstDueDate : null;
@@ -259,9 +262,9 @@ export async function applySalesInvoice(client, user, body) {
         400
       );
     }
-    if (outstanding + totalAmount > creditLimit) {
+    if (outstanding + pricing.finalObligation > creditLimit) {
       throw new ApplyError(
-        `Installment blocked. Outstanding ₱${outstanding.toLocaleString('en-PH', { minimumFractionDigits: 2 })} plus this sale ₱${totalAmount.toLocaleString('en-PH', { minimumFractionDigits: 2 })} exceeds the ₱${creditLimit.toLocaleString('en-PH', { minimumFractionDigits: 2 })} credit limit. Request a Credit Review if a higher limit is needed.`,
+        `Installment blocked. Outstanding ₱${outstanding.toLocaleString('en-PH', { minimumFractionDigits: 2 })} plus this sale ₱${pricing.finalObligation.toLocaleString('en-PH', { minimumFractionDigits: 2 })} exceeds the ₱${creditLimit.toLocaleString('en-PH', { minimumFractionDigits: 2 })} credit limit. Request a Credit Review if a higher limit is needed.`,
         400
       );
     }
@@ -284,7 +287,7 @@ export async function applySalesInvoice(client, user, body) {
 
     resolvedDownPayment = downPayment;
     resolvedTermMonths = termMonths;
-    resolvedMonthly = computeMonthlyAmount(totalAmount - downPayment, termMonths);
+    resolvedMonthly = pricing.monthlyAmount;
     resolvedDueDate = resolvedFirstDue;
   }
 
@@ -293,15 +296,18 @@ export async function applySalesInvoice(client, user, body) {
     `INSERT INTO sales_invoices
        (invoice_number, customer_id, sales_agent_id, branch_id, total_amount,
         payment_method_id, status, invoices_date, due_date, notes,
-        pay_type, down_payment, term_months, monthly_amount, first_due_date)
-     VALUES ($1, $2, $3, $4, $5, $6, 'Pending Review', $7, $8, $9, $10, $11, $12, $13, $14)
+        pay_type, down_payment, term_months, monthly_amount, first_due_date,
+        payment_arrangement, original_total_amount, discount_rate, discount_amount,
+        final_obligation, pricing_policy_version, purchase_bracket, original_maturity_date)
+     VALUES ($1, $2, $3, $4, $5, $6, 'Pending Review', $7, $8, $9, $10, $11, $12, $13, $14,
+              $15, $16, $17, $18, $19, $20, $21, $22)
      RETURNING sales_invoices_id`,
     [
       invoiceNumber,
       customerId,
       user.id,
       user.branchId,
-      totalAmount,
+      pricing.finalObligation,
       paymentMethodId,
       invoicesDate,
       resolvedDueDate,
@@ -311,10 +317,31 @@ export async function applySalesInvoice(client, user, body) {
       resolvedTermMonths,
       resolvedMonthly,
       resolvedFirstDue,
+      pricing.arrangement,
+      pricing.originalTotal,
+      pricing.discountRate,
+      pricing.discountAmount,
+      pricing.finalObligation,
+      POLICY_VERSION,
+      pricing.termMonths ? `${pricing.originalTotal < 3000 ? '1000-2999' : pricing.originalTotal < 5000 ? '3000-4999' : pricing.originalTotal < 7000 ? '5000-6999' : '7000+'}` : null,
+      pricing.maturityDate || null,
     ]
   );
   const invoiceId = invoiceInsert.rows[0].sales_invoices_id;
-  const balance = await chargeCustomerForSale(client, { customerId, amount: totalAmount });
+  const balance = await chargeCustomerForSale(client, {
+    customerId,
+    amount: payType === 'installment' ? pricing.finalObligation : 0,
+    purchaseAmount: pricing.finalObligation,
+  });
+
+  for (const installment of pricing.schedule) {
+    await client.query(
+      `INSERT INTO sales_invoice_installments
+         (invoice_id, installment_number, due_date, scheduled_amount)
+       VALUES ($1, $2, $3, $4)`,
+      [invoiceId, installment.installmentNumber, installment.dueDate, installment.amount]
+    );
+  }
 
   for (let index = 0; index < lineItems.length; index += 1) {
     const item = lineItems[index];
@@ -361,7 +388,7 @@ export async function applySalesInvoice(client, user, body) {
     invoiceId,
     invoiceNumber,
     customerId,
-    totalAmount,
+    totalAmount: pricing.finalObligation,
     outstandingBalance: balance?.outstandingBalance ?? null,
     stockAlerts,
     branchId: user.branchId,

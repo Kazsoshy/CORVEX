@@ -1,5 +1,5 @@
 import express from 'express';
-import { allow, assertSameBranch, isUnscoped, ROLE_SETS } from '../middleware/auth.js';
+import { allow, assertSameBranch, canViewCustomerFinancialDetails, isUnscoped, ROLE_SETS } from '../middleware/auth.js';
 import {
   createPortalInvitation,
   resendPortalInvitation,
@@ -12,6 +12,7 @@ import {
   OVERDUE_CUSTOMER_SQL,
   paymentStandingFromFlags,
 } from '../lib/customerStanding.js';
+import { createCreditReview } from '../lib/creditReview.js';
 
 const GOVERNMENT_ID_TYPES = new Set([
   'Philippine National ID',
@@ -101,10 +102,6 @@ function salesAgentDisplayName(user) {
     || 'Sales Agent';
 }
 
-function wantsPortalAccount(flag) {
-  return flag === true || flag === 'true';
-}
-
 const PORTAL_EMAIL_NOT_CONFIGURED = 'Portal invitations are sent by email. Gmail (SMTP) is not configured on the server yet — ask your administrator to set SMTP in .env and restart the API.';
 
 function buildPortalApiPayload(portalMeta, emailResult) {
@@ -147,6 +144,12 @@ const PURCHASE_VOLUME_UNITS_SQL = `
 const CUSTOMER_SELECT_CORE = `
          c.customer_id,
          c.customer_code,
+         c.customer_type,
+         c.business_name,
+         c.registration_profile_json,
+         c.estimated_monthly_revenue,
+         c.estimated_monthly_expenses,
+         c.existing_obligations,
          c.branch_id,
          c.account_manager_id,
          c.assigned_sales_agent_id,
@@ -203,10 +206,15 @@ router.get('/', async (req, res) => {
       status,
       search,
       standing,
+      name_search,
       territory_id,
+      assigned_sales_agent_id,
+      agent,
       page = 1,
       limit = 20,
       include_stats,
+      sort_by: sortByRaw,
+      sort_dir: sortDirRaw,
     } = req.query;
 
     if (!branch_id && req.currentUser && req.currentUser.branchId) {
@@ -219,6 +227,11 @@ router.get('/', async (req, res) => {
 
     if (branch_id) { conditions.push(`c.branch_id = $${pIdx++}`); params.push(Number(branch_id)); }
     if (status)    { conditions.push(`c.status = $${pIdx++}`);    params.push(status); }
+    const salesAgentFilter = Number(assigned_sales_agent_id || agent);
+    if (Number.isInteger(salesAgentFilter) && salesAgentFilter > 0) {
+      conditions.push(`c.assigned_sales_agent_id = $${pIdx++}`);
+      params.push(salesAgentFilter);
+    }
     if (territory_id === 'none' || territory_id === 'null') {
       conditions.push(`c.territory_id IS NULL`);
     } else if (territory_id) {
@@ -226,7 +239,14 @@ router.get('/', async (req, res) => {
       params.push(Number(territory_id));
     }
     if (search) {
-      conditions.push(`(
+      const searchFields = name_search === 'true'
+        ? `
+        CONCAT_WS(' ', c.first_name, c.middle_name, c.last_name) ILIKE $${pIdx}
+        OR c.business_name ILIKE $${pIdx}
+        OR c.customer_code ILIKE $${pIdx}
+        OR c.contact_phone ILIKE $${pIdx}
+      `
+        : `
         c.first_name ILIKE $${pIdx}
         OR c.last_name ILIKE $${pIdx}
         OR c.middle_name ILIKE $${pIdx}
@@ -242,6 +262,9 @@ router.get('/', async (req, res) => {
         OR b.name ILIKE $${pIdx}
         OR CONCAT(COALESCE(c.first_name, ''), ' ', COALESCE(c.last_name, '')) ILIKE $${pIdx}
         OR CONCAT(COALESCE(c.contact_person_fname, ''), ' ', COALESCE(c.contact_person_lname, '')) ILIKE $${pIdx}
+      `;
+      conditions.push(`(
+        ${searchFields}
       )`);
       params.push(`%${search}%`);
       pIdx += 1;
@@ -280,6 +303,19 @@ router.get('/', async (req, res) => {
     const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
     const offset = (Number(page) - 1) * Number(limit);
 
+    const sortKey = String(sortByRaw || 'created_at').trim().toLowerCase();
+    const sortDir = String(sortDirRaw || 'desc').trim().toLowerCase() === 'asc' ? 'ASC' : 'DESC';
+    const SORT_MAP = {
+      name: `LOWER(TRIM(CONCAT_WS(' ', c.first_name, c.middle_name, c.last_name))) ${sortDir} NULLS LAST, c.customer_id DESC`,
+      code: `c.customer_code ${sortDir} NULLS LAST, c.customer_id DESC`,
+      territory: `LOWER(COALESCE(t.territory_name, '')) ${sortDir} NULLS LAST, c.customer_id DESC`,
+      outstanding: `"outstandingBalance" ${sortDir} NULLS LAST, c.customer_id DESC`,
+      credit_limit: `"creditLimit" ${sortDir} NULLS LAST, c.customer_id DESC`,
+      status: `c.status ${sortDir}, c.customer_id DESC`,
+      created_at: `c.created_at ${sortDir} NULLS LAST, c.customer_id DESC`,
+    };
+    const orderSql = SORT_MAP[sortKey] || SORT_MAP.created_at;
+
     const countResult = await pool.query(
       `SELECT COUNT(*) FROM customers c
        LEFT JOIN territories t ON t.territory_id = c.territory_id
@@ -289,12 +325,14 @@ router.get('/', async (req, res) => {
     );
     const total = Number(countResult.rows[0].count);
 
-    let activityColumns = '';
+    let activityColumns = `
+      ${OUTSTANDING_BALANCE_SQL} AS "outstandingBalance",
+    `;
     try {
       const tableCheck = await pool.query(`SELECT EXISTS (SELECT 1 FROM pg_tables WHERE schemaname = 'public' AND tablename = 'customer_activity')`);
       if (tableCheck.rows[0]?.exists) {
         activityColumns = `
-          COALESCE((SELECT outstanding_balance FROM customer_activity WHERE customer_id = c.customer_id), 0) AS "outstandingBalance",
+          ${OUTSTANDING_BALANCE_SQL} AS "outstandingBalance",
           COALESCE(TO_CHAR((SELECT last_sales_visit FROM customer_activity WHERE customer_id = c.customer_id), 'YYYY-MM-DD'), '') AS "lastVisitDate",
           COALESCE(TO_CHAR((SELECT last_collection_date FROM customer_activity WHERE customer_id = c.customer_id), 'YYYY-MM-DD'), '') AS "lastCollectionDate",
           (
@@ -343,10 +381,33 @@ router.get('/', async (req, res) => {
       console.error('[Customers] customer_activity check failed:', err.message);
     }
 
+    const creditColumns = `
+      COALESCE((
+        SELECT cci.credit_limit FROM customer_credit_info cci WHERE cci.customer_id = c.customer_id LIMIT 1
+      ), 0) AS "creditLimit",
+      (
+        SELECT ci.ci_id
+        FROM credit_investigations ci
+        WHERE ci.customer_id = c.customer_id
+          AND ci.status IN ('Pending', 'Revision Requested')
+        ORDER BY ci.created_at DESC
+        LIMIT 1
+      ) AS "openCiId",
+      (
+        SELECT ci.status
+        FROM credit_investigations ci
+        WHERE ci.customer_id = c.customer_id
+          AND ci.status IN ('Pending', 'Revision Requested')
+        ORDER BY ci.created_at DESC
+        LIMIT 1
+      ) AS "openCiStatus",
+    `;
+
     const result = await pool.query(
       `SELECT
          ${CUSTOMER_SELECT_CORE},
          ${activityColumns}
+         ${creditColumns}
          COALESCE(c.contact_phone, '') AS phone
        FROM customers c
        LEFT JOIN branches b ON b.id = c.branch_id
@@ -354,7 +415,7 @@ router.get('/', async (req, res) => {
        LEFT JOIN users agent ON agent.id = c.assigned_sales_agent_id
        LEFT JOIN territories t ON t.territory_id = c.territory_id
        ${where}
-       ORDER BY c.customer_id DESC
+       ORDER BY ${orderSql}
        LIMIT $${pIdx++} OFFSET $${pIdx++}`,
       [...params, Number(limit), offset]
     );
@@ -366,9 +427,12 @@ router.get('/', async (req, res) => {
         outstandingBalance,
         hasOverdueInvoice,
       });
+      const creditLimit = Number(row.creditLimit) || 0;
       return {
         ...row,
         outstanding_balance: outstandingBalance,
+        approved_credit_limit: creditLimit,
+        available_credit: creditLimit - outstandingBalance,
         has_overdue_invoice: hasOverdueInvoice,
         paymentStatus,
         paymentStanding: paymentStatus,
@@ -430,33 +494,91 @@ router.get('/lookup', async (req, res) => {
     const pool = req.app.locals.pool;
     const phone = String(req.query.contact_phone || '').trim();
     const email = String(req.query.portal_email || '').trim().toLowerCase();
-    if (!phone && !email) {
-      return res.status(400).json({ success: false, message: 'Provide contact_phone or portal_email to search.' });
+    const name = String(req.query.name || req.query.customer_name || '').trim();
+    const businessName = String(req.query.business_name || '').trim();
+    const barangay = String(req.query.address_barangay || req.query.barangay || '').trim();
+    const address = String(req.query.address || '').trim();
+    if (!phone && !email && !name && !businessName && !barangay && !address) {
+      return res.status(400).json({
+        success: false,
+        message: 'Provide contact_phone, name, business_name, address, or portal_email to search.',
+      });
     }
 
+    const phoneDigits = phone.replace(/\D/g, '');
     const matches = [];
-    if (phone) {
+    const selectCols = `
+      c.customer_id, c.customer_code, c.first_name, c.middle_name, c.last_name,
+      c.business_name, c.customer_type, c.contact_phone, c.portal_email, c.portal_status,
+      c.status, c.branch_id, b.name AS branch_name, c.territory_id, t.territory_name,
+      c.address, c.address_barangay, c.address_city
+    `;
+    const fromSql = `
+      FROM customers c
+      LEFT JOIN branches b ON b.id = c.branch_id
+      LEFT JOIN territories t ON t.territory_id = c.territory_id
+    `;
+
+    if (phone || phoneDigits.length >= 7) {
       const byPhone = await pool.query(
-        `SELECT customer_id, customer_code, first_name, last_name, contact_phone, portal_email, portal_status
-         FROM customers
-         WHERE contact_phone = $1 OR contact_person_phone = $1
-         LIMIT 5`,
-        [phone]
+        `SELECT ${selectCols}
+         ${fromSql}
+         WHERE c.contact_phone = $1
+            OR c.contact_person_phone = $1
+            OR regexp_replace(COALESCE(c.contact_phone, ''), '\\D', '', 'g') = $2
+            OR regexp_replace(COALESCE(c.contact_person_phone, ''), '\\D', '', 'g') = $2
+         LIMIT 8`,
+        [phone || phoneDigits, phoneDigits || phone]
       );
-      matches.push(...byPhone.rows);
+      matches.push(...byPhone.rows.map((row) => ({ ...row, match_reason: 'phone', same_branch: true })));
     }
     if (email) {
       const byEmail = await pool.query(
-        `SELECT customer_id, customer_code, first_name, last_name, contact_phone, portal_email, portal_status
-         FROM customers
-         WHERE LOWER(portal_email) = $1
+        `SELECT ${selectCols}
+         ${fromSql}
+         WHERE LOWER(c.portal_email) = $1
          LIMIT 5`,
         [email]
       );
-      matches.push(...byEmail.rows);
+      matches.push(...byEmail.rows.map((row) => ({ ...row, match_reason: 'email' })));
+    }
+    if (name.length >= 3 || businessName.length >= 3) {
+      const needle = `%${(businessName || name).replace(/\s+/g, '%')}%`;
+      const byName = await pool.query(
+        `SELECT ${selectCols}
+         ${fromSql}
+         WHERE CONCAT_WS(' ', c.first_name, c.middle_name, c.last_name) ILIKE $1
+            OR c.business_name ILIKE $1
+         LIMIT 8`,
+        [needle]
+      );
+      matches.push(...byName.rows.map((row) => ({ ...row, match_reason: 'name' })));
+    }
+    if (barangay || address) {
+      const byAddr = await pool.query(
+        `SELECT ${selectCols}
+         ${fromSql}
+         WHERE ($1::text = '' OR c.address_barangay ILIKE $2)
+           AND ($3::text = '' OR c.address ILIKE $4 OR c.address_street ILIKE $4)
+         LIMIT 8`,
+        [
+          barangay,
+          barangay ? `%${barangay}%` : '',
+          address,
+          address ? `%${address}%` : '',
+        ]
+      );
+      matches.push(...byAddr.rows.map((row) => ({ ...row, match_reason: 'address' })));
     }
 
-    const unique = [...new Map(matches.map((row) => [row.customer_id, row])).values()];
+    const actorBranch = req.currentUser?.branchId != null ? Number(req.currentUser.branchId) : null;
+    const unique = [...new Map(matches.map((row) => [row.customer_id, row])).values()]
+      .map((row) => ({
+        ...row,
+        same_branch: actorBranch == null || Number(row.branch_id) === actorBranch,
+        cross_branch: actorBranch != null && Number(row.branch_id) !== actorBranch,
+      }))
+      .slice(0, 10);
     return res.status(200).json({ success: true, data: unique, count: unique.length });
   } catch (err) {
     console.error('[Customers] GET /lookup error:', err.message);
@@ -642,6 +764,8 @@ router.get('/:id', async (req, res) => {
     }
 
     const outstandingBalance = Number(activityResult.rows[0]?.outstanding_balance) || 0;
+    const creditLimit = Number(creditResult.rows[0]?.credit_limit) || 0;
+    const canViewFinancialDetails = canViewCustomerFinancialDetails(req.currentUser?.roleSlug);
     const paymentStatus = paymentStandingFromFlags({
       outstandingBalance,
       hasOverdueInvoice,
@@ -660,14 +784,31 @@ router.get('/:id', async (req, res) => {
       daysOverdue = Math.max(0, diff);
     }
 
+    const activity = activityResult.rows[0] || null;
+    const creditInfo = creditResult.rows[0]
+      ? {
+        ...creditResult.rows[0],
+        approved_credit_limit: creditLimit,
+        available_credit: creditLimit - outstandingBalance,
+      }
+      : {
+        credit_limit: 0,
+        approved_credit_limit: 0,
+        available_credit: -outstandingBalance,
+      };
+
     return res.status(200).json({
       success: true,
       data: {
         ...customerResult.rows[0],
-        activity: activityResult.rows[0] || null,
-        creditInfo: creditResult.rows[0] || null,
-        paymentHistory: paymentsResult.rows,
-        recentSales,
+        activity: canViewFinancialDetails ? activity : (activity ? {
+          outstanding_balance: activity.outstanding_balance,
+          purchase_volume: activity.purchase_volume,
+          updated_at: activity.updated_at,
+        } : null),
+        creditInfo,
+        paymentHistory: canViewFinancialDetails ? paymentsResult.rows : [],
+        recentSales: canViewFinancialDetails ? recentSales : [],
         unpaidInvoiceCount,
         hasOverdueInvoice,
         earliestDueDate,
@@ -675,6 +816,8 @@ router.get('/:id', async (req, res) => {
         todayVisit,
         outstandingBalance,
         outstanding_balance: outstandingBalance,
+        approved_credit_limit: creditLimit,
+        available_credit: creditLimit - outstandingBalance,
         daysOverdue,
         paymentStatus,
         paymentStanding: paymentStatus,
@@ -699,6 +842,19 @@ router.post('/', async (req, res) => {
     branch_id, territory_id, account_manager_id, status,
     create_portal_account, portal_email,
     id_type, id_number, id_photo,
+    customer_type: customerTypeRaw,
+    business_name: businessNameRaw,
+    registration_profile: registrationProfileRaw,
+    source_assignment_id: sourceAssignmentIdRaw,
+    territory_override_note: territoryOverrideNoteRaw,
+    estimated_monthly_revenue: estimatedMonthlyRevenueRaw,
+    estimated_monthly_expenses: estimatedMonthlyExpensesRaw,
+    existing_obligations: existingObligationsRaw,
+    request_credit: requestCreditRaw,
+    requested_credit_limit: requestedCreditLimitRaw,
+    credit_request_reason: creditRequestReasonRaw,
+    credit_request_remarks: creditRequestRemarksRaw,
+    acknowledge_duplicate: acknowledgeDuplicateRaw,
   } = req.body;
 
   const isSalesAgent = req.currentUser?.roleSlug === 'sales_staff';
@@ -726,16 +882,30 @@ router.post('/', async (req, res) => {
   };
   const composedAddress = composeAddress(addressParts) || cleanPart(address);
 
+  const customerType = String(customerTypeRaw || 'Individual').trim() === 'Business' ? 'Business' : 'Individual';
+  const businessName = cleanPart(businessNameRaw);
   const maidenName = cleanPart(mothers_maiden_name);
   const civilStatus = cleanPart(civil_status);
+  const resolvedFirstName = cleanPart(first_name)
+    || (customerType === 'Business' ? cleanPart(contact_person_fname) : '');
+  const resolvedLastName = cleanPart(last_name)
+    || (customerType === 'Business' ? cleanPart(contact_person_lname) : '');
+  const alternateFirstName = cleanPart(contact_person_fname);
+  const alternateMiddleName = cleanPart(contact_person_mname);
+  const alternateLastName = cleanPart(contact_person_lname);
+  const alternatePhone = cleanPart(contact_person_phone);
+  const alternateRelationship = cleanPart(contact_person_relationship);
 
-  if (!first_name || !last_name || !composedAddress || !contact_phone
-    || !contact_person_fname || !contact_person_lname || !contact_person_phone
-    || !contact_person_relationship || !maidenName || !civilStatus) {
+  if (customerType === 'Business' && !businessName) {
+    return res.status(400).json({ success: false, message: 'Business name is required for business customers.' });
+  }
+  if (!resolvedFirstName || !resolvedLastName || !composedAddress || !contact_phone) {
     return res.status(400).json({ success: false, message: 'All required customer fields must be provided.' });
   }
-  if (!CIVIL_STATUSES.has(civilStatus)) {
-    return res.status(400).json({ success: false, message: 'A valid civil status is required.' });
+  if (customerType === 'Individual') {
+    if (civilStatus && !CIVIL_STATUSES.has(civilStatus)) {
+      return res.status(400).json({ success: false, message: 'A valid civil status is required.' });
+    }
   }
   if (!addressParts.address_province || !addressParts.address_city || !addressParts.address_barangay) {
     return res.status(400).json({
@@ -744,9 +914,21 @@ router.post('/', async (req, res) => {
     });
   }
 
-  const customerFullName = [first_name, middle_name, last_name].filter(Boolean).join(' ');
+  const customerFullName = [resolvedFirstName, middle_name, resolvedLastName].filter(Boolean).join(' ');
   const contactFullName = [contact_person_fname, contact_person_mname, contact_person_lname].filter(Boolean).join(' ');
-  if (namesMatchCustomer(customerFullName, contactFullName) || phonesMatch(contact_phone, contact_person_phone)) {
+  const alternateContactProvided = Boolean(
+    contact_person_fname || contact_person_mname || contact_person_lname
+      || contact_person_phone || contact_person_relationship
+  );
+  if (alternateContactProvided && (!contact_person_fname || !contact_person_lname
+    || !contact_person_phone || !contact_person_relationship)) {
+    return res.status(400).json({
+      success: false,
+      message: 'Complete all alternate contact fields or leave the alternate contact blank.',
+    });
+  }
+  if (alternateContactProvided && customerType === 'Individual'
+    && (namesMatchCustomer(customerFullName, contactFullName) || phonesMatch(contact_phone, contact_person_phone))) {
     return res.status(400).json({
       success: false,
       message: 'Primary contact must be someone else to call when the customer is unreachable.',
@@ -755,11 +937,16 @@ router.post('/', async (req, res) => {
 
   const idType = typeof id_type === 'string' ? id_type.trim() : '';
   const idNumber = typeof id_number === 'string' ? id_number.trim() : '';
-  if (!idType || !GOVERNMENT_ID_TYPES.has(idType)) {
-    return res.status(400).json({ success: false, message: 'A valid government ID type is required.' });
-  }
-  if (!idNumber) {
-    return res.status(400).json({ success: false, message: 'Government ID number is required.' });
+  const wantsCredit = Boolean(requestCreditRaw)
+    || String(requestCreditRaw || '').toLowerCase() === 'true'
+    || String(req.body?.apply_for_credit || '').toLowerCase() === 'true';
+  if (customerType === 'Individual' && wantsCredit) {
+    if (!idType || !GOVERNMENT_ID_TYPES.has(idType)) {
+      return res.status(400).json({ success: false, message: 'A valid government ID type is required.' });
+    }
+    if (!idNumber) {
+      return res.status(400).json({ success: false, message: 'Government ID number is required.' });
+    }
   }
 
   if (!resolvedBranchId || !Number.isFinite(resolvedBranchId)) {
@@ -769,8 +956,9 @@ router.post('/', async (req, res) => {
     return res.status(403).json({ success: false, message: 'No branch assigned. Cannot create a customer.' });
   }
 
-  // SA canvassing registration does not create portal accounts from this screen.
-  const portalRequested = !isSalesAgent && wantsPortalAccount(create_portal_account);
+  // A supplied portal email explicitly requests an activation workflow; no default
+  // password is ever created and the invitation remains linked to this customer.
+  const portalRequested = Boolean(String(portal_email || '').trim());
   if (portalRequested && !isMailConfigured()) {
     return res.status(503).json({ success: false, message: PORTAL_EMAIL_NOT_CONFIGURED });
   }
@@ -792,7 +980,6 @@ router.post('/', async (req, res) => {
 
     const customerStatus = isSalesAgent ? 'Active' : (status || 'Active');
     let resolvedTerritoryId = territory_id ? Number(territory_id) : null;
-    let territoryDefaultCollectorId = null;
 
     if (customerStatus === 'Active' && !resolvedTerritoryId) {
       await client.query('ROLLBACK');
@@ -804,7 +991,7 @@ router.post('/', async (req, res) => {
 
     if (resolvedTerritoryId) {
       const territoryCheck = await client.query(
-        `SELECT territory_id, branch_id, COALESCE(status, 'Active') AS status, default_collector_id
+        `SELECT territory_id, branch_id, COALESCE(status, 'Active') AS status
          FROM territories
          WHERE territory_id = $1`,
         [resolvedTerritoryId]
@@ -827,23 +1014,72 @@ router.post('/', async (req, res) => {
           message: 'Active customers can only be assigned to Active territories.',
         });
       }
-      territoryDefaultCollectorId = territoryCheck.rows[0].default_collector_id != null
-        ? Number(territoryCheck.rows[0].default_collector_id)
-        : null;
     }
 
     const assignedSalesAgentId = isSalesAgent
       ? req.currentUser.id
       : null;
 
-    // Permanent Account Manager is the Collector relationship — not the creating Sales Agent.
+    // Permanent Account Manager is the Collector relationship — not the creating Sales Agent
+    // and not the territory (geography ≠ personnel).
     let resolvedAccountManagerId = account_manager_id ? Number(account_manager_id) : null;
-    if (!resolvedAccountManagerId && territoryDefaultCollectorId) {
-      resolvedAccountManagerId = territoryDefaultCollectorId;
-    }
     if (!resolvedAccountManagerId && !isSalesAgent && req.currentUser?.roleSlug === 'collector') {
       resolvedAccountManagerId = req.currentUser.id;
     }
+
+    const sourceAssignmentId = Number(sourceAssignmentIdRaw);
+    const hasSourceAssignment = Number.isInteger(sourceAssignmentId) && sourceAssignmentId > 0;
+    if (hasSourceAssignment) {
+      const assignment = await client.query(
+        `SELECT assignment_id, territory_id, sales_agent_id, branch_id
+         FROM sales_area_assignments
+         WHERE assignment_id = $1`,
+        [sourceAssignmentId]
+      );
+      const row = assignment.rows[0];
+      if (!row
+        || Number(row.branch_id) !== Number(resolvedBranchId)
+        || Number(row.territory_id) !== Number(resolvedTerritoryId)
+        || (isSalesAgent && Number(row.sales_agent_id) !== Number(req.currentUser.id))) {
+        await client.query('ROLLBACK');
+        return res.status(400).json({
+          success: false,
+          message: 'The selected territory does not match your assigned schedule.',
+        });
+      }
+    }
+    const territoryOverrideNote = cleanPart(territoryOverrideNoteRaw);
+    const parseMoney = (v) => {
+      if (v === undefined || v === null || v === '') return null;
+      const n = Number(v);
+      return Number.isFinite(n) && n >= 0 ? Math.round(n * 100) / 100 : null;
+    };
+    const estimatedMonthlyRevenue = parseMoney(estimatedMonthlyRevenueRaw);
+    const estimatedMonthlyExpenses = parseMoney(estimatedMonthlyExpensesRaw);
+    const existingObligations = parseMoney(existingObligationsRaw);
+    const profileInput = registrationProfileRaw && typeof registrationProfileRaw === 'object'
+      ? registrationProfileRaw
+      : {};
+    const registrationProfile = {
+      ...profileInput,
+      customer_type: customerType,
+      business_name: businessName || null,
+      estimated_monthly_revenue: estimatedMonthlyRevenue,
+      estimated_monthly_expenses: estimatedMonthlyExpenses,
+      existing_obligations: existingObligations,
+      requested_credit_limit: parseMoney(requestedCreditLimitRaw),
+      preferred_payment_terms: profileInput.preferred_payment_terms || null,
+      business_type: profileInput.business_type || null,
+      business_category: profileInput.business_category || null,
+      years_of_operation: profileInput.years_of_operation != null
+        ? Number(profileInput.years_of_operation) : null,
+      store_type: profileInput.store_type || null,
+      supplier_references: profileInput.supplier_references || null,
+      evidence_photos: Array.isArray(profileInput.evidence_photos)
+        ? profileInput.evidence_photos.slice(0, 3)
+        : [],
+      acknowledge_duplicate: Boolean(acknowledgeDuplicateRaw),
+    };
 
     const result = await client.query(
       `INSERT INTO customers
@@ -855,19 +1091,21 @@ router.post('/', async (req, res) => {
          contact_person_relationship,
          secondary_contact_fname, secondary_contact_lname, secondary_contact_phone,
          secondary_contact_relationship, status,
-         id_type, id_number, id_photo, id_verification_status)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,'Unverified')
+         id_type, id_number, id_photo, id_verification_status,
+         customer_type, business_name, registration_profile_json, source_assignment_id,
+         territory_override_note, estimated_monthly_revenue, estimated_monthly_expenses, existing_obligations)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,'Unverified',$33,$34,$35::jsonb,$36,$37,$38,$39,$40)
        RETURNING customer_id, created_at`,
       [
         resolvedBranchId,
         resolvedAccountManagerId,
         assignedSalesAgentId,
         resolvedTerritoryId,
-        first_name.trim(),
+        resolvedFirstName,
         middle_name ? String(middle_name).trim() : null,
-        last_name.trim(),
-        maidenName,
-        civilStatus,
+        resolvedLastName,
+        maidenName || null,
+        civilStatus || null,
         composedAddress,
         addressParts.address_region,
         addressParts.address_province,
@@ -878,19 +1116,27 @@ router.post('/', async (req, res) => {
         lat,
         lng,
         contact_phone.trim(),
-        contact_person_fname.trim(),
-        contact_person_mname ? String(contact_person_mname).trim() : null,
-        contact_person_lname.trim(),
-        contact_person_phone.trim(),
-        String(contact_person_relationship).trim(),
-        secondary_contact_fname?.trim() || null,
-        secondary_contact_lname?.trim() || null,
-        secondary_contact_phone?.trim() || null,
-        secondary_contact_relationship?.trim() || null,
+        alternateFirstName,
+        alternateMiddleName,
+        alternateLastName,
+        alternatePhone,
+        alternateRelationship,
+        cleanPart(secondary_contact_fname),
+        cleanPart(secondary_contact_lname),
+        cleanPart(secondary_contact_phone),
+        cleanPart(secondary_contact_relationship),
         customerStatus,
-        idType,
-        idNumber,
+        idType || null,
+        idNumber || null,
         idPhotoValue,
+        customerType,
+        businessName || null,
+        JSON.stringify(registrationProfile),
+        hasSourceAssignment ? sourceAssignmentId : null,
+        territoryOverrideNote || null,
+        estimatedMonthlyRevenue,
+        estimatedMonthlyExpenses,
+        existingObligations,
       ]
     );
 
@@ -908,6 +1154,21 @@ router.post('/', async (req, res) => {
        ON CONFLICT (customer_id) DO NOTHING`,
       [customerId]
     );
+
+    let creditReview = null;
+    if (wantsCredit) {
+      const reason = String(creditRequestReasonRaw || 'First installment').trim() || 'First installment';
+      const createdCi = await createCreditReview(client, {
+        customerId,
+        branchId: resolvedBranchId,
+        submittedBy: req.currentUser.id,
+        requestReason: reason,
+        requestedCreditLimit: requestedCreditLimitRaw,
+        requestRemarks: String(creditRequestRemarksRaw || '').trim()
+          || 'Submitted with customer registration.',
+      });
+      creditReview = createdCi;
+    }
 
     let portalMeta = null;
     if (portalRequested) {
@@ -964,11 +1225,15 @@ router.post('/', async (req, res) => {
       }
     }
 
+    if (creditReview?.row?.ci_id) {
+      createMessage = `${createMessage.replace(/\.$/, '')}. Credit investigation #${creditReview.row.ci_id} submitted for Branch Manager review.`;
+    }
+
     await writeAuditFromReq(req.app.locals.pool, req, {
       module: 'Customer Management',
       activity: 'Create Customer',
       action: 'Create Customer',
-      description: `Created customer ${first_name} ${last_name}.`,
+      description: `Created customer ${resolvedFirstName} ${resolvedLastName}${creditReview?.row?.ci_id ? ` with CI #${creditReview.row.ci_id}` : ''}.`,
       status: AUDIT_STATUS.CREATED,
       affectedRecord: `customer:${customerId}`,
     });
@@ -978,13 +1243,25 @@ router.post('/', async (req, res) => {
       message: createMessage,
       data: detail.rows[0],
       portal: portalPayload,
+      credit_investigation: creditReview?.row
+        ? {
+          ci_id: creditReview.row.ci_id,
+          status: creditReview.row.status,
+          requested_credit_limit: creditReview.row.requested_credit_limit,
+          suggestion: creditReview.evidence?.suggestion || null,
+        }
+        : null,
     });
   } catch (err) {
-    await client.query('ROLLBACK');
+    try { await client.query('ROLLBACK'); } catch { /* ignore */ }
     console.error('[Customers] POST / error:', err.message);
     const clientMessage = err.message || 'Failed to create customer.';
-    const status = /email|portal|valid/i.test(clientMessage) ? 400 : 500;
-    return res.status(status).json({ success: false, message: clientMessage });
+    const status = err.status || (/email|portal|valid|required/i.test(clientMessage) ? 400 : 500);
+    return res.status(status).json({
+      success: false,
+      message: clientMessage,
+      data: err.existingId ? { ci_id: err.existingId } : undefined,
+    });
   } finally {
     client.release();
   }
@@ -1063,6 +1340,130 @@ router.post('/:id/portal/resend', async (req, res) => {
   }
 });
 
+/** Protected master data — Sales Agents must use change-request / BM approval. */
+const CUSTOMER_PROTECTED_FIELDS = [
+  'first_name', 'middle_name', 'last_name', 'mothers_maiden_name', 'civil_status',
+  'customer_type', 'business_name', 'registration_profile_json',
+  'address', 'address_region', 'address_province', 'address_city', 'address_barangay',
+  'address_street', 'address_zip', 'latitude', 'longitude', 'contact_phone',
+  'contact_person_fname', 'contact_person_mname', 'contact_person_lname',
+  'contact_person_phone', 'contact_person_relationship',
+  'territory_id', 'id_type', 'id_number', 'id_photo',
+  'estimated_monthly_revenue', 'estimated_monthly_expenses', 'existing_obligations',
+];
+
+/** Soft fields Sales Agents may update directly without maker-checker. */
+const CUSTOMER_SOFT_FIELDS = [
+  'secondary_contact_fname', 'secondary_contact_lname', 'secondary_contact_phone',
+  'secondary_contact_relationship', 'portal_email',
+];
+
+const CUSTOMER_CHANGE_FIELDS = [...CUSTOMER_PROTECTED_FIELDS, ...CUSTOMER_SOFT_FIELDS];
+
+function customerChangePatch(body = {}, { protectedOnly = false } = {}) {
+  const proposed = body.proposed && typeof body.proposed === 'object' ? body.proposed : body;
+  const allowed = protectedOnly ? CUSTOMER_PROTECTED_FIELDS : CUSTOMER_CHANGE_FIELDS;
+  const patch = {};
+  for (const field of allowed) {
+    if (proposed[field] !== undefined) patch[field] = proposed[field];
+  }
+  return patch;
+}
+
+function customerSoftPatch(body = {}) {
+  const patch = {};
+  for (const field of CUSTOMER_SOFT_FIELDS) {
+    if (body[field] !== undefined) patch[field] = body[field];
+  }
+  return patch;
+}
+
+router.post('/:id/change-requests', async (req, res) => {
+  try {
+    const customerId = Number(req.params.id);
+    const existing = await req.app.locals.pool.query(
+      'SELECT * FROM customers WHERE customer_id = $1',
+      [customerId]
+    );
+    if (!existing.rows.length) return res.status(404).json({ success: false, message: 'Customer not found.' });
+    if (!assertSameBranch(res, req.currentUser, existing.rows[0].branch_id)) return;
+    if (req.currentUser?.roleSlug !== 'sales_staff') {
+      return res.status(403).json({ success: false, message: 'Only Sales Agents submit customer change requests.' });
+    }
+
+    const proposed = customerChangePatch(req.body, { protectedOnly: true });
+    if (!Object.keys(proposed).length) {
+      return res.status(400).json({
+        success: false,
+        message: 'No protected customer fields were submitted. Soft fields (e.g. alternate phone) can be updated directly.',
+      });
+    }
+    const reason = String(req.body.reason || '').trim();
+    if (!reason) return res.status(400).json({ success: false, message: 'A reason is required.' });
+
+    const credit = await req.app.locals.pool.query(
+      'SELECT * FROM customer_credit_info WHERE customer_id = $1',
+      [customerId]
+    );
+    const original = { ...existing.rows[0], credit_info: credit.rows[0] || null };
+    const type = Object.prototype.hasOwnProperty.call(proposed, 'territory_id')
+      || Object.prototype.hasOwnProperty.call(proposed, 'address')
+      ? 'Profile'
+      : 'Profile';
+    const result = await req.app.locals.pool.query(
+      `INSERT INTO customer_change_requests
+        (customer_id, branch_id, requested_by, change_type, proposed_json, original_json, reason)
+       VALUES ($1, $2, $3, $4, $5::jsonb, $6::jsonb, $7)
+       RETURNING request_id, status, created_at`,
+      [
+        customerId,
+        existing.rows[0].branch_id,
+        req.currentUser.id,
+        type,
+        JSON.stringify(proposed),
+        JSON.stringify(original),
+        reason,
+      ]
+    );
+    return res.status(202).json({
+      success: true,
+      pending: true,
+      message: 'Customer change submitted for Branch Manager approval.',
+      data: result.rows[0],
+    });
+  } catch (err) {
+    if (err.code === '23505') {
+      return res.status(409).json({ success: false, message: 'A customer change request is already pending.' });
+    }
+    console.error('[Customers] POST /:id/change-requests error:', err.message);
+    return res.status(500).json({ success: false, message: 'Failed to submit customer change.' });
+  }
+});
+
+router.get('/:id/change-requests', async (req, res) => {
+  try {
+    const customerId = Number(req.params.id);
+    const customer = await req.app.locals.pool.query(
+      'SELECT branch_id FROM customers WHERE customer_id = $1',
+      [customerId]
+    );
+    if (!customer.rows.length) return res.status(404).json({ success: false, message: 'Customer not found.' });
+    if (!assertSameBranch(res, req.currentUser, customer.rows[0].branch_id)) return;
+    const result = await req.app.locals.pool.query(
+      `SELECT r.*, COALESCE(NULLIF(TRIM(u.full_name), ''), CONCAT_WS(' ', u.first_name, u.last_name)) AS requester_name
+       FROM customer_change_requests r
+       LEFT JOIN users u ON u.id = r.requested_by
+       WHERE r.customer_id = $1
+       ORDER BY r.created_at DESC`,
+      [customerId]
+    );
+    return res.status(200).json({ success: true, data: result.rows });
+  } catch (err) {
+    console.error('[Customers] GET /:id/change-requests error:', err.message);
+    return res.status(500).json({ success: false, message: 'Failed to load customer change requests.' });
+  }
+});
+
 router.put('/:id', async (req, res) => {
   try {
     const pool = req.app.locals.pool;
@@ -1077,6 +1478,72 @@ router.put('/:id', async (req, res) => {
     if (!assertSameBranch(res, req.currentUser, existing.rows[0].branch_id)) return;
     const before = existing.rows[0];
     const isSalesAgent = req.currentUser?.roleSlug === 'sales_staff';
+    if (isSalesAgent) {
+      const protectedPatch = customerChangePatch(req.body, { protectedOnly: true });
+      const softPatch = customerSoftPatch(req.body);
+
+      // Soft-only updates apply immediately.
+      if (!Object.keys(protectedPatch).length && Object.keys(softPatch).length) {
+        const softUpdates = [];
+        const softParams = [];
+        let softIdx = 1;
+        for (const [col, val] of Object.entries(softPatch)) {
+          softUpdates.push(`${col} = $${softIdx++}`);
+          softParams.push(val === '' ? null : val);
+        }
+        softUpdates.push('updated_at = CURRENT_TIMESTAMP');
+        softParams.push(customerId);
+        const softResult = await pool.query(
+          `UPDATE customers SET ${softUpdates.join(', ')} WHERE customer_id = $${softIdx} RETURNING *`,
+          softParams
+        );
+        return res.status(200).json({
+          success: true,
+          message: 'Customer soft fields updated.',
+          data: softResult.rows[0],
+        });
+      }
+
+      if (!Object.keys(protectedPatch).length) {
+        return res.status(403).json({
+          success: false,
+          message: 'Sales Agents cannot directly mutate protected customer master data. Submit a change request.',
+        });
+      }
+
+      const reason = String(req.body.reason || 'Customer profile update requested by Sales Agent.').trim();
+      const credit = await pool.query(
+        'SELECT * FROM customer_credit_info WHERE customer_id = $1',
+        [customerId]
+      );
+      try {
+        const request = await pool.query(
+          `INSERT INTO customer_change_requests
+            (customer_id, branch_id, requested_by, change_type, proposed_json, original_json, reason)
+           VALUES ($1, $2, $3, 'Profile', $4::jsonb, $5::jsonb, $6)
+           RETURNING request_id, status, created_at`,
+          [
+            customerId,
+            before.branch_id,
+            req.currentUser.id,
+            JSON.stringify(protectedPatch),
+            JSON.stringify({ ...before, credit_info: credit.rows[0] || null }),
+            reason,
+          ]
+        );
+        return res.status(202).json({
+          success: true,
+          pending: true,
+          message: 'Customer change submitted for Branch Manager approval. Protected fields were not applied directly.',
+          data: request.rows[0],
+        });
+      } catch (err) {
+        if (err.code === '23505') {
+          return res.status(409).json({ success: false, message: 'A customer change request is already pending.' });
+        }
+        throw err;
+      }
+    }
     const {
       first_name, middle_name, last_name, mothers_maiden_name, civil_status,
       address, latitude, longitude,

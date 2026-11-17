@@ -81,14 +81,28 @@ async function main() {
       scheduledDate: today,
     });
     const branchN = Number(branchCust.rows[0].n) || 0;
-    // Own book empty: ranked may include unassigned only, never another collector's book.
+    // Own-book only: empty AM book must not pull territory_default or unassigned customers.
     const foreign = saw.ranked.filter((r) => r.book_status === 'other_book');
+    const territoryDefault = saw.ranked.filter((r) => r.book_status === 'territory_default');
     assert(foreign.length === 0, 'other_book leaked into empty portfolio SAW');
+    assert(territoryDefault.length === 0, 'territory_default path must be removed from SAW');
+    assert(saw.ranked.length === 0, 'empty own-book must return zero SAW candidates');
     assert(saw.ranked.length < branchN || branchN === 0, 'empty portfolio expanded to whole branch');
-    results.push(['empty_portfolio_no_expand', 'PASS', `ranked=${saw.ranked.length} branch=${branchN}`]);
+    results.push(['empty_portfolio_own_book_only', 'PASS', `ranked=${saw.ranked.length} branch=${branchN}`]);
   } else {
-    results.push(['empty_portfolio_no_expand', 'SKIP', 'no empty-book collector']);
+    results.push(['empty_portfolio_own_book_only', 'SKIP', 'no empty-book collector']);
   }
+
+  // Any SAW result must be own_book only (no territory_default).
+  const sampleCollector = collectors.rows[0];
+  const sampleSaw = await computeCollectorSawPriority(pool, {
+    collectorId: sampleCollector.id,
+    branchId: sampleCollector.branch_id,
+    scheduledDate: today,
+  });
+  const badBook = sampleSaw.ranked.filter((r) => r.book_status && r.book_status !== 'own_book');
+  assert(badBook.length === 0, `SAW returned non-own_book statuses: ${badBook.map((r) => r.book_status).join(',')}`);
+  results.push(['saw_own_book_only', 'PASS', `ranked=${sampleSaw.ranked.length}`]);
 
   // Same-day conflict across collectors in same branch.
   const branchGroups = [...byBranch.values()].filter((g) => g.length >= 2);

@@ -1,0 +1,170 @@
+{
+  "before": {
+    "customer": {
+      "customer_id": 153,
+      "first_name": "Renato",
+      "middle_name": "Cruz",
+      "last_name": "Santos",
+      "customer_code": "C-153-2026"
+    },
+    "credit": [
+      {
+        "credit_info_id": 55,
+        "customer_id": 153,
+        "credit_limit": "55000.00",
+        "monthly_income": null,
+        "employment_status": null,
+        "credit_score": null,
+        "approved_by": 3,
+        "approved_date": null,
+        "created_at": "2026-11-14T13:36:14.557Z",
+        "updated_at": "2026-11-14T13:36:14.557Z"
+      }
+    ],
+    "invoices": [
+      {
+        "sales_invoices_id": 197,
+        "invoice_number": "INV-2026-000001",
+        "customer_id": 153,
+        "sales_agent_id": 19,
+        "branch_id": 1,
+        "total_amount": "14999.00",
+        "payment_method_id": 1,
+        "status": "Confirmed",
+        "invoices_date": "2026-11-13T16:00:00.000Z",
+        "due_date": null,
+        "notes": null,
+        "created_at": "2026-11-14T15:34:01.977Z",
+        "updated_at": "2026-11-14T15:34:51.773Z",
+        "reviewed_by": 3,
+        "reviewed_at": "2026-11-14T15:34:51.773Z",
+        "review_note": null,
+        "pay_type": "full",
+        "down_payment": "0.00",
+        "term_months": null,
+        "monthly_amount": null,
+        "first_due_date": null,
+        "payment_arrangement": null,
+        "original_total_amount": null,
+        "discount_rate": "0.00000",
+        "discount_amount": "0.00",
+        "final_obligation": null,
+        "pricing_policy_version": null,
+        "purchase_bracket": null,
+        "original_maturity_date": null
+      }
+    ],
+    "payments": [
+      {
+        "collectionpayment_id": 185,
+        "receipt_number": "RCP-SAW-10-153-15",
+        "customer_id": 153,
+        "collector_id": 10,
+        "branch_id": 1,
+        "amount": "500.00",
+        "payment_method_id": 1,
+        "payment_date": "2026-08-14T16:00:00.000Z",
+        "payment_time": "10:00:00",
+        "status": "Completed",
+        "notes": "SAW demo portfolio link",
+        "created_at": "2026-11-13T07:43:49.063Z",
+        "updated_at": "2026-11-13T07:43:49.063Z",
+        "reviewed_by": null,
+        "reviewed_at": null,
+        "review_note": null,
+        "reference_number": null
+      },
+      {
+        "collectionpayment_id": 186,
+        "receipt_number": "RCP-SAW-11-153-30",
+        "customer_id": 153,
+        "collector_id": 11,
+        "branch_id": 1,
+        "amount": "500.00",
+        "payment_method_id": 1,
+        "payment_date": "2026-08-14T16:00:00.000Z",
+        "payment_time": "10:00:00",
+        "status": "Completed",
+        "notes": "SAW demo portfolio link",
+        "created_at": "2026-11-13T07:43:49.063Z",
+        "updated_at": "2026-11-13T07:43:49.063Z",
+        "reviewed_by": null,
+        "reviewed_at": null,
+        "review_note": null,
+        "reference_number": null
+      },
+      {
+        "collectionpayment_id": 187,
+        "receipt_number": "RCP-SAW-12-153-45",
+        "customer_id": 153,
+        "collector_id": 12,
+        "branch_id": 1,
+        "amount": "500.00",
+        "payment_method_id": 1,
+        "payment_date": "2026-08-14T16:00:00.000Z",
+        "payment_time": "10:00:00",
+        "status": "Completed",
+        "notes": "SAW demo portfolio link",
+        "created_at": "2026-11-13T07:43:49.063Z",
+        "updated_at": "2026-11-13T07:43:49.063Z",
+        "reviewed_by": null,
+        "reviewed_at": null,
+        "review_note": null,
+        "reference_number": null
+      },
+      {
+        "collectionpayment_id": 188,
+        "receipt_number": "RCP-SAW-18-153-60",
+        "customer_id": 153,
+        "collector_id": 18,
+        "branch_id": 1,
+        "amount": "500.00",
+        "payment_method_id": 1,
+        "payment_date": "2026-08-14T16:00:00.000Z",
+        "payment_time": "10:00:00",
+        "status": "Completed",
+        "notes": "SAW demo portfolio link",
+        "created_at": "2026-11-13T07:43:49.063Z",
+        "updated_at": "2026-11-13T07:43:49.063Z",
+        "reviewed_by": null,
+        "reviewed_at": null,
+        "review_note": null,
+        "reference_number": null
+      }
+    ]
+  },
+  "deleted": {
+    "sales_invoice_adjustments": 0,
+    "sales_invoice_installments": 0,
+    "credit_history": 0,
+    "sales_invoice_items": 1,
+    "sales_invoices": 1,
+    "synthetic_collection_payments": 4,
+    "customer_activity": 1
+  },
+  "after": {
+    "credit": [
+      {
+        "customer_id": 153,
+        "credit_limit": "55000.00",
+        "approved_by": 3,
+        "approved_date": null
+      }
+    ],
+    "invoices": {
+      "count": 0,
+      "total": "0"
+    },
+    "payments": {
+      "count": 0
+    },
+    "activity": [
+      {
+        "outstanding_balance": "0.00",
+        "purchase_volume": "0.00",
+        "last_collection_date": null,
+        "last_sales_visit": null
+      }
+    ]
+  }
+}

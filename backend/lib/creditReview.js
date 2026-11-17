@@ -3,6 +3,8 @@
  * Reuses credit_investigations + customer_credit_info (canonical limit).
  */
 
+import { suggestFirstCreditLimit } from './creditPolicies.js';
+
 export const CREDIT_REVIEW_REASONS = [
   'First installment',
   'Need higher limit',
@@ -40,6 +42,9 @@ export async function buildCustomerCreditEvidence(client, customerId) {
     `SELECT c.customer_id, c.customer_code, c.first_name, c.middle_name, c.last_name,
             c.status, c.id_verification_status, c.id_type, c.id_number,
             c.contact_phone, c.branch_id, b.name AS branch_name,
+            c.customer_type, c.business_name, c.registration_profile_json,
+            c.estimated_monthly_revenue, c.estimated_monthly_expenses, c.existing_obligations,
+            c.territory_id, t.territory_name,
             COALESCE(ca.outstanding_balance, 0) AS outstanding_balance,
             ca.last_collection_date, ca.last_sales_visit,
             cci.credit_limit, cci.monthly_income, cci.employment_status, cci.credit_score,
@@ -47,6 +52,7 @@ export async function buildCustomerCreditEvidence(client, customerId) {
             apv.full_name AS credit_approved_by_name
      FROM customers c
      LEFT JOIN branches b ON b.id = c.branch_id
+     LEFT JOIN territories t ON t.territory_id = c.territory_id
      LEFT JOIN customer_activity ca ON ca.customer_id = c.customer_id
      LEFT JOIN customer_credit_info cci ON cci.customer_id = c.customer_id
      LEFT JOIN users apv ON apv.id = cci.approved_by
@@ -131,8 +137,8 @@ export async function buildCustomerCreditEvidence(client, customerId) {
   });
 
   const previousDecisionsRes = await client.query(
-    `SELECT ci_id, status, purpose, request_reason, requested_credit_limit, approved_credit_limit,
-            risk_level, rejection_reason, decision_remarks, created_at, decided_at, updated_at,
+    `SELECT ci.ci_id, ci.status, ci.purpose, ci.request_reason, ci.requested_credit_limit, ci.approved_credit_limit,
+            ci.risk_level, ci.rejection_reason, ci.decision_remarks, ci.created_at, ci.decided_at, ci.updated_at,
             apv.full_name AS decided_by_name
      FROM credit_investigations ci
      LEFT JOIN users apv ON apv.id = ci.approved_by
@@ -172,24 +178,68 @@ export async function buildCustomerCreditEvidence(client, customerId) {
     collection_notes: row.collection_notes || null,
   }));
 
+  const profile = customer.registration_profile_json
+    && typeof customer.registration_profile_json === 'object'
+    ? customer.registration_profile_json
+    : {};
+  const employment = profile.employment && typeof profile.employment === 'object'
+    ? profile.employment
+    : {};
+  const evidencePhotos = Array.isArray(profile.evidence_photos) ? profile.evidence_photos : [];
+  const profileMonthlyIncome = employment.monthly_income != null
+    ? money(employment.monthly_income)
+    : (profile.monthly_income != null ? money(profile.monthly_income) : null);
+  const classification = profile.classification
+    || (customer.customer_type === 'Business' ? 'Business Owner' : 'Employed Individual');
+
   const evidence = {
     customer: {
       customer_id: customer.customer_id,
       customer_code: customer.customer_code || null,
-      name: [customer.first_name, customer.middle_name, customer.last_name].filter(Boolean).join(' '),
+      name: customer.business_name
+        || [customer.first_name, customer.middle_name, customer.last_name].filter(Boolean).join(' '),
+      customer_type: customer.customer_type || 'Individual',
+      classification,
+      business_name: customer.business_name || null,
       status: customer.status || 'Active',
       id_verification_status: customer.id_verification_status || 'Unverified',
       id_type: customer.id_type || null,
       contact_phone: customer.contact_phone || null,
       branch_name: customer.branch_name || null,
+      territory_name: customer.territory_name || null,
       credit_status: creditStatus,
+      estimated_monthly_revenue: customer.estimated_monthly_revenue != null
+        ? money(customer.estimated_monthly_revenue) : null,
+      existing_obligations: customer.existing_obligations != null
+        ? money(customer.existing_obligations) : null,
+      has_supporting_evidence: evidencePhotos.length > 0 || Boolean(profile.business_document),
+      registration_profile: profile,
+      employment,
     },
     financial: {
       outstanding_balance: outstanding,
       credit_limit: hasLimit ? creditLimit : null,
       remaining_credit: remaining,
       utilization_pct: utilization,
-      monthly_income: customer.monthly_income != null ? money(customer.monthly_income) : null,
+      monthly_income: customer.monthly_income != null
+        ? money(customer.monthly_income)
+        : profileMonthlyIncome,
+      estimated_monthly_revenue: customer.estimated_monthly_revenue != null
+        ? money(customer.estimated_monthly_revenue)
+        : (profile.estimated_monthly_revenue != null ? money(profile.estimated_monthly_revenue) : null),
+      estimated_monthly_expenses: customer.estimated_monthly_expenses != null
+        ? money(customer.estimated_monthly_expenses)
+        : (profile.estimated_monthly_expenses != null ? money(profile.estimated_monthly_expenses) : null),
+      existing_obligations: customer.existing_obligations != null
+        ? money(customer.existing_obligations)
+        : (profile.existing_obligations != null ? money(profile.existing_obligations) : null),
+      requested_credit_limit: profile.requested_credit_limit != null
+        ? money(profile.requested_credit_limit) : null,
+      has_supporting_evidence: evidencePhotos.length > 0,
+      evidence_photos: evidencePhotos.slice(0, 3).map((p) => ({
+        name: p.name || null,
+        // omit raw base64 from list payloads in evidence summary size — keep flag only for suggestion
+      })),
       employment_status: customer.employment_status || null,
       credit_score: customer.credit_score != null ? Number(customer.credit_score) : null,
       credit_approved_by: customer.credit_approved_by_name || null,
@@ -238,7 +288,14 @@ export async function buildCustomerCreditEvidence(client, customerId) {
 
   const risk = assessCreditRisk(evidence);
   evidence.risk = risk;
-  evidence.suggestion = buildLimitSuggestion(evidence, risk);
+  let creditPolicies = null;
+  try {
+    const { loadCreditPolicies } = await import('./creditPolicies.js');
+    creditPolicies = await loadCreditPolicies(client);
+  } catch {
+    creditPolicies = null;
+  }
+  evidence.suggestion = buildLimitSuggestion(evidence, risk, creditPolicies);
 
   return evidence;
 }
@@ -337,8 +394,9 @@ export function assessCreditRisk(evidence) {
   return { level, score, reasons };
 }
 
-export function buildLimitSuggestion(evidence, risk) {
+export function buildLimitSuggestion(evidence, risk, creditPolicies = null) {
   const financial = evidence.financial || {};
+  const customer = evidence.customer || {};
   const hasLimit = financial.credit_limit != null && financial.credit_limit > 0;
   const payments = (financial.payment_history || []).filter((p) => {
     const status = String(p.status || p.payment_status || '');
@@ -367,10 +425,30 @@ export function buildLimitSuggestion(evidence, risk) {
   }
 
   if (!hasLimit) {
+    const profile = customer.registration_profile || {};
+    const employment = customer.employment || profile.employment || {};
+    const result = suggestFirstCreditLimit({
+      policies: creditPolicies || undefined,
+      estimatedMonthlyRevenue: financial.estimated_monthly_revenue ?? customer.estimated_monthly_revenue,
+      monthlyIncome: financial.monthly_income
+        ?? employment.monthly_income
+        ?? profile.monthly_income,
+      existingObligations: financial.existing_obligations ?? customer.existing_obligations,
+      requestedCreditLimit: financial.requested_credit_limit ?? evidence.requested_credit_limit,
+      classification: customer.classification || profile.classification,
+      hasEvidence: Boolean(
+        financial.has_supporting_evidence
+        || customer.has_supporting_evidence
+        || (Array.isArray(financial.evidence_photos) && financial.evidence_photos.length)
+        || profile.business_document
+      ),
+    });
     return {
-      eligible: true,
-      message: 'Eligible for review — no approved credit limit yet. Branch Manager sets the limit.',
-      suggested_limit: null,
+      eligible: result.eligible,
+      message: result.message,
+      suggested_limit: result.suggested_limit,
+      path: result.path || null,
+      policy: result.policy || null,
     };
   }
 
@@ -718,11 +796,11 @@ export async function applyCreditReviewDecision(client, {
 
   const updated = await client.query(
     `UPDATE credit_investigations
-     SET status = $1,
+     SET status = $1::text,
          approved_by = $2,
-         rejection_reason = CASE WHEN $1 = 'Rejected' THEN COALESCE($3, rejection_reason) ELSE rejection_reason END,
-         decision_remarks = COALESCE($4, decision_remarks),
-         approved_credit_limit = CASE WHEN $1 = 'Approved' THEN $5 ELSE approved_credit_limit END,
+         rejection_reason = CASE WHEN $1::text = 'Rejected' THEN COALESCE($3::text, rejection_reason) ELSE rejection_reason END,
+         decision_remarks = COALESCE($4::text, decision_remarks),
+         approved_credit_limit = CASE WHEN $1::text = 'Approved' THEN $5::numeric ELSE approved_credit_limit END,
          decided_at = CURRENT_TIMESTAMP,
          revision_history_json = $7::jsonb,
          updated_at = CURRENT_TIMESTAMP

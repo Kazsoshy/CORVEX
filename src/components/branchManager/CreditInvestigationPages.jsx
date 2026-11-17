@@ -509,6 +509,28 @@ export function CreditInvestigationDetailPage({
   const previousDecisions = live?.previous_decisions || snap.previous_decisions || [];
   const revisionHistory = review.revisionHistory || [];
 
+  const evCustomer = { ...(live?.customer || {}), ...(snap?.customer || {}) };
+  const evProfile = (snap?.customer?.registration_profile && Object.keys(snap.customer.registration_profile).length
+    ? snap.customer.registration_profile
+    : live?.customer?.registration_profile) || {};
+  const evEmployment = evProfile.employment || evCustomer.employment || live?.customer?.employment || {};
+  const evClassification = evCustomer.classification || evProfile.classification || '—';
+  const addressParts = [
+    evCustomer.address_street || evProfile.address_street,
+    evCustomer.address_barangay || evProfile.address_barangay,
+    evCustomer.address_city || evProfile.address_city,
+    evCustomer.address_province || evProfile.address_province,
+    evCustomer.address_zip || evProfile.address_zip,
+  ].filter((part) => part && String(part).trim());
+  const evAddress = addressParts.length ? addressParts.join(', ') : (evCustomer.address || evProfile.address || null);
+  const durationMonths = evEmployment.duration_months ?? evEmployment.duration;
+  const hasDoc = Boolean(evProfile.business_document || evCustomer.has_business_document);
+  const showBusinessBlock = Boolean(
+    evProfile.business_type || evProfile.store_type
+    || evProfile.years_of_operation != null || evProfile.business_document
+    || evCustomer.customer_type === 'Business',
+  );
+
   return (
     <div className="page">
       <section className="panel content-panel">
@@ -608,11 +630,57 @@ export function CreditInvestigationDetailPage({
       </section>
 
       <section className="panel content-panel">
+        <div className="panel-section-header"><h3>Registration / Business Evidence</h3></div>
+        <DetailRowsTable
+          rows={[
+            { label: 'Customer Type', value: snap?.customer?.customer_type || live?.customer?.customer_type || '—' },
+            { label: 'Business Name', value: snap?.customer?.business_name || live?.customer?.business_name || '—' },
+            { label: 'Classification', value: evClassification },
+            { label: 'Territory', value: snap?.customer?.territory_name || live?.customer?.territory_name || '—' },
+            ...(evAddress ? [{ label: 'Address', value: evAddress }] : []),
+            ...(showBusinessBlock ? [
+              { label: 'Business Type', value: evProfile.business_type || '—' },
+              { label: 'Store Type', value: evProfile.store_type || '—' },
+              {
+                label: 'Years of Operation',
+                value: evProfile.years_of_operation != null && evProfile.years_of_operation !== ''
+                  ? String(evProfile.years_of_operation)
+                  : '—',
+              },
+              { label: 'Business Document', value: hasDoc ? 'Attached at registration' : 'Not attached' },
+            ] : []),
+            { label: 'Est. Monthly Revenue', value: formatMoneyOrNA(snapFin.estimated_monthly_revenue ?? liveFin.estimated_monthly_revenue) },
+            { label: 'Est. Monthly Expenses', value: formatMoneyOrNA(snapFin.estimated_monthly_expenses ?? liveFin.estimated_monthly_expenses) },
+            { label: 'Existing Obligations', value: formatMoneyOrNA(snapFin.existing_obligations ?? liveFin.existing_obligations) },
+            { label: 'Requested Limit', value: formatMoneyOrNA(review.requestedLimit ?? snapFin.requested_credit_limit) },
+            { label: 'System Suggested Limit', value: formatMoneyOrNA(review.suggestion?.suggested_limit) },
+            {
+              label: 'Supporting Evidence',
+              value: (snapFin.has_supporting_evidence || liveFin.has_supporting_evidence) ? 'Attached at registration' : 'None flagged',
+            },
+          ]}
+        />
+        <p className="muted" style={{ marginTop: 8 }}>
+          Requested, suggested, and approved limits are distinct. Only Approve writes the customer&apos;s authorized credit limit.
+        </p>
+      </section>
+
+      <section className="panel content-panel">
         <div className="panel-section-header"><h3>Employment & Income</h3></div>
         <DetailRowsTable
           rows={[
-            { label: 'Employment Status', value: liveFin.employment_status || snapFin.employment_status || '—' },
-            { label: 'Monthly Income', value: formatMoneyOrNA(liveFin.monthly_income ?? snapFin.monthly_income) },
+            { label: 'Employment Status', value: evEmployment.employment_status || liveFin.employment_status || snapFin.employment_status || '—' },
+            ...(Object.keys(evEmployment).length ? [
+              { label: 'Employer', value: evEmployment.employer_name || '—' },
+              { label: 'Position', value: evEmployment.position || '—' },
+              {
+                label: 'Employment Duration',
+                value: durationMonths != null && durationMonths !== ''
+                  ? (Number.isFinite(Number(durationMonths)) ? `${durationMonths} month(s)` : String(durationMonths))
+                  : '—',
+              },
+            ] : []),
+            { label: 'Monthly Income', value: formatMoneyOrNA(evEmployment.monthly_income ?? liveFin.monthly_income ?? snapFin.monthly_income) },
             { label: 'Credit Score', value: liveFin.credit_score ?? snapFin.credit_score ?? '—' },
             { label: 'KYC Status', value: snap?.customer?.id_verification_status || live?.customer?.id_verification_status || '—' },
           ]}

@@ -14,8 +14,12 @@ const ROUTE_DEFINITIONS = [
   { pattern: /^\/branch-manager\/field-operations$/, pageType: 'fieldOperations' },
   { pattern: /^\/branch-manager\/field-operations\/performance$/, pageType: 'routePerformance' },
   { pattern: /^\/branch-manager\/field-operations\/collectors$/, pageType: 'collectorRoutes' },
+  { pattern: /^\/branch-manager\/field-operations\/collectors\/history$/, pageType: 'collectorRouteHistory' },
+  { pattern: /^\/branch-manager\/field-operations\/collectors\/([^/]+)\/history$/, pageType: 'collectorAgentRouteHistory', params: ['collectorId'] },
   { pattern: /^\/branch-manager\/field-operations\/collectors\/([^/]+)$/, pageType: 'collectorDetail', params: ['collectorId'] },
   { pattern: /^\/branch-manager\/field-operations\/sales$/, pageType: 'salesSchedules' },
+  { pattern: /^\/branch-manager\/field-operations\/sales\/history$/, pageType: 'salesAssignmentHistory' },
+  { pattern: /^\/branch-manager\/field-operations\/sales\/([^/]+)\/history$/, pageType: 'salesAgentAssignmentHistory', params: ['agentId'] },
   { pattern: /^\/branch-manager\/field-operations\/sales\/([^/]+)$/, pageType: 'salesAgentDetail', params: ['agentId'] },
   { pattern: /^\/branch-manager\/ci-approvals$/, pageType: 'ciQueue' },
   { pattern: /^\/branch-manager\/ci-approvals\/([^/]+)$/, pageType: 'ciDetail', params: ['ciId'] },
@@ -83,10 +87,14 @@ export function buildBranchManagerBreadcrumbs(pageType, params = {}) {
     case 'branchInventory': return [...crumbs, { label: 'Branch Inventory', to: '/branch-manager/branch-inventory' }];
     case 'fieldOperations': return [...crumbs, ...fieldOps];
     case 'routePerformance': return [...crumbs, ...fieldOps, { label: "Today's Routes", to: '/branch-manager/field-operations/performance' }];
-    case 'collectorRoutes': return [...crumbs, ...fieldOps, { label: 'Collectors', to: '/branch-manager/field-operations/collectors' }];
-    case 'collectorDetail': return [...crumbs, ...fieldOps, { label: 'Collectors', to: '/branch-manager/field-operations/collectors' }, { label: collector?.name ?? 'Collector Detail', to: `/branch-manager/field-operations/collectors/${params.collectorId}` }];
-    case 'salesSchedules': return [...crumbs, ...fieldOps, { label: 'Sales Agents', to: '/branch-manager/field-operations/sales' }];
-    case 'salesAgentDetail': return [...crumbs, ...fieldOps, { label: 'Sales Agents', to: '/branch-manager/field-operations/sales' }, { label: agent?.name ?? 'Sales Agent Detail', to: `/branch-manager/field-operations/sales/${params.agentId}` }];
+    case 'collectorRoutes': return [...crumbs, ...fieldOps, { label: 'Collector Dispatch', to: '/branch-manager/field-operations/collectors' }];
+    case 'collectorRouteHistory': return [...crumbs, ...fieldOps, { label: 'Collector Dispatch', to: '/branch-manager/field-operations/collectors' }, { label: 'Route History', to: '/branch-manager/field-operations/collectors/history' }];
+    case 'collectorAgentRouteHistory': return [...crumbs, ...fieldOps, { label: 'Collector Dispatch', to: '/branch-manager/field-operations/collectors' }, { label: collector?.name ?? 'Collector', to: `/branch-manager/field-operations/collectors/${params.collectorId}` }, { label: 'Route History', to: `/branch-manager/field-operations/collectors/${params.collectorId}/history` }];
+    case 'collectorDetail': return [...crumbs, ...fieldOps, { label: 'Collector Dispatch', to: '/branch-manager/field-operations/collectors' }, { label: collector?.name ?? 'Daily Dispatch', to: `/branch-manager/field-operations/collectors/${params.collectorId}` }];
+    case 'salesSchedules': return [...crumbs, ...fieldOps, { label: 'Sales Agent Dispatch', to: '/branch-manager/field-operations/sales' }];
+    case 'salesAssignmentHistory': return [...crumbs, ...fieldOps, { label: 'Sales Agent Dispatch', to: '/branch-manager/field-operations/sales' }, { label: 'Assignment History', to: '/branch-manager/field-operations/sales/history' }];
+    case 'salesAgentAssignmentHistory': return [...crumbs, ...fieldOps, { label: 'Sales Agent Dispatch', to: '/branch-manager/field-operations/sales' }, { label: agent?.name ?? 'Sales Agent', to: `/branch-manager/field-operations/sales/${params.agentId}` }, { label: 'Assignment History', to: `/branch-manager/field-operations/sales/${params.agentId}/history` }];
+    case 'salesAgentDetail': return [...crumbs, ...fieldOps, { label: 'Sales Agent Dispatch', to: '/branch-manager/field-operations/sales' }, { label: agent?.name ?? 'Daily Dispatch', to: `/branch-manager/field-operations/sales/${params.agentId}` }];
     case 'ciQueue': return [...crumbs, ...ciCrumbs];
     case 'ciDetail': return [...crumbs, ...ciCrumbs, { label: ci?.customerName ?? 'CI Detail', to: `/branch-manager/ci-approvals/${params.ciId}` }];
     case 'leafletMap': return [...crumbs, ...leafletCrumbs];
@@ -125,10 +133,14 @@ export function resolveBranchManagerPage(pathname) {
     branchInventory: 'Branch Inventory',
     fieldOperations: 'Routes & Schedules',
     routePerformance: "Today's Routes",
-    collectorRoutes: 'Collectors',
-    collectorDetail: 'Collector Detail',
-    salesSchedules: 'Sales Agents',
-    salesAgentDetail: 'Sales Agent Detail',
+    collectorRoutes: 'Collector Dispatch',
+    collectorRouteHistory: 'Collector Route History',
+    collectorAgentRouteHistory: 'Collector Route History',
+    collectorDetail: 'Daily Dispatch',
+    salesSchedules: 'Sales Agent Dispatch',
+    salesAssignmentHistory: 'Sales Assignment History',
+    salesAgentAssignmentHistory: 'Sales Assignment History',
+    salesAgentDetail: 'Daily Dispatch',
     ciQueue: 'Credit Investigation',
     ciDetail: 'Credit Investigation Detail',
     leafletMap: 'Field Map',

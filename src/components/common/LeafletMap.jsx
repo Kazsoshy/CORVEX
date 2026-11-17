@@ -1,8 +1,19 @@
 import React, { useEffect, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { MapContainer, TileLayer, Marker, Popup, Polyline, Circle, Polygon, useMap, useMapEvents } from 'react-leaflet';
 import L from 'leaflet';
+import markerIcon2x from 'leaflet/dist/images/marker-icon-2x.png';
+import markerIcon from 'leaflet/dist/images/marker-icon.png';
+import markerShadow from 'leaflet/dist/images/marker-shadow.png';
 import { brand } from '../../theme/palette.js';
 import { NavIcon } from '../../navIcons';
+
+delete L.Icon.Default.prototype._getIconUrl;
+L.Icon.Default.mergeOptions({
+  iconRetinaUrl: markerIcon2x,
+  iconUrl: markerIcon,
+  shadowUrl: markerShadow,
+});
 
 function FitBounds({ bounds, padding = [36, 36] }) {
   const map = useMap();
@@ -14,6 +25,22 @@ function FitBounds({ bounds, padding = [36, 36] }) {
       /* ignore invalid bounds */
     }
   }, [bounds, map, padding]);
+  return null;
+}
+
+function Recenter({ center, zoom }) {
+  const map = useMap();
+  useEffect(() => {
+    if (!Array.isArray(center) || center.length < 2) return;
+    const lat = Number(center[0]);
+    const lng = Number(center[1]);
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) return;
+    try {
+      map.setView([lat, lng], Number.isFinite(Number(zoom)) ? Number(zoom) : map.getZoom(), { animate: false });
+    } catch {
+      /* map may be unmounted */
+    }
+  }, [center, zoom, map]);
   return null;
 }
 
@@ -69,14 +96,6 @@ function OverlayPopup({ overlay }) {
   );
 }
 
-// Fix for default marker icon in leaflet
-delete L.Icon.Default.prototype._getIconUrl;
-L.Icon.Default.mergeOptions({
-  iconRetinaUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon-2x.png',
-  iconUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png',
-  shadowUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png',
-});
-
 // A custom DivIcon creator for more modern looking markers if needed
 export const createCustomIcon = (color = brand, label = '') => {
   return L.divIcon({
@@ -121,6 +140,7 @@ export default function LeafletMap({
   fitBounds = null,
   showFullscreen = true,
   onMapClick = null,
+  pinStatusLabel = null,
 }) {
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [sizeRevision, setSizeRevision] = useState(0);
@@ -142,127 +162,182 @@ export default function LeafletMap({
 
   useEffect(() => {
     setSizeRevision((current) => current + 1);
-  }, [isFullscreen, height]);
+  }, [isFullscreen, height, center, zoom]);
+
+  const mapBody = (
+    <>
+      {showFullscreen ? (
+        <div className="leaflet-map-controls" role="toolbar" aria-label="Map view controls">
+          <button
+            type="button"
+            className="leaflet-map-control-btn"
+            onClick={() => setIsFullscreen((current) => !current)}
+            aria-pressed={isFullscreen}
+            aria-label={isFullscreen ? 'Exit full screen' : 'Full screen'}
+            title={isFullscreen ? 'Exit full screen (Esc)' : 'Full screen'}
+          >
+            <NavIcon name={isFullscreen ? 'minimize' : 'maximize'} className="nav-svg" />
+          </button>
+        </div>
+      ) : null}
+
+      {pinStatusLabel ? (
+        <div
+          className="leaflet-map-pin-status"
+          style={{
+            position: 'absolute',
+            left: 12,
+            bottom: 12,
+            zIndex: 1000,
+            maxWidth: '70%',
+            padding: '8px 10px',
+            borderRadius: 8,
+            background: 'rgba(255,255,255,0.94)',
+            border: '1px solid var(--border, #e2e8f0)',
+            boxShadow: '0 2px 8px rgba(0,0,0,0.12)',
+            fontSize: '0.85rem',
+            color: 'var(--text, #0B2133)',
+          }}
+        >
+          {pinStatusLabel}
+        </div>
+      ) : null}
+
+      <MapContainer center={center} zoom={zoom} style={{ height: '100%', width: '100%' }}>
+        <TileLayer
+          attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+          url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+        />
+        <InvalidateSize revision={sizeRevision} />
+        <Recenter center={center} zoom={zoom} />
+        {typeof onMapClick === 'function' ? <MapClickHandler onMapClick={onMapClick} /> : null}
+        {fitBounds?.length ? <FitBounds bounds={fitBounds} /> : null}
+
+        {polygons.map((polygon) => (
+          <Polygon
+            key={polygon.id}
+            positions={polygon.positions}
+            pathOptions={{
+              color: polygon.color || brand,
+              weight: polygon.weight ?? 2,
+              fillColor: polygon.fillColor || polygon.color || brand,
+              fillOpacity: polygon.fillOpacity ?? 0.18,
+              opacity: polygon.opacity ?? 0.85,
+              dashArray: polygon.dashArray,
+            }}
+          >
+            <OverlayPopup overlay={polygon} />
+          </Polygon>
+        ))}
+
+        {circles.map((circle) => (
+          <Circle
+            key={circle.id}
+            center={circle.center}
+            radius={circle.radius ?? 400}
+            pathOptions={{
+              color: circle.color || brand,
+              weight: circle.weight ?? 1,
+              fillColor: circle.fillColor || circle.color || brand,
+              fillOpacity: circle.fillOpacity ?? 0.22,
+              opacity: circle.opacity ?? 0.8,
+            }}
+          >
+            <OverlayPopup overlay={circle} />
+          </Circle>
+        ))}
+
+        {markers.map((marker) => (
+          <Marker
+            key={marker.id}
+            position={marker.position}
+            draggable={Boolean(marker.draggable)}
+            eventHandlers={{
+              ...(typeof marker.onDragEnd === 'function'
+                ? {
+                    dragend: (event) => {
+                      const next = event.target.getLatLng();
+                      marker.onDragEnd({ lat: next.lat, lng: next.lng });
+                    },
+                  }
+                : {}),
+              ...(typeof marker.onClick === 'function'
+                ? {
+                    click: () => marker.onClick(marker),
+                  }
+                : {}),
+            }}
+            icon={marker.icon || (marker.color ? createCustomIcon(marker.color, marker.label) : new L.Icon.Default())}
+          >
+            {(marker.popupContent || marker.popup) && (
+              <Popup>
+                <div style={{ padding: '4px', minWidth: 160 }}>
+                  {marker.popupContent || marker.popup}
+                </div>
+              </Popup>
+            )}
+          </Marker>
+        ))}
+
+        {polylines.map((line) => (
+          <Polyline
+            key={line.id}
+            positions={line.positions}
+            color={line.color || brand}
+            weight={line.weight ?? 3}
+            opacity={line.opacity ?? 0.7}
+            dashArray={line.dashArray}
+          >
+            <OverlayPopup overlay={line} />
+          </Polyline>
+        ))}
+      </MapContainer>
+    </>
+  );
+
+  // Portal fullscreen shell to body so modal overflow/stacking cannot trap the exit control.
+  const fullscreenShell = isFullscreen && typeof document !== 'undefined'
+    ? createPortal(
+      <div className="leaflet-map-shell is-fullscreen" role="dialog" aria-modal="true" aria-label="Map full screen">
+        {mapBody}
+      </div>,
+      document.body
+    )
+    : null;
 
   return (
     <div
       className={`leaflet-map-root${isFullscreen ? ' is-fullscreen-active' : ''}`}
       style={{ height: resolvedHeight, width: '100%' }}
     >
-      <div
-        className={`leaflet-map-shell${isFullscreen ? ' is-fullscreen' : ''}`}
-        style={isFullscreen ? undefined : {
-          height: '100%',
-          width: '100%',
-          borderRadius: '8px',
-          overflow: 'hidden',
-          border: '1px solid var(--surface-3)',
-        }}
-      >
-        {showFullscreen ? (
-          <div className="leaflet-map-controls" role="toolbar" aria-label="Map view controls">
-            <button
-              type="button"
-              className="leaflet-map-control-btn"
-              onClick={() => setIsFullscreen((current) => !current)}
-              aria-pressed={isFullscreen}
-              aria-label={isFullscreen ? 'Exit full screen' : 'Full screen'}
-              title={isFullscreen ? 'Exit full screen' : 'Full screen'}
-            >
-              <NavIcon name={isFullscreen ? 'minimize' : 'maximize'} className="nav-svg" />
-            </button>
-          </div>
-        ) : null}
-
-        <MapContainer center={center} zoom={zoom} style={{ height: '100%', width: '100%' }}>
-          <TileLayer
-            attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
-            url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-          />
-          <InvalidateSize revision={sizeRevision} />
-          {typeof onMapClick === 'function' ? <MapClickHandler onMapClick={onMapClick} /> : null}
-          {fitBounds?.length ? <FitBounds bounds={fitBounds} /> : null}
-
-          {polygons.map((polygon) => (
-            <Polygon
-              key={polygon.id}
-              positions={polygon.positions}
-              pathOptions={{
-                color: polygon.color || brand,
-                weight: polygon.weight ?? 2,
-                fillColor: polygon.fillColor || polygon.color || brand,
-                fillOpacity: polygon.fillOpacity ?? 0.18,
-                opacity: polygon.opacity ?? 0.85,
-                dashArray: polygon.dashArray,
-              }}
-            >
-              <OverlayPopup overlay={polygon} />
-            </Polygon>
-          ))}
-
-          {circles.map((circle) => (
-            <Circle
-              key={circle.id}
-              center={circle.center}
-              radius={circle.radius ?? 400}
-              pathOptions={{
-                color: circle.color || brand,
-                weight: circle.weight ?? 1,
-                fillColor: circle.fillColor || circle.color || brand,
-                fillOpacity: circle.fillOpacity ?? 0.22,
-                opacity: circle.opacity ?? 0.8,
-              }}
-            >
-              <OverlayPopup overlay={circle} />
-            </Circle>
-          ))}
-
-          {markers.map((marker) => (
-            <Marker
-              key={marker.id}
-              position={marker.position}
-              draggable={Boolean(marker.draggable)}
-              eventHandlers={{
-                ...(typeof marker.onDragEnd === 'function'
-                  ? {
-                      dragend: (event) => {
-                        const next = event.target.getLatLng();
-                        marker.onDragEnd({ lat: next.lat, lng: next.lng });
-                      },
-                    }
-                  : {}),
-                ...(typeof marker.onClick === 'function'
-                  ? {
-                      click: () => marker.onClick(marker),
-                    }
-                  : {}),
-              }}
-              icon={marker.icon || (marker.color ? createCustomIcon(marker.color, marker.label) : new L.Icon.Default())}
-            >
-              {(marker.popupContent || marker.popup) && (
-                <Popup>
-                  <div style={{ padding: '4px', minWidth: 160 }}>
-                    {marker.popupContent || marker.popup}
-                  </div>
-                </Popup>
-              )}
-            </Marker>
-          ))}
-
-          {polylines.map((line) => (
-            <Polyline
-              key={line.id}
-              positions={line.positions}
-              color={line.color || brand}
-              weight={line.weight ?? 3}
-              opacity={line.opacity ?? 0.7}
-              dashArray={line.dashArray}
-            >
-              <OverlayPopup overlay={line} />
-            </Polyline>
-          ))}
-        </MapContainer>
-      </div>
+      {!isFullscreen ? (
+        <div
+          className="leaflet-map-shell"
+          style={{
+            height: '100%',
+            width: '100%',
+            borderRadius: '8px',
+            overflow: 'hidden',
+            border: '1px solid var(--surface-3)',
+          }}
+        >
+          {mapBody}
+        </div>
+      ) : (
+        <div
+          className="leaflet-map-shell"
+          style={{
+            height: '100%',
+            width: '100%',
+            borderRadius: '8px',
+            overflow: 'hidden',
+            border: '1px solid var(--surface-3)',
+            background: 'var(--surface-2)',
+          }}
+          aria-hidden="true"
+        />
+      )}
+      {fullscreenShell}
     </div>
   );
 }

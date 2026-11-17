@@ -53,6 +53,22 @@ export async function refreshSessionPermissions() {
 }
 
 /**
+ * Replace a temporary password on first sign-in. The temporary password is only
+ * sent to the API as `current_password` and is never stored.
+ */
+export async function completeRequiredPasswordChange(currentPassword, newPassword, confirmPassword) {
+  const response = await apiClient.put('/auth/me', {
+    current_password: currentPassword,
+    new_password: newPassword,
+    confirm_password: confirmPassword,
+  });
+  if (response.data?.success) {
+    writeSessionUser({ ...(getCurrentUser() || {}), mustChangePassword: false });
+  }
+  return response.data;
+}
+
+/**
  * Clear the current session from localStorage.
  */
 export function logout() {

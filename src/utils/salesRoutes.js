@@ -57,7 +57,7 @@ export function buildSalesBreadcrumbs(pageType, params = {}, parentContext = 'cu
   const customerLabel = params.customerId ? `Customer #${params.customerId}` : 'Customer Detail';
   const productLabel = params.productId ? `Product #${params.productId}` : 'Product Details';
 
-  const creditCrumbs = [{ label: 'Payment History', to: '/sales/credit-history' }];
+  const creditCrumbs = [{ label: 'Credit History', to: '/sales/credit-history' }];
 
   switch (pageType) {
     case 'dashboard':

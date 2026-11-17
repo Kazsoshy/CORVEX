@@ -38,7 +38,7 @@ export const ROLE_SETS = {
   reportsBranch: ['super_admin', 'operating_manager', 'branch_manager', 'inventory_staff'],
   reportsOrg: ['super_admin', 'operating_manager'],
   // Customer payment ledger — not warehouse inventory access.
-  creditHistory: ['super_admin', 'operating_manager', 'branch_manager', 'sales_staff'],
+  creditHistory: ['super_admin', 'operating_manager', 'branch_manager', 'collector'],
   inventory: ['super_admin', 'operating_manager', 'branch_manager', 'inventory_staff'],
   branchOps: ['super_admin', 'operating_manager', 'branch_manager'],
   receipts: ['super_admin', 'operating_manager'],
@@ -48,6 +48,10 @@ export const ROLE_SETS = {
   dashboardBranches: ['super_admin', 'operating_manager'],
   dashboardBranch: ['super_admin', 'operating_manager', 'branch_manager'],
 };
+
+export function canViewCustomerFinancialDetails(roleSlug) {
+  return ['super_admin', 'operating_manager', 'branch_manager', 'collector'].includes(String(roleSlug || ''));
+}
 
 function authSecret() {
   if (process.env.AUTH_SECRET) return process.env.AUTH_SECRET;
@@ -122,6 +126,8 @@ export async function requireAuth(req, res, next) {
     const result = await pool.query(
       `SELECT u.id, u.status, u.branch_id, u.email, u.role_id,
               COALESCE(NULLIF(TRIM(u.full_name), ''), TRIM(CONCAT_WS(' ', u.first_name, u.last_name)), u.email) AS full_name,
+              COALESCE(u.must_change_password, FALSE) AS must_change_password,
+              u.session_revoked_at,
               r.slug AS role_slug,
               r.role_name
        FROM users u
@@ -135,10 +141,26 @@ export async function requireAuth(req, res, next) {
     }
 
     const user = result.rows[0];
+    // 401 (not 403) so clients discard the token immediately.
     if (user.status !== 'Active') {
+      return res.status(401).json({
+        success: false,
+        code: 'ACCOUNT_DISABLED',
+        message: 'This account has been disabled. Contact your administrator.',
+      });
+    }
+    if (user.session_revoked_at && session.iat < new Date(user.session_revoked_at).getTime()) {
+      return res.status(401).json({
+        success: false,
+        code: 'SESSION_REVOKED',
+        message: 'Your session was ended by an administrator. Sign in again.',
+      });
+    }
+    if (user.must_change_password && !String(req.originalUrl || '').startsWith('/api/auth/')) {
       return res.status(403).json({
         success: false,
-        message: 'Account is not active.',
+        code: 'PASSWORD_CHANGE_REQUIRED',
+        message: 'You must change your temporary password before using CORVEX.',
       });
     }
 
@@ -162,6 +184,7 @@ export async function requireAuth(req, res, next) {
       roleId: user.role_id,
       branchId: user.branch_id,
       permissionCodes,
+      mustChangePassword: Boolean(user.must_change_password),
       tokenIat: session.iat,
       tokenLa: session.la,
     };

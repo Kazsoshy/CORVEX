@@ -438,29 +438,25 @@ export function buildBranchLeafletView({
 
   if (resolvedMode === 'coverage') {
     territories.forEach((territory, index) => {
-      const assignedIds = new Set((territory.assignedUserIds || []).map((id) => Number(id)));
-      if (staffId && staffId !== 'all') {
-        const selected = Number(staffId);
-        const isDefaultOwner = Number(territory.defaultSalesAgentId) === selected
-          || Number(territory.defaultCollectorId) === selected;
-        if (!isDefaultOwner && assignedIds.size && !assignedIds.has(selected)) return;
-        if (!isDefaultOwner && !assignedIds.size) return;
-      }
       const members = allAccounts.filter((account) => {
         if (!matchesBranch(account, branchId)) return false;
         return territory.id && Number(account.territoryId) === Number(territory.id);
       });
+      if (staffId && staffId !== 'all') {
+        const selected = Number(staffId);
+        const staffLinked = members.some((account) => (
+          Number(account.collectorId) === selected
+          || Number(account.salesAgentId) === selected
+        ));
+        if (!staffLinked) return;
+      }
       const color = TERRITORY_COLORS[index % TERRITORY_COLORS.length];
-      const owners = [
-        territory.defaultSalesAgentName ? `SA: ${territory.defaultSalesAgentName}` : null,
-        territory.defaultCollectorName ? `Collector: ${territory.defaultCollectorName}` : null,
-      ].filter(Boolean).join(' · ') || (territory.assignedNames || []).filter(Boolean).join(', ') || 'Unassigned';
       const popup = [
         territory.name,
+        territory.barangayName ? `Barangay: ${territory.barangayName}` : null,
         'Approximate Territory Coverage',
         `${members.length} customers in territory`,
-        owners,
-        territory.radiusMeters ? `${territory.radiusMeters} m radius` : null,
+        territory.radiusMeters ? `${territory.radiusMeters} m operational zone` : null,
         territory.coverageArea ? `Notes: ${territory.coverageArea}` : null,
       ].filter(Boolean).join(' · ');
 

@@ -140,11 +140,18 @@ export function resolveOperatingManagerPage(pathname) {
     const resolved = resolveBranchManagerPage(legacyPath);
     if (!resolved) return null;
 
+    const breadcrumbs = rewriteBreadcrumbs(resolved.breadcrumbs, '/branch-manager', '/operating-manager/operations')
+      .map((crumb) => (
+        resolved.pageType === 'settings' && crumb.label === 'Settings'
+          ? { ...crumb, label: 'System Configuration' }
+          : crumb
+      ));
+
     return {
       ...resolved,
       module: 'operations',
       title: OPERATION_TITLES[resolved.pageType] ?? resolved.title ?? 'Operating Manager',
-      breadcrumbs: rewriteBreadcrumbs(resolved.breadcrumbs, '/branch-manager', '/operating-manager/operations'),
+      breadcrumbs,
       badge: 'Operating manager',
     };
   }
@@ -239,7 +246,7 @@ const ADMIN_TITLES = {
 
 const OPERATION_TITLES = {
   dashboard: 'Operations Dashboard',
-  settings: 'Settings',
+  settings: 'System Configuration',
   approvalCenter: 'Approval Center',
   auditLog: 'Audit Log',
   customers: 'Customers',
@@ -248,10 +255,14 @@ const OPERATION_TITLES = {
   fieldActivityReportDetail: 'Field Activity Report',
   fieldOperations: 'Field Operations',
   routePerformance: 'Route Performance',
-  collectorRoutes: 'Collector Route Overview',
-  collectorDetail: 'Collector Detail',
-  salesSchedules: 'Sales Schedule Overview',
-  salesAgentDetail: 'Sales Agent Detail',
+  collectorRoutes: 'Collector Dispatch',
+  collectorRouteHistory: 'Collector Route History',
+  collectorAgentRouteHistory: 'Collector Route History',
+  collectorDetail: 'Collector Daily Dispatch',
+  salesSchedules: 'Sales Agent Dispatch',
+  salesAssignmentHistory: 'Sales Assignment History',
+  salesAgentAssignmentHistory: 'Sales Assignment History',
+  salesAgentDetail: 'Sales Agent Daily Dispatch',
   ciQueue: 'CI Approval Queue',
   ciDetail: 'CI Detail',
   leafletMap: 'Leaflet | OpenStreetMap',

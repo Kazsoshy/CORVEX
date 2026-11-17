@@ -21,6 +21,7 @@ const WARNING_TERMS = [
   'pending', 'processing', 'in progress', 'low stock', 'low', 'medium', 'warning',
   'submitted', 'awaiting', 'scheduled', 'rescheduled', 'partial', 'unread',
   'due', 'open', 'needs alignment', 'misaligned', 'investigating', 'archived', 'assigned',
+  'incomplete', 'not started', 'needs attention',
 ];
 
 const SUCCESS_TERMS = [

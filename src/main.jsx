@@ -4,6 +4,7 @@ import { BrowserRouter } from 'react-router-dom';
 import App from './App';
 import { OfflineProvider } from './offline/OfflineProvider.jsx';
 import { PreferencesProvider } from './settings/PreferencesProvider.jsx';
+import 'leaflet/dist/leaflet.css';
 import './styles.css';
 import './modern-overrides.css';
 import './styles/accessibility.css';

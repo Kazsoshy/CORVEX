@@ -1,5 +1,11 @@
 import { useEffect, useMemo, useState } from 'react';
-import { getFieldActivityReports, getFieldActivityReport, getBranchStaff } from '../../api/branchManagerService.js';
+import {
+  getFieldActivityReports,
+  getFieldActivityReport,
+  getBranchStaff,
+  reviewFieldActivityReport,
+  reopenFieldActivityReportEdit,
+} from '../../api/branchManagerService.js';
 import { EmptyState } from '../shared/EmptyState';
 import { LoadingState } from '../shared/LoadingState';
 import { Pagination } from '../shared/Pagination';
@@ -14,6 +20,7 @@ import {
   FAR_ROLE_OPTIONS,
   FAR_SEVERITY_OPTIONS,
   isIncidentActivity,
+  outcomeLabel,
   reportPhotoSrc,
   severityTone,
 } from '../../utils/fieldActivityReports.js';
@@ -303,6 +310,8 @@ export function FieldActivityReportDetailPage({
     || currentUser?.role?.slug === 'super_admin';
   const [report, setReport] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [busy, setBusy] = useState(false);
+  const [reviewNotes, setReviewNotes] = useState('');
 
   useEffect(() => {
     let cancelled = false;
@@ -310,8 +319,10 @@ export function FieldActivityReportDetailPage({
       setLoading(true);
       const result = await getFieldActivityReport(reportId);
       if (cancelled) return;
-      if (result.success && result.data) setReport(result.data);
-      else {
+      if (result.success && result.data) {
+        setReport(result.data);
+        setReviewNotes(result.data.review_notes || '');
+      } else {
         setReport(null);
         showToast?.(result.message || 'Report not found.', 'error');
       }
@@ -339,6 +350,33 @@ export function FieldActivityReportDetailPage({
     ? `${opsBase}/field-operations/sales/${report.staff_id || report.collector_id}`
     : `${opsBase}/field-operations/collectors/${report.staff_id || report.collector_id}`;
 
+  const applyReview = async (reviewStatus) => {
+    setBusy(true);
+    const result = await reviewFieldActivityReport(reportId, {
+      review_status: reviewStatus,
+      review_notes: reviewNotes.trim(),
+    });
+    setBusy(false);
+    if (result.success && result.data) {
+      setReport(result.data);
+      showToast?.(result.message || 'Review saved.', 'success');
+    } else {
+      showToast?.(result.message || 'Could not save review.', 'error');
+    }
+  };
+
+  const reopenEdit = async () => {
+    setBusy(true);
+    const result = await reopenFieldActivityReportEdit(reportId, { hours: 24 });
+    setBusy(false);
+    if (result.success && result.data) {
+      setReport(result.data);
+      showToast?.(result.message || 'Editing reopened.', 'success');
+    } else {
+      showToast?.(result.message || 'Could not reopen editing.', 'error');
+    }
+  };
+
   return (
     <div className="page">
       <section className="panel dashboard-greeting">
@@ -346,11 +384,12 @@ export function FieldActivityReportDetailPage({
           <p className="text-[0.82rem] font-bold tracking-widest uppercase text-navy/60 m-0">
             {report.branch_name || 'Field Activity Report'}
           </p>
-          <h2>{report.activity_type || 'Field Activity Report'}</h2>
+          <h2>{outcomeLabel(report.activity_type) || 'Field Activity Report'}</h2>
           <p className="text-ink/70">
             {report.staff_name || report.collector_name}
             {report.staff_role ? ` · ${report.staff_role}` : ''}
             {report.severity ? ` · ${report.severity}` : ''}
+            {report.review_status ? ` · ${report.review_status}` : ''}
           </p>
         </div>
       </section>
@@ -375,9 +414,8 @@ export function FieldActivityReportDetailPage({
           <DetailRowsTable rows={[
             { label: 'Assigned Area', value: report.area_name || '—' },
             { label: 'Assignment ID', value: report.assignment_id || '—' },
+            { label: 'Assignment Status', value: report.assignment_status || '—' },
             { label: 'Work Date', value: formatDisplayDate(report.work_date || report.assignment_work_date) },
-            { label: 'Associated Customer', value: report.customer_name || '—' },
-            { label: 'Customer Code', value: report.customer_code || '—' },
           ]} />
         ) : (
           <DetailRowsTable rows={[
@@ -405,18 +443,33 @@ export function FieldActivityReportDetailPage({
       <section className="panel content-panel relative overflow-hidden">
         <h3>Report Information</h3>
         <DetailRowsTable rows={[
-          { label: 'Activity Type', value: report.activity_type || '—' },
+          { label: isSales ? 'Overall Outcome' : 'Activity Type', value: outcomeLabel(report.activity_type) },
           {
             label: 'Severity',
             value: isIncidentActivity(report.activity_type)
               ? (report.severity || '—')
               : 'Not applicable',
           },
+          { label: 'Review Status', value: <StatusBadge status={report.review_status || 'Submitted'} /> },
           { label: 'Work Date', value: formatDisplayDate(report.work_date || report.scheduled_date) },
           { label: 'Submitted', value: formatDisplayDateTime(report.created_at) },
+          { label: 'Last Updated', value: formatDisplayDateTime(report.updated_at || report.created_at) },
           { label: 'Device Sync Status', value: report.sync_status || '—' },
           { label: 'Remarks', value: report.remarks || '—' },
+          { label: 'Photo Exception', value: report.photo_exception_reason || '—' },
         ]} />
+        {(report.revision_history || []).length ? (
+          <div style={{ marginTop: 12 }}>
+            <h4>Revision history</h4>
+            <ul>
+              {(report.revision_history || []).slice().reverse().map((rev, idx) => (
+                <li key={`${rev.at}-${idx}`}>
+                  {formatDisplayDateTime(rev.at)} · {outcomeLabel(rev.activity_type)}
+                </li>
+              ))}
+            </ul>
+          </div>
+        ) : null}
       </section>
 
       <section className="panel content-panel relative overflow-hidden">
@@ -431,10 +484,45 @@ export function FieldActivityReportDetailPage({
           </a>
         ) : (
           <p className="muted" style={{ margin: 0 }}>
-            {report.has_photo ? 'Photo could not be displayed.' : 'No photo attached.'}
+            {report.has_photo
+              ? 'Photo could not be displayed.'
+              : (report.photo_exception_reason
+                ? `No photo. Exception: ${report.photo_exception_reason}`
+                : 'No photo attached.')}
           </p>
         )}
       </section>
+
+      {isSales && !report.is_superseded ? (
+        <section className="panel content-panel relative overflow-hidden">
+          <h3>Branch Manager Review</h3>
+          <p className="muted">
+            Review only — this does not approve the report or reopen the assignment. Marking Reviewed or Needs Follow-up records your monitoring decision.
+          </p>
+          <label className="field-label" style={{ display: 'block', marginTop: 8 }}>
+            Review notes
+            <textarea
+              className="filter-input"
+              rows={3}
+              value={reviewNotes}
+              onChange={(e) => setReviewNotes(e.target.value)}
+              placeholder="Optional for Reviewed. Required for Needs Follow-up."
+              style={{ display: 'block', width: '100%', marginTop: 6 }}
+            />
+          </label>
+          <div className="flex flex-wrap gap-2 mt-3">
+            <button className="button" type="button" disabled={busy} onClick={() => applyReview('Reviewed')}>
+              Mark Reviewed
+            </button>
+            <button className="button secondary" type="button" disabled={busy} onClick={() => applyReview('Needs Follow-up')}>
+              Needs Follow-up
+            </button>
+            <button className="button ghost" type="button" disabled={busy} onClick={reopenEdit}>
+              Reopen Edit (24h)
+            </button>
+          </div>
+        </section>
+      ) : null}
 
       <div className="flex justify-end gap-2 mt-4">
         <button className="button ghost" type="button" onClick={() => navigate(`${opsBase}/field-activity-reports`)}>

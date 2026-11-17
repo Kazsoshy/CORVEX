@@ -34,6 +34,9 @@ import { ensureSchema } from './lib/ensureSchema.js';
 import { loadProductImage } from './lib/productImages.js';
 import { startOperationalNotificationSweep } from './lib/operationalNotifications.js';
 import { startSecurityMonitor } from './lib/security/monitor.js';
+import { startUserInactivitySweep } from './lib/userAccounts.js';
+import { startBranchStatusSweep } from './lib/branchPolicies.js';
+import { startSalesAssignmentAutoClose } from './lib/jobs/salesAssignmentAutoClose.js';
 import { createSecurityRequestInspector } from './lib/security/requestInspector.js';
 import { isMailConfigured } from './lib/mail.js';
 
@@ -252,6 +255,9 @@ async function startServer() {
   }
 
   startOperationalNotificationSweep(pool);
+  startUserInactivitySweep(pool);
+  startBranchStatusSweep(pool);
+  startSalesAssignmentAutoClose(pool);
   startSecurityMonitor(pool).catch((err) => {
     console.error('[SecurityMonitor] failed to start:', err.message);
   });

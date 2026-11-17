@@ -156,6 +156,7 @@ router.post('/login', async (req, res) => {
          u.created_at,
          COALESCE(u.failed_login_count, 0) AS failed_login_count,
          u.login_locked_until,
+         COALESCE(u.must_change_password, FALSE) AS must_change_password,
          r.role_id,
          r.role_name,
          r.slug AS role_slug,
@@ -168,7 +169,7 @@ router.post('/login', async (req, res) => {
        JOIN roles r ON r.role_id = u.role_id
        LEFT JOIN branches b ON b.id = u.branch_id
        LEFT JOIN customers c ON c.user_id = u.id
-       WHERE u.email = $1`,
+       WHERE LOWER(u.email) = $1`,
       [email.toLowerCase().trim()]
     );
 
@@ -329,6 +330,7 @@ router.post('/login', async (req, res) => {
         customerId: user.customer_id ?? null,
         customerCode: user.customer_code ?? null,
         hasAvatar: Boolean(user.avatar_file),
+        mustChangePassword: Boolean(user.must_change_password),
         permissions,
       },
     });
@@ -422,6 +424,7 @@ const PROFILE_SELECT = `
     u.updated_at,
     u.last_login,
     u.avatar_file,
+    COALESCE(u.must_change_password, FALSE) AS must_change_password,
     r.role_name,
     r.slug AS role_slug,
     b.name AS branch_name
@@ -449,6 +452,7 @@ function formatProfileRow(row) {
     updated_at: row.updated_at || null,
     last_login: row.last_login || null,
     has_avatar: Boolean(row.avatar_file),
+    must_change_password: Boolean(row.must_change_password),
     role: { id: row.role_id, name: row.role_name, slug: row.role_slug },
     branch: row.branch_id ? { id: row.branch_id, name: row.branch_name } : null,
   };
@@ -692,7 +696,8 @@ router.put('/me', requireAuth, async (req, res) => {
     let changingIdentity = false;
 
     const currentResult = await pool.query(
-      `SELECT id, first_name, middle_name, last_name, email, phone, password_hash
+      `SELECT id, first_name, middle_name, last_name, email, phone, password_hash,
+              COALESCE(must_change_password, FALSE) AS must_change_password
        FROM users WHERE id = $1`,
       [userId]
     );
@@ -700,6 +705,22 @@ router.put('/me', requireAuth, async (req, res) => {
       return res.status(404).json({ success: false, message: 'User not found.' });
     }
     const current = currentResult.rows[0];
+    const hasNewPassword = nextPassword !== undefined && nextPassword !== null && String(nextPassword).length > 0;
+    if (current.must_change_password) {
+      if (!hasNewPassword || [first_name, middle_name, last_name, email, phone].some((v) => v !== undefined)) {
+        return res.status(403).json({
+          success: false,
+          code: 'PASSWORD_CHANGE_REQUIRED',
+          message: 'Change your temporary password before updating anything else.',
+        });
+      }
+      if (String(current_password || '') === String(nextPassword)) {
+        return res.status(400).json({
+          success: false,
+          message: 'Choose a new password that is different from your temporary password.',
+        });
+      }
+    }
 
     if (first_name !== undefined) {
       const value = String(first_name || '').trim();
@@ -767,6 +788,7 @@ router.put('/me', requireAuth, async (req, res) => {
       const hash = await bcrypt.hash(String(nextPassword), 12);
       updates.push(`password_hash = $${pIdx++}`);
       params.push(hash);
+      updates.push('must_change_password = FALSE');
     }
 
     if (!updates.length) {
@@ -796,7 +818,9 @@ router.put('/me', requireAuth, async (req, res) => {
         module: 'Authentication',
         activity: 'Password Changed',
         action: 'Password Changed',
-        description: 'User changed their account password.',
+        description: current.must_change_password
+          ? 'User replaced their temporary password (required password change completed).'
+          : 'User changed their account password.',
         status: AUDIT_STATUS.PASSWORD_CHANGED,
         affectedRecord: `user:${userId}`,
       });

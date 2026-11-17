@@ -14,6 +14,11 @@ function recordTitle(row) {
     return [payload.customer_name || 'Collection', money].filter(Boolean).join(' · ');
   }
   if (row.tableName === 'sales_invoices') return payload.customer_name || 'Sale';
+  if (row.tableName === 'customer_registration') {
+    return payload.business_name
+      || [payload.first_name, payload.last_name].filter(Boolean).join(' ')
+      || 'Customer registration';
+  }
   return payload.area_name || payload.customer_name || 'Field report';
 }
 
@@ -23,6 +28,11 @@ function recordDetail(row) {
   if (row.tableName === 'sales_invoices') {
     const count = Array.isArray(payload.items) ? payload.items.length : 0;
     return `${count} line item${count === 1 ? '' : 's'}`;
+  }
+  if (row.tableName === 'customer_registration') {
+    return payload.request_credit
+      ? 'Pending sync · credit investigation queued'
+      : 'Pending sync · registration only';
   }
   return [payload.activity_type, payload.remarks].filter(Boolean).join(' — ') || '—';
 }

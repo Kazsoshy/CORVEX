@@ -104,6 +104,33 @@ export async function fetchApprovalCenterSummary() {
   }
 }
 
+export async function fetchCustomerChangeRequests(params = {}) {
+  try {
+    const response = await apiClient.get('/approvals/customer-change-requests', { params });
+    return response.data;
+  } catch (error) {
+    return { success: false, data: [], message: error.response?.data?.message || 'Failed to load customer changes.' };
+  }
+}
+
+export async function fetchCustomerChangeRequestById(id) {
+  try {
+    const response = await apiClient.get(`/approvals/customer-change-requests/${id}`);
+    return response.data;
+  } catch (error) {
+    return { success: false, data: null, message: error.response?.data?.message || 'Failed to load customer change.' };
+  }
+}
+
+export async function patchCustomerChangeRequest(id, body) {
+  try {
+    const response = await apiClient.patch(`/approvals/customer-change-requests/${id}`, body);
+    return response.data;
+  } catch (error) {
+    return { success: false, message: error.response?.data?.message || 'Failed to decide customer change.' };
+  }
+}
+
 export async function fetchPendingRestocks() {
   try {
     const response = await apiClient.get('/approvals/restocks');
@@ -219,6 +246,10 @@ export function mapCreditInvestigationRow(row) {
     || row.snapshot?.financial?.payment_history
     || [];
   const reason = row.request_reason || row.purpose;
+  const snapshot = row.snapshot || row.financial_snapshot_json || null;
+  const snapSuggestion = snapshot?.suggestion?.suggested_limit
+    ?? snapshot?.financial?.suggested_limit
+    ?? null;
   return {
     id: String(row.ci_id),
     ciId: row.ci_id,
@@ -233,6 +264,7 @@ export function mapCreditInvestigationRow(row) {
     purpose: reason,
     requestReason: reason,
     requestedLimit: row.requested_credit_limit != null ? Number(row.requested_credit_limit) : null,
+    suggestedLimit: snapSuggestion != null ? Number(snapSuggestion) : null,
     approvedLimit: row.approved_credit_limit != null ? Number(row.approved_credit_limit) : null,
     riskLevel: row.risk_level || row.leaflet_classification || null,
     monthlyIncome: Number(row.monthly_income || 0),
@@ -243,7 +275,7 @@ export function mapCreditInvestigationRow(row) {
     leafletClassification: row.leaflet_classification || row.risk_level,
     rejectionReason: row.rejection_reason,
     decisionRemarks: row.decision_remarks || null,
-    snapshot: row.snapshot || row.financial_snapshot_json || null,
+    snapshot,
     live: row.live || null,
     delinquencyFlags: Array.isArray(flags) ? flags : [],
     paymentHistory: Array.isArray(payments)
