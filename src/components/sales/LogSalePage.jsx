@@ -63,6 +63,7 @@ function customerLabel(customer) {
   if (!customer) return '';
   const formatted = formatCustomerFullName(customer);
   if (formatted && formatted !== '—') return formatted;
+  if (String(customer.business_name || '').trim()) return String(customer.business_name).trim();
   return `${customer.first_name || ''} ${customer.last_name || ''}`.trim() || 'Customer';
 }
 
@@ -70,6 +71,20 @@ function paymentStanding(outstanding) {
   const balance = money(outstanding);
   if (balance <= 0) return 'Current';
   return 'Has Balance';
+}
+
+/** Offline: remaining = max(0, approved_limit − outstanding − local queued installment totals). */
+function queuedOfflineInstallmentCredit(deviceSales, customerId) {
+  if (!customerId || !Array.isArray(deviceSales)) return 0;
+  return deviceSales.reduce((sum, row) => {
+    const payload = row?.payload || {};
+    if (String(payload.customer_id) !== String(customerId)) return sum;
+    if (payload.pay_type !== 'installment') return sum;
+    const items = Array.isArray(payload.items) ? payload.items : [];
+    const total = items.reduce((acc, line) => acc + money(line.unit_price) * (Number(line.quantity) || 0), 0);
+    if (total > 0) return money(sum + total);
+    return money(sum + money(payload.total_amount || payload.invoice_total || 0));
+  }, 0);
 }
 
 function CustomerSearchSelect({
@@ -98,9 +113,16 @@ function CustomerSearchSelect({
     let cancelled = false;
     setSearching(true);
     const timer = setTimeout(async () => {
-      const result = await fetchCustomers({ search: term, limit: 20, status: 'Active' });
+      const result = await fetchCustomers({
+        search: term,
+        limit: 20,
+        status: 'Active',
+        name_search: 'true',
+      });
       if (cancelled) return;
-      setResults(result.success ? result.data || [] : []);
+      setResults(result.success
+        ? (result.data || []).filter((customer) => customerLabel(customer) !== 'Customer')
+        : []);
       setSearching(false);
       setActiveIndex(0);
     }, 250);
@@ -218,9 +240,12 @@ function CustomerStatusPanel({
   creditContext,
   loading,
   totalAmount,
+  pricing,
   payType,
   navigate,
   onRequestCreditReview,
+  offlineMode = false,
+  offlineQueuedCredit = 0,
 }) {
   if (loading) {
     return (
@@ -249,15 +274,24 @@ function CustomerStatusPanel({
   const outstanding = money(customerDetail.activity?.outstanding_balance ?? customerDetail.outstandingBalance ?? 0);
   const hasCreditRow = Boolean(customerDetail.creditInfo);
   const creditLimit = money(customerDetail.creditInfo?.credit_limit || 0);
+  const hasUsableCredit = hasCreditRow && creditLimit > 0;
   const creditUsed = Math.min(outstanding, creditLimit || outstanding);
-  const creditRemaining = hasCreditRow && creditLimit > 0 ? Math.max(0, creditLimit - outstanding) : null;
-  const afterSale = money(outstanding + money(totalAmount));
-  const exceeds = hasCreditRow && creditLimit > 0 && afterSale > creditLimit;
+  const creditRemaining = hasUsableCredit
+    ? Math.max(0, creditLimit - outstanding - money(offlineQueuedCredit))
+    : null;
+  const saleUsesCredit = payType === 'installment';
+  const cartObligation = money(pricing?.finalObligation ?? totalAmount);
+  const creditImpact = saleUsesCredit ? cartObligation : 0;
+  const afterSaleOutstanding = money(outstanding + money(offlineQueuedCredit) + creditImpact);
+  const remainingAfterSale = hasUsableCredit
+    ? Math.max(0, creditLimit - afterSaleOutstanding)
+    : null;
+  const exceeds = hasUsableCredit && saleUsesCredit && afterSaleOutstanding > creditLimit;
   const lastCollection = customerDetail.activity?.last_collection_date || null;
   const lastSale = customerDetail.activity?.last_sales_visit || null;
   const pending = creditContext?.pending_review || null;
   const riskLevel = creditContext?.risk?.level || null;
-  const needsReview = payType === 'installment' && (
+  const needsReview = saleUsesCredit && (
     !hasCreditRow
     || creditLimit <= 0
     || exceeds
@@ -281,21 +315,49 @@ function CustomerStatusPanel({
         </div>
         <div>
           <span className="muted">Credit Limit</span>
-          <strong>{hasCreditRow && creditLimit > 0 ? formatCurrency(creditLimit) : 'No credit on file'}</strong>
+          <strong>{hasUsableCredit ? formatCurrency(creditLimit) : 'No credit on file'}</strong>
         </div>
         <div>
           <span className="muted">Credit Used / Remaining</span>
           <strong>
-            {hasCreditRow && creditLimit > 0
+            {hasUsableCredit
               ? `${formatCurrency(creditUsed)} / ${formatCurrency(creditRemaining)}`
               : '—'}
           </strong>
+          {offlineMode && money(offlineQueuedCredit) > 0 ? (
+            <div className="muted" style={{ fontSize: '0.78rem' }}>
+              Includes {formatCurrency(offlineQueuedCredit)} queued offline installment(s)
+            </div>
+          ) : null}
         </div>
         <div>
-          <span className="muted">After This Sale</span>
+          <span className="muted">This sale vs credit</span>
+          <strong>
+            {saleUsesCredit
+              ? formatCurrency(creditImpact)
+              : '₱0.00 (spot cash)'}
+          </strong>
+          {!saleUsesCredit && hasUsableCredit ? (
+            <div className="muted" style={{ fontSize: '0.78rem' }}>
+              Spot cash does not use the credit limit. Switch to Installment to charge against credit.
+            </div>
+          ) : null}
+        </div>
+        <div>
+          <span className="muted">Projected outstanding</span>
           <strong style={{ color: exceeds ? 'var(--danger, #b42318)' : undefined }}>
-            {formatCurrency(afterSale)}
+            {formatCurrency(afterSaleOutstanding)}
             {exceeds ? ' · exceeds limit' : ''}
+          </strong>
+        </div>
+        <div>
+          <span className="muted">Credit remaining after sale</span>
+          <strong style={{ color: exceeds ? 'var(--danger, #b42318)' : undefined }}>
+            {hasUsableCredit
+              ? (saleUsesCredit
+                ? formatCurrency(remainingAfterSale)
+                : formatCurrency(creditRemaining))
+              : '—'}
           </strong>
         </div>
         <div>
@@ -324,19 +386,30 @@ function CustomerStatusPanel({
           </strong>
         </div>
       </div>
-      {payType === 'installment' && (!hasCreditRow || creditLimit <= 0) ? (
-        <p className="form-error" style={{ marginTop: 12 }}>
-          Request a Credit Review / wait for Branch Manager to set a credit limit before installment.
+      {payType === 'full' && hasUsableCredit && cartObligation > 0 ? (
+        <p className="muted" style={{ marginTop: 12 }}>
+          Available credit: {formatCurrency(creditRemaining)}. Choose <strong>Installment (Monthly)</strong> to apply this sale against the limit
+          {cartObligation > creditRemaining
+            ? ` — this cart (${formatCurrency(cartObligation)}) is over remaining credit.`
+            : '.'}
         </p>
       ) : null}
-      {payType === 'installment' && exceeds ? (
+      {saleUsesCredit && (!hasCreditRow || creditLimit <= 0) ? (
         <p className="form-error" style={{ marginTop: 12 }}>
-          Projected outstanding exceeds this customer&apos;s credit limit. Request a Credit Review if a higher limit is needed.
+          {offlineMode
+            ? 'Offline installment needs a cached approved credit limit. Cash sales only until credit is approved and synced.'
+            : 'Request a Credit Review / wait for Branch Manager to set a credit limit before installment.'}
         </p>
       ) : null}
-      {payType === 'installment' && pending ? (
+      {saleUsesCredit && exceeds ? (
+        <p className="form-error" style={{ marginTop: 12 }}>
+          Projected outstanding {formatCurrency(afterSaleOutstanding)} exceeds the ₱{creditLimit.toLocaleString('en-PH', { minimumFractionDigits: 2 })} credit limit. Remove items or request a higher limit.
+        </p>
+      ) : null}
+      {saleUsesCredit && pending ? (
         <p className="muted" style={{ marginTop: 12 }}>
           A credit review is awaiting Branch Manager. Submitting a request does not unlock installment sales until BM decides.
+          {offlineMode ? ' Offline: use cash unless an approved limit is already on this device.' : ''}
         </p>
       ) : null}
       <div className="flex flex-wrap gap-2" style={{ marginTop: 12 }}>
@@ -375,6 +448,7 @@ export function LogSalePage({
   const [customerDetailLoading, setCustomerDetailLoading] = useState(false);
   const [creditContext, setCreditContext] = useState(null);
   const [creditReviewOpen, setCreditReviewOpen] = useState(false);
+  const [pricing, setPricing] = useState(null);
   const [form, setForm] = useState({
     customerId: customerId ? String(customerId) : '',
     payType: 'full',
@@ -391,7 +465,9 @@ export function LogSalePage({
   const [deviceSales, setDeviceSales] = useState([]);
 
   const fullPaymentMethods = useMemo(
-    () => paymentMethods.filter((method) => String(method.method_name || '').toLowerCase() !== 'credit'),
+    () => paymentMethods.filter((method) => ['cash', 'gcash'].includes(
+      String(method.method_name || '').trim().toLowerCase()
+    )),
     [paymentMethods]
   );
 
@@ -443,13 +519,61 @@ export function LogSalePage({
       if (result.success && result.data) {
         setCustomerDetail(result.data);
         setSelectedCustomer(result.data);
+        // Approved credit → default to Installment so the right panel checks the limit against the cart.
+        const limit = money(result.data.creditInfo?.credit_limit || 0);
+        if (limit > 0) {
+          setForm((prev) => {
+            if (prev.payType === 'installment') return prev;
+            return {
+              ...prev,
+              payType: 'installment',
+              paymentMethodId: '',
+              firstDueDate: prev.firstDueDate || addCalendarMonths(prev.invoicesDate || today, 1),
+            };
+          });
+        }
       } else {
         setCustomerDetail(null);
         showToast?.(result.message || 'Could not load customer.', 'error');
       }
     }
     loadCustomerDetail(form.customerId);
-  }, [form.customerId, showToast]);
+  }, [form.customerId, showToast, today]);
+
+  useEffect(() => {
+    const items = lineItems
+      .filter((line) => line.productId)
+      .map((line) => ({ product_id: Number(line.productId), quantity: Number(line.quantity) || 0 }));
+    if (!items.length || !form.invoicesDate) {
+      setPricing(null);
+      return undefined;
+    }
+    let cancelled = false;
+    const timer = setTimeout(async () => {
+      try {
+        const response = await apiClient.post('/sales/pricing/calculate', {
+          customer_id: form.customerId ? Number(form.customerId) : undefined,
+          pay_type: form.payType,
+          invoices_date: form.invoicesDate,
+          first_due_date: form.firstDueDate,
+          items,
+        });
+        if (!cancelled && response.data?.success) {
+          setPricing(response.data.data);
+          if (response.data.data.termMonths) {
+            setForm((prev) => ({ ...prev, termMonths: String(response.data.data.termMonths) }));
+          }
+        }
+      } catch (error) {
+        if (!cancelled) setPricing(null);
+        console.error('[LogSale] pricing calculation error:', error.message);
+      }
+    }, 200);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [form.customerId, form.payType, form.invoicesDate, form.firstDueDate, lineItems]);
 
   useEffect(() => {
     async function load() {
@@ -503,7 +627,6 @@ export function LogSalePage({
   const buildValidation = () => {
     const nextErrors = {};
     if (!form.customerId) nextErrors.customerId = 'Select a customer.';
-    if (!form.invoicesDate) nextErrors.invoicesDate = 'Invoice date is required.';
     if (!form.payType) nextErrors.payType = 'Select how the customer will pay.';
 
     const items = lineItems
@@ -540,7 +663,7 @@ export function LogSalePage({
         nextErrors.dueDate = 'Due date cannot be earlier than the invoice date.';
       }
     } else {
-      const months = Number(form.termMonths);
+      const months = Number(pricing?.termMonths || form.termMonths);
       if (!Number.isInteger(months) || months < 1 || months > 24) {
         nextErrors.termMonths = 'Months must be a whole number from 1 to 24.';
       }
@@ -553,21 +676,34 @@ export function LogSalePage({
       if (form.firstDueDate && form.firstDueDate < form.invoicesDate) {
         nextErrors.firstDueDate = 'First due date cannot be earlier than the invoice date.';
       }
-      if (down > 0 && !form.paymentMethodId) {
-        nextErrors.paymentMethodId = 'Select a down payment method.';
+      if (!form.paymentMethodId) {
+        nextErrors.paymentMethodId = 'Select a payment method.';
       }
       const creditLimit = money(customerDetail?.creditInfo?.credit_limit || 0);
       const outstanding = money(customerDetail?.activity?.outstanding_balance || 0);
+      const offline = !isBrowserOnline();
+      const queuedCredit = queuedOfflineInstallmentCredit(deviceSales, form.customerId);
       if (!customerDetail?.creditInfo || creditLimit <= 0) {
-        nextErrors.payType = 'Request a Credit Review / wait for Branch Manager to set a credit limit before installment.';
-      } else if (outstanding + money(totalAmount) > creditLimit) {
-        nextErrors.payType = 'Projected outstanding exceeds this customer’s credit limit. Request a Credit Review if needed.';
+        nextErrors.payType = offline
+          ? 'Offline installment needs a cached approved credit limit. Use cash until credit is approved.'
+          : 'Request a Credit Review / wait for Branch Manager to set a credit limit before installment.';
+      } else if (outstanding + queuedCredit + money(pricing?.finalObligation ?? totalAmount) > creditLimit) {
+        nextErrors.payType = offline
+          ? 'Offline remaining credit (limit − outstanding − queued installment sales) is insufficient.'
+          : 'Projected outstanding exceeds this customer’s credit limit. Request a Credit Review if needed.';
       } else if (
-        creditContext?.pending_review
+        !offline
+        && creditContext?.pending_review
         && (creditContext.pending_review.risk_level === 'High' || creditContext?.risk?.level === 'High')
       ) {
         nextErrors.payType = 'A high-risk Credit Review is pending Branch Manager decision.';
+      } else if (offline && creditContext?.pending_review && creditLimit <= 0) {
+        nextErrors.payType = 'Pending credit investigation is cash-only while offline.';
       }
+    }
+
+    if (form.payType === 'installment' && (!pricing || !pricingMatchesTotal)) {
+      nextErrors.payType = 'Wait for the server pricing calculation before submitting.';
     }
 
     return { nextErrors, items };
@@ -576,15 +712,15 @@ export function LogSalePage({
   const buildPayload = (items) => ({
     customer_id: Number(form.customerId),
     payment_method_id: form.paymentMethodId ? Number(form.paymentMethodId) : undefined,
-    invoices_date: form.invoicesDate,
+    invoices_date: today,
     due_date: form.payType === 'full' ? (form.dueDate || undefined) : form.firstDueDate,
     notes: form.notes,
     items,
     customer_name: customerLabel(selectedCustomer || customerDetail) || 'Sale',
     pay_type: form.payType,
     down_payment: form.payType === 'installment' ? money(form.downPayment) : 0,
-    term_months: form.payType === 'installment' ? Number(form.termMonths) : undefined,
-    monthly_amount: form.payType === 'installment' ? installment.monthly : undefined,
+    term_months: form.payType === 'installment' ? Number(pricing?.termMonths || form.termMonths) : undefined,
+    monthly_amount: form.payType === 'installment' ? (pricing?.monthlyAmount || installment.monthly) : undefined,
     first_due_date: form.payType === 'installment' ? form.firstDueDate : undefined,
   });
 
@@ -593,7 +729,14 @@ export function LogSalePage({
       showToast('Turn on offline mode in Settings to keep this sale on the device.', 'error');
       return false;
     }
-    await saveOfflineRecord({ tableName: 'sales_invoices', payload: { ...payload, saved_offline: true } });
+    await saveOfflineRecord({
+      tableName: 'sales_invoices',
+      payload: {
+        ...payload,
+        total_amount: money(totalAmount),
+        saved_offline: true,
+      },
+    });
     showToast(
       isSalesAutoSyncEnabled()
         ? 'Saved on this device. It will sync when you are online.'
@@ -655,12 +798,21 @@ export function LogSalePage({
 
   const confirmMessage = (() => {
     const name = customerLabel(selectedCustomer || customerDetail) || 'this customer';
-    const total = formatCurrency(totalAmount);
+    const total = formatCurrency(form.payType === 'full' ? (pricing?.finalObligation ?? totalAmount) : totalAmount);
     if (form.payType === 'installment') {
       return `Submit ${total} for ${name}: ${formatCurrency(installment.down)} down payment + ${formatCurrency(installment.monthly)} × ${installment.months} months? Stock will be deducted and the invoice will be submitted for Branch Head review.`;
     }
     return `Submit ${total} for ${name} (Pay in Full)? Stock will be deducted and the invoice will be submitted for Branch Head review.`;
   })();
+  const pricingMatchesTotal = pricing && Math.abs(Number(pricing.originalTotal) - money(totalAmount)) < 0.01;
+  const creditLimit = money(customerDetail?.creditInfo?.credit_limit || 0);
+  const outstanding = money(customerDetail?.activity?.outstanding_balance || 0);
+  const queuedCredit = queuedOfflineInstallmentCredit(deviceSales, form.customerId);
+  const projectedInstallment = outstanding + queuedCredit
+    + money(pricingMatchesTotal ? pricing.finalObligation : totalAmount);
+  const creditLimitExceeded = form.payType === 'installment'
+    && creditLimit > 0
+    && projectedInstallment > creditLimit;
 
   if (loading) return <LoadingState message="Loading log a sale form..." />;
 
@@ -709,7 +861,7 @@ export function LogSalePage({
 
               <div className="field-report-filter-row log-sale-terms-row">
                 <label className="field-report-field" htmlFor="log-sale-pay-type">
-                  <span>Pay Type *</span>
+                  <span>Payment Arrangement *</span>
                   <select
                     id="log-sale-pay-type"
                     className="filter-select"
@@ -725,29 +877,21 @@ export function LogSalePage({
                       setErrors((prev) => ({ ...prev, payType: undefined, paymentMethodId: undefined }));
                     }}
                   >
-                    <option value="full">Pay in Full</option>
+                    <option value="full">Spot Cash</option>
                     <option value="installment">Installment (Monthly)</option>
                   </select>
+                  {form.payType === 'full' && money(customerDetail?.creditInfo?.credit_limit || 0) > 0 ? (
+                    <p className="muted" style={{ marginTop: 4 }}>
+                      Spot cash ignores the credit limit. Use Installment to apply available credit.
+                    </p>
+                  ) : null}
                   {errors.payType ? <p className="form-error">{errors.payType}</p> : null}
                 </label>
 
-                <label className="field-report-field" htmlFor="log-sale-date">
-                  <span>Invoice Date *</span>
-                  <input
-                    id="log-sale-date"
-                    className="filter-input"
-                    type="date"
-                    value={form.invoicesDate}
-                    onChange={(e) => setForm((prev) => ({
-                      ...prev,
-                      invoicesDate: e.target.value,
-                      firstDueDate: prev.payType === 'installment' && !prev.firstDueDate
-                        ? addCalendarMonths(e.target.value, 1)
-                        : prev.firstDueDate,
-                    }))}
-                  />
-                  {errors.invoicesDate ? <p className="form-error">{errors.invoicesDate}</p> : null}
-                </label>
+                <div className="field-report-field">
+                  <span>Invoice Date</span>
+                  <strong>{formatDisplayDate(today)}</strong>
+                </div>
               </div>
 
               {form.payType === 'full' ? (
@@ -788,21 +932,8 @@ export function LogSalePage({
               ) : (
                 <>
                   <div className="field-report-filter-row log-sale-installment-row">
-                    <label className="field-report-field" htmlFor="log-sale-down">
-                      <span>Down Payment</span>
-                      <input
-                        id="log-sale-down"
-                        className="filter-input"
-                        type="number"
-                        min="0"
-                        step="0.01"
-                        value={form.downPayment}
-                        onChange={(e) => setForm((prev) => ({ ...prev, downPayment: e.target.value }))}
-                      />
-                      {errors.downPayment ? <p className="form-error">{errors.downPayment}</p> : null}
-                    </label>
                     <label className="field-report-field" htmlFor="log-sale-months">
-                      <span>Months *</span>
+                      <span>Installment Term (automatic)</span>
                       <input
                         id="log-sale-months"
                         className="filter-input"
@@ -811,7 +942,7 @@ export function LogSalePage({
                         max="24"
                         step="1"
                         value={form.termMonths}
-                        onChange={(e) => setForm((prev) => ({ ...prev, termMonths: e.target.value }))}
+                        readOnly
                       />
                       {errors.termMonths ? <p className="form-error">{errors.termMonths}</p> : null}
                     </label>
@@ -827,9 +958,8 @@ export function LogSalePage({
                       />
                       {errors.firstDueDate ? <p className="form-error">{errors.firstDueDate}</p> : null}
                     </label>
-                    {money(form.downPayment) > 0 ? (
-                      <label className="field-report-field" htmlFor="log-sale-down-method">
-                        <span>Down Payment Method *</span>
+                    <label className="field-report-field" htmlFor="log-sale-down-method">
+                        <span>Payment Method *</span>
                         <select
                           id="log-sale-down-method"
                           className="filter-select"
@@ -847,8 +977,7 @@ export function LogSalePage({
                           ))}
                         </select>
                         {errors.paymentMethodId ? <p className="form-error">{errors.paymentMethodId}</p> : null}
-                      </label>
-                    ) : null}
+                    </label>
                   </div>
 
                   <div className="log-sale-installment-preview">
@@ -856,24 +985,80 @@ export function LogSalePage({
                       <h4 className="subsection-title">Installment preview</h4>
                     </div>
                     <div className="log-sale-status-rows">
-                      <div><span className="muted">Invoice Total</span><strong>{formatCurrency(installment.total)}</strong></div>
-                      <div><span className="muted">Down Payment</span><strong>{formatCurrency(installment.down)}</strong></div>
-                      <div><span className="muted">Financed Amount</span><strong>{formatCurrency(installment.financed)}</strong></div>
-                      <div><span className="muted">Months</span><strong>{installment.months || '—'}</strong></div>
-                      <div><span className="muted">Monthly Amount</span><strong>{formatCurrency(installment.monthly)}</strong></div>
+                      <div><span className="muted">Original Product Total</span><strong>{formatCurrency(pricing?.originalTotal ?? totalAmount)}</strong></div>
+                      <div><span className="muted">Purchase Bracket</span><strong>{pricing?.termMonths ? (
+                        pricing.originalTotal < 3000 ? '₱1,000–₱2,999'
+                          : pricing.originalTotal < 5000 ? '₱3,000–₱4,999'
+                            : pricing.originalTotal < 7000 ? '₱5,000–₱6,999'
+                              : '₱7,000+'
+                      ) : '—'}</strong></div>
+                      <div><span className="muted">Original Obligation</span><strong>{formatCurrency(pricing?.finalObligation ?? totalAmount)}</strong></div>
+                      <div><span className="muted">Monthly Amount</span><strong>{formatCurrency(pricing?.monthlyAmount ?? installment.monthly)}</strong></div>
                       <div><span className="muted">First Due Date</span><strong>{form.firstDueDate ? formatDisplayDate(form.firstDueDate) : '—'}</strong></div>
+                      <div><span className="muted">Maturity Date</span><strong>{pricing?.maturityDate ? formatDisplayDate(pricing.maturityDate) : '—'}</strong></div>
                     </div>
-                    {installment.months > 0 ? (
-                      <p className="muted" style={{ marginTop: 10 }}>
-                        {formatCurrency(installment.monthly)}/month for {installment.months} months after {formatCurrency(installment.down)} down payment.
-                        {installment.lastPayment !== installment.monthly ? (
-                          <> Final month {formatCurrency(installment.lastPayment)} to clear rounding.</>
-                        ) : null}
-                      </p>
+                    {pricing?.schedule?.length ? (
+                      <>
+                        <h5 className="subsection-title" style={{ marginTop: 16 }}>Monthly installment schedule</h5>
+                        <div className="table-shell">
+                          <table className="corvex-table">
+                            <thead>
+                              <tr><th>#</th><th>Due Date</th><th>Amount</th><th>Status</th></tr>
+                            </thead>
+                            <tbody>
+                              {pricing.schedule.map((installmentRow) => (
+                                <tr key={installmentRow.installmentNumber}>
+                                  <td>{installmentRow.installmentNumber}</td>
+                                  <td>{installmentRow.dueDate ? formatDisplayDate(installmentRow.dueDate) : '—'}</td>
+                                  <td>{formatCurrency(installmentRow.amount)}</td>
+                                  <td>Scheduled</td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      </>
+                    ) : null}
+                    {pricing?.settlementOptions?.length ? (
+                      <>
+                        <h5 className="subsection-title" style={{ marginTop: 16 }}>Early Settlement Discount Breakdown</h5>
+                        <p className="muted">Potential future savings only. Discounts are earned after full qualifying settlement.</p>
+                        <div className="table-shell">
+                          <table className="corvex-table">
+                            <thead>
+                              <tr><th>Settlement Timing</th><th>Discount</th><th>Savings</th><th>Total After Discount</th></tr>
+                            </thead>
+                            <tbody>
+                              {pricing.settlementOptions.map((option) => (
+                                <tr key={`${option.ratePercent}-${option.timing}`}>
+                                  <td>{option.timing}</td>
+                                  <td>{option.ratePercent}%</td>
+                                  <td>{formatCurrency(option.discountAmount)}</td>
+                                  <td>{formatCurrency(option.discountedObligation)}</td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      </>
                     ) : null}
                   </div>
                 </>
               )}
+
+              {form.payType === 'full' && pricing ? (
+                <div className="form-group field-report-block">
+                  <h4 className="subsection-title">Spot Cash Summary</h4>
+                  <div className="log-sale-status-rows">
+                    <div><span className="muted">Original Product Total</span><strong>{formatCurrency(pricing.originalTotal)}</strong></div>
+                    <div><span className="muted">Spot Cash Discount (30%)</span><strong>{formatCurrency(pricing.discountAmount)}</strong></div>
+                    <div><span className="muted">Final Cash Price</span><strong>{formatCurrency(pricing.finalObligation)}</strong></div>
+                    <div><span className="muted">Amount Paid</span><strong>{formatCurrency(0)}</strong></div>
+                    <div><span className="muted">Payment Status</span><strong>Pending payment</strong></div>
+                    <div><span className="muted">Remaining Cash Due</span><strong>{formatCurrency(pricing.finalObligation)}</strong></div>
+                  </div>
+                </div>
+              ) : null}
 
               <div className="form-group field-report-block">
                 <label htmlFor="log-sale-notes">Notes</label>
@@ -973,13 +1158,21 @@ export function LogSalePage({
               </table>
             </div>
             <p className="muted" style={{ marginTop: 12 }}>
-              Invoice total: <strong>{formatCurrency(totalAmount)}</strong>
+              Invoice total: <strong>{formatCurrency(form.payType === 'full'
+                ? (pricing?.finalObligation ?? totalAmount)
+                : totalAmount)}</strong>
             </p>
           </section>
 
           <div className="flex flex-wrap justify-end gap-2 mt-4">
             <button className="button secondary" type="button" onClick={handleCancel}>Cancel</button>
-            <button className="button" type="button" onClick={handleSubmitClick} disabled={submitting}>
+            <button
+              className="button"
+              type="button"
+              onClick={handleSubmitClick}
+              disabled={submitting || creditLimitExceeded}
+              title={creditLimitExceeded ? 'This installment sale exceeds the customer credit limit.' : undefined}
+            >
               {submitting ? 'Submitting…' : 'Submit Sale'}
             </button>
           </div>
@@ -990,8 +1183,11 @@ export function LogSalePage({
           creditContext={creditContext}
           loading={customerDetailLoading}
           totalAmount={totalAmount}
+          pricing={pricing}
           payType={form.payType}
           navigate={navigate}
+          offlineMode={!isBrowserOnline()}
+          offlineQueuedCredit={queuedOfflineInstallmentCredit(deviceSales, form.customerId)}
           onRequestCreditReview={() => {
             if (creditContext?.pending_review?.ci_id) {
               navigate(`/sales/credit-investigations/${creditContext.pending_review.ci_id}`);

@@ -13,11 +13,13 @@ async function getLinkedCustomer(pool, userId) {
             b.name AS branch_name,
             COALESCE(ca.outstanding_balance, 0) AS outstanding_balance,
             COALESCE(ca.purchase_volume, 0) AS purchase_volume,
+            COALESCE(cci.credit_limit, 0) AS credit_limit,
             ca.last_collection_date,
             ca.last_sales_visit
      FROM customers c
      LEFT JOIN branches b ON b.id = c.branch_id
      LEFT JOIN customer_activity ca ON ca.customer_id = c.customer_id
+     LEFT JOIN customer_credit_info cci ON cci.customer_id = c.customer_id
      WHERE c.user_id = $1
      LIMIT 1`,
     [userId]
@@ -157,7 +159,7 @@ router.post('/purchase-requests', async (req, res) => {
       return res.status(404).json({ success: false, message: 'Customer record not found.' });
     }
 
-    const { items, notes } = req.body;
+    const { items, notes, payment_terms, pay_type } = req.body;
     if (!Array.isArray(items) || !items.length) {
       return res.status(400).json({ success: false, message: 'At least one product line is required.' });
     }
@@ -171,6 +173,17 @@ router.post('/purchase-requests', async (req, res) => {
     if (normalized.some((item) => !Number.isInteger(item.product_id) || item.product_id <= 0
       || !Number.isInteger(item.quantity) || item.quantity <= 0)) {
       return res.status(400).json({ success: false, message: 'Each item needs a valid product and quantity.' });
+    }
+
+    const requestedPayType = String(pay_type || payment_terms || 'cash').trim().toLowerCase();
+    const isCreditPurchase = requestedPayType === 'installment'
+      || requestedPayType === 'credit'
+      || Number(req.body.term_months) > 0;
+    if (isCreditPurchase && Number(customer.credit_limit) <= 0) {
+      return res.status(403).json({
+        success: false,
+        message: 'Credit purchases are unavailable until your credit limit is approved.',
+      });
     }
 
     const salesAgentId = await resolveSalesAgentIdForCustomer(pool, customer.customer_id);

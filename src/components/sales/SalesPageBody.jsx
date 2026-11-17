@@ -35,7 +35,8 @@ import { InvoiceDetailsPage } from './InvoiceDetailsPage';
 import { LogSalePage } from './LogSalePage';
 import { AreaAssignmentDetailPage, SchedulePage } from './SalesAreaSchedule';
 import { FieldActivityReportDetailPage, FieldActivityReportsPage } from './SalesFieldReports';
-import { CustomerDetailPage, CustomerFormPage, CustomersPage } from './SalesCustomers';
+import { CustomerDetailPage, CustomersPage } from './SalesCustomers';
+import { CustomerFormPage } from './CustomerRegistrationForm';
 import {
   SalesCreditReviewDetailPage,
   SalesCreditReviewRequestPage,

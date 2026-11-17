@@ -2,7 +2,13 @@ import React, { useState, useCallback, useEffect } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Mail, Lock, Eye, EyeOff, AlertCircle, ArrowRight } from 'lucide-react';
-import { login as apiLogin, getEntryPathForRole } from '../../api/authService.js';
+import {
+  login as apiLogin,
+  getEntryPathForRole,
+  getCurrentUser,
+  completeRequiredPasswordChange,
+  logout as clearSession,
+} from '../../api/authService.js';
 import { consumeAuthNotice } from '../../api/sessionActivity.js';
 import whiteLogo from '../../assets/corvex-logo.png';
 import bgImage from '../../assets/corvex-bg.png';
@@ -25,10 +31,59 @@ export function LoginPage() {
   const [apiError, setApiError] = useState('');
   const [loading, setLoading] = useState(false);
 
+  const [mustChange, setMustChange] = useState(() => {
+    const stored = getCurrentUser();
+    return Boolean(stored?.mustChangePassword && localStorage.getItem('corvex_token'));
+  });
+  const [currentPassword, setCurrentPassword] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+
   useEffect(() => {
     const notice = consumeAuthNotice();
     if (notice) setApiError(notice);
   }, []);
+
+  const handlePasswordChange = useCallback(async (e) => {
+    e?.preventDefault();
+    const next = {};
+    if (!currentPassword) next.currentPassword = 'Enter the temporary password you were given';
+    if (newPassword.length < 8) next.newPassword = 'Use at least 8 characters';
+    else if (newPassword === currentPassword) next.newPassword = 'Choose a password different from the temporary one';
+    if (confirmPassword !== newPassword) next.confirmPassword = 'Passwords do not match';
+    setErrors(next);
+    if (Object.keys(next).length) return;
+
+    setApiError('');
+    setLoading(true);
+    try {
+      await completeRequiredPasswordChange(currentPassword, newPassword, confirmPassword);
+      setCurrentPassword('');
+      setNewPassword('');
+      setConfirmPassword('');
+      navigate(getEntryPathForRole(getCurrentUser()?.role?.slug));
+    } catch (err) {
+      if (!err?.response) setApiError('Cannot connect to the server.');
+      else if (err.response.status === 401 && !localStorage.getItem('corvex_token')) {
+        setMustChange(false);
+        setApiError(err.response.data?.message || 'Your session ended. Sign in again with your temporary password.');
+      } else {
+        setApiError(err.response.data?.message || 'Could not update your password.');
+      }
+    } finally {
+      setLoading(false);
+    }
+  }, [currentPassword, newPassword, confirmPassword, navigate]);
+
+  const cancelPasswordChange = () => {
+    clearSession();
+    setMustChange(false);
+    setCurrentPassword('');
+    setNewPassword('');
+    setConfirmPassword('');
+    setErrors({});
+    setApiError('');
+  };
 
   const handleLogin = useCallback(async (e) => {
     e?.preventDefault();
@@ -47,7 +102,11 @@ export function LoginPage() {
 
     try {
       const data = await apiLogin(email.trim(), password);
-      if (data.success && data.user && data.token) {
+      if (data.success && data.user && data.token && data.user.mustChangePassword) {
+        setCurrentPassword(password);
+        setPassword('');
+        setMustChange(true);
+      } else if (data.success && data.user && data.token) {
         const entryPath = getEntryPathForRole(data.user.role?.slug);
         navigate(entryPath);
       } else {
@@ -107,9 +166,11 @@ export function LoginPage() {
             transition={{ duration: 0.45, ease: [0.16, 1, 0.3, 1] }}
           >
             <div className="login-form-header">
-              <h1 className="login-heading">Welcome back</h1>
+              <h1 className="login-heading">{mustChange ? 'Set your password' : 'Welcome back'}</h1>
               <p className="login-subtitle">
-                Sign in to continue to your Corvex account.
+                {mustChange
+                  ? 'You signed in with a temporary password. Choose your own password to continue.'
+                  : 'Sign in to continue to your Corvex account.'}
               </p>
             </div>
 
@@ -128,6 +189,58 @@ export function LoginPage() {
               )}
             </AnimatePresence>
 
+            {mustChange ? (
+              <form onSubmit={handlePasswordChange} noValidate className="login-form-wrapper">
+                {[
+                  { id: 'currentPassword', label: 'Temporary password', value: currentPassword, set: setCurrentPassword, auto: 'current-password' },
+                  { id: 'newPassword', label: 'New password', value: newPassword, set: setNewPassword, auto: 'new-password' },
+                  { id: 'confirmPassword', label: 'Confirm new password', value: confirmPassword, set: setConfirmPassword, auto: 'new-password' },
+                ].map((field) => (
+                  <div className="login-input-group" key={field.id}>
+                    <label htmlFor={`pw-${field.id}`} className="login-label">{field.label}</label>
+                    <div className="login-input-control group">
+                      <span className="login-input-icon">
+                        <Lock {...fieldIconProps} />
+                      </span>
+                      <input
+                        id={`pw-${field.id}`}
+                        type={showPassword ? 'text' : 'password'}
+                        value={field.value}
+                        onChange={(e) => field.set(e.target.value)}
+                        className={`login-input login-input-password ${errors[field.id] ? 'has-error' : ''}`}
+                        autoComplete={field.auto}
+                        disabled={loading}
+                        aria-invalid={!!errors[field.id]}
+                      />
+                      {field.id === 'newPassword' ? (
+                        <button
+                          type="button"
+                          className="password-toggle"
+                          onClick={() => setShowPassword(!showPassword)}
+                          aria-label={showPassword ? 'Hide passwords' : 'Show passwords'}
+                        >
+                          {showPassword ? <EyeOff {...fieldIconProps} /> : <Eye {...fieldIconProps} />}
+                        </button>
+                      ) : null}
+                    </div>
+                    {errors[field.id] && (
+                      <span className="login-error-message" role="alert">{errors[field.id]}</span>
+                    )}
+                  </div>
+                ))}
+                <button type="submit" className="login-submit-button" disabled={loading}>
+                  {loading ? <span className="login-spinner" aria-hidden="true" /> : (
+                    <>
+                      <span>Save password and continue</span>
+                      <ArrowRight size={18} strokeWidth={2} aria-hidden="true" />
+                    </>
+                  )}
+                </button>
+                <button type="button" className="login-link" onClick={cancelPasswordChange} disabled={loading}>
+                  Back to sign in
+                </button>
+              </form>
+            ) : (
             <form onSubmit={handleLogin} noValidate className="login-form-wrapper">
               <div className="login-input-group">
                 <label htmlFor="login-email" className="login-label">Email</label>
@@ -213,6 +326,7 @@ export function LoginPage() {
                 )}
               </button>
             </form>
+            )}
 
             <p className="login-secure-note">
               <Lock size={13} strokeWidth={2} aria-hidden="true" />

@@ -18,6 +18,9 @@ export async function ensureSchema(client) {
     ALTER TABLE customers ADD COLUMN IF NOT EXISTS secondary_contact_lname VARCHAR(100);
     ALTER TABLE customers ADD COLUMN IF NOT EXISTS secondary_contact_phone VARCHAR(30);
     ALTER TABLE customers ADD COLUMN IF NOT EXISTS secondary_contact_relationship VARCHAR(80);
+    ALTER TABLE customers ALTER COLUMN contact_person_fname DROP NOT NULL;
+    ALTER TABLE customers ALTER COLUMN contact_person_lname DROP NOT NULL;
+    ALTER TABLE customers ALTER COLUMN contact_person_phone DROP NOT NULL;
 
     ALTER TABLE products ADD COLUMN IF NOT EXISTS image_url VARCHAR(500);
     ALTER TABLE products ALTER COLUMN image_url TYPE TEXT;
@@ -54,6 +57,14 @@ export async function ensureSchema(client) {
     ALTER TABLE customers ADD COLUMN IF NOT EXISTS mothers_maiden_name VARCHAR(120);
     ALTER TABLE customers ADD COLUMN IF NOT EXISTS civil_status VARCHAR(30);
     ALTER TABLE customers ALTER COLUMN latitude DROP NOT NULL;
+    ALTER TABLE customers ADD COLUMN IF NOT EXISTS customer_type VARCHAR(20) NOT NULL DEFAULT 'Individual';
+    ALTER TABLE customers ADD COLUMN IF NOT EXISTS business_name VARCHAR(200);
+    ALTER TABLE customers ADD COLUMN IF NOT EXISTS registration_profile_json JSONB NOT NULL DEFAULT '{}'::jsonb;
+    ALTER TABLE customers ADD COLUMN IF NOT EXISTS source_assignment_id INTEGER;
+    ALTER TABLE customers ADD COLUMN IF NOT EXISTS territory_override_note TEXT;
+    ALTER TABLE customers ADD COLUMN IF NOT EXISTS estimated_monthly_revenue DECIMAL(14, 2);
+    ALTER TABLE customers ADD COLUMN IF NOT EXISTS estimated_monthly_expenses DECIMAL(14, 2);
+    ALTER TABLE customers ADD COLUMN IF NOT EXISTS existing_obligations DECIMAL(14, 2);
 
     ALTER TABLE credit_investigations ADD COLUMN IF NOT EXISTS request_reason VARCHAR(120);
     ALTER TABLE credit_investigations ADD COLUMN IF NOT EXISTS requested_credit_limit DECIMAL(12, 2);
@@ -300,6 +311,10 @@ export async function ensureSchema(client) {
         ADD COLUMN IF NOT EXISTS radius_meters INTEGER NOT NULL DEFAULT 800,
         ADD COLUMN IF NOT EXISTS default_sales_agent_id INTEGER REFERENCES users(id),
         ADD COLUMN IF NOT EXISTS default_collector_id INTEGER REFERENCES users(id),
+        ADD COLUMN IF NOT EXISTS barangay_code VARCHAR(20),
+        ADD COLUMN IF NOT EXISTS barangay_name VARCHAR(120),
+        ADD COLUMN IF NOT EXISTS municipality_name VARCHAR(120),
+        ADD COLUMN IF NOT EXISTS province_name VARCHAR(120),
         ADD COLUMN IF NOT EXISTS created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
         ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
     `);
@@ -312,6 +327,7 @@ export async function ensureSchema(client) {
       CREATE INDEX IF NOT EXISTS idx_territories_branch_status ON territories (branch_id, status);
       CREATE INDEX IF NOT EXISTS idx_territories_default_sales_agent ON territories (default_sales_agent_id);
       CREATE INDEX IF NOT EXISTS idx_territories_default_collector ON territories (default_collector_id);
+      CREATE INDEX IF NOT EXISTS idx_territories_barangay_code ON territories (barangay_code) WHERE barangay_code IS NOT NULL;
       CREATE UNIQUE INDEX IF NOT EXISTS uq_territories_branch_name_active
         ON territories (branch_id, lower(btrim(territory_name)))
         WHERE status = 'Active'
@@ -338,6 +354,48 @@ export async function ensureSchema(client) {
     );
   `);
 
+  try {
+    await client.query(`
+      INSERT INTO system_settings (setting_key, setting_value, updated_at)
+      VALUES (
+        'territory_policies',
+        '{"inactivityDays":90,"usageSignals":{"assignments":true,"sales":true,"collections":true,"customerActivity":true},"blockers":{"activeCustomers":true,"overdueBalances":true,"openAssignments":true},"mode":"off","notifyBranchManager":true,"preserveHistory":true}',
+        CURRENT_TIMESTAMP
+      )
+      ON CONFLICT (setting_key) DO NOTHING
+    `);
+  } catch (err) {
+    console.error('[ensureSchema] territory_policies seed:', err.message);
+  }
+
+  try {
+    await client.query(`
+      INSERT INTO system_settings (setting_key, setting_value, updated_at)
+      VALUES (
+        'user_policies',
+        '{"inactivity":{"mode":"off","inactivityDays":null,"includeNeverSignedIn":false,"notifyOperatingManagers":true}}',
+        CURRENT_TIMESTAMP
+      )
+      ON CONFLICT (setting_key) DO NOTHING
+    `);
+  } catch (err) {
+    console.error('[ensureSchema] user_policies seed:', err.message);
+  }
+
+  try {
+    await client.query(`
+      INSERT INTO system_settings (setting_key, setting_value, updated_at)
+      VALUES (
+        'credit_suggestion_policies',
+        '{"revenue_fraction":0.3,"max_first_limit":50000,"min_first_limit":1000,"require_evidence_for_suggestion":false,"territory_buffer_meters":250,"offline_credit_max_age_hours":24}',
+        CURRENT_TIMESTAMP
+      )
+      ON CONFLICT (setting_key) DO NOTHING
+    `);
+  } catch (err) {
+    console.error('[ensureSchema] credit_suggestion_policies seed:', err.message);
+  }
+
   // Supplier.contact stores phone numbers; replace name-only seed values.
   await client.query(`
     UPDATE suppliers
@@ -347,6 +405,50 @@ export async function ensureSchema(client) {
        OR TRIM(contact) = ''
        OR contact !~ '[0-9]';
   `);
+
+  // Branch Management: Branch Code, structured address, operations/status policy fields.
+  try {
+    await client.query(`ALTER TABLE branches ADD COLUMN IF NOT EXISTS branch_code VARCHAR(20)`);
+    await client.query(`ALTER TABLE branches ADD COLUMN IF NOT EXISTS address_street VARCHAR(150)`);
+    await client.query(`ALTER TABLE branches ADD COLUMN IF NOT EXISTS address_barangay VARCHAR(100)`);
+    await client.query(`ALTER TABLE branches ADD COLUMN IF NOT EXISTS address_city VARCHAR(100)`);
+    await client.query(`ALTER TABLE branches ADD COLUMN IF NOT EXISTS address_province VARCHAR(100)`);
+    await client.query(`ALTER TABLE branches ADD COLUMN IF NOT EXISTS address_zip VARCHAR(20)`);
+    await client.query(`ALTER TABLE branches ADD COLUMN IF NOT EXISTS operations_state VARCHAR(20) NOT NULL DEFAULT 'operating'`);
+    await client.query(`ALTER TABLE branches ADD COLUMN IF NOT EXISTS operations_reason TEXT`);
+    await client.query(`ALTER TABLE branches ADD COLUMN IF NOT EXISTS operations_recorded_at TIMESTAMPTZ`);
+    await client.query(`ALTER TABLE branches ADD COLUMN IF NOT EXISTS operations_recorded_by INTEGER`);
+    await client.query(`ALTER TABLE branches ADD COLUMN IF NOT EXISTS status_reason TEXT`);
+    await client.query(`ALTER TABLE branches ADD COLUMN IF NOT EXISTS status_changed_at TIMESTAMPTZ`);
+    await client.query(`ALTER TABLE branches ADD COLUMN IF NOT EXISTS status_changed_by INTEGER`);
+    await client.query(`ALTER TABLE branches ADD COLUMN IF NOT EXISTS status_policy_key VARCHAR(40)`);
+    await client.query(`ALTER TABLE branches ADD COLUMN IF NOT EXISTS last_activity_at TIMESTAMPTZ`);
+    await client.query(`CREATE SEQUENCE IF NOT EXISTS branches_code_seq START 1`);
+    await client.query(`
+      DO $$
+      DECLARE rec RECORD;
+      BEGIN
+        FOR rec IN SELECT id FROM branches WHERE branch_code IS NULL ORDER BY created_at, id
+        LOOP
+          UPDATE branches
+             SET branch_code = 'BR-' || LPAD(nextval('branches_code_seq')::TEXT, 5, '0')
+           WHERE id = rec.id;
+        END LOOP;
+      END $$;
+    `);
+    await client.query(`CREATE UNIQUE INDEX IF NOT EXISTS branches_branch_code_key ON branches (branch_code)`);
+    await client.query(`
+      INSERT INTO system_settings (setting_key, setting_value, updated_at)
+      VALUES (
+        'branch_policies',
+        '{"inactivity":{"mode":"off","inactivityMonths":null,"reactivateOnActivity":true,"notifyOperatingManagers":true}}',
+        CURRENT_TIMESTAMP
+      )
+      ON CONFLICT (setting_key) DO NOTHING
+    `);
+  } catch (err) {
+    console.error('[ensureSchema] branch management controls:', err.message);
+  }
 
   // Audit log enrichment + login lockout fields (safe if migration 052 already applied).
   // Run as separate statements so one failure cannot skip the rest.
@@ -363,6 +465,11 @@ export async function ensureSchema(client) {
     await client.query(`CREATE INDEX IF NOT EXISTS idx_audit_logs_branch_created ON audit_logs (branch_id, created_at DESC)`);
     await client.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS failed_login_count INTEGER NOT NULL DEFAULT 0`);
     await client.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS login_locked_until TIMESTAMP NULL`);
+    await client.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS must_change_password BOOLEAN NOT NULL DEFAULT FALSE`);
+    await client.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS session_revoked_at TIMESTAMPTZ NULL`);
+    await client.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS status_changed_at TIMESTAMPTZ NULL`);
+    await client.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS status_changed_by INTEGER NULL REFERENCES users(id)`);
+    await client.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS status_reason TEXT NULL`);
     await client.query(`CREATE INDEX IF NOT EXISTS idx_audit_logs_created_at ON audit_logs (created_at DESC)`);
     await client.query(`
       UPDATE audit_logs
@@ -441,6 +548,17 @@ export async function ensureSchema(client) {
     ALTER TABLE field_activity_reports ADD COLUMN IF NOT EXISTS assignment_id INTEGER;
     ALTER TABLE field_activity_reports ADD COLUMN IF NOT EXISTS customer_id INTEGER;
     ALTER TABLE field_activity_reports ADD COLUMN IF NOT EXISTS severity VARCHAR(20);
+    ALTER TABLE field_activity_reports ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ;
+    ALTER TABLE field_activity_reports ADD COLUMN IF NOT EXISTS updated_by INTEGER;
+    ALTER TABLE field_activity_reports ADD COLUMN IF NOT EXISTS review_status VARCHAR(30) NOT NULL DEFAULT 'Submitted';
+    ALTER TABLE field_activity_reports ADD COLUMN IF NOT EXISTS reviewed_at TIMESTAMPTZ;
+    ALTER TABLE field_activity_reports ADD COLUMN IF NOT EXISTS reviewed_by INTEGER;
+    ALTER TABLE field_activity_reports ADD COLUMN IF NOT EXISTS review_notes TEXT;
+    ALTER TABLE field_activity_reports ADD COLUMN IF NOT EXISTS revision_history_json JSONB NOT NULL DEFAULT '[]'::jsonb;
+    ALTER TABLE field_activity_reports ADD COLUMN IF NOT EXISTS photo_exception_reason TEXT;
+    ALTER TABLE field_activity_reports ADD COLUMN IF NOT EXISTS is_superseded BOOLEAN NOT NULL DEFAULT FALSE;
+    ALTER TABLE field_activity_reports ADD COLUMN IF NOT EXISTS superseded_by INTEGER;
+    ALTER TABLE field_activity_reports ADD COLUMN IF NOT EXISTS edit_reopened_until TIMESTAMPTZ;
 
     ALTER TABLE field_visits ADD COLUMN IF NOT EXISTS visit_outcome VARCHAR(40);
     ALTER TABLE field_visits ADD COLUMN IF NOT EXISTS visit_remarks TEXT;
@@ -463,18 +581,12 @@ export async function ensureSchema(client) {
 
   try {
     await client.query(`
-      CREATE UNIQUE INDEX IF NOT EXISTS uq_sales_area_territory_day
-      ON sales_area_assignments (territory_id, work_date)
-      WHERE territory_id IS NOT NULL
-        AND status IN ('Assigned', 'In Progress', 'Done')
-    `);
-    await client.query(`
-      CREATE UNIQUE INDEX IF NOT EXISTS uq_sales_area_agent_name_day
-      ON sales_area_assignments (sales_agent_id, work_date, lower(btrim(area_name)))
-      WHERE status IN ('Assigned', 'In Progress', 'Done')
+      CREATE UNIQUE INDEX IF NOT EXISTS uq_far_one_active_per_assignment
+      ON field_activity_reports (assignment_id)
+      WHERE assignment_id IS NOT NULL AND is_superseded = FALSE
     `);
   } catch (err) {
-    console.error('[ensureSchema] sales_area_assignments unique indexes:', err.message);
+    console.error('[ensureSchema] FAR one-active-per-assignment index:', err.message);
   }
 
   await client.query(`
@@ -487,14 +599,17 @@ export async function ensureSchema(client) {
       area_name       VARCHAR(150) NOT NULL,
       coverage_notes  TEXT,
       work_date       DATE NOT NULL,
+      end_date        DATE,
       status          VARCHAR(20) NOT NULL DEFAULT 'Assigned'
-                      CHECK (status IN ('Assigned', 'In Progress', 'Done')),
+                      CHECK (status IN ('Assigned', 'In Progress', 'Done', 'Not Started', 'Incomplete')),
       latitude        DECIMAL(10, 7),
       longitude       DECIMAL(10, 7),
       radius_meters   INTEGER NOT NULL DEFAULT 800
                       CHECK (radius_meters >= 100 AND radius_meters <= 20000),
       started_at      TIMESTAMP,
       completed_at    TIMESTAMP,
+      closure_notes   TEXT,
+      closeout_report_id INTEGER REFERENCES field_activity_reports(report_id) ON DELETE SET NULL,
       created_at      TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
       updated_at      TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
     );
@@ -506,6 +621,45 @@ export async function ensureSchema(client) {
       PRIMARY KEY (assignment_id, product_id)
     );
   `);
+
+  try {
+    await client.query(`
+      ALTER TABLE sales_area_assignments
+        ADD COLUMN IF NOT EXISTS end_date DATE;
+      UPDATE sales_area_assignments
+      SET end_date = work_date
+      WHERE end_date IS NULL;
+      ALTER TABLE sales_area_assignments
+        ALTER COLUMN end_date SET DEFAULT CURRENT_DATE;
+      ALTER TABLE sales_area_assignments
+        ALTER COLUMN end_date SET NOT NULL;
+      ALTER TABLE sales_area_assignments
+        ADD COLUMN IF NOT EXISTS closure_notes TEXT;
+      ALTER TABLE sales_area_assignments
+        ADD COLUMN IF NOT EXISTS closeout_report_id INTEGER REFERENCES field_activity_reports(report_id) ON DELETE SET NULL;
+      UPDATE sales_area_assignments
+      SET status = CASE
+        WHEN started_at IS NULL THEN 'Not Started'
+        ELSE 'Incomplete'
+      END,
+      updated_at = CURRENT_TIMESTAMP
+      WHERE status = 'Expired';
+      ALTER TABLE sales_area_assignments
+        DROP CONSTRAINT IF EXISTS sales_area_assignments_status_check;
+      ALTER TABLE sales_area_assignments
+        ADD CONSTRAINT sales_area_assignments_status_check
+        CHECK (status IN ('Assigned', 'In Progress', 'Done', 'Not Started', 'Incomplete'));
+      DROP INDEX IF EXISTS uq_sales_area_territory_day;
+      DROP INDEX IF EXISTS uq_sales_area_agent_name_day;
+      CREATE INDEX IF NOT EXISTS idx_sales_area_assignments_agent_range
+        ON sales_area_assignments (sales_agent_id, work_date, end_date);
+      CREATE INDEX IF NOT EXISTS idx_sales_area_assignments_territory_range
+        ON sales_area_assignments (territory_id, work_date, end_date)
+        WHERE territory_id IS NOT NULL;
+    `);
+  } catch (err) {
+    console.error('[ensureSchema] sales_area_assignments date range:', err.message);
+  }
 
   await client.query(`
     ALTER TABLE credit_investigations

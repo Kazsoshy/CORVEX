@@ -14,12 +14,15 @@ import { loadBranchDashboardAnalytics } from '../lib/branchManagerDashboardAnaly
 import {
   AREA_ASSIGNMENT_FROM,
   AREA_ASSIGNMENT_SELECT,
+  AREA_ASSIGNMENT_STATUSES,
+  expireStaleAssignments,
   findAreaAssignmentConflicts,
   isValidDate,
   loadAssignmentProducts,
   positiveInteger,
   withProducts,
 } from '../lib/salesAreaAssignments.js';
+import { AUDIT_STATUS, writeAuditFromReq } from '../lib/auditLog.js';
 import {
   OVERDUE_CUSTOMER_SQL as OVERDUE_CUSTOMER,
   paymentStandingFromFlags,
@@ -28,6 +31,7 @@ import {
   FAR_FROM_SQL,
   FAR_SELECT_COLUMNS,
   FAR_WORK_DATE_SQL,
+  FAR_REVIEW_STATUSES,
   mapFarRow,
 } from '../lib/fieldActivityReports.js';
 import { loadStaffPerformance } from '../lib/staffPerformance.js';
@@ -88,6 +92,7 @@ router.get('/staff', requireAuth, async (req, res) => {
 
     const { branchScoped: isBranchScoped, bid } = scopeUser(user);
     const dispatchDate = String(req.query.date || req.query.scheduled_date || manilaDateString()).slice(0, 10);
+    await expireStaleAssignments(pool, isBranchScoped ? { branchId: bid } : {});
 
     // Collectors + Sales Agents: include Active/Inactive for dispatch roster filters.
     const result = await pool.query(
@@ -152,10 +157,14 @@ router.get('/staff', requireAuth, async (req, res) => {
         const todayStops = Number(todayRouteResult.rows[0]?.stops) || 0;
         const todayCompleted = Number(todayRouteResult.rows[0]?.completed) || 0;
         const todayRemaining = Number(todayRouteResult.rows[0]?.remaining) || 0;
+        const manilaToday = manilaDateString();
         let todayRouteStatus = 'No Route';
-        if (todayStops > 0 && todayRemaining === 0) todayRouteStatus = 'Done';
+        if (todayStops > 0 && todayRemaining === 0) todayRouteStatus = 'Completed';
         else if (todayStops > 0 && todayCompleted > 0) todayRouteStatus = 'In Progress';
         else if (todayStops > 0) todayRouteStatus = 'Published';
+        if (dispatchDate < manilaToday && todayStops > 0 && todayRemaining > 0) {
+          todayRouteStatus = 'Needs Attention';
+        }
 
         return {
           id: String(u.id),
@@ -173,6 +182,8 @@ router.get('/staff', requireAuth, async (req, res) => {
           todayStops,
           todayCompleted,
           todayRemaining,
+          needsAttention: todayRouteStatus === 'Needs Attention',
+          hasMapStops: todayStops > 0,
           // Legacy lifetime fields kept for Scorecards / older consumers
           accountsAssigned: assigned,
           accountsVisited: visited,
@@ -190,7 +201,16 @@ router.get('/staff', requireAuth, async (req, res) => {
 
     const salesAgents = await Promise.all(
       result.rows.filter((u) => u.role_slug === 'sales_staff').map(async (u) => {
-        const [bookResult, areaTodayResult, salesTodayResult, lifetimeVisits, lifetimeSales, newCustResult] = await Promise.all([
+        const [
+          bookResult,
+          areaTodayResult,
+          productsTodayResult,
+          salesTodayResult,
+          dayVisitsResult,
+          lifetimeVisits,
+          lifetimeSales,
+          newCustResult,
+        ] = await Promise.all([
           pool.query(
             `SELECT COUNT(*)::int AS book_size
              FROM customers
@@ -204,10 +224,32 @@ router.get('/staff', requireAuth, async (req, res) => {
                COUNT(*)::int AS areas,
                COUNT(*) FILTER (WHERE status = 'Done')::int AS done,
                COUNT(*) FILTER (WHERE status = 'In Progress')::int AS in_progress,
-               COUNT(*) FILTER (WHERE status = 'Assigned')::int AS assigned
+               COUNT(*) FILTER (WHERE status = 'Assigned')::int AS assigned,
+               COUNT(*) FILTER (WHERE status = 'Not Started')::int AS not_started,
+               COUNT(*) FILTER (WHERE status = 'Incomplete')::int AS incomplete,
+               COALESCE(
+                 STRING_AGG(area_name, ', ' ORDER BY assignment_id)
+                   FILTER (WHERE area_name IS NOT NULL AND BTRIM(area_name) <> ''),
+                 ''
+               ) AS area_names,
+               COALESCE(
+                 STRING_AGG(DISTINCT territory_id::text, ',')
+                   FILTER (WHERE territory_id IS NOT NULL),
+                 ''
+               ) AS territory_ids
              FROM sales_area_assignments
              WHERE sales_agent_id = $1
-               AND work_date = $2::date`,
+               AND work_date <= $2::date
+               AND COALESCE(end_date, work_date) >= $2::date`,
+            [u.id, dispatchDate]
+          ),
+          pool.query(
+            `SELECT COUNT(DISTINCT sap.product_id)::int AS product_count
+             FROM sales_area_assignments saa
+             JOIN sales_area_assignment_products sap ON sap.assignment_id = saa.assignment_id
+             WHERE saa.sales_agent_id = $1
+               AND saa.work_date <= $2::date
+               AND COALESCE(saa.end_date, saa.work_date) >= $2::date`,
             [u.id, dispatchDate]
           ),
           pool.query(
@@ -218,6 +260,15 @@ router.get('/staff', requireAuth, async (req, res) => {
              WHERE sales_agent_id = $1
                AND invoices_date = $2::date
                AND status IN ('Pending Review', 'Confirmed')`,
+            [u.id, dispatchDate]
+          ),
+          pool.query(
+            `SELECT
+               COUNT(*) FILTER (WHERE visit_type = 'Sales')::int AS visits_planned,
+               COUNT(*) FILTER (WHERE visit_type = 'Sales' AND status = 'Completed')::int AS visits_completed_today
+             FROM field_visits
+             WHERE user_id = $1
+               AND scheduled_date = $2::date`,
             [u.id, dispatchDate]
           ),
           pool.query(
@@ -249,10 +300,23 @@ router.get('/staff', requireAuth, async (req, res) => {
         const areas = Number(areaTodayResult.rows[0]?.areas) || 0;
         const areasDone = Number(areaTodayResult.rows[0]?.done) || 0;
         const areasInProgress = Number(areaTodayResult.rows[0]?.in_progress) || 0;
-        let workStatus = 'No Assignment';
-        if (areas > 0 && areasDone === areas) workStatus = 'Done';
+        const areasNotStarted = Number(areaTodayResult.rows[0]?.not_started) || 0;
+        const areasIncomplete = Number(areaTodayResult.rows[0]?.incomplete) || 0;
+        const manilaToday = manilaDateString();
+        let workStatus = 'Unassigned';
+        if (areas > 0 && areasDone === areas) workStatus = 'Completed';
         else if (areasInProgress > 0) workStatus = 'In Progress';
-        else if (areas > 0) workStatus = 'Assigned';
+        else if (areas > 0 && areasIncomplete === areas) workStatus = 'Incomplete';
+        else if (areas > 0 && areasNotStarted === areas) workStatus = 'Not Started';
+        else if (areas > 0 && areasIncomplete > 0 && areasDone + areasIncomplete + areasNotStarted === areas) {
+          workStatus = 'Incomplete';
+        } else if (areas > 0) workStatus = 'Assigned';
+        if (areasIncomplete > 0 && areasDone < areas && workStatus !== 'Incomplete') {
+          workStatus = 'Needs Attention';
+        } else if (dispatchDate < manilaToday && areas > 0 && areasDone < areas
+          && areasIncomplete === 0 && areasNotStarted === 0) {
+          workStatus = 'Needs Attention';
+        }
 
         const visits = lifetimeVisits.rows[0];
         const sales = lifetimeSales.rows[0];
@@ -266,6 +330,8 @@ router.get('/staff', requireAuth, async (req, res) => {
           ? Math.round((salesLogged / visitsCompleted) * 100)
           : 0;
         const avgSaleValue = salesLogged > 0 ? Math.round(totalSalesAmount / salesLogged) : 0;
+        const visitsPlannedToday = Number(dayVisitsResult.rows[0]?.visits_planned) || 0;
+        const visitsCompletedToday = Number(dayVisitsResult.rows[0]?.visits_completed_today) || 0;
 
         return {
           id: String(u.id),
@@ -281,6 +347,17 @@ router.get('/staff', requireAuth, async (req, res) => {
           areasAssignedToday: areas,
           areasDoneToday: areasDone,
           areasInProgressToday: areasInProgress,
+          assignedAreaNames: areaTodayResult.rows[0]?.area_names || '',
+          territoryIdsToday: String(areaTodayResult.rows[0]?.territory_ids || '')
+            .split(',')
+            .map((v) => Number(v))
+            .filter((v) => Number.isFinite(v) && v > 0),
+          productsToPushToday: Number(productsTodayResult.rows[0]?.product_count) || 0,
+          visitsPlannedToday,
+          visitsCompletedToday,
+          fieldProgressLabel: visitsPlannedToday > 0
+            ? `${visitsCompletedToday}/${visitsPlannedToday}`
+            : (areas > 0 ? `${areasDone}/${areas}` : null),
           workStatus,
           salesTodayCount: Number(salesTodayResult.rows[0]?.sales_count) || 0,
           salesTodayAmount: Number(salesTodayResult.rows[0]?.sales_amount) || 0,
@@ -462,31 +539,18 @@ router.get('/map', requireAuth, async (req, res) => {
       ),
       pool.query(
         `SELECT
-           t.territory_id, t.territory_name, t.coverage_area, t.assigned_user,
+           t.territory_id, t.territory_name, t.coverage_area,
            t.branch_id, b.name AS branch_name,
            COALESCE(t.status, 'Active') AS status,
            t.latitude::FLOAT AS latitude,
            t.longitude::FLOAT AS longitude,
            COALESCE(t.radius_meters, 800) AS radius_meters,
-           t.default_sales_agent_id,
-           TRIM(CONCAT_WS(' ', sa.first_name, sa.last_name)) AS default_sales_agent_name,
-           t.default_collector_id,
-           TRIM(CONCAT_WS(' ', col.first_name, col.last_name)) AS default_collector_name,
-           COALESCE(
-             JSON_AGG(
-               JSON_BUILD_OBJECT('user_id', ta.user_id, 'user_name', TRIM(u2.first_name || ' ' || u2.last_name))
-             ) FILTER (WHERE ta.user_id IS NOT NULL),
-             '[]'
-           ) AS assigned_users
+           t.barangay_code,
+           t.barangay_name
          FROM territories t
          JOIN branches b ON b.id = t.branch_id
-         LEFT JOIN users sa ON sa.id = t.default_sales_agent_id
-         LEFT JOIN users col ON col.id = t.default_collector_id
-         LEFT JOIN territory_assignments ta ON ta.territory_id = t.territory_id
-         LEFT JOIN users u2 ON u2.id = ta.user_id
          WHERE COALESCE(t.status, 'Active') = 'Active'
            ${branchScoped ? 'AND t.branch_id = $1' : ''}
-         GROUP BY t.territory_id, b.name, sa.first_name, sa.last_name, col.first_name, col.last_name
          ORDER BY b.name, t.territory_name`,
         branchScoped ? [bid] : []
       ),
@@ -589,13 +653,6 @@ router.get('/map', requireAuth, async (req, res) => {
       });
 
     const territories = territoryResult.rows.map((row) => {
-      const assigned = Array.isArray(row.assigned_users) ? row.assigned_users : [];
-      const assignedUserIds = [...new Set([
-        row.default_sales_agent_id,
-        row.default_collector_id,
-        row.assigned_user,
-        ...assigned.map((person) => person.user_id),
-      ].filter(Boolean).map(Number))];
       const hasPin = validCoord(row.latitude, row.longitude);
       return {
         id: row.territory_id,
@@ -606,16 +663,12 @@ router.get('/map', requireAuth, async (req, res) => {
         lng: hasPin ? Number(row.longitude) : null,
         radiusMeters: Number(row.radius_meters) || 800,
         hasMapLocation: hasPin,
-        defaultSalesAgentId: row.default_sales_agent_id != null ? Number(row.default_sales_agent_id) : null,
-        defaultSalesAgentName: row.default_sales_agent_name || null,
-        defaultCollectorId: row.default_collector_id != null ? Number(row.default_collector_id) : null,
-        defaultCollectorName: row.default_collector_name || null,
-        assignedUserIds,
-        assignedNames: [
-          row.default_sales_agent_name,
-          row.default_collector_name,
-          ...assigned.map((person) => person.user_name),
-        ].filter(Boolean),
+        barangayCode: row.barangay_code || null,
+        barangayName: row.barangay_name || null,
+        defaultSalesAgentId: null,
+        defaultCollectorId: null,
+        assignedUserIds: [],
+        assignedNames: [],
         branchId: row.branch_id != null ? Number(row.branch_id) : null,
         branchName: row.branch_name || null,
       };
@@ -760,6 +813,18 @@ router.get('/customers', requireAuth, async (req, res) => {
     const user = req.currentUser;
 
     const { branchScoped: isBranchScoped, bid } = scopeUser(user);
+    const agentFilter = positiveInteger(req.query.agent || req.query.assigned_sales_agent_id);
+    const conditions = [];
+    const params = [];
+    if (isBranchScoped) {
+      params.push(bid);
+      conditions.push(`c.branch_id = $${params.length}`);
+    }
+    if (agentFilter) {
+      params.push(agentFilter);
+      conditions.push(`c.assigned_sales_agent_id = $${params.length}`);
+    }
+    const whereSql = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
 
     const result = await pool.query(
       `SELECT c.customer_id, c.customer_code, c.first_name, c.last_name, c.contact_phone, c.status,
@@ -781,9 +846,9 @@ router.get('/customers', requireAuth, async (req, res) => {
        LEFT JOIN customer_activity ca ON c.customer_id = ca.customer_id
        LEFT JOIN users mgr ON mgr.id = c.account_manager_id
        LEFT JOIN users agent ON agent.id = c.assigned_sales_agent_id
-       ${isBranchScoped ? 'WHERE c.branch_id = $1' : ''}
+       ${whereSql}
        ORDER BY c.last_name, c.first_name`,
-      isBranchScoped ? [bid] : []
+      params
     );
 
     const customers = result.rows.map((c) => {
@@ -1080,9 +1145,7 @@ router.get('/staff/collectors/:id/saw-priority', requireAuth, async (req, res) =
 
     const assignments = await getCollectionAssignmentsForDate(pool, collectorId, scheduledDate);
     const assignedIds = new Set(assignments.map((a) => Number(a.customer_id)));
-    const emptyBook = (Number(bookStats?.ownBook) || 0) === 0
-      && (Number(bookStats?.territoryDefault) || 0) === 0
-      && (Number(bookStats?.unassignedEligible) || 0) === 0;
+    const emptyBook = (Number(bookStats?.ownBook) || 0) === 0;
 
     return res.status(200).json({
       success: true,
@@ -1095,7 +1158,7 @@ router.get('/staff/collectors/:id/saw-priority', requireAuth, async (req, res) =
         assignedCustomerIds: [...assignedIds],
         emptyBook,
         emptyBookMessage: emptyBook
-          ? 'No eligible customers are currently assigned to this Collector\'s portfolio or territories.'
+          ? 'No customers are currently assigned to this Collector\'s permanent collection portfolio. Assign this Collector as Assigned Collector on customer records, then refresh.'
           : null,
       },
     });
@@ -1284,7 +1347,7 @@ router.get('/staff/collectors/:id', requireAuth, async (req, res) => {
       ),
       // Fast published-route read — no OSRM. Priority candidates come from saw-priority.
       pool.query(
-        `SELECT fv.visit_id, fv.status, fv.scheduled_date,
+        `SELECT fv.visit_id, fv.status, fv.visit_outcome, fv.scheduled_date,
                 c.customer_id, c.customer_code, c.address,
                 c.latitude, c.longitude,
                 COALESCE(ca.outstanding_balance, 0)::float AS outstanding_balance,
@@ -1324,23 +1387,30 @@ router.get('/staff/collectors/:id', requireAuth, async (req, res) => {
       address: row.address,
       outstandingBalance: Number(row.outstanding_balance) || 0,
       status: row.status || 'Pending',
+      visitOutcome: row.visit_outcome || null,
       scheduledDate,
       priorityScore: null,
       priorityRank: null,
       lat: row.latitude != null ? Number(row.latitude) : null,
       lng: row.longitude != null ? Number(row.longitude) : null,
+      latitude: row.latitude != null ? Number(row.latitude) : null,
+      longitude: row.longitude != null ? Number(row.longitude) : null,
       amount: null,
     }));
 
     const completed = publishedStops.filter((s) => s.status === 'Completed').length;
     const pending = publishedStops.filter((s) => s.status === 'Pending').length;
+    const manilaToday = manilaDateString();
     let todayRouteStatus = 'No Route';
-    if (publishedStops.length && pending === 0) todayRouteStatus = 'Done';
+    if (publishedStops.length && pending === 0) todayRouteStatus = 'Completed';
     else if (publishedStops.length && completed > 0) todayRouteStatus = 'In Progress';
     else if (publishedStops.length) todayRouteStatus = 'Published';
+    if (scheduledDate < manilaToday && publishedStops.length && pending > 0) {
+      todayRouteStatus = 'Needs Attention';
+    }
 
     const mapMarkers = publishedStops
-      .filter((r) => Number.isFinite(r.lat) && Number.isFinite(r.lng))
+      .filter((r) => Number.isFinite(r.lat) && Number.isFinite(r.lng) && !(r.lat === 0 && r.lng === 0))
       .map((r) => ({
         id: `stop-${r.visitId || r.customerId}`,
         position: [r.lat, r.lng],
@@ -1374,12 +1444,15 @@ router.get('/staff/collectors/:id', requireAuth, async (req, res) => {
         routeStats: {
           eligibleCustomers: null,
           customersInBook: Number(bookRes.rows[0]?.book_size) || 0,
+          portfolioCustomers: Number(bookRes.rows[0]?.book_size) || 0,
           alreadyAssignedToday: publishedStops.length,
           publishedStops: publishedStops.length,
           completed,
           remaining: pending,
           blockedAssignments: null,
         },
+        // Visit-level history remains available for API consumers but is no longer
+        // the primary BM history UI (use GET /collection-routes instead).
         history: historyRes.rows.map((row) => ({
           visitId: row.visit_id,
           customerId: row.customer_id,
@@ -1402,6 +1475,286 @@ router.get('/staff/collectors/:id', requireAuth, async (req, res) => {
   }
 });
 
+function deriveCollectionRouteStatus(planned, completed, remaining, workDate, manilaToday) {
+  if (!planned) return 'No Route';
+  let status = 'Published';
+  if (remaining === 0) status = 'Completed';
+  else if (completed > 0) status = 'In Progress';
+  if (workDate < manilaToday && remaining > 0) status = 'Needs Attention';
+  return status;
+}
+
+async function queryCollectionRoutes(pool, {
+  branchScoped,
+  bid,
+  collectorId = null,
+  from = null,
+  to = null,
+  status = null,
+  search = '',
+  limit = 200,
+}) {
+  const params = [];
+  const where = [`fv.visit_type = 'Collection'`];
+  let p = 1;
+
+  if (branchScoped && bid != null) {
+    where.push(`u.branch_id = $${p++}`);
+    params.push(bid);
+  }
+  if (collectorId) {
+    where.push(`fv.user_id = $${p++}`);
+    params.push(collectorId);
+  }
+  if (from) {
+    where.push(`fv.scheduled_date >= $${p++}::date`);
+    params.push(String(from).slice(0, 10));
+  }
+  if (to) {
+    where.push(`fv.scheduled_date <= $${p++}::date`);
+    params.push(String(to).slice(0, 10));
+  }
+  if (search && String(search).trim()) {
+    where.push(`(
+      CONCAT(u.first_name, ' ', u.last_name) ILIKE $${p}
+      OR COALESCE(u.employee_id, '') ILIKE $${p}
+      OR COALESCE(u.email, '') ILIKE $${p}
+    )`);
+    params.push(`%${String(search).trim()}%`);
+    p += 1;
+  }
+
+  const lim = Math.min(Math.max(Number(limit) || 200, 1), 500);
+  params.push(lim);
+
+  const result = await pool.query(
+    `SELECT
+       fv.user_id AS collector_id,
+       CONCAT(u.first_name, ' ', u.last_name) AS collector_name,
+       u.employee_id AS collector_employee_id,
+       u.branch_id,
+       b.name AS branch_name,
+       fv.scheduled_date::text AS work_date,
+       COUNT(*)::int AS planned_stops,
+       COUNT(*) FILTER (WHERE fv.status = 'Completed')::int AS completed,
+       COUNT(*) FILTER (WHERE fv.status = 'Pending')::int AS remaining,
+       MAX(fv.visited_at) AS completed_at,
+       MIN(fv.created_at) AS published_at
+     FROM field_visits fv
+     JOIN users u ON u.id = fv.user_id
+     JOIN roles r ON r.role_id = u.role_id AND r.slug = 'collector'
+     LEFT JOIN branches b ON b.id = u.branch_id
+     WHERE ${where.join(' AND ')}
+     GROUP BY fv.user_id, u.first_name, u.last_name, u.employee_id, u.branch_id, b.name, fv.scheduled_date
+     ORDER BY fv.scheduled_date DESC, collector_name ASC
+     LIMIT $${p}`,
+    params
+  );
+
+  const manilaToday = manilaDateString();
+  let rows = result.rows.map((row) => {
+    const planned = Number(row.planned_stops) || 0;
+    const completed = Number(row.completed) || 0;
+    const remaining = Number(row.remaining) || 0;
+    const routeStatus = deriveCollectionRouteStatus(planned, completed, remaining, row.work_date, manilaToday);
+    return {
+      collector_id: String(row.collector_id),
+      collector_name: row.collector_name,
+      collector_employee_id: row.collector_employee_id || null,
+      branch_id: row.branch_id,
+      branch_name: row.branch_name || null,
+      work_date: row.work_date,
+      planned_stops: planned,
+      completed,
+      remaining,
+      route_status: routeStatus,
+      published_by: null,
+      published_at: row.published_at || null,
+      completed_at: remaining === 0 ? row.completed_at : null,
+    };
+  });
+
+  if (status && status !== 'all') {
+    const wanted = String(status);
+    rows = rows.filter((row) => {
+      if (wanted === 'Done') return row.route_status === 'Completed';
+      return row.route_status === wanted;
+    });
+  }
+  return rows;
+}
+
+async function queryCollectionRouteDetail(pool, {
+  branchScoped,
+  bid,
+  collectorId,
+  workDate,
+}) {
+  const params = [collectorId, String(workDate).slice(0, 10)];
+  let branchSql = '';
+  if (branchScoped && bid != null) {
+    branchSql = ' AND u.branch_id = $3';
+    params.push(bid);
+  }
+
+  const headerRes = await pool.query(
+    `SELECT
+       u.id AS collector_id,
+       CONCAT(u.first_name, ' ', u.last_name) AS collector_name,
+       u.employee_id AS collector_employee_id,
+       u.branch_id,
+       b.name AS branch_name
+     FROM users u
+     JOIN roles r ON r.role_id = u.role_id AND r.slug = 'collector'
+     LEFT JOIN branches b ON b.id = u.branch_id
+     WHERE u.id = $1${branchSql}`,
+    params
+  );
+  const header = headerRes.rows[0];
+  if (!header) return null;
+
+  const stopsRes = await pool.query(
+    `SELECT
+       fv.visit_id,
+       fv.status,
+       fv.visit_outcome,
+       fv.visit_remarks,
+       fv.visited_at,
+       fv.scheduled_date::text AS scheduled_date,
+       fv.created_at,
+       c.customer_id,
+       c.customer_code,
+       c.address,
+       c.latitude,
+       c.longitude,
+       COALESCE(ca.outstanding_balance, 0)::float AS outstanding_balance,
+       COALESCE(NULLIF(TRIM(CONCAT_WS(' ', c.first_name, c.last_name)), ''), 'Customer') AS customer_name,
+       (
+         SELECT COUNT(*)::int FROM field_activity_reports far
+         WHERE far.visit_id = fv.visit_id
+       ) AS field_report_count,
+       (
+         SELECT COALESCE(SUM(cp.amount), 0)::float
+         FROM collection_payment cp
+         WHERE cp.customer_id = fv.customer_id
+           AND cp.collector_id = fv.user_id
+           AND cp.payment_date::date = fv.scheduled_date
+           AND cp.status IN ('Completed', 'Pending Review', 'Pending')
+       ) AS payment_amount
+     FROM field_visits fv
+     JOIN customers c ON c.customer_id = fv.customer_id
+     LEFT JOIN customer_activity ca ON ca.customer_id = c.customer_id
+     WHERE fv.user_id = $1
+       AND fv.visit_type = 'Collection'
+       AND fv.scheduled_date = $2::date
+     ORDER BY fv.visit_id ASC`,
+    [collectorId, String(workDate).slice(0, 10)]
+  );
+
+  const stops = stopsRes.rows.map((row, idx) => ({
+    stop_number: idx + 1,
+    visit_id: row.visit_id,
+    customer_id: row.customer_id,
+    customer_code: row.customer_code || null,
+    customer_name: row.customer_name,
+    address: row.address || null,
+    status: row.status || 'Pending',
+    visit_outcome: row.visit_outcome || null,
+    visit_remarks: row.visit_remarks || null,
+    visited_at: row.visited_at || null,
+    outstanding_balance: Number(row.outstanding_balance) || 0,
+    field_report_count: Number(row.field_report_count) || 0,
+    payment_amount: Number(row.payment_amount) || 0,
+    latitude: row.latitude != null ? Number(row.latitude) : null,
+    longitude: row.longitude != null ? Number(row.longitude) : null,
+  }));
+
+  const planned = stops.length;
+  const completed = stops.filter((s) => s.status === 'Completed').length;
+  const remaining = stops.filter((s) => s.status === 'Pending').length;
+  const manilaToday = manilaDateString();
+  const routeStatus = deriveCollectionRouteStatus(
+    planned,
+    completed,
+    remaining,
+    String(workDate).slice(0, 10),
+    manilaToday
+  );
+
+  return {
+    collector_id: String(header.collector_id),
+    collector_name: header.collector_name,
+    collector_employee_id: header.collector_employee_id || null,
+    branch_id: header.branch_id,
+    branch_name: header.branch_name || null,
+    work_date: String(workDate).slice(0, 10),
+    planned_stops: planned,
+    completed,
+    remaining,
+    route_status: routeStatus,
+    published_by: null,
+    published_at: stopsRes.rows[0]?.created_at || null,
+    completed_at: remaining === 0
+      ? stops.reduce((max, s) => (s.visited_at && (!max || s.visited_at > max) ? s.visited_at : max), null)
+      : null,
+    stops,
+  };
+}
+
+// Branch-wide synthetic collection route history (grouped field_visits)
+router.get('/collection-routes', requireAuth, async (req, res) => {
+  try {
+    const pool = req.app.locals.pool;
+    const user = req.currentUser;
+    const { branchScoped, bid } = scopeUser(user);
+    const collectorId = positiveInteger(req.query.collector_id || req.query.collectorId);
+    const rows = await queryCollectionRoutes(pool, {
+      branchScoped,
+      bid,
+      collectorId,
+      from: req.query.from,
+      to: req.query.to,
+      status: req.query.status ? String(req.query.status) : null,
+      search: req.query.search || '',
+      limit: req.query.limit,
+    });
+    return res.status(200).json({ success: true, data: rows });
+  } catch (err) {
+    console.error('[Branch Manager] GET /collection-routes error:', err.message);
+    return res.status(500).json({ success: false, message: 'Failed to load collection route history.' });
+  }
+});
+
+router.get('/collection-routes/:collectorId/:workDate', requireAuth, async (req, res) => {
+  try {
+    const pool = req.app.locals.pool;
+    const user = req.currentUser;
+    const collectorId = positiveInteger(req.params.collectorId);
+    const workDate = String(req.params.workDate || '').slice(0, 10);
+    if (!collectorId || !isValidDate(workDate)) {
+      return res.status(400).json({ success: false, message: 'Invalid collector or work date.' });
+    }
+    const allowed = await assertStaffInBranch(pool, user, collectorId, 'collector');
+    if (!allowed) {
+      return res.status(404).json({ success: false, message: 'Collector not found.' });
+    }
+    const { branchScoped, bid } = scopeUser(user);
+    const detail = await queryCollectionRouteDetail(pool, {
+      branchScoped,
+      bid,
+      collectorId,
+      workDate,
+    });
+    if (!detail) {
+      return res.status(404).json({ success: false, message: 'Route not found.' });
+    }
+    return res.status(200).json({ success: true, data: detail });
+  } catch (err) {
+    console.error('[Branch Manager] GET /collection-routes/:collectorId/:workDate error:', err.message);
+    return res.status(500).json({ success: false, message: 'Failed to load route detail.' });
+  }
+});
+
 // GET /api/branch-manager/staff/sales/:id — profile, date-scoped areas, owned customer book
 router.get('/staff/sales/:id', requireAuth, async (req, res) => {
   try {
@@ -1417,6 +1770,7 @@ router.get('/staff/sales/:id', requireAuth, async (req, res) => {
     }
 
     const workDate = String(req.query.work_date || req.query.date || manilaDateString()).slice(0, 10);
+    await expireStaleAssignments(pool, { salesAgentId: agentId });
 
     const profileRes = await pool.query(
       `SELECT u.id, u.first_name, u.last_name, u.email, u.phone, u.employee_id,
@@ -1431,7 +1785,7 @@ router.get('/staff/sales/:id', requireAuth, async (req, res) => {
       return res.status(404).json({ success: false, message: 'Sales agent not found.' });
     }
 
-    const [bookRes, areasRes, farRes, salesTodayRes, customersRes] = await Promise.all([
+    const [bookRes, areasRes, farRes, salesTodayRes, dayVisitsRes, dayActivityRes] = await Promise.all([
       pool.query(
         `SELECT COUNT(*)::int AS book_size
          FROM customers
@@ -1444,7 +1798,8 @@ router.get('/staff/sales/:id', requireAuth, async (req, res) => {
         `SELECT ${AREA_ASSIGNMENT_SELECT}
          ${AREA_ASSIGNMENT_FROM}
          WHERE saa.sales_agent_id = $1
-           AND saa.work_date = $2::date
+           AND saa.work_date <= $2::date
+           AND COALESCE(saa.end_date, saa.work_date) >= $2::date
          ORDER BY saa.assignment_id ASC`,
         [agentId, workDate]
       ),
@@ -1454,7 +1809,7 @@ router.get('/staff/sales/:id', requireAuth, async (req, res) => {
          LEFT JOIN sales_area_assignments saa ON saa.assignment_id = far.assignment_id
          WHERE far.user_id = $1
            AND (
-             saa.work_date = $2::date
+             (saa.work_date <= $2::date AND COALESCE(saa.end_date, saa.work_date) >= $2::date)
              OR (far.created_at AT TIME ZONE 'Asia/Manila')::date = $2::date
            )`,
         [agentId, workDate]
@@ -1468,21 +1823,31 @@ router.get('/staff/sales/:id', requireAuth, async (req, res) => {
         [agentId, workDate]
       ),
       pool.query(
-        `SELECT c.customer_id, c.customer_code,
-                COALESCE(NULLIF(TRIM(CONCAT_WS(' ', c.first_name, c.last_name)), ''), 'Customer') AS customer_name,
-                c.contact_phone, c.address, c.status,
-                COALESCE(ca.outstanding_balance, 0)::float AS outstanding_balance,
-                (${OVERDUE_CUSTOMER}) AS has_overdue_invoice,
-                t.territory_name
-         FROM customers c
-         LEFT JOIN customer_activity ca ON ca.customer_id = c.customer_id
-         LEFT JOIN territories t ON t.territory_id = c.territory_id
-         WHERE c.assigned_sales_agent_id = $1
-           AND c.status = 'Active'
-           AND ($2::int IS NULL OR c.branch_id = $2)
-         ORDER BY c.last_name, c.first_name
-         LIMIT 100`,
-        [agentId, profile.branch_id]
+        `SELECT
+           COUNT(*) FILTER (WHERE visit_type = 'Sales')::int AS visits_planned,
+           COUNT(*) FILTER (WHERE visit_type = 'Sales' AND status = 'Completed')::int AS visits_completed
+         FROM field_visits
+         WHERE user_id = $1
+           AND scheduled_date = $2::date`,
+        [agentId, workDate]
+      ),
+      pool.query(
+        `SELECT far.report_id, far.activity_type, far.remarks, far.created_at,
+                fv.visit_id, fv.status AS visit_status, fv.scheduled_date::text AS scheduled_date,
+                COALESCE(NULLIF(TRIM(CONCAT_WS(' ', c.first_name, c.last_name)), ''), NULL) AS customer_name
+         FROM field_activity_reports far
+         LEFT JOIN sales_area_assignments saa ON saa.assignment_id = far.assignment_id
+         LEFT JOIN field_visits fv ON fv.visit_id = far.visit_id
+         LEFT JOIN customers c ON c.customer_id = fv.customer_id
+         WHERE far.user_id = $1
+           AND (
+             (saa.work_date <= $2::date AND COALESCE(saa.end_date, saa.work_date) >= $2::date)
+             OR (far.created_at AT TIME ZONE 'Asia/Manila')::date = $2::date
+             OR fv.scheduled_date = $2::date
+           )
+         ORDER BY far.created_at DESC
+         LIMIT 50`,
+        [agentId, workDate]
       ),
     ]);
 
@@ -1493,15 +1858,32 @@ router.get('/staff/sales/:id', requireAuth, async (req, res) => {
     const areas = areasRes.rows.map((row) => withProducts(row, productsByAssignment));
     const areasDone = areas.filter((a) => a.status === 'Done').length;
     const areasInProgress = areas.filter((a) => a.status === 'In Progress').length;
-    let workStatus = 'No Assignment';
-    if (areas.length && areasDone === areas.length) workStatus = 'Done';
+    const areasNotStarted = areas.filter((a) => a.status === 'Not Started').length;
+    const areasIncomplete = areas.filter((a) => a.status === 'Incomplete').length;
+    const manilaToday = manilaDateString();
+    let workStatus = 'Unassigned';
+    if (areas.length && areasDone === areas.length) workStatus = 'Completed';
     else if (areasInProgress > 0) workStatus = 'In Progress';
-    else if (areas.length) workStatus = 'Assigned';
+    else if (areas.length && areasIncomplete === areas.length) workStatus = 'Incomplete';
+    else if (areas.length && areasNotStarted === areas.length) workStatus = 'Not Started';
+    else if (areas.length && areasIncomplete > 0
+      && areasDone + areasIncomplete + areasNotStarted === areas.length) {
+      workStatus = 'Incomplete';
+    } else if (areas.length) workStatus = 'Assigned';
+    if (areasIncomplete > 0 && areasDone < areas.length && workStatus !== 'Incomplete') {
+      workStatus = 'Needs Attention';
+    } else if (workDate < manilaToday && areas.length && areasDone < areas.length
+      && areasIncomplete === 0 && areasNotStarted === 0) {
+      workStatus = 'Needs Attention';
+    }
 
     const productsAssigned = new Set();
     areas.forEach((area) => {
       (area.products_to_push || []).forEach((p) => productsAssigned.add(p.product_id));
     });
+
+    const visitsPlanned = Number(dayVisitsRes.rows[0]?.visits_planned) || 0;
+    const visitsCompleted = Number(dayVisitsRes.rows[0]?.visits_completed) || 0;
 
     return res.status(200).json({
       success: true,
@@ -1521,31 +1903,30 @@ router.get('/staff/sales/:id', requireAuth, async (req, res) => {
         },
         workDate,
         areas,
+        fieldActivity: dayActivityRes.rows.map((row) => ({
+          reportId: row.report_id,
+          activityType: row.activity_type,
+          remarks: row.remarks,
+          createdAt: row.created_at,
+          visitId: row.visit_id,
+          visitStatus: row.visit_status,
+          scheduledDate: row.scheduled_date,
+          customerName: row.customer_name,
+        })),
         dispatchStats: {
           areasAssigned: areas.length,
           areasCompleted: areasDone,
           areasInProgress,
           fieldReports: Number(farRes.rows[0]?.count) || 0,
           productsAssigned: productsAssigned.size,
+          visitsPlanned,
+          visitsCompleted,
           areasWithMapLocation: areas.filter((a) => Number.isFinite(Number(a.latitude)) && Number.isFinite(Number(a.longitude))).length,
           salesLoggedToday: Number(salesTodayRes.rows[0]?.count) || 0,
           salesAmountToday: Number(salesTodayRes.rows[0]?.amount) || 0,
         },
-        customerBook: customersRes.rows.map((row) => ({
-          customerId: row.customer_id,
-          customerCode: row.customer_code,
-          customerName: row.customer_name,
-          contactPhone: row.contact_phone,
-          address: row.address,
-          territoryName: row.territory_name || null,
-          status: row.status,
-          outstandingBalance: Number(row.outstanding_balance) || 0,
-          paymentStanding: paymentStandingFromFlags({
-            outstandingBalance: Number(row.outstanding_balance) || 0,
-            hasOverdueInvoice: Boolean(row.has_overdue_invoice),
-          }),
-        })),
-        // Legacy keys kept empty so old UI code does not crash if still referenced.
+        // Kept for compatibility; Daily Dispatch UI links out instead of embedding the book.
+        customerBook: [],
         customers: [],
         productPerformance: [],
       },
@@ -1661,6 +2042,18 @@ router.get('/field-activity-reports', requireAuth, async (req, res) => {
       p += 1;
     }
 
+    const includeSuperseded = String(req.query.include_superseded || '') === '1'
+      || String(req.query.include_superseded || '').toLowerCase() === 'true';
+    if (!includeSuperseded) {
+      conditions.push(`COALESCE(far.is_superseded, FALSE) = FALSE`);
+    }
+
+    const reviewStatus = String(req.query.review_status || '').trim();
+    if (reviewStatus && reviewStatus.toLowerCase() !== 'all' && FAR_REVIEW_STATUSES.includes(reviewStatus)) {
+      conditions.push(`far.review_status = $${p++}`);
+      params.push(reviewStatus);
+    }
+
     const whereSql = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
 
     const result = await pool.query(
@@ -1761,7 +2154,288 @@ router.get('/field-activity-reports/:id', requireAuth, async (req, res) => {
   }
 });
 
+// PATCH /api/branch-manager/field-activity-reports/:id/review — review only (no approval gate)
+router.patch('/field-activity-reports/:id/review', requireAuth, async (req, res) => {
+  const reportId = Number(req.params.id);
+  if (!Number.isInteger(reportId) || reportId <= 0) {
+    return res.status(400).json({ success: false, message: 'Invalid report id.' });
+  }
+  const reviewStatus = String(req.body?.review_status || '').trim();
+  const reviewNotes = String(req.body?.review_notes || '').trim();
+  if (!['Reviewed', 'Needs Follow-up'].includes(reviewStatus)) {
+    return res.status(400).json({
+      success: false,
+      message: 'review_status must be Reviewed or Needs Follow-up.',
+    });
+  }
+  if (reviewStatus === 'Needs Follow-up' && !reviewNotes) {
+    return res.status(400).json({
+      success: false,
+      message: 'Review notes are required when marking Needs Follow-up.',
+    });
+  }
+
+  try {
+    const pool = req.app.locals.pool;
+    const user = req.currentUser;
+    const { branchScoped: isBranchScoped, bid } = scopeUser(user);
+    const params = isBranchScoped ? [bid, reportId] : [reportId];
+    const whereSql = isBranchScoped
+      ? 'WHERE u.branch_id = $1 AND far.report_id = $2'
+      : 'WHERE far.report_id = $1';
+
+    const existing = await pool.query(
+      `SELECT far.report_id, far.assignment_id, far.is_superseded, far.visit_id
+       ${FAR_FROM_SQL}
+       ${whereSql}`,
+      params
+    );
+    if (!existing.rows.length) {
+      return res.status(404).json({ success: false, message: 'Field activity report not found.' });
+    }
+    if (existing.rows[0].is_superseded) {
+      return res.status(400).json({ success: false, message: 'Superseded reports cannot be reviewed.' });
+    }
+
+    const updated = await pool.query(
+      `UPDATE field_activity_reports
+       SET review_status = $1,
+           review_notes = $2,
+           reviewed_at = CURRENT_TIMESTAMP,
+           reviewed_by = $3,
+           updated_at = CURRENT_TIMESTAMP
+       WHERE report_id = $4
+       RETURNING report_id`,
+      [reviewStatus, reviewNotes || null, user.id, reportId]
+    );
+
+    await writeAuditFromReq(pool, req, {
+      module: 'Branch Manager',
+      activity: 'Review Field Report',
+      action: 'Review Field Report',
+      description: `Marked FAR #${reportId} as ${reviewStatus}.`,
+      status: AUDIT_STATUS.UPDATED,
+      affectedRecord: `field_report:${reportId}`,
+    });
+
+    const detail = await pool.query(
+      `SELECT ${FAR_SELECT_COLUMNS}, far.photo
+       ${FAR_FROM_SQL}
+       WHERE far.report_id = $1`,
+      [updated.rows[0].report_id]
+    );
+
+    return res.status(200).json({
+      success: true,
+      message: reviewStatus === 'Reviewed' ? 'Report marked as Reviewed.' : 'Report marked as Needs Follow-up.',
+      data: mapFarRow(detail.rows[0], { includePhoto: true }),
+    });
+  } catch (err) {
+    console.error('[Branch Manager] PATCH /field-activity-reports/:id/review error:', err.message);
+    return res.status(500).json({ success: false, message: 'Failed to update field activity report review.' });
+  }
+});
+
+// POST /api/branch-manager/field-activity-reports/:id/reopen-edit
+router.post('/field-activity-reports/:id/reopen-edit', requireAuth, async (req, res) => {
+  const reportId = Number(req.params.id);
+  if (!Number.isInteger(reportId) || reportId <= 0) {
+    return res.status(400).json({ success: false, message: 'Invalid report id.' });
+  }
+  const hours = Math.min(168, Math.max(1, Number(req.body?.hours) || 24));
+
+  try {
+    const pool = req.app.locals.pool;
+    const user = req.currentUser;
+    const { branchScoped: isBranchScoped, bid } = scopeUser(user);
+    const params = isBranchScoped ? [bid, reportId] : [reportId];
+    const whereSql = isBranchScoped
+      ? 'WHERE u.branch_id = $1 AND far.report_id = $2'
+      : 'WHERE far.report_id = $1';
+
+    const existing = await pool.query(
+      `SELECT far.report_id, far.assignment_id, far.is_superseded, far.visit_id
+       ${FAR_FROM_SQL}
+       ${whereSql}`,
+      params
+    );
+    if (!existing.rows.length) {
+      return res.status(404).json({ success: false, message: 'Field activity report not found.' });
+    }
+    if (!existing.rows[0].assignment_id) {
+      return res.status(400).json({
+        success: false,
+        message: 'Only Sales Agent assignment reports can be reopened for editing.',
+      });
+    }
+    if (existing.rows[0].is_superseded) {
+      return res.status(400).json({ success: false, message: 'Superseded reports cannot be reopened.' });
+    }
+
+    const until = new Date(Date.now() + hours * 60 * 60 * 1000);
+    await pool.query(
+      `UPDATE field_activity_reports
+       SET edit_reopened_until = $1,
+           updated_at = CURRENT_TIMESTAMP
+       WHERE report_id = $2`,
+      [until.toISOString(), reportId]
+    );
+
+    await writeAuditFromReq(pool, req, {
+      module: 'Branch Manager',
+      activity: 'Reopen Field Report Edit',
+      action: 'Reopen Field Report Edit',
+      description: `Reopened FAR #${reportId} for editing until ${until.toISOString()}.`,
+      status: AUDIT_STATUS.UPDATED,
+      affectedRecord: `field_report:${reportId}`,
+    });
+
+    const detail = await pool.query(
+      `SELECT ${FAR_SELECT_COLUMNS}, far.photo
+       ${FAR_FROM_SQL}
+       WHERE far.report_id = $1`,
+      [reportId]
+    );
+
+    return res.status(200).json({
+      success: true,
+      message: `Editing reopened for ${hours} hour(s). Assignment status is unchanged.`,
+      data: mapFarRow(detail.rows[0], { includePhoto: true }),
+    });
+  } catch (err) {
+    console.error('[Branch Manager] POST /field-activity-reports/:id/reopen-edit error:', err.message);
+    return res.status(500).json({ success: false, message: 'Failed to reopen field activity report editing.' });
+  }
+});
+
 // ── Sales area / canvass assignments (BM assigns WHERE SA works) ──────────────
+
+async function querySalesAreaAssignments(pool, {
+  branchScoped,
+  bid,
+  agentId = null,
+  from = null,
+  to = null,
+  territoryId = null,
+  status = null,
+  search = '',
+  limit = 200,
+}) {
+  const conditions = [];
+  const params = [];
+  let p = 1;
+
+  if (branchScoped) {
+    conditions.push(`saa.branch_id = $${p++}`);
+    params.push(bid);
+  }
+  if (agentId) {
+    conditions.push(`saa.sales_agent_id = $${p++}`);
+    params.push(agentId);
+  }
+  if (from && isValidDate(String(from))) {
+    // Overlap with [from, to]: end_date >= from
+    conditions.push(`COALESCE(saa.end_date, saa.work_date) >= $${p++}::date`);
+    params.push(String(from).slice(0, 10));
+  }
+  if (to && isValidDate(String(to))) {
+    conditions.push(`saa.work_date <= $${p++}::date`);
+    params.push(String(to).slice(0, 10));
+  }
+  if (territoryId) {
+    conditions.push(`saa.territory_id = $${p++}`);
+    params.push(territoryId);
+  }
+  if (status && AREA_ASSIGNMENT_STATUSES.has(status)) {
+    conditions.push(`saa.status = $${p++}`);
+    params.push(status);
+  }
+  const q = String(search || '').trim();
+  if (q) {
+    conditions.push(`(
+      saa.area_name ILIKE $${p}
+      OR t.territory_name ILIKE $${p}
+      OR agent.employee_id ILIKE $${p}
+      OR TRIM(CONCAT_WS(' ', agent.first_name, agent.last_name)) ILIKE $${p}
+    )`);
+    params.push(`%${q}%`);
+    p += 1;
+  }
+
+  const whereSql = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
+  const safeLimit = Math.min(500, Math.max(1, Number(limit) || 200));
+  params.push(safeLimit);
+
+  const result = await pool.query(
+    `SELECT ${AREA_ASSIGNMENT_SELECT},
+            (
+              SELECT COUNT(*)::int FROM field_activity_reports far
+              WHERE far.assignment_id = saa.assignment_id OR (
+                far.user_id = saa.sales_agent_id
+                AND (far.created_at AT TIME ZONE 'Asia/Manila')::date = saa.work_date
+              )
+            ) AS field_report_count,
+            (
+              SELECT COUNT(*)::int FROM field_visits fv
+              WHERE fv.user_id = saa.sales_agent_id
+                AND fv.scheduled_date >= saa.work_date
+                AND fv.scheduled_date <= COALESCE(saa.end_date, saa.work_date)
+                AND fv.visit_type = 'Sales'
+            ) AS visits_planned,
+            (
+              SELECT COUNT(*)::int FROM field_visits fv
+              WHERE fv.user_id = saa.sales_agent_id
+                AND fv.scheduled_date >= saa.work_date
+                AND fv.scheduled_date <= COALESCE(saa.end_date, saa.work_date)
+                AND fv.visit_type = 'Sales'
+                AND fv.status = 'Completed'
+            ) AS visits_completed
+     ${AREA_ASSIGNMENT_FROM}
+     ${whereSql}
+     ORDER BY saa.work_date DESC, saa.assignment_id DESC
+     LIMIT $${p}`,
+    params
+  );
+
+  const productsByAssignment = await loadAssignmentProducts(
+    pool,
+    result.rows.map((row) => row.assignment_id)
+  );
+  return result.rows.map((row) => ({
+    ...withProducts(row, productsByAssignment),
+    sales_agent_employee_id: row.sales_agent_employee_id || null,
+    field_report_count: Number(row.field_report_count) || 0,
+    visits_planned: Number(row.visits_planned) || 0,
+    visits_completed: Number(row.visits_completed) || 0,
+  }));
+}
+
+// Branch-wide history (read-only)
+router.get('/sales-area-assignments', requireAuth, async (req, res) => {
+  try {
+    const pool = req.app.locals.pool;
+    const user = req.currentUser;
+    const { branchScoped, bid } = scopeUser(user);
+    await expireStaleAssignments(pool, branchScoped ? { branchId: bid } : {});
+    const agentId = positiveInteger(req.query.agent_id || req.query.agentId);
+    const territoryId = positiveInteger(req.query.territory_id || req.query.territoryId);
+    const rows = await querySalesAreaAssignments(pool, {
+      branchScoped,
+      bid,
+      agentId,
+      from: req.query.from,
+      to: req.query.to,
+      territoryId,
+      status: req.query.status ? String(req.query.status) : null,
+      search: req.query.search || '',
+      limit: req.query.limit,
+    });
+    return res.status(200).json({ success: true, data: rows });
+  } catch (err) {
+    console.error('[Branch Manager] GET /sales-area-assignments error:', err.message);
+    return res.status(500).json({ success: false, message: 'Failed to load assignment history.' });
+  }
+});
 
 router.get('/staff/sales/:id/area-assignments', requireAuth, async (req, res) => {
   try {
@@ -1776,22 +2450,20 @@ router.get('/staff/sales/:id/area-assignments', requireAuth, async (req, res) =>
       return res.status(404).json({ success: false, message: 'Sales agent not found.' });
     }
 
-    const result = await pool.query(
-      `SELECT ${AREA_ASSIGNMENT_SELECT}
-       ${AREA_ASSIGNMENT_FROM}
-       WHERE saa.sales_agent_id = $1
-       ORDER BY saa.work_date DESC, saa.assignment_id DESC
-       LIMIT 100`,
-      [agentId]
-    );
-    const productsByAssignment = await loadAssignmentProducts(
-      pool,
-      result.rows.map((row) => row.assignment_id)
-    );
-    return res.status(200).json({
-      success: true,
-      data: result.rows.map((row) => withProducts(row, productsByAssignment)),
+    const { branchScoped, bid } = scopeUser(user);
+    const territoryId = positiveInteger(req.query.territory_id || req.query.territoryId);
+    const rows = await querySalesAreaAssignments(pool, {
+      branchScoped,
+      bid,
+      agentId,
+      from: req.query.from,
+      to: req.query.to,
+      territoryId,
+      status: req.query.status ? String(req.query.status) : null,
+      search: req.query.search || '',
+      limit: req.query.limit || 200,
     });
+    return res.status(200).json({ success: true, data: rows });
   } catch (err) {
     console.error('[Branch Manager] GET sales area-assignments error:', err.message);
     return res.status(500).json({ success: false, message: 'Failed to load area assignments.' });
@@ -1815,6 +2487,14 @@ router.post('/staff/sales/:id/area-assignments', requireAuth, async (req, res) =
     if (!isValidDate(String(workDate))) {
       return res.status(400).json({ success: false, message: 'work_date must be YYYY-MM-DD.' });
     }
+    const endDateRaw = req.body?.end_date || req.body?.endDate || workDate;
+    if (!isValidDate(String(endDateRaw))) {
+      return res.status(400).json({ success: false, message: 'end_date must be YYYY-MM-DD.' });
+    }
+    const endDate = String(endDateRaw).slice(0, 10);
+    if (endDate < String(workDate).slice(0, 10)) {
+      return res.status(400).json({ success: false, message: 'end_date must be on or after work_date.' });
+    }
 
     const territoryId = positiveInteger(req.body?.territory_id);
     let areaName = typeof req.body?.area_name === 'string' ? req.body.area_name.trim() : '';
@@ -1837,13 +2517,12 @@ router.post('/staff/sales/:id/area-assignments', requireAuth, async (req, res) =
     }
     const agent = agentResult.rows[0];
 
-    let territoryDefaultSalesAgentId = null;
     let territoryRadius = null;
     if (territoryId) {
       const territory = await pool.query(
         `SELECT territory_id, territory_name, coverage_area, branch_id,
                 COALESCE(status, 'Active') AS status,
-                latitude, longitude, radius_meters, default_sales_agent_id
+                latitude, longitude, radius_meters
          FROM territories
          WHERE territory_id = $1`,
         [territoryId]
@@ -1859,9 +2538,6 @@ router.post('/staff/sales/:id/area-assignments', requireAuth, async (req, res) =
       }
       if (!areaName) areaName = territory.rows[0].territory_name;
       if (!coverageNotes) coverageNotes = territory.rows[0].coverage_area || '';
-      territoryDefaultSalesAgentId = territory.rows[0].default_sales_agent_id != null
-        ? Number(territory.rows[0].default_sales_agent_id)
-        : null;
       territoryRadius = Number(territory.rows[0].radius_meters) || null;
       if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) {
         if (Number.isFinite(Number(territory.rows[0].latitude))
@@ -1892,31 +2568,6 @@ router.post('/staff/sales/:id/area-assignments', requireAuth, async (req, res) =
       || territoryRadius
       || 800;
 
-    const allowOwnershipException = req.body?.confirm_default_owner_exception === true
-      || req.body?.confirm_default_owner_exception === 'true'
-      || req.body?.confirm_default_owner_exception === 1;
-    if (
-      territoryId
-      && territoryDefaultSalesAgentId
-      && Number(territoryDefaultSalesAgentId) !== Number(agentId)
-      && !allowOwnershipException
-    ) {
-      const owner = await pool.query(
-        `SELECT TRIM(CONCAT_WS(' ', first_name, last_name)) AS full_name
-         FROM users WHERE id = $1`,
-        [territoryDefaultSalesAgentId]
-      );
-      return res.status(409).json({
-        success: false,
-        message: `This territory’s default Sales Agent is ${owner.rows[0]?.full_name || `#${territoryDefaultSalesAgentId}`}. Confirm to assign a different agent for this work date only.`,
-        data: {
-          requiresDefaultOwnerConfirmation: true,
-          defaultSalesAgentId: territoryDefaultSalesAgentId,
-          defaultSalesAgentName: owner.rows[0]?.full_name || null,
-        },
-      });
-    }
-
     if (productIds.length) {
       const productCheck = await pool.query(
         `SELECT id FROM products WHERE id = ANY($1::int[]) AND status = 'Active'`,
@@ -1937,6 +2588,7 @@ router.post('/staff/sales/:id/area-assignments', requireAuth, async (req, res) =
       branchId: agent.branch_id,
       salesAgentId: agentId,
       workDate,
+      endDate,
       territoryId,
       areaName,
       latitude,
@@ -1974,6 +2626,7 @@ router.post('/staff/sales/:id/area-assignments', requireAuth, async (req, res) =
         branchId: agent.branch_id,
         salesAgentId: agentId,
         workDate,
+        endDate,
         territoryId,
         areaName,
         latitude,
@@ -1992,8 +2645,8 @@ router.post('/staff/sales/:id/area-assignments', requireAuth, async (req, res) =
       const inserted = await client.query(
         `INSERT INTO sales_area_assignments (
            branch_id, sales_agent_id, assigned_by, territory_id, area_name, coverage_notes,
-           work_date, status, latitude, longitude, radius_meters
-         ) VALUES ($1, $2, $3, $4, $5, $6, $7::date, 'Assigned', $8, $9, $10)
+           work_date, end_date, status, latitude, longitude, radius_meters
+         ) VALUES ($1, $2, $3, $4, $5, $6, $7::date, $8::date, 'Assigned', $9, $10, $11)
          RETURNING assignment_id`,
         [
           agent.branch_id,
@@ -2003,6 +2656,7 @@ router.post('/staff/sales/:id/area-assignments', requireAuth, async (req, res) =
           areaName,
           coverageNotes || null,
           workDate,
+          endDate,
           latitude,
           longitude,
           Math.min(20000, Math.max(100, effectiveRadius)),
@@ -2010,6 +2664,7 @@ router.post('/staff/sales/:id/area-assignments', requireAuth, async (req, res) =
       );
       const assignmentId = inserted.rows[0].assignment_id;
 
+      // Products are optional legacy join rows; BM dispatch no longer requires them.
       for (const productId of productIds) {
         await client.query(
           `INSERT INTO sales_area_assignment_products (assignment_id, product_id)
@@ -2033,10 +2688,19 @@ router.post('/staff/sales/:id/area-assignments', requireAuth, async (req, res) =
         workDate,
         areaName,
       });
+      await writeAuditFromReq(pool, req, {
+        action: 'sales_area_assignment.create',
+        entityType: 'sales_area_assignment',
+        entityId: assignmentId,
+        details: { sales_agent_id: agentId, work_date: workDate, end_date: endDate, area_name: areaName },
+      });
 
+      const windowLabel = endDate === String(workDate).slice(0, 10)
+        ? workDate
+        : `${workDate}–${endDate}`;
       return res.status(201).json({
         success: true,
-        message: `Assigned ${areaName} for ${workDate}.`,
+        message: `Assigned ${areaName} for ${windowLabel}.`,
         data: withProducts(detail.rows[0], productsByAssignment),
         meta: {
           hasMapLocation: hasCoords,
@@ -2052,6 +2716,146 @@ router.post('/staff/sales/:id/area-assignments', requireAuth, async (req, res) =
   } catch (err) {
     console.error('[Branch Manager] POST sales area-assignments error:', err.message);
     return res.status(500).json({ success: false, message: 'Failed to create area assignment.' });
+  }
+});
+
+// PATCH extend end_date or reassign sales agent (auto-closed / active incomplete allowed)
+router.patch('/staff/sales/:id/area-assignments/:assignmentId', requireAuth, async (req, res) => {
+  try {
+    const pool = req.app.locals.pool;
+    const user = req.currentUser;
+    const agentId = positiveInteger(req.params.id);
+    const assignmentId = positiveInteger(req.params.assignmentId);
+    if (!agentId || !assignmentId) {
+      return res.status(400).json({ success: false, message: 'Invalid sales agent or assignment ID.' });
+    }
+    const allowed = await assertStaffInBranch(pool, user, agentId, 'sales_staff');
+    if (!allowed) {
+      return res.status(404).json({ success: false, message: 'Sales agent not found.' });
+    }
+
+    await expireStaleAssignments(pool, { salesAgentId: agentId });
+
+    const existing = await pool.query(
+      `SELECT ${AREA_ASSIGNMENT_SELECT}
+       ${AREA_ASSIGNMENT_FROM}
+       WHERE saa.assignment_id = $1 AND saa.sales_agent_id = $2`,
+      [assignmentId, agentId]
+    );
+    if (!existing.rows.length) {
+      return res.status(404).json({ success: false, message: 'Assignment not found.' });
+    }
+    const row = existing.rows[0];
+    if (row.status === 'Done') {
+      return res.status(400).json({
+        success: false,
+        message: 'Completed assignments cannot be extended or reassigned through dispatch controls.',
+      });
+    }
+
+    const isAutoClosed = row.status === 'Not Started' || row.status === 'Incomplete' || row.status === 'Expired';
+    const action = String(req.body?.action || '').toLowerCase();
+    let nextEndDate = row.end_date || row.work_date;
+    let nextAgentId = Number(row.sales_agent_id);
+    let nextStatus = isAutoClosed ? 'Assigned' : row.status;
+
+    if (action === 'extend' || req.body?.end_date || req.body?.endDate) {
+      const endRaw = req.body?.end_date || req.body?.endDate;
+      if (!isValidDate(String(endRaw))) {
+        return res.status(400).json({ success: false, message: 'end_date must be YYYY-MM-DD.' });
+      }
+      nextEndDate = String(endRaw).slice(0, 10);
+      if (nextEndDate < String(row.work_date).slice(0, 10)) {
+        return res.status(400).json({ success: false, message: 'end_date must be on or after work_date.' });
+      }
+      if (isAutoClosed) nextStatus = 'Assigned';
+    }
+
+    if (action === 'reassign' || req.body?.sales_agent_id || req.body?.salesAgentId) {
+      const targetAgent = positiveInteger(req.body?.sales_agent_id || req.body?.salesAgentId);
+      if (!targetAgent) {
+        return res.status(400).json({ success: false, message: 'sales_agent_id is required to reassign.' });
+      }
+      const targetAllowed = await assertStaffInBranch(pool, user, targetAgent, 'sales_staff');
+      if (!targetAllowed) {
+        return res.status(404).json({ success: false, message: 'Target sales agent not found.' });
+      }
+      nextAgentId = targetAgent;
+      if (isAutoClosed) nextStatus = 'Assigned';
+    }
+
+    if (action !== 'extend' && action !== 'reassign'
+      && !req.body?.end_date && !req.body?.endDate
+      && !req.body?.sales_agent_id && !req.body?.salesAgentId) {
+      return res.status(400).json({
+        success: false,
+        message: 'Provide action=extend|reassign with end_date and/or sales_agent_id.',
+      });
+    }
+
+    const conflictCheck = await findAreaAssignmentConflicts(pool, {
+      branchId: row.branch_id,
+      salesAgentId: nextAgentId,
+      workDate: row.work_date,
+      endDate: nextEndDate,
+      territoryId: row.territory_id,
+      areaName: row.area_name,
+      latitude: row.latitude,
+      longitude: row.longitude,
+      radiusMeters: row.radius_meters,
+      excludeAssignmentId: assignmentId,
+    });
+    if (conflictCheck.conflicts.length) {
+      return res.status(409).json({
+        success: false,
+        message: conflictCheck.conflicts[0].message,
+        data: { conflicts: conflictCheck.conflicts, warnings: conflictCheck.warnings },
+      });
+    }
+
+    await pool.query(
+      `UPDATE sales_area_assignments
+       SET sales_agent_id = $2,
+           end_date = $3::date,
+           status = $4,
+           started_at = CASE WHEN $5::boolean THEN NULL ELSE started_at END,
+           completed_at = CASE WHEN $5::boolean THEN NULL ELSE completed_at END,
+           closure_notes = CASE WHEN $5::boolean THEN NULL ELSE closure_notes END,
+           closeout_report_id = CASE WHEN $5::boolean THEN NULL ELSE closeout_report_id END,
+           updated_at = CURRENT_TIMESTAMP
+       WHERE assignment_id = $1`,
+      [assignmentId, nextAgentId, nextEndDate, nextStatus, isAutoClosed && nextStatus === 'Assigned']
+    );
+
+    await writeAuditFromReq(pool, req, {
+      action: action === 'reassign' ? 'sales_area_assignment.reassign' : 'sales_area_assignment.extend',
+      entityType: 'sales_area_assignment',
+      entityId: assignmentId,
+      details: {
+        from_agent_id: row.sales_agent_id,
+        to_agent_id: nextAgentId,
+        work_date: row.work_date,
+        end_date: nextEndDate,
+        previous_status: row.status,
+        status: nextStatus,
+      },
+    });
+
+    const detail = await pool.query(
+      `SELECT ${AREA_ASSIGNMENT_SELECT}
+       ${AREA_ASSIGNMENT_FROM}
+       WHERE saa.assignment_id = $1`,
+      [assignmentId]
+    );
+    const productsByAssignment = await loadAssignmentProducts(pool, [assignmentId]);
+    return res.status(200).json({
+      success: true,
+      message: action === 'reassign' ? 'Assignment reassigned.' : 'Assignment extended.',
+      data: withProducts(detail.rows[0], productsByAssignment),
+    });
+  } catch (err) {
+    console.error('[Branch Manager] PATCH sales area-assignments error:', err.message);
+    return res.status(500).json({ success: false, message: 'Failed to update area assignment.' });
   }
 });
 

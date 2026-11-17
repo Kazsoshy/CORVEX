@@ -33,11 +33,20 @@ import {
 import { getReportCollection, getReportSales, getReportInventory, getReportDelinquency, getReportCompliance, getReportKPI, getReportInvoices } from '../../api/reportsService.js';
 import { CreditHistoryListPage, CreditHistoryDetailPage } from '../shared/CreditHistoryPages';
 import { TerritoriesPage } from '../territories/TerritoriesPage';
+import { OmPoliciesPage } from '../operatingManager/OmPoliciesPage';
 import { InvoiceDetailsPage } from '../sales/InvoiceDetailsPage';
 import { BranchLeafletPage } from './BranchLeafletPage';
 import { FieldActivityReportsPage, FieldActivityReportDetailPage } from './FieldActivityReportsPages.jsx';
-import { CollectorsDispatchRoster, CollectorDispatchDetailPage } from './CollectorsDispatchPages.jsx';
-import { SalesAgentsDispatchRoster, SalesAgentDispatchDetailPage } from './SalesAgentsDispatchPages.jsx';
+import {
+  CollectorsDispatchRoster,
+  CollectorDispatchDetailPage,
+  CollectorRouteHistoryPage,
+} from './CollectorsDispatchPages.jsx';
+import {
+  SalesAgentsDispatchRoster,
+  SalesAgentDispatchDetailPage,
+  SalesAssignmentHistoryPage,
+} from './SalesAgentsDispatchPages.jsx';
 import { BranchCustomersPage, BranchCustomerDetailPage } from './BranchCustomersPages.jsx';
 import { CreditInvestigationQueuePage, CreditInvestigationDetailPage } from './CreditInvestigationPages.jsx';
 import { formatMiddleNameDisplay } from '../../utils/customerDisplay.js';
@@ -1780,7 +1789,8 @@ function NotificationsPage({
 function ProfilePage({
   navigate,
   showToast,
-  opsBase
+  opsBase,
+  currentUser,
 }) {
   return <AccountProfilePanel
     showToast={showToast}
@@ -1789,7 +1799,7 @@ function ProfilePage({
       <button className="button ghost" type="button" onClick={() => navigate(`${opsBase}/audit-log`)}>Audit log</button>
       <button className="button ghost" type="button" onClick={() => navigate(`${opsBase}/approval-center`)}>Approval center</button>
     </>}
-    settings={<SettingsPage embedded navigate={navigate} opsBase={opsBase} />}
+    settings={<SettingsPage embedded navigate={navigate} opsBase={opsBase} showToast={showToast} currentUser={currentUser} />}
   />;
 }
 function branchActivityLabel(log) {
@@ -2091,8 +2101,16 @@ function AuditLogPage({
 function SettingsPage({
   navigate,
   opsBase,
+  showToast,
   embedded = false,
+  currentUser,
 }) {
+  const isOmPoliciesOwner = currentUser?.role?.slug === 'operating_manager'
+    || currentUser?.role?.slug === 'super_admin';
+  // OM System Configuration is the Policies hub — not personal device prefs.
+  if (!embedded && isOmPoliciesOwner) {
+    return <OmPoliciesPage showToast={showToast} />;
+  }
   return (
     <UserSettingsPanel embedded={embedded} role="branch">
       <p className="muted">Profile, approvals, audit history, and notifications for this branch.</p>
@@ -2166,10 +2184,18 @@ export function BranchManagerPageBody({
       return <FieldOperationsHub {...p} />;
     case 'collectorRoutes':
       return <CollectorsDispatchRoster {...p} />;
+    case 'collectorRouteHistory':
+      return <CollectorRouteHistoryPage {...p} />;
+    case 'collectorAgentRouteHistory':
+      return <CollectorRouteHistoryPage {...p} collectorId={p.collectorId} />;
     case 'collectorDetail':
       return <CollectorDispatchDetailPage {...p} />;
     case 'salesSchedules':
       return <SalesAgentsDispatchRoster {...p} />;
+    case 'salesAssignmentHistory':
+      return <SalesAssignmentHistoryPage {...p} />;
+    case 'salesAgentAssignmentHistory':
+      return <SalesAssignmentHistoryPage {...p} agentId={p.agentId} />;
     case 'salesAgentDetail':
       return <SalesAgentDispatchDetailPage {...p} />;
     case 'ciQueue':

@@ -1,11 +1,11 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { EmptyState } from '../shared/EmptyState';
 import { LoadingState } from '../shared/LoadingState';
 import { Stats } from '../shared/StatsGrid';
 import { Pagination } from '../shared/Pagination';
 import { usePagination } from '../../hooks/usePagination';
 import { StatusBadge } from '../StatusBadge';
-import { NavIcon } from '../../navIcons';
 import LeafletMap from '../common/LeafletMap';
 import { formatCurrency, formatDisplayDate, formatPhone } from '../../data/branchManagerMockData';
 import { getCurrentUser } from '../../api/authService.js';
@@ -15,6 +15,8 @@ import {
   fetchCollectorSawPriority,
   previewCollectorCollectionRoute,
   assignCollectorCollectionRoute,
+  getCollectorRouteHistory,
+  getCollectorRouteDetail,
 } from '../../api/branchManagerService.js';
 
 function manilaDateInputValue() {
@@ -30,6 +32,26 @@ function isOrgScopeUser(user) {
   return ['operating_manager', 'super_admin'].includes(user?.role?.slug);
 }
 
+function normalizeRouteStatus(status) {
+  const value = String(status || 'No Route');
+  if (value === 'Done') return 'Completed';
+  return value;
+}
+
+function parseCoord(value) {
+  if (value === '' || value == null) return null;
+  const n = Number(value);
+  return Number.isFinite(n) ? n : null;
+}
+
+function validLatLng(lat, lng) {
+  const a = parseCoord(lat);
+  const b = parseCoord(lng);
+  if (a == null || b == null) return null;
+  if (a === 0 && b === 0) return null;
+  return [a, b];
+}
+
 function assignmentStatusLabel(row, assignedIds) {
   if (row.assignment_block === 'assigned_to_other_collector') {
     return `Already assigned to ${row.assigned_collector_name || 'another collector'}`;
@@ -37,8 +59,8 @@ function assignmentStatusLabel(row, assignedIds) {
   if (row.assignment_block === 'already_scheduled' || assignedIds.has(String(row.customer_id))) {
     return 'Already on this route';
   }
-  if (row.book_status === 'unassigned') return 'Unassigned book';
-  if (row.book_status === 'own_book') return 'In account book';
+  if (row.book_status === 'unassigned') return 'Not in this Collector\'s permanent portfolio';
+  if (row.book_status === 'own_book') return 'In permanent portfolio';
   return 'Eligible';
 }
 
@@ -51,6 +73,142 @@ function roadProviderNote(provider) {
     return 'Visiting order follows priority ranking until road routing is available.';
   }
   return null;
+}
+
+function hasMapableStops(collector) {
+  return Number(collector?.todayStops || 0) > 0 || Boolean(collector?.hasMapStops);
+}
+
+function RowActionsMenu({ label, items }) {
+  const [open, setOpen] = useState(false);
+  const [pos, setPos] = useState(null);
+  const buttonRef = useRef(null);
+  const menuRef = useRef(null);
+
+  useLayoutEffect(() => {
+    if (!open || !buttonRef.current) return;
+    const rect = buttonRef.current.getBoundingClientRect();
+    const menuHeight = menuRef.current?.offsetHeight || 0;
+    const fitsBelow = rect.bottom + menuHeight + 8 < window.innerHeight;
+    setPos({
+      top: fitsBelow ? rect.bottom + 4 : Math.max(8, rect.top - menuHeight - 4),
+      right: Math.max(8, window.innerWidth - rect.right),
+    });
+  }, [open]);
+
+  useEffect(() => {
+    if (!open) return undefined;
+    const close = (event) => {
+      if (menuRef.current?.contains(event.target) || buttonRef.current?.contains(event.target)) return;
+      setOpen(false);
+    };
+    const onKey = (event) => { if (event.key === 'Escape') setOpen(false); };
+    const onScroll = () => setOpen(false);
+    document.addEventListener('mousedown', close);
+    document.addEventListener('keydown', onKey);
+    window.addEventListener('scroll', onScroll, true);
+    window.addEventListener('resize', onScroll);
+    return () => {
+      document.removeEventListener('mousedown', close);
+      document.removeEventListener('keydown', onKey);
+      window.removeEventListener('scroll', onScroll, true);
+      window.removeEventListener('resize', onScroll);
+    };
+  }, [open]);
+
+  const visible = items.filter(Boolean);
+  return (
+    <>
+      <button
+        ref={buttonRef}
+        type="button"
+        className="button ghost user-row-menu-trigger"
+        aria-haspopup="menu"
+        aria-expanded={open}
+        aria-label={label}
+        onClick={(event) => { event.stopPropagation(); setOpen((v) => !v); }}
+      >
+        ⋮
+      </button>
+      {open ? createPortal(
+        <div
+          ref={menuRef}
+          role="menu"
+          className="panel user-row-menu"
+          style={{ top: pos?.top ?? -9999, right: pos?.right ?? 0 }}
+          onClick={(event) => event.stopPropagation()}
+        >
+          {visible.map((item) => (
+            <button
+              key={item.key}
+              type="button"
+              role="menuitem"
+              className="button ghost user-row-menu-item"
+              disabled={item.disabled}
+              title={item.title}
+              onClick={() => {
+                if (item.disabled) return;
+                setOpen(false);
+                item.onSelect();
+              }}
+            >
+              {item.label}
+            </button>
+          ))}
+        </div>,
+        document.body
+      ) : null}
+    </>
+  );
+}
+
+function deriveRosterSummary(collectors) {
+  const list = Array.isArray(collectors) ? collectors : [];
+  const active = list.filter((c) => String(c.status || 'Active') === 'Active');
+  const counts = {
+    totalActive: active.length,
+    routesPublished: 0,
+    unassigned: 0,
+    plannedStops: 0,
+    completedStops: 0,
+    needsAttention: 0,
+  };
+  for (const collector of active) {
+    const status = normalizeRouteStatus(collector.todayRouteStatus);
+    counts.plannedStops += Number(collector.todayStops) || 0;
+    counts.completedStops += Number(collector.todayCompleted) || 0;
+    if (status === 'Needs Attention') counts.needsAttention += 1;
+    if (status === 'No Route') counts.unassigned += 1;
+    else if (status !== 'No Route') counts.routesPublished += 1;
+  }
+  return counts;
+}
+
+function buildMarkersFromRows(rows, {
+  idKey = 'customer_id',
+  labelKey = 'route_sequence',
+  nameKey = 'customer_name',
+  statusKey = 'status',
+  color = '#093850',
+} = {}) {
+  return (rows || [])
+    .map((row, index) => {
+      const lat = row.latitude ?? row.lat ?? row.customer_latitude;
+      const lng = row.longitude ?? row.lng ?? row.customer_longitude;
+      const position = validLatLng(lat, lng);
+      if (!position) return null;
+      const stopLabel = row[labelKey] || row.stopNumber || row.stop_number || (index + 1);
+      const name = row[nameKey] || row.customerName || row.account || 'Stop';
+      const status = row[statusKey] || row.visit_status || '';
+      return {
+        id: `m-${row[idKey] || row.visitId || row.visit_id || index}`,
+        position,
+        label: String(stopLabel),
+        color: status === 'Completed' ? '#10b981' : color,
+        popup: `#${stopLabel} ${name}${status ? ` (${status})` : ''}`,
+      };
+    })
+    .filter(Boolean);
 }
 
 export function CollectorsDispatchRoster({ navigate, opsBase, showToast }) {
@@ -85,19 +243,20 @@ export function CollectorsDispatchRoster({ navigate, opsBase, showToast }) {
     const q = search.trim().toLowerCase();
     return (collectors || []).filter((c) => {
       if (activeStatus !== 'all' && String(c.status || 'Active') !== activeStatus) return false;
-      if (routeStatus !== 'all' && String(c.todayRouteStatus || 'No Route') !== routeStatus) return false;
+      const status = normalizeRouteStatus(c.todayRouteStatus);
+      if (routeStatus !== 'all') {
+        const wanted = normalizeRouteStatus(routeStatus);
+        if (status !== wanted) return false;
+      }
       if (!q) return true;
-      const hay = [
-        c.name,
-        c.email,
-        c.employeeCode,
-        c.phone,
-        c.branchName,
-      ].map((v) => String(v || '').toLowerCase()).join(' ');
+      const hay = [c.name, c.email, c.employeeCode, c.phone, c.branchName]
+        .map((v) => String(v || '').toLowerCase())
+        .join(' ');
       return hay.includes(q);
     });
   }, [collectors, search, routeStatus, activeStatus]);
 
+  const summary = useMemo(() => deriveRosterSummary(collectors), [collectors]);
   const pagination = usePagination(filtered);
   const rows = pagination.paginatedData;
 
@@ -110,16 +269,26 @@ export function CollectorsDispatchRoster({ navigate, opsBase, showToast }) {
           <div>
             <h3>Collector Dispatch</h3>
             <p className="muted" style={{ marginTop: 4, marginBottom: 0 }}>
+              Daily collection route preparation and monitoring for the selected work date.
               {orgScope
-                ? 'Organization-wide collectors. Open a collector to review priority candidates and publish a route.'
-                : `Collectors assigned to ${currentUser?.branch?.name || 'your branch'} only. Open a collector to review priorities and publish today's route.`}
+                ? ' Organization-wide collectors.'
+                : ` Branch: ${currentUser?.branch?.name || 'your branch'}.`}
             </p>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <button
+              className="button secondary"
+              type="button"
+              onClick={() => navigate(`${opsBase}/field-operations/collectors/history`)}
+            >
+              Collector Route History
+            </button>
           </div>
         </div>
 
         <div className="flex flex-wrap gap-2 items-end mb-4">
           <label className="flex flex-col gap-1 text-sm">
-            Dispatch date
+            Work date
             <input
               type="date"
               className="input"
@@ -127,6 +296,13 @@ export function CollectorsDispatchRoster({ navigate, opsBase, showToast }) {
               onChange={(e) => setDispatchDate(e.target.value)}
             />
           </label>
+          <button
+            className="button secondary"
+            type="button"
+            onClick={() => setDispatchDate(manilaDateInputValue())}
+          >
+            Today
+          </button>
           <label className="flex flex-col gap-1 text-sm" style={{ minWidth: 220 }}>
             Search
             <input
@@ -143,7 +319,8 @@ export function CollectorsDispatchRoster({ navigate, opsBase, showToast }) {
               <option value="No Route">No Route</option>
               <option value="Published">Published</option>
               <option value="In Progress">In Progress</option>
-              <option value="Done">Done</option>
+              <option value="Completed">Completed</option>
+              <option value="Needs Attention">Needs Attention</option>
             </select>
           </label>
           <label className="flex flex-col gap-1 text-sm">
@@ -156,12 +333,23 @@ export function CollectorsDispatchRoster({ navigate, opsBase, showToast }) {
           </label>
         </div>
 
+        <Stats stats={[
+          { label: 'Active Collectors', value: String(summary.totalActive) },
+          { label: 'Routes Published', value: String(summary.routesPublished) },
+          { label: 'Unassigned Collectors', value: String(summary.unassigned) },
+          { label: 'Planned Stops', value: String(summary.plannedStops) },
+          { label: 'Completed Stops', value: String(summary.completedStops) },
+          { label: 'Needs Attention', value: String(summary.needsAttention) },
+        ]} />
+
         {!filtered.length ? (
           <EmptyState
-            title="No collectors are currently assigned to your branch"
-            description={orgScope
-              ? 'No collectors match the current filters.'
-              : 'Contact the Operating Manager to create a Collector account.'}
+            title={collectors.length ? 'No collectors match the current filters' : 'No collectors are currently assigned to your branch'}
+            description={collectors.length
+              ? 'Adjust search, route status, or account status filters.'
+              : (orgScope
+                ? 'No collectors match the current filters.'
+                : 'Contact the Operating Manager to create a Collector account.')}
           />
         ) : (
           <>
@@ -170,57 +358,66 @@ export function CollectorsDispatchRoster({ navigate, opsBase, showToast }) {
                 <thead>
                   <tr>
                     <th>Collector</th>
-                    <th>Employee Information</th>
-                    <th>Contact</th>
                     {orgScope ? <th>Branch</th> : null}
-                    <th>Account Book</th>
+                    <th>Portfolio Customers</th>
                     <th>Today&apos;s Route</th>
                     <th>Stops</th>
                     <th>Completed</th>
                     <th>Remaining</th>
-                    <th>Status</th>
+                    <th>Account Status</th>
                     <th>Actions</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {rows.map((c) => (
-                    <tr
-                      key={c.id}
-                      className="clickable-row"
-                      onClick={() => navigate(`${opsBase}/field-operations/collectors/${c.id}?date=${encodeURIComponent(dispatchDate)}`)}
-                    >
-                      <td><strong>{c.name}</strong></td>
-                      <td>
-                        <div>{c.employeeCode || '—'}</div>
-                        <div className="text-ink/70" style={{ fontSize: '0.85rem' }}>{c.email || '—'}</div>
-                      </td>
-                      <td>{c.phone ? formatPhone(c.phone) : '—'}</td>
-                      {orgScope ? <td>{c.branchName || '—'}</td> : null}
-                      <td>{c.accountBookSize ?? 0}</td>
-                      <td><StatusBadge status={c.todayRouteStatus || 'No Route'} /></td>
-                      <td>{c.todayStops ?? 0}</td>
-                      <td>{c.todayCompleted ?? 0}</td>
-                      <td>{c.todayRemaining ?? 0}</td>
-                      <td><StatusBadge status={c.status || 'Active'} /></td>
-                      <td className="table-actions" onClick={(e) => e.stopPropagation()}>
-                        <button
-                          className="button secondary"
-                          type="button"
-                          onClick={() => navigate(`${opsBase}/field-operations/collectors/${c.id}?date=${encodeURIComponent(dispatchDate)}`)}
-                        >
-                          Open Dispatch
-                        </button>
-                        <button
-                          className="icon-action-button"
-                          type="button"
-                          title="View on Field Map"
-                          onClick={() => navigate(`${opsBase}/leaflet?staff=${encodeURIComponent(c.id)}`)}
-                        >
-                          <NavIcon name="map" />
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
+                  {rows.map((c) => {
+                    const routeLabel = normalizeRouteStatus(c.todayRouteStatus);
+                    const canMap = hasMapableStops(c);
+                    return (
+                      <tr
+                        key={c.id}
+                        className="clickable-row"
+                        onClick={() => navigate(`${opsBase}/field-operations/collectors/${c.id}?date=${encodeURIComponent(dispatchDate)}`)}
+                      >
+                        <td>
+                          <strong>{c.name}</strong>
+                          <div className="text-ink/70" style={{ fontSize: '0.85rem' }}>{c.employeeCode || '—'}</div>
+                        </td>
+                        {orgScope ? <td>{c.branchName || '—'}</td> : null}
+                        <td>{c.accountBookSize ?? 0}</td>
+                        <td><StatusBadge status={routeLabel} /></td>
+                        <td>{c.todayStops ?? 0}</td>
+                        <td>{c.todayCompleted ?? 0}</td>
+                        <td>{c.todayRemaining ?? 0}</td>
+                        <td><StatusBadge status={c.status || 'Active'} /></td>
+                        <td className="table-actions" onClick={(e) => e.stopPropagation()}>
+                          <RowActionsMenu
+                            label={`Actions for ${c.name}`}
+                            items={[
+                              {
+                                key: 'open',
+                                label: 'Open Dispatch',
+                                onSelect: () => navigate(`${opsBase}/field-operations/collectors/${c.id}?date=${encodeURIComponent(dispatchDate)}`),
+                              },
+                              {
+                                key: 'map',
+                                label: canMap ? 'Map' : 'Map (no route)',
+                                disabled: !canMap,
+                                title: canMap
+                                  ? 'Open Field Map for this collector'
+                                  : 'No published route stops for this date',
+                                onSelect: () => navigate(`${opsBase}/leaflet?staff=${encodeURIComponent(c.id)}&date=${encodeURIComponent(dispatchDate)}`),
+                              },
+                              {
+                                key: 'history',
+                                label: 'Route History',
+                                onSelect: () => navigate(`${opsBase}/field-operations/collectors/${c.id}/history`),
+                              },
+                            ]}
+                          />
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
@@ -252,6 +449,11 @@ export function CollectorDispatchDetailPage({
   const [assignBusy, setAssignBusy] = useState(false);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(null);
+  const [showBlocked, setShowBlocked] = useState(false);
+
+  function syncDateInUrl(nextDate) {
+    navigate(`${opsBase}/field-operations/collectors/${collectorId}?date=${encodeURIComponent(nextDate)}`);
+  }
 
   async function reload(date) {
     if (!collectorId) {
@@ -281,6 +483,7 @@ export function CollectorDispatchDetailPage({
     }
     setPreviewRows([]);
     setPreviewMeta(null);
+    setSelectedIds(new Set());
   }
 
   useEffect(() => {
@@ -298,10 +501,59 @@ export function CollectorDispatchDetailPage({
   const profile = detail?.profile;
   const publishedRoute = detail?.publishedRoute || detail?.route || [];
   const routeStats = detail?.routeStats || {};
-  const paginationSaw = usePagination(sawRows);
+  const routeStatus = normalizeRouteStatus(profile?.todayRouteStatus || 'No Route');
+  const eligibleRows = useMemo(
+    () => sawRows.filter((row) => !row.assignment_block && !assignedIds.has(String(row.customer_id))),
+    [sawRows, assignedIds]
+  );
+  const blockedRows = useMemo(
+    () => sawRows.filter((row) => row.assignment_block || assignedIds.has(String(row.customer_id))),
+    [sawRows, assignedIds]
+  );
+  const alreadyAssignedCount = useMemo(() => {
+    const blockedAssigned = blockedRows.filter((row) => (
+      row.assignment_block === 'already_scheduled'
+      || row.assignment_block === 'assigned_to_other_collector'
+      || assignedIds.has(String(row.customer_id))
+    )).length;
+    return Math.max(blockedAssigned, Number(routeStats.alreadyAssignedToday) || 0);
+  }, [blockedRows, assignedIds, routeStats.alreadyAssignedToday]);
+
+  const paginationSaw = usePagination(eligibleRows);
   const paginationRoute = usePagination(publishedRoute);
   const paginationPreview = usePagination(previewRows);
-  const mapCenter = detail?.mapMarkers?.[0]?.position || [7.1907, 125.4553];
+  const paginationBlocked = usePagination(blockedRows);
+
+  const selectedRows = useMemo(
+    () => sawRows.filter((row) => selectedIds.has(String(row.customer_id))),
+    [sawRows, selectedIds]
+  );
+
+  const previewMarkers = useMemo(
+    () => buildMarkersFromRows(previewRows.length ? previewRows : selectedRows, {
+      color: '#1d4ed8',
+    }),
+    [previewRows, selectedRows]
+  );
+  const publishedMarkers = useMemo(
+    () => (detail?.mapMarkers?.length
+      ? detail.mapMarkers.filter((m) => validLatLng(m.position?.[0], m.position?.[1]))
+      : buildMarkersFromRows(publishedRoute, {
+        idKey: 'customerId',
+        labelKey: 'stopNumber',
+        nameKey: 'customerName',
+      })),
+    [detail?.mapMarkers, publishedRoute]
+  );
+
+  const mapMarkers = previewMarkers.length ? previewMarkers : publishedMarkers;
+  const mapBounds = mapMarkers.map((m) => m.position);
+  const mapCenter = mapMarkers[0]?.position || null;
+  const missingCoordCount = (previewRows.length ? previewRows : (selectedIds.size ? selectedRows : publishedRoute))
+    .filter((row) => !validLatLng(
+      row.latitude ?? row.lat ?? row.customer_latitude,
+      row.longitude ?? row.lng ?? row.customer_longitude
+    )).length;
 
   function toggleSelected(customerId) {
     const id = String(customerId);
@@ -311,13 +563,12 @@ export function CollectorDispatchDetailPage({
       else next.add(id);
       return next;
     });
+    setPreviewRows([]);
+    setPreviewMeta(null);
   }
 
   function selectTopN(n = 5) {
-    const picks = sawRows
-      .filter((row) => !row.assignment_block && !assignedIds.has(String(row.customer_id)))
-      .slice(0, n)
-      .map((row) => String(row.customer_id));
+    const picks = eligibleRows.slice(0, n).map((row) => String(row.customer_id));
     setSelectedIds(new Set(picks));
     setPreviewRows([]);
     setPreviewMeta(null);
@@ -383,6 +634,13 @@ export function CollectorDispatchDetailPage({
   }
 
   const emptyBook = Boolean(sawMeta?.emptyBook);
+  const portfolioCount = Number(routeStats.portfolioCustomers ?? routeStats.customersInBook ?? profile.accountBookSize ?? 0);
+  const hasPublished = publishedRoute.length > 0;
+  const allCompleted = hasPublished && publishedRoute.every((r) => r.status === 'Completed');
+  const canSelect = !allCompleted;
+  const selectedCount = selectedIds.size;
+  const showOptimize = canSelect && selectedCount > 0;
+  const showPublish = canSelect && selectedCount > 0;
 
   return (
     <div className="page">
@@ -391,150 +649,159 @@ export function CollectorDispatchDetailPage({
           <div>
             <h3>{profile.name}</h3>
             <p className="muted" style={{ marginTop: 4, marginBottom: 0 }}>
-              Operational collector profile for dispatch — not an HR record.
+              {profile.employeeCode || '—'}
+              {' · '}
+              {profile.branchName || '—'}
+              {' · '}
+              <StatusBadge status={profile.status || 'Active'} />
+              {profile.email ? ` · ${profile.email}` : ''}
+              {profile.phone ? ` · ${formatPhone(profile.phone)}` : ''}
+            </p>
+            <p className="muted" style={{ marginTop: 6, marginBottom: 0 }}>
+              Route status: <StatusBadge status={routeStatus} />
             </p>
           </div>
-          <div className="flex flex-wrap gap-2">
-            <label className="flex items-center gap-2 text-sm">
-              Dispatch date
+          <div className="flex flex-wrap gap-2 items-end">
+            <label className="flex flex-col gap-1 text-sm">
+              Work date
               <input
                 type="date"
                 className="input"
                 value={scheduledDate}
-                onChange={(e) => setScheduledDate(e.target.value)}
+                onChange={(e) => {
+                  const next = e.target.value;
+                  setScheduledDate(next);
+                  syncDateInUrl(next);
+                }}
               />
             </label>
             <button
               className="button secondary"
               type="button"
-              onClick={() => navigate(`${opsBase}/leaflet?staff=${encodeURIComponent(collectorId)}`)}
+              onClick={() => {
+                const today = manilaDateInputValue();
+                setScheduledDate(today);
+                syncDateInUrl(today);
+              }}
             >
-              View on Field Map
+              Today
+            </button>
+            <button
+              className="button secondary"
+              type="button"
+              onClick={() => navigate(`${opsBase}/field-operations/collectors/${collectorId}/history`)}
+            >
+              View Collector Route History
+            </button>
+            <button
+              className="button ghost"
+              type="button"
+              onClick={() => navigate(`${opsBase}/customers`)}
+            >
+              Customer Management
             </button>
           </div>
-        </div>
-        <div className="corvex-table-wrapper" style={{ marginTop: 16 }}>
-          <table className="corvex-table">
-            <tbody>
-              <tr><th>Full Name</th><td>{profile.name}</td></tr>
-              <tr><th>Employee ID</th><td>{profile.employeeCode || '—'}</td></tr>
-              <tr><th>Email</th><td>{profile.email || '—'}</td></tr>
-              <tr><th>Contact Number</th><td>{profile.phone ? formatPhone(profile.phone) : '—'}</td></tr>
-              <tr><th>Account Status</th><td><StatusBadge status={profile.status || 'Active'} /></td></tr>
-              <tr><th>Branch</th><td>{profile.branchName || '—'}</td></tr>
-              <tr><th>Date Joined</th><td>{profile.joinedAt ? formatDisplayDate(profile.joinedAt) : '—'}</td></tr>
-              <tr>
-                <th>Permanent Customer Book</th>
-                <td>
-                  {profile.accountBookSize ?? 0}
-                  <span className="text-ink/70"> (customers where this collector is the Assigned Collector)</span>
-                </td>
-              </tr>
-              <tr><th>Route Status</th><td><StatusBadge status={profile.todayRouteStatus || 'No Route'} /></td></tr>
-            </tbody>
-          </table>
         </div>
       </section>
 
       <Stats stats={[
-        { label: 'Eligible Customers', value: String(sawMeta?.stats?.ranked ?? routeStats.eligibleCustomers ?? sawRows.length ?? 0) },
-        { label: 'Customers in This Book', value: String(routeStats.customersInBook ?? profile.accountBookSize ?? 0) },
-        { label: 'Already Assigned Today', value: String(routeStats.alreadyAssignedToday ?? publishedRoute.length ?? 0) },
-        { label: 'Published Stops', value: String(routeStats.publishedStops ?? publishedRoute.length ?? 0) },
-        { label: 'Blocked Assignments', value: String(sawMeta?.stats?.blocked ?? routeStats.blockedAssignments ?? 0) },
+        { label: 'Portfolio Customers', value: String(portfolioCount) },
+        { label: 'Eligible Customers', value: String(sawMeta?.stats?.ranked ?? eligibleRows.length ?? 0) },
+        { label: 'Already Assigned Today', value: String(alreadyAssignedCount) },
+        {
+          label: hasPublished ? 'Published Stops' : 'Selected Stops',
+          value: String(hasPublished ? (routeStats.publishedStops ?? publishedRoute.length) : selectedCount),
+        },
+        { label: 'Blocked Customers', value: String(sawMeta?.stats?.blocked ?? blockedRows.length ?? 0) },
       ]} />
 
       <section className="panel content-panel relative overflow-hidden">
         <div className="flex flex-col md:flex-row justify-between gap-4 items-start md:items-center mb-4">
           <div>
-            <h3>Priority Candidates</h3>
+            <h3>Recommended Customers</h3>
             <p className="muted" style={{ marginTop: 4, marginBottom: 0 }}>
-              System-ranked eligible customers for {formatDisplayDate(scheduledDate)}. Review, optimize, then publish.
+              Suggested priority for {formatDisplayDate(scheduledDate)}. Review eligible customers, optimize, then publish.
             </p>
           </div>
           <div className="flex flex-wrap gap-2 items-center">
-            <button className="button secondary" type="button" disabled={assignBusy} onClick={() => selectTopN(5)}>
-              Select Top 5
-            </button>
-            <button
-              className="button secondary"
-              type="button"
-              disabled={assignBusy || selectedIds.size === 0}
-              onClick={() => runPreview()}
-            >
-              Optimize Route
-            </button>
-            <button
-              className="button"
-              type="button"
-              disabled={assignBusy || selectedIds.size === 0}
-              onClick={() => publishRoute()}
-            >
-              Confirm &amp; Publish ({selectedIds.size})
-            </button>
+            {canSelect ? (
+              <>
+                <button className="button secondary" type="button" disabled={assignBusy || !eligibleRows.length} onClick={() => selectTopN(5)}>
+                  Select Top 5
+                </button>
+                <button
+                  className="button secondary"
+                  type="button"
+                  disabled={assignBusy || !showOptimize}
+                  onClick={() => runPreview()}
+                >
+                  Optimize Route
+                </button>
+                <button
+                  className="button"
+                  type="button"
+                  disabled={assignBusy || !showPublish}
+                  onClick={() => publishRoute()}
+                >
+                  Confirm &amp; Publish ({selectedCount})
+                </button>
+              </>
+            ) : (
+              <span className="muted">Route completed for this date — view published stops below.</span>
+            )}
           </div>
         </div>
 
         {emptyBook && !sawRows.length ? (
           <EmptyState
-            title="No eligible customers are currently assigned to this Collector's portfolio or territories."
-            description="Eligibility uses permanent Account Manager ownership and Active territories where this Collector is the default Collector. The whole branch is never used as a fallback."
+            title="No customers are currently assigned to this Collector's permanent collection portfolio."
+            description={sawMeta?.emptyBookMessage
+              || 'Assign this Collector as Assigned Collector on customer records in Customer Management, then return here. Territories define geography, not portfolio ownership.'}
+            actionLabel="Open Customer Management"
+            onAction={() => navigate(`${opsBase}/customers`)}
           />
-        ) : sawRows.length ? (
+        ) : eligibleRows.length ? (
           <>
             <div className="corvex-table-wrapper">
               <table className="corvex-table">
                 <thead>
                   <tr>
                     <th aria-label="Select" />
-                    <th>Priority</th>
+                    <th>Suggested Priority</th>
                     <th>Customer</th>
-                    <th>Code</th>
-                    <th>Priority Score</th>
+                    <th>Contact</th>
+                    <th>Address / Area</th>
                     <th>Outstanding</th>
-                    <th>Overdue</th>
-                    <th>Due Date</th>
-                    <th>Assigned Collector</th>
-                    <th>Territory</th>
-                    <th>Assignment Status</th>
+                    <th>Collection Standing</th>
+                    <th>Map Location</th>
                   </tr>
                 </thead>
                 <tbody>
                   {paginationSaw.paginatedData.map((row) => {
                     const id = String(row.customer_id);
-                    const blocked = Boolean(row.assignment_block) || assignedIds.has(id);
-                    const otherBook = row.book_status === 'other_book';
+                    const hasPin = Boolean(validLatLng(row.latitude ?? row.lat, row.longitude ?? row.lng));
                     return (
                       <tr key={id}>
                         <td>
                           <input
                             type="checkbox"
                             checked={selectedIds.has(id)}
-                            disabled={blocked}
-                            title={blocked ? assignmentStatusLabel(row, assignedIds) : 'Select for publish'}
+                            disabled={!canSelect}
+                            title="Select for publish"
                             onChange={() => toggleSelected(id)}
                             aria-label={`Select ${row.customer_name}`}
                           />
                         </td>
                         <td><strong>#{row.rank}</strong></td>
                         <td>
-                          {row.customer_name}
-                          {otherBook ? <div className="text-ink/70" style={{ fontSize: '0.8rem' }}>Off-book exception</div> : null}
+                          <div>{row.customer_name}</div>
+                          <div className="text-ink/70" style={{ fontSize: '0.85rem' }}>{row.customer_code || '—'}</div>
                         </td>
-                        <td>{row.customer_code || '—'}</td>
-                        <td>{row.score != null ? Number(row.score).toFixed(3) : '—'}</td>
+                        <td>{row.contact_number || row.phone || '—'}</td>
+                        <td>{row.address || row.territory_name || '—'}</td>
                         <td>{formatCurrency(row.outstanding_balance || 0)}</td>
-                        <td>{row.days_overdue ?? 0} days</td>
-                        <td>{row.due_date ? formatDisplayDate(row.due_date) : '—'}</td>
-                        <td>{row.account_manager_name || (row.book_status === 'unassigned' ? 'Unassigned' : '—')}</td>
-                        <td>{row.territory_name || '—'}</td>
-                        <td>
-                          {blocked ? (
-                            <span className="text-ink/70">{assignmentStatusLabel(row, assignedIds)}</span>
-                          ) : (
-                            <StatusBadge status="Eligible" />
-                          )}
-                        </td>
+                        <td>{row.days_overdue != null ? `${row.days_overdue} days overdue` : (row.due_date ? `Due ${formatDisplayDate(row.due_date)}` : '—')}</td>
+                        <td>{hasPin ? 'Pin available' : 'Missing coordinates'}</td>
                       </tr>
                     );
                   })}
@@ -543,12 +810,57 @@ export function CollectorDispatchDetailPage({
             </div>
             <Pagination {...paginationSaw} />
           </>
+        ) : blockedRows.length ? (
+          <EmptyState
+            title="Some eligible customers are already included in another route for this date."
+            description="Inspect blocked customers below. Duplicate same-day assignments are not allowed."
+            actionLabel={showBlocked ? 'Hide blocked' : 'Inspect blocked customers'}
+            onAction={() => setShowBlocked((v) => !v)}
+          />
         ) : (
           <EmptyState
-            title="No eligible customers for this date"
-            description="Eligible customers need an open balance, coordinates, and either this Collector's permanent book or an Active territory where they are the default Collector."
+            title="This Collector has customers in their portfolio, but none currently meets the dispatch eligibility rules for the selected date."
+            description="Eligibility still requires an open balance, valid coordinates, and permanent portfolio ownership. Adjust customer records or try another work date."
+            actionLabel="Open Customer Management"
+            onAction={() => navigate(`${opsBase}/customers`)}
           />
         )}
+
+        {blockedRows.length ? (
+          <div style={{ marginTop: 16 }}>
+            <button className="button ghost" type="button" onClick={() => setShowBlocked((v) => !v)}>
+              {showBlocked ? 'Hide' : 'Show'} blocked customers ({blockedRows.length})
+            </button>
+            {showBlocked ? (
+              <>
+                <div className="corvex-table-wrapper" style={{ marginTop: 8 }}>
+                  <table className="corvex-table">
+                    <thead>
+                      <tr>
+                        <th>Customer</th>
+                        <th>Outstanding</th>
+                        <th>Exclusion reason</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {paginationBlocked.paginatedData.map((row) => (
+                        <tr key={`blocked-${row.customer_id}`}>
+                          <td>
+                            <div>{row.customer_name}</div>
+                            <div className="text-ink/70" style={{ fontSize: '0.85rem' }}>{row.customer_code || '—'}</div>
+                          </td>
+                          <td>{formatCurrency(row.outstanding_balance || 0)}</td>
+                          <td>{assignmentStatusLabel(row, assignedIds)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                <Pagination {...paginationBlocked} />
+              </>
+            ) : null}
+          </div>
+        ) : null}
       </section>
 
       {previewRows.length ? (
@@ -558,10 +870,15 @@ export function CollectorDispatchDetailPage({
               <h3>Proposed Visiting Order</h3>
               <p className="muted" style={{ marginTop: 4, marginBottom: 0 }}>
                 {roadProviderNote(previewMeta?.roadProvider) || 'Review the recommended stop order before publishing.'}
-                {' '}Priority Score remains separate from travel sequence.
+                {' '}Suggested priority remains separate from travel sequence.
               </p>
             </div>
-            <button className="button" type="button" disabled={assignBusy} onClick={() => publishRoute(previewRows.map((r) => r.customer_id))}>
+            <button
+              className="button"
+              type="button"
+              disabled={assignBusy || !canSelect}
+              onClick={() => publishRoute(previewRows.map((r) => r.customer_id))}
+            >
               Publish This Route
             </button>
           </div>
@@ -571,21 +888,24 @@ export function CollectorDispatchDetailPage({
                 <tr>
                   <th>Stop</th>
                   <th>Customer</th>
-                  <th>Priority Score</th>
                   <th>Outstanding</th>
                   <th>Address</th>
+                  <th>Map Location</th>
                 </tr>
               </thead>
               <tbody>
-                {paginationPreview.paginatedData.map((row) => (
-                  <tr key={row.customer_id}>
-                    <td><strong>#{row.route_sequence || row.rank}</strong></td>
-                    <td>{row.customer_name}</td>
-                    <td>{row.score != null ? Number(row.score).toFixed(3) : '—'}</td>
-                    <td>{formatCurrency(row.outstanding_balance || 0)}</td>
-                    <td>{row.address || '—'}</td>
-                  </tr>
-                ))}
+                {paginationPreview.paginatedData.map((row) => {
+                  const hasPin = Boolean(validLatLng(row.latitude ?? row.lat, row.longitude ?? row.lng));
+                  return (
+                    <tr key={row.customer_id}>
+                      <td><strong>#{row.route_sequence || row.rank}</strong></td>
+                      <td>{row.customer_name}</td>
+                      <td>{formatCurrency(row.outstanding_balance || 0)}</td>
+                      <td>{row.address || '—'}</td>
+                      <td>{hasPin ? 'Pin available' : 'Missing coordinates'}</td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>
@@ -596,13 +916,22 @@ export function CollectorDispatchDetailPage({
       <section className="panel content-panel relative overflow-hidden">
         <div className="flex flex-col md:flex-row justify-between gap-4 items-start md:items-center mb-4">
           <div>
-            <h3>Today&apos;s Published Route</h3>
+            <h3>
+              {allCompleted
+                ? 'Completed Route'
+                : hasPublished
+                  ? 'Published Route'
+                  : 'Route Map Preview'}
+            </h3>
             <p className="muted" style={{ marginTop: 4, marginBottom: 0 }}>
-              Published collection visits for {formatDisplayDate(scheduledDate)}. Same records the collector executes.
+              {hasPublished
+                ? `Published collection visits for ${formatDisplayDate(scheduledDate)}. Visit completion is separate from payment posting.`
+                : `Select eligible customers to preview the proposed collection route for ${formatDisplayDate(scheduledDate)}.`}
               {detail?.roadProvider ? ` ${roadProviderNote(detail.roadProvider) || ''}` : ''}
             </p>
           </div>
         </div>
+
         {publishedRoute.length ? (
           <>
             <div className="corvex-table-wrapper">
@@ -614,6 +943,7 @@ export function CollectorDispatchDetailPage({
                     <th>Address</th>
                     <th>Outstanding</th>
                     <th>Visit Status</th>
+                    <th>Visit Outcome</th>
                     <th>Scheduled Date</th>
                   </tr>
                 </thead>
@@ -625,6 +955,7 @@ export function CollectorDispatchDetailPage({
                       <td>{r.address || '—'}</td>
                       <td>{r.outstandingBalance != null ? formatCurrency(r.outstandingBalance) : '—'}</td>
                       <td><StatusBadge status={r.status} /></td>
+                      <td>{r.visitOutcome || r.visit_outcome || '—'}</td>
                       <td>{formatDisplayDate(r.scheduledDate || scheduledDate)}</td>
                     </tr>
                   ))}
@@ -636,59 +967,304 @@ export function CollectorDispatchDetailPage({
         ) : (
           <EmptyState
             title="No published route for this date"
-            description="Select eligible customers, review the proposed order, then confirm and publish."
+            description="Select eligible customers, review the proposed order, then confirm and publish. Empty routes cannot be published."
           />
         )}
+
         <div style={{ marginTop: 16 }}>
-          <LeafletMap
-            center={mapCenter}
-            zoom={13}
-            height={400}
-            polylines={detail?.polylines || []}
-            markers={detail?.mapMarkers || []}
-          />
-          {!detail?.mapMarkers?.length ? (
-            <p className="muted" style={{ marginTop: 8 }}>
-              Route map shows published stops with coordinates in visiting order. Road paths appear on Field Map when routing data is available.
-            </p>
-          ) : null}
+          {mapMarkers.length ? (
+            <>
+              <LeafletMap
+                center={mapCenter}
+                zoom={13}
+                height={400}
+                fitBounds={mapBounds}
+                polylines={detail?.polylines || []}
+                markers={mapMarkers}
+              />
+              {missingCoordCount > 0 ? (
+                <p className="muted" style={{ marginTop: 8 }}>
+                  {missingCoordCount} selected/published stop(s) are missing valid coordinates and are omitted from the map.
+                </p>
+              ) : null}
+            </>
+          ) : (
+            <EmptyState
+              title="No route locations available yet"
+              description="Select eligible customers to preview the proposed collection route. The map only shows real customer coordinates — never a default pin."
+            />
+          )}
         </div>
       </section>
 
-      {detail?.history?.length ? (
+      <div className="flex justify-between gap-2 mt-4 flex-wrap">
+        <button
+          className="button secondary"
+          type="button"
+          onClick={() => navigate(`${opsBase}/field-operations/collectors/${collectorId}/history`)}
+        >
+          View Collector Route History
+        </button>
+        <button className="button ghost" type="button" onClick={() => navigate(`${opsBase}/field-operations/collectors`)}>
+          Back to Collector Dispatch
+        </button>
+      </div>
+    </div>
+  );
+}
+
+export function CollectorRouteHistoryPage({
+  navigate,
+  opsBase,
+  showToast,
+  collectorId = null,
+}) {
+  const today = manilaDateInputValue();
+  const [from, setFrom] = useState(() => {
+    const d = new Date(`${today}T00:00:00`);
+    d.setDate(d.getDate() - 14);
+    return d.toISOString().slice(0, 10);
+  });
+  const [to, setTo] = useState(today);
+  const [status, setStatus] = useState('all');
+  const [search, setSearch] = useState('');
+  const [collectorFilter, setCollectorFilter] = useState(collectorId ? String(collectorId) : 'all');
+  const [collectors, setCollectors] = useState([]);
+  const [rows, setRows] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [selected, setSelected] = useState(null);
+  const [detailLoading, setDetailLoading] = useState(false);
+
+  useEffect(() => {
+    if (collectorId) setCollectorFilter(String(collectorId));
+  }, [collectorId]);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function loadMeta() {
+      const staffResult = await getBranchStaff({ date: today });
+      if (cancelled) return;
+      if (staffResult.success) setCollectors(staffResult.data?.collectors || []);
+    }
+    loadMeta();
+    return () => { cancelled = true; };
+  }, [today]);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function load() {
+      setLoading(true);
+      const params = {
+        from,
+        to,
+        search: search.trim() || undefined,
+        status: status === 'all' ? undefined : status,
+        collector_id: collectorFilter !== 'all' ? collectorFilter : undefined,
+        limit: 300,
+      };
+      const result = await getCollectorRouteHistory(params);
+      if (cancelled) return;
+      if (result.success) setRows(result.data || []);
+      else {
+        setRows([]);
+        showToast?.(result.message || 'Failed to load route history.', 'error');
+      }
+      setLoading(false);
+    }
+    load();
+    return () => { cancelled = true; };
+  }, [from, to, status, collectorFilter, search, showToast]);
+
+  const pagination = usePagination(rows);
+
+  async function openDetails(row) {
+    setDetailLoading(true);
+    const result = await getCollectorRouteDetail(row.collector_id, row.work_date);
+    setDetailLoading(false);
+    if (result.success) setSelected(result.data);
+    else showToast?.(result.message || 'Failed to load route detail.', 'error');
+  }
+
+  if (loading) return <LoadingState variant="dashboard" message="Loading collector route history..." />;
+
+  return (
+    <div className="page">
+      <section className="panel content-panel relative overflow-hidden">
+        <div className="list-section-header" style={{ alignItems: 'flex-start' }}>
+          <div>
+            <h3>Collector Route History</h3>
+            <p className="muted" style={{ marginTop: 4, marginBottom: 0 }}>
+              One record per dispatched collection route (collector + work date). Read-only. Visit outcomes are separate from payment posting.
+            </p>
+          </div>
+          <button
+            className="button secondary"
+            type="button"
+            onClick={() => navigate(collectorId
+              ? `${opsBase}/field-operations/collectors/${collectorId}`
+              : `${opsBase}/field-operations/collectors`)}
+          >
+            Back to Dispatch
+          </button>
+        </div>
+
+        <div className="flex flex-wrap gap-2 items-end mb-4">
+          <label className="flex flex-col gap-1 text-sm">
+            From
+            <input type="date" className="input" value={from} onChange={(e) => setFrom(e.target.value)} />
+          </label>
+          <label className="flex flex-col gap-1 text-sm">
+            To
+            <input type="date" className="input" value={to} onChange={(e) => setTo(e.target.value)} />
+          </label>
+          {!collectorId ? (
+            <label className="flex flex-col gap-1 text-sm">
+              Collector
+              <select className="filter-select" value={collectorFilter} onChange={(e) => setCollectorFilter(e.target.value)}>
+                <option value="all">All</option>
+                {collectors.map((c) => (
+                  <option key={c.id} value={String(c.id)}>{c.name}</option>
+                ))}
+              </select>
+            </label>
+          ) : null}
+          <label className="flex flex-col gap-1 text-sm">
+            Route status
+            <select className="filter-select" value={status} onChange={(e) => setStatus(e.target.value)}>
+              <option value="all">All</option>
+              <option value="Published">Published</option>
+              <option value="In Progress">In Progress</option>
+              <option value="Completed">Completed</option>
+              <option value="Needs Attention">Needs Attention</option>
+            </select>
+          </label>
+          <label className="flex flex-col gap-1 text-sm" style={{ minWidth: 200 }}>
+            Search
+            <input
+              className="input"
+              placeholder="Collector name or EMP id"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+            />
+          </label>
+        </div>
+
+        {!rows.length ? (
+          <EmptyState
+            title="No collection routes in this range"
+            description="Published routes for past work dates appear here as route-level records."
+          />
+        ) : (
+          <>
+            <div className="corvex-table-wrapper">
+              <table className="corvex-table">
+                <thead>
+                  <tr>
+                    <th>Work Date</th>
+                    <th>Collector</th>
+                    <th>Planned Stops</th>
+                    <th>Completed</th>
+                    <th>Remaining</th>
+                    <th>Route Status</th>
+                    <th>Published By</th>
+                    <th>Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {pagination.paginatedData.map((row) => (
+                    <tr key={`${row.collector_id}-${row.work_date}`}>
+                      <td>{formatDisplayDate(row.work_date)}</td>
+                      <td>
+                        <div>{row.collector_name}</div>
+                        <div className="text-ink/70" style={{ fontSize: '0.85rem' }}>{row.collector_employee_id || '—'}</div>
+                      </td>
+                      <td>{row.planned_stops}</td>
+                      <td>{row.completed}</td>
+                      <td>{row.remaining}</td>
+                      <td><StatusBadge status={normalizeRouteStatus(row.route_status)} /></td>
+                      <td>{row.published_by || '—'}</td>
+                      <td>
+                        <button className="button secondary" type="button" onClick={() => openDetails(row)}>
+                          View Details
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <Pagination {...pagination} />
+          </>
+        )}
+      </section>
+
+      {detailLoading ? (
+        <LoadingState variant="detail" message="Loading route detail..." />
+      ) : null}
+
+      {selected ? (
         <section className="panel content-panel relative overflow-hidden">
-          <div className="list-section-header"><h3>Route History</h3></div>
-          <p className="muted">Previous collection visits — separate from today&apos;s published route.</p>
+          <div className="list-section-header">
+            <div>
+              <h3>Route Details — {formatDisplayDate(selected.work_date)}</h3>
+              <p className="muted" style={{ marginTop: 4, marginBottom: 0 }}>
+                {selected.collector_name}
+                {' · '}
+                <StatusBadge status={normalizeRouteStatus(selected.route_status)} />
+                {' · '}
+                {selected.planned_stops} stops
+                {selected.completed_at ? ` · Completed ${formatDisplayDate(selected.completed_at)}` : ''}
+              </p>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <button
+                className="button secondary"
+                type="button"
+                onClick={() => navigate(`${opsBase}/field-operations/collectors/${selected.collector_id}?date=${encodeURIComponent(selected.work_date)}`)}
+              >
+                Open Daily Dispatch
+              </button>
+              <button className="button ghost" type="button" onClick={() => setSelected(null)}>Close</button>
+            </div>
+          </div>
           <div className="corvex-table-wrapper">
             <table className="corvex-table">
               <thead>
                 <tr>
-                  <th>Date</th>
+                  <th>Stop</th>
                   <th>Customer</th>
-                  <th>Status</th>
+                  <th>Address</th>
+                  <th>Visit Status</th>
+                  <th>Visit Outcome</th>
+                  <th>Field Reports</th>
+                  <th>Payment Amount</th>
                   <th>Outstanding</th>
                 </tr>
               </thead>
               <tbody>
-                {detail.history.slice(0, 15).map((h) => (
-                  <tr key={h.visitId}>
-                    <td>{formatDisplayDate(h.scheduledDate)}</td>
-                    <td>{h.account}</td>
-                    <td><StatusBadge status={h.status} /></td>
-                    <td>{formatCurrency(h.outstandingBalance || 0)}</td>
+                {(selected.stops || []).map((stop) => (
+                  <tr key={stop.visit_id}>
+                    <td><strong>#{stop.stop_number}</strong></td>
+                    <td>
+                      <div>{stop.customer_name}</div>
+                      <div className="text-ink/70" style={{ fontSize: '0.85rem' }}>{stop.customer_code || '—'}</div>
+                    </td>
+                    <td>{stop.address || '—'}</td>
+                    <td><StatusBadge status={stop.status} /></td>
+                    <td>{stop.visit_outcome || '—'}</td>
+                    <td>{stop.field_report_count || 0}</td>
+                    <td>{stop.payment_amount ? formatCurrency(stop.payment_amount) : '—'}</td>
+                    <td>{formatCurrency(stop.outstanding_balance || 0)}</td>
                   </tr>
                 ))}
               </tbody>
             </table>
           </div>
+          <p className="muted" style={{ marginTop: 12 }}>
+            Visit outcome records field results. Payment amount reflects posted/pending collection transactions and is not required for a completed visit.
+          </p>
         </section>
       ) : null}
-
-      <div className="flex justify-end gap-2 mt-4">
-        <button className="button ghost" type="button" onClick={() => navigate(`${opsBase}/field-operations/collectors`)}>
-          Back to Collectors
-        </button>
-      </div>
     </div>
   );
 }

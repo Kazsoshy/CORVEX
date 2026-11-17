@@ -86,7 +86,18 @@ export async function updateCustomer(customerId, payload) {
   } catch (error) {
     const message = error?.response?.data?.message || error?.message || 'Failed to update customer';
     console.error('Failed to update customer:', error);
-    return { success: false, message };
+    return { success: false, message, status: error?.response?.status };
+  }
+}
+
+/** Sales Agent maker-checker path for protected customer master-data fields. */
+export async function submitCustomerChangeRequest(customerId, payload) {
+  try {
+    const response = await apiClient.post(`/customers/${customerId}/change-requests`, payload);
+    return response.data;
+  } catch (error) {
+    const message = error?.response?.data?.message || error?.message || 'Failed to submit change request';
+    return { success: false, message, status: error?.response?.status };
   }
 }
 
@@ -305,9 +316,24 @@ export async function submitSalesFieldReport(payload) {
     return {
       success: false,
       offline: unreachable,
+      status: error.response?.status,
       message: error.response?.data?.message || (unreachable
         ? 'The server could not be reached.'
         : 'Failed to submit report.'),
+      data: error.response?.data?.data || null,
+    };
+  }
+}
+
+export async function updateSalesFieldReport(id, payload) {
+  try {
+    const response = await apiClient.put(`/sales/field-reports/${id}`, payload);
+    return response.data;
+  } catch (error) {
+    return {
+      success: false,
+      message: error.response?.data?.message || 'Failed to update field activity report.',
+      data: error.response?.data?.data || null,
     };
   }
 }
@@ -344,14 +370,44 @@ export async function fetchSalesAreaAssignmentById(id) {
   }
 }
 
-export async function updateSalesAreaAssignmentStatus(id, status) {
+export async function updateSalesAreaAssignmentStatus(id, status, payload = {}) {
   try {
-    const response = await apiClient.patch(`/sales/area-assignments/${id}/status`, { status });
+    const response = await apiClient.patch(`/sales/area-assignments/${id}/status`, {
+      status,
+      ...payload,
+    });
     return response.data;
   } catch (error) {
     return {
       success: false,
       message: error?.response?.data?.message || 'Failed to update area assignment.',
+    };
+  }
+}
+
+export async function fetchSalesAreaAssignmentCustomers(id) {
+  try {
+    const response = await apiClient.get(`/sales/area-assignments/${id}/customers`);
+    return response.data;
+  } catch (error) {
+    return {
+      success: false,
+      data: [],
+      count: 0,
+      message: error?.response?.data?.message || 'Failed to load area customers.',
+    };
+  }
+}
+
+export async function previewSalesAreaAssignmentRoute(id, payload = {}) {
+  try {
+    const response = await apiClient.post(`/sales/area-assignments/${id}/route-preview`, payload);
+    return response.data;
+  } catch (error) {
+    return {
+      success: false,
+      data: null,
+      message: error?.response?.data?.message || 'Failed to preview route.',
     };
   }
 }

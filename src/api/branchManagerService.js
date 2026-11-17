@@ -171,6 +171,37 @@ export async function assignCollectorCollectionRoute(collectorId, body) {
   }
 }
 
+/** Branch-wide (or collector-filtered) synthetic collection route history — read-only. */
+export async function getCollectorRouteHistory(params = {}) {
+  try {
+    const response = await apiClient.get('/branch-manager/collection-routes', { params });
+    return response.data;
+  } catch (error) {
+    console.error('Failed to fetch collection route history:', error);
+    return {
+      success: false,
+      message: error.response?.data?.message || 'Failed to load collection route history.',
+      data: [],
+    };
+  }
+}
+
+export async function getCollectorRouteDetail(collectorId, workDate) {
+  try {
+    const response = await apiClient.get(
+      `/branch-manager/collection-routes/${collectorId}/${workDate}`
+    );
+    return response.data;
+  } catch (error) {
+    console.error('Failed to fetch collection route detail:', error);
+    return {
+      success: false,
+      message: error.response?.data?.message || 'Failed to load route detail.',
+      data: null,
+    };
+  }
+}
+
 export async function getFieldActivityReports(params = {}) {
   try {
     const response = await apiClient.get('/branch-manager/field-activity-reports', { params });
@@ -194,6 +225,32 @@ export async function getFieldActivityReport(reportId) {
     return {
       success: false,
       message: error.response?.data?.message || 'Failed to load field activity report.',
+      data: null,
+    };
+  }
+}
+
+export async function reviewFieldActivityReport(reportId, body = {}) {
+  try {
+    const response = await apiClient.patch(`/branch-manager/field-activity-reports/${reportId}/review`, body);
+    return response.data;
+  } catch (error) {
+    return {
+      success: false,
+      message: error.response?.data?.message || 'Failed to update report review.',
+      data: null,
+    };
+  }
+}
+
+export async function reopenFieldActivityReportEdit(reportId, body = {}) {
+  try {
+    const response = await apiClient.post(`/branch-manager/field-activity-reports/${reportId}/reopen-edit`, body);
+    return response.data;
+  } catch (error) {
+    return {
+      success: false,
+      message: error.response?.data?.message || 'Failed to reopen report editing.',
       data: null,
     };
   }
@@ -227,6 +284,21 @@ export async function getSalesAgentAreaAssignments(agentId, params = {}) {
   }
 }
 
+/** Branch-wide (or agent-filtered) sales assignment history — read-only. */
+export async function getSalesAreaAssignmentHistory(params = {}) {
+  try {
+    const response = await apiClient.get('/branch-manager/sales-area-assignments', { params });
+    return response.data;
+  } catch (error) {
+    console.error('Failed to fetch sales assignment history:', error);
+    return {
+      success: false,
+      message: error.response?.data?.message || 'Failed to load assignment history.',
+      data: [],
+    };
+  }
+}
+
 export async function assignSalesAgentArea(agentId, body) {
   try {
     const response = await apiClient.post(
@@ -239,6 +311,23 @@ export async function assignSalesAgentArea(agentId, body) {
     return {
       success: false,
       message: error.response?.data?.message || 'Failed to assign area.',
+      data: error.response?.data?.data || null,
+    };
+  }
+}
+
+export async function updateSalesAgentAreaAssignment(agentId, assignmentId, body) {
+  try {
+    const response = await apiClient.patch(
+      `/branch-manager/staff/sales/${agentId}/area-assignments/${assignmentId}`,
+      body
+    );
+    return response.data;
+  } catch (error) {
+    console.error('Failed to update sales area assignment:', error);
+    return {
+      success: false,
+      message: error.response?.data?.message || 'Failed to update assignment.',
       data: error.response?.data?.data || null,
     };
   }

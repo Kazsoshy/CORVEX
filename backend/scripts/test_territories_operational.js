@@ -1,5 +1,5 @@
 /**
- * Lightweight integrity checks for the territories operational model.
+ * Lightweight integrity checks for geography-first territories.
  * Run: node backend/scripts/test_territories_operational.js
  */
 import dotenv from 'dotenv';
@@ -29,11 +29,12 @@ async function main() {
     WHERE table_name = 'territories'
       AND column_name IN (
         'status','latitude','longitude','radius_meters',
+        'barangay_code','barangay_name','municipality_name','province_name',
         'default_sales_agent_id','default_collector_id'
       )
     ORDER BY column_name
   `);
-  assert(cols.rows.length >= 6, 'Missing territories operational columns');
+  assert(cols.rows.length >= 8, 'Missing territories geo/operational columns');
   results.push(['schema_columns', 'PASS', cols.rows.map((r) => r.column_name).join(',')]);
 
   const statusBad = await pool.query(`
@@ -42,16 +43,6 @@ async function main() {
   `);
   assert(statusBad.rows[0].n === 0, 'Invalid territory status values exist');
   results.push(['status_values', 'PASS']);
-
-  const crossBranchStaff = await pool.query(`
-    SELECT COUNT(*)::int AS n
-    FROM territories t
-    LEFT JOIN users sa ON sa.id = t.default_sales_agent_id
-    LEFT JOIN users col ON col.id = t.default_collector_id
-    WHERE (t.default_sales_agent_id IS NOT NULL AND sa.branch_id IS DISTINCT FROM t.branch_id)
-       OR (t.default_collector_id IS NOT NULL AND col.branch_id IS DISTINCT FROM t.branch_id)
-  `);
-  results.push(['cross_branch_default_staff', 'INFO', String(crossBranchStaff.rows[0].n)]);
 
   const crossBranchCustomers = await pool.query(`
     SELECT COUNT(*)::int AS n
@@ -76,13 +67,42 @@ async function main() {
   `);
   results.push(['active_territories_missing_pin', 'INFO', String(activeMissingGeo.rows[0].n)]);
 
-  const activeMissingDefaults = await pool.query(`
+  const activeMissingBarangay = await pool.query(`
     SELECT COUNT(*)::int AS n
     FROM territories
     WHERE COALESCE(status,'Active') = 'Active'
-      AND (default_sales_agent_id IS NULL OR default_collector_id IS NULL)
+      AND (barangay_name IS NULL OR btrim(barangay_name) = '')
   `);
-  results.push(['active_territories_missing_defaults', 'INFO', String(activeMissingDefaults.rows[0].n)]);
+  results.push(['active_territories_missing_barangay', 'INFO', String(activeMissingBarangay.rows[0].n)]);
+
+  // Defaults are legacy/nullable — Active territories must NOT require them.
+  const activeWithNullDefaults = await pool.query(`
+    SELECT COUNT(*)::int AS n
+    FROM territories
+    WHERE COALESCE(status,'Active') = 'Active'
+      AND default_sales_agent_id IS NULL
+      AND default_collector_id IS NULL
+  `);
+  results.push(['active_ok_without_defaults', 'PASS', String(activeWithNullDefaults.rows[0].n)]);
+
+  const policy = await pool.query(`
+    SELECT setting_value FROM system_settings WHERE setting_key = 'territory_policies' LIMIT 1
+  `);
+  if (policy.rows[0]) {
+    let parsed;
+    try {
+      parsed = typeof policy.rows[0].setting_value === 'string'
+        ? JSON.parse(policy.rows[0].setting_value)
+        : policy.rows[0].setting_value;
+    } catch {
+      parsed = null;
+    }
+    assert(parsed && parsed.mode === 'off', 'territory_policies.mode must ship as off');
+    assert(parsed.preserveHistory === true, 'territory_policies.preserveHistory must be true');
+    results.push(['territory_policies_mode_off', 'PASS']);
+  } else {
+    results.push(['territory_policies_mode_off', 'INFO', 'setting not seeded yet']);
+  }
 
   for (const row of results) {
     console.log(row.join('\t'));

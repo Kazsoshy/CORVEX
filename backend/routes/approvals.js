@@ -41,10 +41,54 @@ import {
 } from '../lib/inventoryTransferNotifications.js';
 import { logWarehouseAudit } from '../lib/branchInventoryStock.js';
 
+import { loadCreditPolicies, saveCreditPolicies } from '../lib/creditPolicies.js';
+
 const router = express.Router();
 const APPROVAL_ROLES = [...new Set([...ROLE_SETS.branchOps, 'operating_manager', 'super_admin'])];
 
 router.use(requireAuth, requireRole(APPROVAL_ROLES));
+
+router.get('/credit-policies', async (req, res) => {
+  try {
+    const policies = await loadCreditPolicies(req.app.locals.pool);
+    return res.status(200).json({ success: true, data: policies });
+  } catch (err) {
+    console.error('[Approvals] GET /credit-policies error:', err.message);
+    return res.status(500).json({ success: false, message: 'Failed to load credit policies.' });
+  }
+});
+
+router.put('/credit-policies', async (req, res) => {
+  try {
+    const slug = req.currentUser?.roleSlug;
+    if (slug !== 'operating_manager' && slug !== 'super_admin') {
+      return res.status(403).json({
+        success: false,
+        message: 'Only Operating Managers can edit credit suggestion policies. Branch Managers approve CI for their branch.',
+      });
+    }
+    const saved = await saveCreditPolicies(req.app.locals.pool, req.body || {});
+    await writeAuditFromReq(req.app.locals.pool, req, {
+      module: 'System Configuration',
+      activity: 'Update Credit Policies',
+      action: 'Update Credit Policies',
+      description: 'Updated org-wide first-credit suggestion policy knobs.',
+      status: AUDIT_STATUS.UPDATED,
+      affectedRecord: 'system_settings:credit_suggestion_policies',
+    });
+    return res.status(200).json({
+      success: true,
+      message: 'Credit suggestion policies saved. Branch Managers still approve CI for their own branch.',
+      data: saved,
+    });
+  } catch (err) {
+    if (err.status === 400) {
+      return res.status(400).json({ success: false, message: err.message });
+    }
+    console.error('[Approvals] PUT /credit-policies error:', err.message);
+    return res.status(500).json({ success: false, message: 'Failed to save credit policies.' });
+  }
+});
 
 function branchFilter(user, alias = '', paramOffset = 1) {
   const col = alias ? `${alias}.branch_id` : 'branch_id';
@@ -623,6 +667,137 @@ router.patch('/collections/:id', async (req, res) => {
   }
 });
 
+router.get('/customer-change-requests', async (req, res) => {
+  try {
+    const scope = branchFilter(req.currentUser, 'r');
+    const result = await req.app.locals.pool.query(
+      `SELECT r.request_id, r.customer_id, r.branch_id, r.status, r.change_type,
+              r.proposed_json, r.original_json, r.reason, r.created_at,
+              COALESCE(NULLIF(TRIM(u.full_name), ''), CONCAT_WS(' ', u.first_name, u.last_name)) AS requester_name,
+              CONCAT_WS(' ', c.first_name, c.last_name) AS customer_name, c.customer_code
+       FROM customer_change_requests r
+       JOIN customers c ON c.customer_id = r.customer_id
+       LEFT JOIN users u ON u.id = r.requested_by
+       WHERE ${scope.sql}
+         AND ($${scope.params.length + 1} = 'All' OR r.status = $${scope.params.length + 1})
+       ORDER BY CASE WHEN r.status = 'Pending' THEN 0 ELSE 1 END, r.created_at ASC`,
+      [...scope.params, String(req.query.status || 'Pending')]
+    );
+    return res.status(200).json({ success: true, data: result.rows });
+  } catch (err) {
+    console.error('[Approvals] GET /customer-change-requests error:', err.message);
+    return res.status(500).json({ success: false, message: 'Failed to load customer change requests.' });
+  }
+});
+
+router.get('/customer-change-requests/:id', async (req, res) => {
+  try {
+    const scope = branchFilter(req.currentUser, 'r', 2);
+    const result = await req.app.locals.pool.query(
+      `SELECT r.*, CONCAT_WS(' ', c.first_name, c.last_name) AS customer_name, c.customer_code,
+              COALESCE(NULLIF(TRIM(u.full_name), ''), CONCAT_WS(' ', u.first_name, u.last_name)) AS requester_name
+       FROM customer_change_requests r
+       JOIN customers c ON c.customer_id = r.customer_id
+       LEFT JOIN users u ON u.id = r.requested_by
+       WHERE r.request_id = $1 AND ${scope.sql}`,
+      [Number(req.params.id), ...scope.params]
+    );
+    if (!result.rows.length) return res.status(404).json({ success: false, message: 'Customer change request not found.' });
+    return res.status(200).json({ success: true, data: result.rows[0] });
+  } catch (err) {
+    console.error('[Approvals] GET /customer-change-requests/:id error:', err.message);
+    return res.status(500).json({ success: false, message: 'Failed to load customer change request.' });
+  }
+});
+
+router.patch('/customer-change-requests/:id', async (req, res) => {
+  const client = await req.app.locals.pool.connect();
+  try {
+    const requestId = Number(req.params.id);
+    const decision = String(req.body?.status || '').trim();
+    const remarks = String(req.body?.decision_remarks || '').trim();
+    if (!['Approved', 'Rejected'].includes(decision)) {
+      return res.status(400).json({ success: false, message: 'Status must be Approved or Rejected.' });
+    }
+    if (decision === 'Rejected' && !remarks) {
+      return res.status(400).json({ success: false, message: 'Rejection remarks are required.' });
+    }
+
+    await client.query('BEGIN');
+    const scope = branchFilter(req.currentUser, 'r', 2);
+    const loaded = await client.query(
+      `SELECT r.*, c.branch_id
+       FROM customer_change_requests r
+       JOIN customers c ON c.customer_id = r.customer_id
+       WHERE r.request_id = $1 AND ${scope.sql}
+       FOR UPDATE`,
+      [requestId, ...scope.params]
+    );
+    if (!loaded.rows.length) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ success: false, message: 'Customer change request not found.' });
+    }
+    const request = loaded.rows[0];
+    if (request.status !== 'Pending') {
+      await client.query('ROLLBACK');
+      return res.status(409).json({ success: false, message: 'This request has already been decided.' });
+    }
+
+    if (decision === 'Approved') {
+      const allowed = new Set([
+        'first_name', 'middle_name', 'last_name', 'mothers_maiden_name', 'civil_status',
+        'customer_type', 'business_name', 'registration_profile_json', 'address',
+        'address_region', 'address_province', 'address_city', 'address_barangay',
+        'address_street', 'address_zip', 'latitude', 'longitude', 'contact_phone',
+        'contact_person_fname', 'contact_person_mname', 'contact_person_lname',
+        'contact_person_phone', 'contact_person_relationship',
+        'secondary_contact_fname', 'secondary_contact_lname', 'secondary_contact_phone',
+        'secondary_contact_relationship', 'territory_id',
+      ]);
+      const patch = request.proposed_json || {};
+      const entries = Object.entries(patch).filter(([key]) => allowed.has(key));
+      if (entries.length) {
+        const values = [];
+        const clauses = entries.map(([key, value], index) => {
+          values.push(value);
+          return `${key} = $${index + 1}`;
+        });
+        values.push(request.customer_id);
+        await client.query(
+          `UPDATE customers SET ${clauses.join(', ')}, updated_at = CURRENT_TIMESTAMP
+           WHERE customer_id = $${values.length}`,
+          values
+        );
+      }
+    }
+
+    const updated = await client.query(
+      `UPDATE customer_change_requests
+       SET status = $1, decision_remarks = $2, decided_by = $3, decided_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
+       WHERE request_id = $4
+       RETURNING *`,
+      [decision, remarks || null, req.currentUser.id, requestId]
+    );
+    await client.query('COMMIT');
+
+    await writeAuditFromReq(req.app.locals.pool, req, {
+      module: 'Customer Management',
+      activity: `${decision} Customer Change`,
+      action: `${decision} Customer Change`,
+      description: `${decision} customer change request #${requestId}.`,
+      status: decision === 'Approved' ? AUDIT_STATUS.APPROVED : AUDIT_STATUS.REJECTED,
+      affectedRecord: `customer_change_request:${requestId}`,
+    });
+    return res.status(200).json({ success: true, message: `Customer change ${decision.toLowerCase()}.`, data: updated.rows[0] });
+  } catch (err) {
+    try { await client.query('ROLLBACK'); } catch { /* transaction already ended */ }
+    console.error('[Approvals] PATCH /customer-change-requests/:id error:', err.message);
+    return res.status(500).json({ success: false, message: 'Failed to decide customer change request.' });
+  } finally {
+    client.release();
+  }
+});
+
 router.get('/center-summary', async (req, res) => {
   try {
     const pool = req.app.locals.pool;
@@ -632,7 +807,7 @@ router.get('/center-summary', async (req, res) => {
     const scopePay = branchFilter(user, 'cp');
     const branchParams = isUnscoped(user) ? [] : [user.branchId];
 
-    const [ciPending, transfersPending, invoicesPending, collectionsPending, restocksPending, countsPending] =
+    const [ciPending, transfersPending, invoicesPending, collectionsPending, restocksPending, countsPending, customerChangesPending] =
       await Promise.all([
         pool.query(
           `SELECT COUNT(*)::int AS count
@@ -670,6 +845,11 @@ router.get('/center-summary', async (req, res) => {
            ${isUnscoped(user) ? '' : 'AND h.branch_id = $1'}`,
           branchParams
         ),
+        pool.query(
+          `SELECT COUNT(*)::int AS count FROM customer_change_requests r
+           WHERE r.status = 'Pending' AND ${branchFilter(user, 'r').sql}`,
+          branchFilter(user, 'r').params
+        ),
       ]);
 
     const ci_pending = ciPending.rows[0]?.count || 0;
@@ -678,6 +858,7 @@ router.get('/center-summary', async (req, res) => {
     const collections_pending = collectionsPending.rows[0]?.count || 0;
     const restocks_pending = restocksPending.rows[0]?.count || 0;
     const stock_counts_pending = countsPending.rows[0]?.count || 0;
+    const customer_changes_pending = customerChangesPending.rows[0]?.count || 0;
 
     return res.status(200).json({
       success: true,
@@ -687,6 +868,7 @@ router.get('/center-summary', async (req, res) => {
         transfers_pending,
         restocks_pending,
         stock_counts_pending,
+        customer_changes_pending,
         ci_pending,
         needs_action:
           collections_pending
@@ -694,6 +876,7 @@ router.get('/center-summary', async (req, res) => {
           + transfers_pending
           + restocks_pending
           + stock_counts_pending
+          + customer_changes_pending
           + ci_pending,
       },
     });

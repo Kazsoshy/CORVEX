@@ -3306,7 +3306,7 @@ export function OperatingManagerPageBody({
         />
       );
     case 'territories':
-      return <TerritoriesPage {...props} />;
+      return <TerritoriesPage {...props} opsBase="/operating-manager/operations" />;
     case 'digitalReceipts':
       return <DigitalReceiptsPage {...props} />;
     case 'sawResults':

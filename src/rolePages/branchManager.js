@@ -24,8 +24,8 @@ export const branchManagerRole = {
     {
       title: 'People & Routes',
       items: [
-        { label: 'Collectors', to: '/branch-manager/field-operations/collectors' },
-        { label: 'Sales Agents', to: '/branch-manager/field-operations/sales' },
+        { label: 'Collector Dispatch', to: '/branch-manager/field-operations/collectors' },
+        { label: 'Sales Agent Dispatch', to: '/branch-manager/field-operations/sales' },
         { label: 'Territories', to: '/branch-manager/territories' },
       ],
     },
@@ -64,8 +64,8 @@ export const branchManagerRole = {
     { label: 'Dashboard', to: '/branch-manager/dashboard' },
     { label: 'Field Map', to: '/branch-manager/leaflet' },
     { label: 'Field Activity Reports', to: '/branch-manager/field-activity-reports' },
-    { label: 'Collectors', to: '/branch-manager/field-operations/collectors' },
-    { label: 'Sales Agents', to: '/branch-manager/field-operations/sales' },
+    { label: 'Collector Dispatch', to: '/branch-manager/field-operations/collectors' },
+    { label: 'Sales Agent Dispatch', to: '/branch-manager/field-operations/sales' },
     { label: 'Territories', to: '/branch-manager/territories' },
     { label: 'Customers', to: '/branch-manager/customers' },
     { label: 'Payment History', to: '/branch-manager/credit-history' },

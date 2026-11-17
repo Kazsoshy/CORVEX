@@ -10,13 +10,10 @@ import { osrmDrivingTable } from './osrm.js';
 import { optimizePriorityAwareRoute } from './routeOrder.js';
 
 /**
- * Load invoice-level rows for SAW (ACM-shaped), scoped to one collector.
- */
-/**
  * Candidate pool for collector priority ranking:
  * - Same branch only
  * - Permanent book = customers.account_manager_id = collector
- * - Active territories where this collector is default_collector_id (unassigned AM only)
+ * - Never expands via territory default personnel (geography ≠ staff)
  * - Never expands an empty book to the entire branch
  * - Never silently includes another collector's permanent book
  */
@@ -50,15 +47,7 @@ export async function fetchSawSourceRows(pool, { collectorId, branchId }) {
       c.customer_code,
       $1::INTEGER AS collector_id,
       c.account_manager_id,
-      CASE
-        WHEN c.account_manager_id = $1 THEN 'own_book'
-        WHEN c.account_manager_id IS NULL
-          AND t.default_collector_id = $1
-          AND COALESCE(t.status, 'Active') = 'Active'
-          THEN 'territory_default'
-        WHEN c.account_manager_id IS NULL THEN 'unassigned'
-        ELSE 'other_book'
-      END AS book_status,
+      'own_book'::text AS book_status,
       COALESCE(
         NULLIF(TRIM(CONCAT_WS(' ', am.first_name, am.last_name)), ''),
         NULL
@@ -76,7 +65,6 @@ export async function fetchSawSourceRows(pool, { collectorId, branchId }) {
       c.address,
       c.contact_phone,
       t.territory_name,
-      t.default_collector_id,
       COALESCE(t.status, 'Active') AS territory_status
     FROM customers c
     JOIN customer_activity ca ON ca.customer_id = c.customer_id
@@ -86,20 +74,13 @@ export async function fetchSawSourceRows(pool, { collectorId, branchId }) {
     LEFT JOIN territories t ON t.territory_id = c.territory_id
     WHERE c.branch_id = $2
       AND c.status = 'Active'
+      AND c.account_manager_id = $1
       AND COALESCE(ca.outstanding_balance, 0) > 0
       AND oi.invoice_status IN ('Unpaid', 'Partial')
       AND c.latitude IS NOT NULL
       AND c.longitude IS NOT NULL
       AND b.latitude IS NOT NULL
       AND b.longitude IS NOT NULL
-      AND (
-        c.account_manager_id = $1
-        OR (
-          c.account_manager_id IS NULL
-          AND t.default_collector_id = $1
-          AND COALESCE(t.status, 'Active') = 'Active'
-        )
-      )
     `,
     [collectorId, branchId]
   );
@@ -152,8 +133,6 @@ export async function computeCollectorSawPriority(pool, { collectorId, branchId,
   }
 
   const ownBook = ranked.filter((r) => r.book_status === 'own_book').length;
-  const territoryDefault = ranked.filter((r) => r.book_status === 'territory_default').length;
-  const unassigned = ranked.filter((r) => r.book_status === 'unassigned').length;
 
   return {
     asOf,
@@ -163,14 +142,14 @@ export async function computeCollectorSawPriority(pool, { collectorId, branchId,
       eligible: eligible.length,
       ranked: ranked.length,
       ownBook,
-      territoryDefault,
-      unassigned,
+      territoryDefault: 0,
+      unassigned: 0,
       blocked: ranked.filter((r) => r.assignment_block).length,
     },
     bookStats: {
       ownBook,
-      territoryDefault,
-      unassignedEligible: unassigned,
+      territoryDefault: 0,
+      unassignedEligible: 0,
     },
   };
 }

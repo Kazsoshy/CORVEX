@@ -11,24 +11,41 @@ router.use(requirePermission(
 // ──────────────────────────────────────────────────────────────────────────────
 // GET /api/roles  — List roles with their permission sets
 // ──────────────────────────────────────────────────────────────────────────────
+/** Roles outside Operating Manager user-management / assignment scope. */
+const HIDDEN_FROM_OM_SLUGS = ['super_admin', 'operating_manager', 'customer', 'client'];
+
 router.get('/', async (req, res) => {
   try {
     const pool = req.app.locals.pool;
+    const actorSlug = req.currentUser?.roleSlug;
+    const isSuperAdmin = actorSlug === 'super_admin';
 
     const includeArchived = String(req.query.status || '').toLowerCase() === 'all';
-    const statusFilter = includeArchived ? '' : `WHERE COALESCE(status, 'Active') = 'Active'`;
+    const conditions = [];
+    const params = [];
+    if (!includeArchived) {
+      conditions.push(`COALESCE(status, 'Active') = 'Active'`);
+    }
+    // OM (and other non–Super Admin callers) never see org-admin / portal roles here.
+    if (!isSuperAdmin) {
+      params.push(HIDDEN_FROM_OM_SLUGS);
+      conditions.push(`slug <> ALL($${params.length}::text[])`);
+    }
+    const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
 
     // Active roles by default; pass status=all to include archived.
     const rolesResult = await pool.query(
       `SELECT role_id, role_name, slug, COALESCE(status, 'Active') AS status, created_at, updated_at
-       FROM roles ${statusFilter} ORDER BY role_id`
+       FROM roles ${where} ORDER BY role_id`,
+      params
     );
 
-    // Active permissions by default (same status filter).
+    // Active permissions by default (same status filter as roles).
+    const permsStatusFilter = includeArchived ? '' : `WHERE COALESCE(status, 'Active') = 'Active'`;
     const permsResult = await pool.query(
       `SELECT permission_id, label, description, module, code,
               COALESCE(status, 'Active') AS status, created_at
-       FROM permissions ${statusFilter} ORDER BY permission_id`
+       FROM permissions ${permsStatusFilter} ORDER BY permission_id`
     );
 
     // Role-permission mapping

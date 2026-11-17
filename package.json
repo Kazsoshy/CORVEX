@@ -13,6 +13,7 @@
     "seed:reset-passwords": "node backend/reset_passwords.js",
     "saw:csv": "node backend/scripts/run_saw_from_csv.js",
     "check:schema": "node scripts/check_schema.mjs",
+    "check:credit": "node backend/scripts/verify_credit_consistency.js",
     "check:suppliers": "node scripts/check_suppliers.js",
     "check:territories": "node scripts/check_territories.js",
     "test": "node --test backend/tests/*.test.js",

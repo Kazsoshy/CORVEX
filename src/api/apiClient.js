@@ -40,7 +40,9 @@ apiClient.interceptors.response.use(
     return response;
   },
   (error) => {
-    if (error.response?.status === 401) {
+    const status = error.response?.status;
+    const code = error.response?.data?.code;
+    if (status === 401) {
       const message = error.response?.data?.message || '';
       localStorage.removeItem('corvex_user');
       localStorage.removeItem('corvex_token');
@@ -50,7 +52,12 @@ apiClient.interceptors.response.use(
           'Your session ended after 15 minutes of inactivity. Sign in again.'
         );
         window.dispatchEvent(new Event('session-ended'));
+      } else if (code === 'ACCOUNT_DISABLED' || code === 'SESSION_REVOKED') {
+        sessionStorage.setItem('corvex_auth_notice', message);
+        window.dispatchEvent(new Event('session-ended'));
       }
+    } else if (status === 403 && code === 'PASSWORD_CHANGE_REQUIRED') {
+      window.dispatchEvent(new Event('session-ended'));
     }
     return Promise.reject(error);
   }

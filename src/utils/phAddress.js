@@ -10,6 +10,12 @@ let barangaysCache = null;
 let barangaysByCity = null;
 let barangaysPromise = null;
 
+/** PSGC HUC province codes that should not collide with real province names. */
+const HUC_PROVINCE_LABELS = {
+  307: 'Davao City (HUC)',
+  308: 'General Santos City (HUC)',
+};
+
 function sortByName(items, key) {
   return [...items].sort((a, b) => String(a[key] || '').localeCompare(String(b[key] || ''), undefined, { sensitivity: 'base' }));
 }
@@ -18,6 +24,7 @@ function normalizeName(value) {
   return String(value || '')
     .toLowerCase()
     .replace(/\bcity of\b/g, '')
+    .replace(/\bhuc\b/g, '')
     .replace(/[^a-z0-9]+/g, '')
     .trim();
 }
@@ -27,6 +34,12 @@ function namesMatch(a, b) {
   const right = normalizeName(b);
   if (!left || !right) return false;
   return left === right || left.includes(right) || right.includes(left);
+}
+
+function displayProvince(row) {
+  if (!row) return row;
+  const label = HUC_PROVINCE_LABELS[String(row.provCode)];
+  return label ? { ...row, provName: label } : row;
 }
 
 async function ensureBarangays() {
@@ -52,18 +65,46 @@ export function getRegions() {
 
 export function getProvinces(regCode) {
   if (!regCode) return [];
-  return sortByName(provinces.filter((row) => row.regCode === regCode), 'provName');
+  const resolvedRegion = regions.find((row) => row.regCode === regCode)
+    || regions.find((row) => namesMatch(row.regionName, regCode));
+  const code = resolvedRegion?.regCode || regCode;
+  return sortByName(provinces.filter((row) => row.regCode === code).map(displayProvince), 'provName');
 }
 
+/**
+ * Resolve cities by PSGC province code (preferred) or name.
+ * Name lookup uses exact-normalized match first to avoid Davao HUC vs Davao del Sur collisions.
+ */
 export function getCities(provCode) {
   if (!provCode) return [];
-  return sortByName(muncities.filter((row) => row.provCode === provCode), 'munCityName');
+  const byCode = provinces.find((row) => row.provCode === String(provCode));
+  if (byCode) {
+    return sortByName(muncities.filter((row) => row.provCode === byCode.provCode), 'munCityName');
+  }
+  // Prefer HUC aliases before loose name match.
+  const normalized = normalizeName(provCode);
+  if (normalized === 'davaocity' || normalized === 'cityofdavao') {
+    return sortByName(muncities.filter((row) => row.provCode === '307'), 'munCityName');
+  }
+  if (normalized.includes('generalsantos')) {
+    return sortByName(muncities.filter((row) => row.provCode === '308'), 'munCityName');
+  }
+  // Exact normalized province name only (no substring) to avoid "Davao" matching HUC.
+  const exact = provinces.find((row) => normalizeName(row.provName) === normalized
+    || normalizeName(displayProvince(row).provName) === normalized);
+  if (exact) {
+    return sortByName(muncities.filter((row) => row.provCode === exact.provCode), 'munCityName');
+  }
+  return [];
 }
 
 export async function getBarangays(munCityCode) {
   if (!munCityCode) return [];
   const index = await ensureBarangays();
-  return sortByName(index[String(munCityCode)] || [], 'brgyName');
+  const resolvedCity = muncities.find((row) => row.munCityCode === String(munCityCode))
+    || muncities.find((row) => namesMatch(row.munCityName, munCityCode));
+  const code = resolvedCity?.munCityCode || String(munCityCode);
+  return sortByName(index[code] || [], 'brgyName');
 }
 
 export function findRegionByName(name) {
@@ -73,37 +114,67 @@ export function findRegionByName(name) {
 
 export function findProvinceByName(regCode, name) {
   if (!String(name || '').trim()) return null;
-  const pool = regCode ? getProvinces(regCode) : provinces;
-  return pool.find((row) => namesMatch(row.provName, name)) || null;
+  const normalized = normalizeName(name);
+  if (normalized === 'cityofdavao' || normalized === 'davaocity') {
+    return displayProvince(provinces.find((row) => row.provCode === '307') || null);
+  }
+  if (normalized.includes('generalsantos')) {
+    return displayProvince(provinces.find((row) => row.provCode === '308') || null);
+  }
+  const pool = regCode
+    ? getProvinces(regCode)
+    : provinces.map(displayProvince);
+  // Prefer exact match before loose includes.
+  return pool.find((row) => normalizeName(row.provName) === normalized)
+    || pool.find((row) => namesMatch(row.provName, name))
+    || null;
 }
 
 export function findCityByName(provCode, name) {
   if (!String(name || '').trim()) return null;
   const pool = provCode ? getCities(provCode) : muncities;
-  return pool.find((row) => namesMatch(row.munCityName, name)) || null;
+  const normalized = normalizeName(name);
+  return pool.find((row) => normalizeName(row.munCityName) === normalized)
+    || pool.find((row) => namesMatch(row.munCityName, name))
+    || null;
 }
 
 export async function findBarangayByName(munCityCode, name) {
   if (!String(name || '').trim() || !munCityCode) return null;
   const pool = await getBarangays(munCityCode);
-  return pool.find((row) => namesMatch(row.brgyName, name)) || null;
+  const normalized = normalizeName(name);
+  return pool.find((row) => normalizeName(row.brgyName) === normalized)
+    || pool.find((row) => namesMatch(row.brgyName, name))
+    || null;
 }
 
 /** Resolve stored name fields back into PSGC codes for edit forms. */
 export async function resolveAddressSelection(parts = {}) {
-  const region = findRegionByName(parts.address_region);
-  const province = findProvinceByName(region?.regCode, parts.address_province);
-  const city = findCityByName(province?.provCode, parts.address_city);
+  let region = findRegionByName(parts.address_region);
+  let province = findProvinceByName(region?.regCode, parts.address_province);
+  let city = findCityByName(province?.provCode, parts.address_city);
+
+  if (!city && parts.address_city) {
+    city = findCityByName('', parts.address_city);
+  }
+  if (city && !province) {
+    province = displayProvince(provinces.find((row) => row.provCode === city.provCode) || null);
+  }
+  if (province && !region) {
+    region = regions.find((row) => row.regCode === province.regCode) || null;
+  }
   const barangay = city
     ? await findBarangayByName(city.munCityCode, parts.address_barangay)
     : null;
+
+  const provinceDisplay = province ? displayProvince(province) : null;
 
   return {
     regCode: region?.regCode || '',
     provCode: province?.provCode || '',
     munCityCode: city?.munCityCode || '',
     regionName: region?.regionName || String(parts.address_region || '').trim(),
-    provinceName: province?.provName || String(parts.address_province || '').trim(),
+    provinceName: provinceDisplay?.provName || String(parts.address_province || '').trim(),
     cityName: city?.munCityName || String(parts.address_city || '').trim(),
     barangayName: barangay?.brgyName || String(parts.address_barangay || '').trim(),
   };

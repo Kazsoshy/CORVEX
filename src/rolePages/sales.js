@@ -25,7 +25,6 @@ export const salesRole = {
       items: [
         { label: 'Customers', to: '/sales/customers' },
         { label: 'Credit Reviews', to: '/sales/credit-investigations' },
-        { label: 'Payment History', to: '/sales/credit-history' },
       ],
     },
     {
@@ -51,7 +50,6 @@ export const salesRole = {
     { label: 'Field Activity Reports', to: '/sales/field-reports' },
     { label: 'Customers', to: '/sales/customers' },
     { label: 'Credit Reviews', to: '/sales/credit-investigations' },
-    { label: 'Payment History', to: '/sales/credit-history' },
     { label: 'Sales History', to: '/sales/history' },
     { label: 'Inventory', to: '/sales/inventory' },
     { label: 'Notifications', to: '/sales/notifications' },

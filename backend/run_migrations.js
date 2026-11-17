@@ -93,6 +93,17 @@ const MIGRATIONS = [
   { file: '065_inventory_approval_controls.sql', label: '065_inventory_approval_controls.sql' },
   { file: '066_operational_alerts_desk.sql', label: '066_operational_alerts_desk.sql' },
   { file: '067_audit_logs_branch_id.sql', label: '067_audit_logs_branch_id.sql' },
+  { file: '068_territories_barangay_geo.sql', label: '068_territories_barangay_geo.sql' },
+  { file: '069_user_management_controls.sql', label: '069_user_management_controls.sql' },
+  { file: '070_branch_management_controls.sql', label: '070_branch_management_controls.sql' },
+  { file: '071_sales_area_assignment_date_range.sql', label: '071_sales_area_assignment_date_range.sql' },
+  { file: '072_sales_area_assignment_autoclose_statuses.sql', label: '072_sales_area_assignment_autoclose_statuses.sql' },
+  { file: '073_customer_registration_credit_profile.sql', label: '073_customer_registration_credit_profile.sql' },
+  { file: '074_sa_far_assignment_summary.sql', label: '074_sa_far_assignment_summary.sql' },
+  { file: '075_customer_credit_consistency.sql', label: '075_customer_credit_consistency.sql' },
+  { file: '076_customer_credit_seed_repair.sql', label: '076_customer_credit_seed_repair.sql' },
+  { file: '077_sales_pricing_policy.sql', label: '077_sales_pricing_policy.sql' },
+  { file: '078_optional_customer_alternate_contact.sql', label: '078_optional_customer_alternate_contact.sql' },
 ];
 
 async function ensureMigrationsTable() {

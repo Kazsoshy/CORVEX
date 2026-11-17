@@ -20,6 +20,8 @@ import {
   fetchStockCountApprovalById,
   patchStockCountApproval,
   mapCreditInvestigationRow,
+  fetchCustomerChangeRequests,
+  patchCustomerChangeRequest,
 } from '../../api/approvalsService.js';
 import {
   fetchInventoryTransfers,
@@ -28,11 +30,12 @@ import {
   mapInventoryTransferRow,
 } from '../../api/inventoryService.js';
 import { formatMoneyOrNA } from '../../utils/creditReview';
+import { CreditInvestigationDetailPage } from './CreditInvestigationPages';
 
 function tabFromSearch() {
   try {
     const raw = new URLSearchParams(window.location.search).get('tab') || '';
-    const allowed = new Set(['collections', 'invoices', 'transfers', 'restocks', 'stock-counts', 'ci']);
+    const allowed = new Set(['collections', 'invoices', 'transfers', 'restocks', 'stock-counts', 'ci', 'customer-changes']);
     return allowed.has(raw) ? raw : null;
   } catch {
     return null;
@@ -245,11 +248,13 @@ export function ApprovalCenterPage({
 }) {
   const [tab, setTab] = useState(() => tabFromSearch() || 'collections');
   const [ciList, setCiList] = useState([]);
+  const [selectedCiId, setSelectedCiId] = useState(null);
   const [transferList, setTransferList] = useState([]);
   const [restockList, setRestockList] = useState([]);
   const [stockCountList, setStockCountList] = useState([]);
   const [invoiceList, setInvoiceList] = useState([]);
   const [collectionList, setCollectionList] = useState([]);
+  const [customerChangeList, setCustomerChangeList] = useState([]);
   const [summary, setSummary] = useState(null);
   const [loading, setLoading] = useState(true);
   const [busyKey, setBusyKey] = useState(null);
@@ -266,7 +271,7 @@ export function ApprovalCenterPage({
 
   const reload = async () => {
     setLoading(true);
-    const [ciRes, trRes, restockRes, countRes, invRes, pendingPayRes, summaryRes] = await Promise.all([
+    const [ciRes, trRes, restockRes, countRes, invRes, pendingPayRes, summaryRes, changesRes] = await Promise.all([
       fetchCreditInvestigations({ status: 'Needs BM', limit: 100 }),
       fetchInventoryTransfers({ status: 'pending', limit: 100 }),
       fetchPendingRestocks(),
@@ -274,6 +279,7 @@ export function ApprovalCenterPage({
       fetchPendingSalesInvoices(),
       fetchCollectionsForReview('Pending'),
       fetchApprovalCenterSummary(),
+      fetchCustomerChangeRequests({ status: 'Pending' }),
     ]);
 
     const nextCi = ciRes.success
@@ -312,6 +318,7 @@ export function ApprovalCenterPage({
     setStockCountList(nextCounts);
     setInvoiceList(nextInvoices);
     setCollectionList(nextCollections);
+    setCustomerChangeList(changesRes.success ? (changesRes.data || []) : []);
     if (summaryRes.success) setSummary(summaryRes.data || null);
     else setSummary(null);
 
@@ -323,6 +330,7 @@ export function ApprovalCenterPage({
       restocks: nextRestocks.length,
       'stock-counts': nextCounts.length,
       ci: nextCi.length,
+      'customer-changes': changesRes.success ? (changesRes.data || []).length : 0,
     };
     setTab((current) => {
       if (preferred && counts[preferred] != null) return preferred;
@@ -333,6 +341,7 @@ export function ApprovalCenterPage({
       if (counts.restocks > 0) return 'restocks';
       if (counts['stock-counts'] > 0) return 'stock-counts';
       if (counts.ci > 0) return 'ci';
+      if (counts['customer-changes'] > 0) return 'customer-changes';
       return 'collections';
     });
 
@@ -350,7 +359,8 @@ export function ApprovalCenterPage({
     restocks: restockList.length,
     'stock-counts': stockCountList.length,
     ci: ciList.length,
-  }), [collectionList, invoiceList, transferList, restockList, stockCountList, ciList]);
+    'customer-changes': customerChangeList.length,
+  }), [collectionList, invoiceList, transferList, restockList, stockCountList, ciList, customerChangeList]);
 
   const needsAction = useMemo(() => {
     if (summary && Number.isFinite(Number(summary.needs_action))) {
@@ -361,7 +371,8 @@ export function ApprovalCenterPage({
       + counts.transfers
       + counts.restocks
       + counts['stock-counts']
-      + counts.ci;
+      + counts.ci
+      + counts['customer-changes'];
   }, [summary, counts]);
 
   const tabs = [
@@ -371,6 +382,7 @@ export function ApprovalCenterPage({
     { key: 'restocks', label: `Restocks (${counts.restocks})` },
     { key: 'stock-counts', label: `Stock Counts (${counts['stock-counts']})` },
     { key: 'ci', label: `Credit Reviews (${counts.ci})` },
+    { key: 'customer-changes', label: `Customer Changes (${counts['customer-changes']})` },
   ];
 
   const paginationCollections = usePagination(collectionList);
@@ -594,6 +606,38 @@ export function ApprovalCenterPage({
         });
         if (result.success) {
           showToast?.(result.message || 'Collection rejected.', 'success');
+          reload();
+        } else {
+          showToast?.(result.message || 'Reject failed.', 'error');
+          throw new Error(result.message || 'Reject failed.');
+        }
+      },
+    });
+  };
+
+  const approveCustomerChange = async (requestId) => {
+    setBusyKey(`customer-change-approve-${requestId}`);
+    const result = await patchCustomerChangeRequest(requestId, { status: 'Approved' });
+    setBusyKey(null);
+    if (result.success) {
+      showToast?.(result.message || 'Customer change approved.', 'success');
+      reload();
+    } else showToast?.(result.message || 'Approve failed.', 'error');
+  };
+
+  const rejectCustomerChange = (requestId) => {
+    openReasonDialog({
+      key: `customer-change-reject-${requestId}`,
+      title: 'Reject customer change',
+      description: 'The original customer record will remain unchanged.',
+      confirmLabel: 'Reject Change',
+      onSubmit: async (reason) => {
+        const result = await patchCustomerChangeRequest(requestId, {
+          status: 'Rejected',
+          decision_remarks: reason,
+        });
+        if (result.success) {
+          showToast?.(result.message || 'Customer change rejected.', 'success');
           reload();
         } else {
           showToast?.(result.message || 'Reject failed.', 'error');
@@ -1020,11 +1064,41 @@ export function ApprovalCenterPage({
 
       {tab === 'ci' ? (
         <section className="panel content-panel relative overflow-hidden">
+          {selectedCiId ? (
+            <>
+              <div className="mb-4" style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                <button
+                  className="button ghost"
+                  type="button"
+                  onClick={() => {
+                    setSelectedCiId(null);
+                    reload();
+                  }}
+                >
+                  Back to CI queue
+                </button>
+                <button
+                  className="button ghost"
+                  type="button"
+                  onClick={() => navigate(`${opsBase}/ci-approvals/${selectedCiId}`)}
+                >
+                  Open full desk
+                </button>
+              </div>
+              <CreditInvestigationDetailPage
+                ciId={selectedCiId}
+                navigate={navigate}
+                opsBase={opsBase}
+                showToast={showToast}
+              />
+            </>
+          ) : (
+          <>
           <div className="flex flex-col md:flex-row justify-between gap-4 items-start md:items-center mb-4">
             <div>
               <h3>Credit Reviews</h3>
               <p className="muted" style={{ margin: '4px 0 0' }}>
-                Preview only. Open the full credit decision desk to approve, reject, or request revision.
+                Review and decide here. Same decide UI as the Credit Review desk.
               </p>
             </div>
             <button
@@ -1044,7 +1118,7 @@ export function ApprovalCenterPage({
                       <th>Customer</th>
                       <th>Sales Agent</th>
                       <th>Risk</th>
-                      <th>Suggested / Requested</th>
+                      <th>Requested / Suggested</th>
                       <th>Waiting Since</th>
                       <th>Status</th>
                       <th>Actions</th>
@@ -1055,7 +1129,7 @@ export function ApprovalCenterPage({
                       <tr
                         key={ci.id}
                         className="clickable-row"
-                        onClick={() => navigate(`${opsBase}/ci-approvals/${ci.ciId || ci.id}`)}
+                        onClick={() => setSelectedCiId(ci.ciId || ci.id)}
                       >
                         <td>
                           <strong>{ci.customerName}</strong>
@@ -1068,7 +1142,10 @@ export function ApprovalCenterPage({
                         <td>{ci.submittedBy || '—'}</td>
                         <td><StatusBadge status={ci.riskLevel || '—'} /></td>
                         <td>
-                          {formatMoneyOrNA(ci.requestedLimit)}
+                          <div>{formatMoneyOrNA(ci.requestedLimit)} requested</div>
+                          <div className="muted" style={{ fontSize: '0.8rem' }}>
+                            {formatMoneyOrNA(ci.suggestedLimit)} suggested
+                          </div>
                         </td>
                         <td>
                           {formatDisplayDate(ci.submissionDate)}
@@ -1083,9 +1160,16 @@ export function ApprovalCenterPage({
                           <button
                             className="button"
                             type="button"
-                            onClick={() => navigate(`${opsBase}/ci-approvals/${ci.ciId || ci.id}`)}
+                            onClick={() => setSelectedCiId(ci.ciId || ci.id)}
                           >
                             Open Decision
+                          </button>
+                          <button
+                            className="button ghost"
+                            type="button"
+                            onClick={() => navigate(`${opsBase}/ci-approvals/${ci.ciId || ci.id}`)}
+                          >
+                            Open full desk
                           </button>
                         </td>
                       </tr>
@@ -1102,6 +1186,50 @@ export function ApprovalCenterPage({
               actionLabel="Full Credit Review Queue"
               onAction={() => navigate(`${opsBase}/ci-approvals`)}
             />
+          )}
+          </>
+          )}
+        </section>
+      ) : null}
+
+      {tab === 'customer-changes' ? (
+        <section className="panel content-panel relative overflow-hidden">
+          <div className="list-section-header">
+            <h3>Customer Change Approvals</h3>
+            <p className="list-section-subtitle">Review Sales Agent proposals before the master customer record changes.</p>
+          </div>
+          {customerChangeList.length ? (
+            <div className="corvex-table-wrapper">
+              <table className="corvex-table">
+                <thead>
+                  <tr>
+                    <th>Customer</th>
+                    <th>Requested By</th>
+                    <th>Type</th>
+                    <th>Reason</th>
+                    <th>Submitted</th>
+                    <th>Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {customerChangeList.map((request) => (
+                    <tr key={request.request_id}>
+                      <td><strong>{request.customer_name || request.customer_code || `#${request.customer_id}`}</strong></td>
+                      <td>{request.requester_name || '—'}</td>
+                      <td>{request.change_type}</td>
+                      <td>{request.reason || '—'}</td>
+                      <td>{formatDisplayDateTime(request.created_at)}</td>
+                      <td className="table-actions">
+                        <button className="button" type="button" disabled={Boolean(busyKey)} onClick={() => approveCustomerChange(request.request_id)}>Approve</button>
+                        <button className="button secondary" type="button" disabled={Boolean(busyKey)} onClick={() => rejectCustomerChange(request.request_id)}>Reject</button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ) : (
+            <EmptyState title="Nothing waiting for your decision" description="No customer changes are awaiting approval." />
           )}
         </section>
       ) : null}

@@ -257,7 +257,7 @@ function PrototypeShell() {
     if (!currentRole) return;
     const user = getCurrentUser();
     const token = localStorage.getItem('corvex_token');
-    if (!user?.role?.slug || !token) {
+    if (!user?.role?.slug || !token || user.mustChangePassword) {
       navigate('/login', { replace: true });
       return;
     }

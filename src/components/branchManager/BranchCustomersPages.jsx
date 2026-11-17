@@ -73,12 +73,13 @@ function standingToApiFilter(value) {
   return undefined;
 }
 
-function buildReturnQuery({ search, statusFilter, paymentFilter, territoryFilter, page }) {
+function buildReturnQuery({ search, statusFilter, paymentFilter, territoryFilter, agentFilter, page }) {
   const params = new URLSearchParams();
   if (search) params.set('q', search);
   if (statusFilter && statusFilter !== 'All') params.set('status', statusFilter);
   if (paymentFilter && paymentFilter !== 'All') params.set('standing', paymentFilter);
   if (territoryFilter && territoryFilter !== 'All') params.set('territory', territoryFilter);
+  if (agentFilter) params.set('agent', agentFilter);
   if (page && page > 1) params.set('page', String(page));
   const qs = params.toString();
   return qs ? `?${qs}` : '';
@@ -93,13 +94,15 @@ export function BranchCustomersPage({ navigate, opsBase, showToast }) {
   const [statusFilter, setStatusFilter] = useState(initial.get('status') || 'All');
   const [paymentFilter, setPaymentFilter] = useState(initial.get('standing') || 'All');
   const [territoryFilter, setTerritoryFilter] = useState(initial.get('territory') || 'All');
+  const [agentFilter, setAgentFilter] = useState(initial.get('agent') || '');
+  const [agentLabel, setAgentLabel] = useState('');
   const [territories, setTerritories] = useState([]);
   const [customers, setCustomers] = useState([]);
   const [stats, setStats] = useState(null);
   const [totalRecords, setTotalRecords] = useState(0);
   const [loading, setLoading] = useState(true);
 
-  const filterResetKey = `${search}|${statusFilter}|${paymentFilter}|${territoryFilter}`;
+  const filterResetKey = `${search}|${statusFilter}|${paymentFilter}|${territoryFilter}|${agentFilter}`;
   const pagination = useServerPagination({
     totalRecords,
     pageSize: DEFAULT_PAGE_SIZE,
@@ -132,6 +135,7 @@ export function BranchCustomersPage({ navigate, opsBase, showToast }) {
       if (standing) params.standing = standing;
       if (territoryFilter === 'none') params.territory_id = 'none';
       else if (territoryFilter !== 'All') params.territory_id = territoryFilter;
+      if (agentFilter) params.agent = agentFilter;
 
       const res = await fetchCustomers(params);
       if (!active) return;
@@ -139,6 +143,12 @@ export function BranchCustomersPage({ navigate, opsBase, showToast }) {
         setCustomers(res.data || []);
         setTotalRecords(Number(res.pagination?.total) || 0);
         setStats(res.meta?.stats || null);
+        if (agentFilter) {
+          const named = (res.data || []).find((c) => c.assigned_sales_agent_name)?.assigned_sales_agent_name;
+          if (named) setAgentLabel(named);
+        } else {
+          setAgentLabel('');
+        }
       } else {
         setCustomers([]);
         setTotalRecords(0);
@@ -149,13 +159,14 @@ export function BranchCustomersPage({ navigate, opsBase, showToast }) {
     }
     load();
     return () => { active = false; };
-  }, [pagination.currentPage, search, statusFilter, paymentFilter, territoryFilter, showToast]);
+  }, [pagination.currentPage, search, statusFilter, paymentFilter, territoryFilter, agentFilter, showToast]);
 
   const returnQuery = buildReturnQuery({
     search,
     statusFilter,
     paymentFilter,
     territoryFilter,
+    agentFilter,
     page: pagination.currentPage,
   });
 
@@ -179,8 +190,24 @@ export function BranchCustomersPage({ navigate, opsBase, showToast }) {
             <h3>Customers</h3>
             <p className="muted" style={{ marginTop: 4, marginBottom: 0 }}>
               Monitor and supervise customer accounts across your assigned branch.
+              {agentFilter
+                ? ` Showing permanent book for Sales Agent${agentLabel ? ` ${agentLabel}` : ''} (#${agentFilter}).`
+                : ''}
             </p>
           </div>
+          {agentFilter ? (
+            <button
+              className="button secondary"
+              type="button"
+              onClick={() => {
+                setAgentFilter('');
+                setAgentLabel('');
+                navigate(`${opsBase}/customers`);
+              }}
+            >
+              Clear Sales Agent filter
+            </button>
+          ) : null}
         </div>
 
         <div className="list-section-toolbar suppliers-toolbar audit-logs-toolbar">
