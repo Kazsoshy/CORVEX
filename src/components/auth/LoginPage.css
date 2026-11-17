@@ -533,10 +533,26 @@
   text-decoration: underline;
 }
 
+.login-password-footer {
+  display: flex;
+  align-items: flex-start;
+  justify-content: flex-end;
+  margin-top: 8px;
+  gap: 12px;
+}
+
+.login-password-footer .login-error-message {
+  margin-top: 0;
+  margin-right: auto;
+  line-height: 1.4;
+}
+
 .login-forgot {
   font-size: 0.84rem;
   font-weight: 500;
   white-space: nowrap;
+  margin-left: auto;
+  line-height: 1.4;
 }
 
 /* ── Security Note ───────────────────────────────────────────── */

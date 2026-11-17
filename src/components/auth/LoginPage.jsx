@@ -156,16 +156,7 @@ export function LoginPage() {
               </div>
 
               <div className="login-input-group">
-                <div className="login-label-row">
-                  <label htmlFor="login-password" className="login-label">Password</label>
-                  <button
-                    type="button"
-                    className="login-link login-forgot"
-                    onClick={() => navigate('/password-reset')}
-                  >
-                    Forgot password?
-                  </button>
-                </div>
+                <label htmlFor="login-password" className="login-label">Password</label>
                 <div className="login-input-control group">
                   <span className="login-input-icon">
                     <Lock {...fieldIconProps} />
@@ -191,11 +182,20 @@ export function LoginPage() {
                     {showPassword ? <EyeOff {...fieldIconProps} /> : <Eye {...fieldIconProps} />}
                   </button>
                 </div>
-                {errors.password && (
-                  <span id="login-password-error" className="login-error-message" role="alert">
-                    {errors.password}
-                  </span>
-                )}
+                <div className="login-password-footer">
+                  {errors.password && (
+                    <span id="login-password-error" className="login-error-message" role="alert">
+                      {errors.password}
+                    </span>
+                  )}
+                  <button
+                    type="button"
+                    className="login-link login-forgot"
+                    onClick={() => navigate('/password-reset')}
+                  >
+                    Forgot password?
+                  </button>
+                </div>
               </div>
 
               <button
