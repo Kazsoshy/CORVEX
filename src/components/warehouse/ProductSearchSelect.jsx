@@ -24,6 +24,7 @@ export function ProductSearchSelect({
       : options.filter((p) => (
         String(p.product_name || '').toLowerCase().includes(q)
         || String(p.sku || '').toLowerCase().includes(q)
+        || String(p.supplier_name || '').toLowerCase().includes(q)
       ));
     return rows.slice(0, 80);
   }, [options, query]);
@@ -114,8 +115,13 @@ export function ProductSearchSelect({
               >
                 <span style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 2, minWidth: 0 }}>
                   <strong style={{ fontWeight: 600 }}>{p.product_name || '—'}</strong>
-                  <span className="mono-cell" style={{ fontSize: '0.78rem', opacity: 0.75 }}>
-                    {p.sku || 'No SKU'}
+                  <span style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.78rem', opacity: 0.85, flexWrap: 'wrap' }}>
+                    <span className="mono-cell">{p.sku || 'No SKU'}</span>
+                    {p.supplier_name ? (
+                      <span style={{ color: 'var(--cvx-corporate-blue, #164B78)', fontWeight: 500 }}>
+                        • {p.supplier_name}
+                      </span>
+                    ) : null}
                   </span>
                 </span>
               </button>

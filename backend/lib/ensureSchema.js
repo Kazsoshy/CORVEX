@@ -25,6 +25,7 @@ export async function ensureSchema(client) {
     ALTER TABLE products ADD COLUMN IF NOT EXISTS image_url VARCHAR(500);
     ALTER TABLE products ALTER COLUMN image_url TYPE TEXT;
     ALTER TABLE products ADD COLUMN IF NOT EXISTS category VARCHAR(50);
+    ALTER TABLE products ADD COLUMN IF NOT EXISTS supplier_id INT;
 
     ALTER TABLE notifications ADD COLUMN IF NOT EXISTS category VARCHAR(50);
 
@@ -729,5 +730,36 @@ export async function ensureSchema(client) {
     `);
   } catch (err) {
     console.error('[ensureSchema] operational_alerts indexes:', err.message);
+  }
+
+  try {
+    await client.query(`
+      -- Populate supplier_id from restocks if products are missing supplier_id
+      UPDATE products p
+      SET supplier_id = r.supplier_id
+      FROM (
+        SELECT product_id, supplier_id,
+               ROW_NUMBER() OVER (PARTITION BY product_id ORDER BY received_date DESC, restock_id DESC) AS rn
+        FROM restocks
+        WHERE supplier_id IS NOT NULL
+      ) r
+      WHERE p.id = r.product_id AND r.rn = 1 AND p.supplier_id IS NULL;
+
+      -- If any products still have no supplier_id, assign an active supplier
+      UPDATE products p
+      SET supplier_id = s.suppliers_id
+      FROM (
+        SELECT suppliers_id,
+               ROW_NUMBER() OVER (ORDER BY suppliers_id) AS rn,
+               COUNT(*) OVER () AS total
+        FROM suppliers
+        WHERE status = 'Active'
+      ) s
+      WHERE p.supplier_id IS NULL
+        AND s.total > 0
+        AND s.rn = ((p.id % s.total) + 1);
+    `);
+  } catch (err) {
+    console.error('[ensureSchema] products supplier_id link:', err.message);
   }
 }

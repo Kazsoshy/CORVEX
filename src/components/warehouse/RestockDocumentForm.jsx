@@ -67,41 +67,68 @@ export function RestockDocumentForm({
     if (!initialProductId || !products.length) return;
     const product = products.find((p) => String(p.product_id) === String(initialProductId));
     if (!product) return;
+    const supName = product.supplier_name || suppliers.find((s) => String(s.suppliers_id) === String(product.supplier_id))?.supplier_name || '';
+
     setLines((prev) => {
       if (prev.some((line) => String(line.product_id) === String(initialProductId))) return prev;
       return [{
         product_id: Number(product.product_id),
         product_name: product.product_name,
         sku: product.sku,
+        supplier_id: product.supplier_id,
+        supplier_name: supName,
         on_hand: onHandByProduct.get(Number(product.product_id)) || 0,
         quantity: '1',
       }];
     });
-  }, [initialProductId, products, onHandByProduct]);
+
+    if (!initialSupplierId && product.supplier_id && suppliers.length) {
+      const match = suppliers.find((s) => String(s.suppliers_id) === String(product.supplier_id));
+      if (match) {
+        setForm((prev) => ({ ...prev, supplierId: String(match.suppliers_id) }));
+        setSupplierPrefillNote('');
+        setErrors((prev) => {
+          const next = { ...prev };
+          delete next.supplierId;
+          return next;
+        });
+      } else {
+        setSupplierPrefillNote(
+          `The supplier for "${product.product_name}" is inactive or unavailable. Choose another Active supplier to continue.`
+        );
+      }
+    }
+  }, [initialProductId, initialSupplierId, products, suppliers, onHandByProduct]);
 
   useEffect(() => {
-    if (!initialSupplierId || loading) return;
+    if (!initialSupplierId || loading || !suppliers.length) return;
     const match = suppliers.find((s) => String(s.suppliers_id) === String(initialSupplierId));
     if (match) {
-      setForm((prev) => {
-        if (prev.supplierId && String(prev.supplierId) !== String(initialSupplierId)) return prev;
-        return { ...prev, supplierId: String(match.suppliers_id) };
-      });
+      setForm((prev) => ({ ...prev, supplierId: String(match.suppliers_id) }));
       setSupplierPrefillNote('');
+      setErrors((prev) => {
+        const next = { ...prev };
+        delete next.supplierId;
+        return next;
+      });
       return;
     }
-    setForm((prev) => {
-      if (prev.supplierId && String(prev.supplierId) !== String(initialSupplierId)) return prev;
-      return { ...prev, supplierId: '' };
-    });
+    setForm((prev) => ({ ...prev, supplierId: '' }));
     setSupplierPrefillNote('The selected supplier is inactive or unavailable. Choose another Active supplier to continue.');
     setErrors((prev) => ({ ...prev, supplierId: 'Select an Active supplier.' }));
   }, [initialSupplierId, suppliers, loading]);
 
-  const availableOptions = useMemo(
-    () => products.filter((p) => !lines.some((line) => Number(line.product_id) === Number(p.product_id))),
-    [products, lines]
-  );
+  const availableOptions = useMemo(() => {
+    const unselected = products.filter(
+      (p) => !lines.some((line) => Number(line.product_id) === Number(p.product_id))
+    );
+    if (!form.supplierId) return unselected;
+    return [...unselected].sort((a, b) => {
+      const aMatches = String(a.supplier_id) === String(form.supplierId) ? 1 : 0;
+      const bMatches = String(b.supplier_id) === String(form.supplierId) ? 1 : 0;
+      return bMatches - aMatches;
+    });
+  }, [products, lines, form.supplierId]);
 
   const totals = useMemo(() => {
     const totalUnits = lines.reduce((sum, line) => sum + (Number(line.quantity) || 0), 0);
@@ -114,10 +141,47 @@ export function RestockDocumentForm({
       showToast('That product is already on this restock.', 'error');
       return;
     }
+
+    const supName = product.supplier_name || suppliers.find((s) => String(s.suppliers_id) === String(product.supplier_id))?.supplier_name || '';
+
+    // Automatically identify and display the supplier to which this product specifically belongs
+    if (product.supplier_id) {
+      const targetSupplierId = String(product.supplier_id);
+      const matchedSupplier = suppliers.find((s) => String(s.suppliers_id) === targetSupplierId);
+
+      // Prevent mixing products from different suppliers on one restock receipt
+      if (lines.length > 0 && form.supplierId && String(form.supplierId) !== targetSupplierId) {
+        const currentSupplier = suppliers.find((s) => String(s.suppliers_id) === String(form.supplierId));
+        const currentName = currentSupplier?.supplier_name || 'the current supplier';
+        const newSupplierName = matchedSupplier?.supplier_name || supName || 'another supplier';
+        showToast(
+          `"${product.product_name}" belongs to ${newSupplierName}. This restock is for ${currentName}. Each restock receipt must be from a single supplier.`,
+          'error'
+        );
+        return;
+      }
+
+      if (matchedSupplier) {
+        setForm((prev) => ({ ...prev, supplierId: targetSupplierId }));
+        setSupplierPrefillNote('');
+        setErrors((prev) => {
+          const next = { ...prev };
+          delete next.supplierId;
+          return next;
+        });
+      } else {
+        setSupplierPrefillNote(
+          `The supplier for "${product.product_name}" (${supName || 'ID ' + product.supplier_id}) is inactive or unavailable. Please choose an Active supplier.`
+        );
+      }
+    }
+
     setLines((prev) => [...prev, {
       product_id: Number(product.product_id),
       product_name: product.product_name,
       sku: product.sku,
+      supplier_id: product.supplier_id,
+      supplier_name: supName,
       on_hand: onHandByProduct.get(Number(product.product_id)) || 0,
       quantity: '1',
     }]);
@@ -130,7 +194,20 @@ export function RestockDocumentForm({
   };
 
   const removeLine = (productId) => {
-    setLines((prev) => prev.filter((line) => Number(line.product_id) !== Number(productId)));
+    setLines((prev) => {
+      const next = prev.filter((line) => Number(line.product_id) !== Number(productId));
+      if (next.length === 0) {
+        // No lines left – clear supplier selection and related notes/errors
+        setForm((p) => ({ ...p, supplierId: '' }));
+        setSupplierPrefillNote('');
+        setErrors((prevErr) => {
+          const nextErr = { ...prevErr };
+          delete nextErr.supplierId;
+          return nextErr;
+        });
+      }
+      return next;
+    });
   };
 
   const saveRestock = async ({ submit }) => {
@@ -204,8 +281,24 @@ export function RestockDocumentForm({
             className="filter-select"
             value={form.supplierId}
             onChange={(e) => {
-              setForm((p) => ({ ...p, supplierId: e.target.value }));
+              const newSupplierId = e.target.value;
+              if (lines.length > 0 && newSupplierId) {
+                const mismatched = lines.find((l) => l.supplier_id && String(l.supplier_id) !== String(newSupplierId));
+                if (mismatched) {
+                  showToast(
+                    `Existing line "${mismatched.product_name}" belongs to ${mismatched.supplier_name || 'another supplier'}. Remove it first to switch suppliers.`,
+                    'error'
+                  );
+                  return;
+                }
+              }
+              setForm((p) => ({ ...p, supplierId: newSupplierId }));
               setSupplierPrefillNote('');
+              setErrors((prev) => {
+                const next = { ...prev };
+                delete next.supplierId;
+                return next;
+              });
             }}
           >
             <option value="">Select Active supplier</option>
@@ -260,7 +353,14 @@ export function RestockDocumentForm({
                       const qty = Number(line.quantity) || 0;
                       return (
                         <tr key={line.product_id}>
-                          <td><strong>{line.product_name}</strong></td>
+                          <td>
+                            <strong>{line.product_name}</strong>
+                            {line.supplier_name ? (
+                              <div className="muted" style={{ fontSize: '0.78rem', marginTop: 2 }}>
+                                {line.supplier_name}
+                              </div>
+                            ) : null}
+                          </td>
                           <td><span className="mono-cell">{line.sku || '—'}</span></td>
                           <td>{line.on_hand}</td>
                           <td style={{ minWidth: 140 }}>

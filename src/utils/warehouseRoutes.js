@@ -30,7 +30,8 @@ const ROUTE_DEFINITIONS = [
   { pattern: /^\/warehouse\/product-categories$/, pageType: 'productCategories' },
 ];
 
-function normalizeWarehousePathname(pathname) {
+function normalizeWarehousePathname(rawPathname) {
+  const pathname = rawPathname && !rawPathname.startsWith('/') ? `/${rawPathname}` : (rawPathname || '');
   if (pathname === '/warehouse/transfer-requests') return '/warehouse/transfers';
   if (pathname === '/warehouse/transfer-requests/new') return '/warehouse/transfers/new';
   if (
@@ -224,6 +225,10 @@ export function resolveWarehousePage(pathname, search = '') {
     } else {
       params.stockFilter = 'All';
     }
+  }
+  if (match.pageType === 'restockNew') {
+    params.supplierId = searchParams.get('supplier') || undefined;
+    params.productId = searchParams.get('product') || undefined;
   }
 
   const breadcrumbs = buildWarehouseBreadcrumbs(match.pageType, params);

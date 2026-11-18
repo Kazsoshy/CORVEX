@@ -91,6 +91,8 @@ router.get('/', async (req, res) => {
           p.unit_price,
           p.status,
           p.image_url,
+          p.supplier_id,
+          s.supplier_name,
           (i.inventory_id IS NOT NULL) AS has_stock_record,
           COALESCE(i.available_stock, i.quantity, 0)::int AS quantity,
           COALESCE(i.available_stock, i.quantity, 0)::int AS available_stock,
@@ -110,6 +112,7 @@ router.get('/', async (req, res) => {
           b.name AS branch_name
         FROM products p
         LEFT JOIN product_categories pc ON pc.category_id = p.category_id
+        LEFT JOIN suppliers s ON s.suppliers_id = p.supplier_id
         LEFT JOIN branch_inventory i ON i.product_id = p.id AND i.branch_id = $${branchJoinParam}
         LEFT JOIN branches b ON b.id = i.branch_id
         ${where}
@@ -127,6 +130,8 @@ router.get('/', async (req, res) => {
           p.unit_price,
           p.status,
           p.image_url,
+          p.supplier_id,
+          s.supplier_name,
           FALSE AS has_stock_record,
           COALESCE(SUM(COALESCE(i.available_stock, i.quantity, 0)), 0)::int AS quantity,
           COALESCE(SUM(COALESCE(i.available_stock, i.quantity, 0)), 0)::int AS available_stock,
@@ -139,9 +144,10 @@ router.get('/', async (req, res) => {
           END AS stock_status
         FROM products p
         LEFT JOIN product_categories pc ON pc.category_id = p.category_id
+        LEFT JOIN suppliers s ON s.suppliers_id = p.supplier_id
         LEFT JOIN branch_inventory i ON i.product_id = p.id
         ${where}
-        GROUP BY p.id, p.sku, p.category_id, pc.category_name, p.unit_price, p.status, p.image_url
+        GROUP BY p.id, p.sku, p.category_id, pc.category_name, p.unit_price, p.status, p.image_url, p.supplier_id, s.supplier_name
         ORDER BY p.name
         LIMIT $${limitIdx} OFFSET $${offsetIdx}
       `;

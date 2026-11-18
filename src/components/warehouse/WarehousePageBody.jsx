@@ -415,7 +415,6 @@ function InventoryPage({
       <section className="panel content-panel relative overflow-hidden">
         <div className="list-section-header">
           <div>
-            <h3 style={{ margin: 0 }}>Products</h3>
             <p className="text-ink/70" style={{ margin: '4px 0 0', fontSize: '0.88rem' }}>
               Active products available for your branch stock work
               {user?.branch?.name ? ` · ${branchName}` : ''}.
@@ -1248,7 +1247,7 @@ function StockCountHistoryPage({ navigate }) {
       <section className="panel content-panel relative overflow-hidden">
         <div className="list-section-header">
           <div>
-            <h3 style={{ margin: 0 }}>Stock Counts</h3>
+            
             <p className="text-ink/70" style={{ margin: '4px 0 0', fontSize: '0.88rem' }}>
               Physical inventory verification sessions · {branchName}
             </p>
@@ -1581,7 +1580,6 @@ function MovementsPage({
       <section className="panel content-panel relative overflow-hidden">
         <div className="list-section-header">
           <div>
-            <h3 style={{ margin: 0 }}>Stock Movements</h3>
             <p className="text-ink/70" style={{ margin: '4px 0 0', fontSize: '0.88rem' }}>
               Inventory transactions for your branch · {branchName}
             </p>
@@ -2219,19 +2217,6 @@ function TransfersPage({
   return (
     <div className="page">
       <section className="panel content-panel relative overflow-hidden">
-        <div className="list-section-header">
-          <div>
-            <h3 style={{ margin: 0 }}>Transfers</h3>
-            <p className="text-ink/70" style={{ margin: '4px 0 0', fontSize: '0.88rem' }}>
-              Request stock moves from your branch, track approval, and confirm shipment.
-              {' · '}From: <strong>{branchName}</strong>
-            </p>
-          </div>
-          <button className="button whitespace-nowrap" type="button" onClick={() => navigate('/warehouse/transfers/new')}>
-            + New Transfer
-          </button>
-        </div>
-
         <div className="transfers-toolbar" style={{ marginBottom: 12 }}>
           <div className="segmented-control">
             <button className={mainTab === 'requests' ? 'segment active' : 'segment'} type="button" onClick={() => setMainTab('requests')}>
@@ -2265,38 +2250,43 @@ function TransfersPage({
           </div>
         ) : null}
 
-        <div className="list-section-controls" style={{ marginBottom: 12 }}>
-          <input
-            className="filter-input search"
-            type="search"
-            placeholder="Search by transfer ref or product"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            aria-label="Search transfers"
-          />
-          {mainTab === 'history' ? (
+        <div className="list-section-toolbar">
+          <div className="list-section-controls" style={{ marginBottom: 12 }}>
+            <input
+              className="filter-input search"
+              type="search"
+              placeholder="Search by transfer ref or product"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              aria-label="Search transfers"
+            />
+            {mainTab === 'history' ? (
+              <select
+                className="filter-select"
+                value={statusFilter}
+                onChange={(e) => setStatusFilter(e.target.value)}
+                aria-label="Filter by status"
+              >
+                {['Closed', 'All', 'Pending', 'Approved', 'Shipped', 'Completed', 'Rejected'].map((s) => (
+                  <option key={s} value={s}>{s === 'All' ? 'All statuses' : s}</option>
+                ))}
+              </select>
+            ) : null}
             <select
               className="filter-select"
-              value={statusFilter}
-              onChange={(e) => setStatusFilter(e.target.value)}
-              aria-label="Filter by status"
+              value={destinationFilter}
+              onChange={(e) => setDestinationFilter(e.target.value)}
+              aria-label="Filter by destination"
             >
-              {['Closed', 'All', 'Pending', 'Approved', 'Shipped', 'Completed', 'Rejected'].map((s) => (
-                <option key={s} value={s}>{s === 'All' ? 'All statuses' : s}</option>
+              <option value="All">All destinations</option>
+              {destinationOptions.map((name) => (
+                <option key={name} value={name}>{name}</option>
               ))}
             </select>
-          ) : null}
-          <select
-            className="filter-select"
-            value={destinationFilter}
-            onChange={(e) => setDestinationFilter(e.target.value)}
-            aria-label="Filter by destination"
-          >
-            <option value="All">All destinations</option>
-            {destinationOptions.map((name) => (
-              <option key={name} value={name}>{name}</option>
-            ))}
-          </select>
+            <button className="button whitespace-nowrap" type="button" onClick={() => navigate('/warehouse/transfers/new')}>
+              + New Transfer
+            </button>
+          </div>
         </div>
 
         {activeList.length ? (
@@ -2715,22 +2705,7 @@ function RestockHistoryPage({ navigate }) {
   return (
     <div className="page">
       <section className="panel content-panel relative overflow-hidden">
-        <div className="list-section-header">
-          <div>
-            <h3 style={{ margin: 0 }}>Restock</h3>
-            <p className="text-ink/70" style={{ margin: '4px 0 0', fontSize: '0.88rem' }}>
-              Deliveries recorded for your branch · {branchName}
-            </p>
-            <p className="text-ink/70" style={{ margin: '4px 0 0', fontSize: '0.82rem' }}>
-              Record a goods receipt to increase stock immediately. No manager approval required.
-            </p>
-          </div>
-          <button className="button whitespace-nowrap" type="button" onClick={() => navigate('/warehouse/restock-history/new')}>
-            + New Restock
-          </button>
-        </div>
-
-        <div className="list-section-controls" style={{ marginBottom: 12 }}>
+        <div className="list-section-controls restock-filter-controls" style={{ marginBottom: 12 }}>
           <input
             className="filter-input search"
             type="search"
@@ -2745,6 +2720,9 @@ function RestockHistoryPage({ navigate }) {
           <input className="filter-input" type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} aria-label="From date" />
           <input className="filter-input" type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} aria-label="To date" />
           <button className="button ghost" type="button" onClick={clearFilters}>Clear filters</button>
+          <button className="button whitespace-nowrap" type="button" onClick={() => navigate('/warehouse/restock-history/new')}>
+            + New Restock
+          </button>
         </div>
 
         {productFilter ? (
@@ -2842,14 +2820,16 @@ function RestockHistoryPage({ navigate }) {
   );
 }
 
-function RestockNewPage({ navigate, showToast }) {
-  const params = new URLSearchParams(window.location.search);
-  const supplierId = params.get('supplier') || '';
+function RestockNewPage({ navigate, showToast, supplierId: propSupplierId, productId: propProductId }) {
+  const searchStr = typeof window !== 'undefined' ? window.location.search : '';
+  const params = new URLSearchParams(searchStr);
+  const supplierId = propSupplierId || params.get('supplier') || '';
+  const productId = propProductId || params.get('product') || '';
   return (
     <RestockDocumentForm
       navigate={navigate}
       showToast={showToast}
-      initialProductId={params.get('product') || ''}
+      initialProductId={productId}
       initialSupplierId={supplierId}
       cancelTo={supplierId ? `/warehouse/suppliers/${supplierId}` : '/warehouse/restock-history'}
     />
@@ -3226,7 +3206,6 @@ function SuppliersPage({
       <section className="panel content-panel relative overflow-hidden">
         <div className="list-section-header">
           <div>
-            <h3 style={{ margin: 0 }}>Suppliers</h3>
             <p className="text-ink/70" style={{ margin: '4px 0 0', fontSize: '0.88rem' }}>
               Vendors used when recording restocks for your branch.
             </p>
@@ -3521,7 +3500,6 @@ function ProductCategoriesPage({
       <section className="panel content-panel relative overflow-hidden">
         <div className="list-section-header">
           <div>
-            <h3 style={{ margin: 0 }}>Product Categories</h3>
             <p className="text-ink/70" style={{ margin: '4px 0 0', fontSize: '0.88rem' }}>
               How products are grouped in the catalog (managed by Operating Manager).
             </p>

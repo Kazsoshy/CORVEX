@@ -698,6 +698,46 @@ button.outline-btn:hover {
   margin-bottom: 0;
 }
 
+.restock-filter-controls {
+  flex-wrap: nowrap;
+}
+
+.branch-stock-filter-controls {
+  flex-wrap: nowrap;
+}
+
+.branch-stock-toolbar {
+  display: flex !important;
+  flex-wrap: nowrap !important;
+  align-items: center !important;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+}
+
+.branch-stock-toolbar > .list-section-controls {
+  flex: 1 1 auto !important;
+  min-width: 0;
+  width: auto !important;
+  margin-bottom: 0;
+}
+
+.branch-stock-toolbar-actions {
+  display: flex !important;
+  flex-direction: row !important;
+  flex-wrap: nowrap !important;
+  align-items: center !important;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-left: auto;
+  flex: 0 0 auto;
+}
+
+.branch-stock-toolbar-actions > .button {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
 .notifications-toolbar {
   display: flex !important;
   flex-wrap: wrap;
@@ -723,10 +763,41 @@ button.outline-btn:hover {
 }
 
 @media (max-width: 700px) {
+  .restock-filter-controls {
+    flex-wrap: wrap;
+  }
+
+  .branch-stock-filter-controls {
+    flex-wrap: wrap;
+  }
+
+  .branch-stock-toolbar {
+    flex-wrap: wrap !important;
+  }
+
+  .branch-stock-toolbar-actions {
+    width: 100%;
+    margin-left: 0;
+  }
+
   .notifications-toolbar > .button,
   .transfers-toolbar > .button {
     width: 100%;
     margin-left: 0;
+  }
+}
+
+@media (min-width: 701px) and (max-width: 900px) {
+  .restock-filter-controls {
+    flex-wrap: wrap;
+  }
+
+  .branch-stock-filter-controls {
+    flex-wrap: wrap;
+  }
+
+  .branch-stock-toolbar {
+    flex-wrap: wrap !important;
   }
 }
 

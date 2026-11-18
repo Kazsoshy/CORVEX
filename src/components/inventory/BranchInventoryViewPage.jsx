@@ -219,15 +219,6 @@ export function BranchInventoryViewPage({
     <div className="page">
       <section className="panel content-panel relative overflow-hidden">
         <div className="list-section-header">
-          <div>
-            <h3 style={{ margin: 0 }}>Branch Stock</h3>
-            <p className="text-ink/70" style={{ margin: '4px 0 0', fontSize: '0.85rem' }}>
-              On-hand inventory at {resolvedBranch}.
-              {isWarehouse
-                ? ' Start restock, transfer, or stock count from here.'
-                : ' Monitor stock health and open approval queues for inventory decisions.'}
-            </p>
-          </div>
           <div className="flex flex-wrap gap-2 items-center">
             {isOversight ? <StatusBadge status="View only" /> : null}
             {isOversight && navigate ? (
@@ -252,31 +243,6 @@ export function BranchInventoryViewPage({
                   onClick={() => navigate(`${opsBase}/approval-center?tab=stock-counts`)}
                 >
                   Stock Count Approvals
-                </button>
-              </>
-            ) : null}
-            {isWarehouse && navigate ? (
-              <>
-                <button
-                  className="button secondary"
-                  type="button"
-                  onClick={() => navigate('/warehouse/restock-history/new')}
-                >
-                  Restock
-                </button>
-                <button
-                  className="button secondary"
-                  type="button"
-                  onClick={() => navigate('/warehouse/transfers/new')}
-                >
-                  Transfer
-                </button>
-                <button
-                  className="button"
-                  type="button"
-                  onClick={() => navigate('/warehouse/stock-counts/new')}
-                >
-                  Stock Count
                 </button>
               </>
             ) : null}
@@ -330,8 +296,8 @@ export function BranchInventoryViewPage({
       </section>
 
       <section className="panel content-panel relative overflow-hidden">
-        <div className="list-section-toolbar">
-          <div className="list-section-controls">
+        <div className="list-section-toolbar branch-stock-toolbar">
+          <div className="list-section-controls branch-stock-filter-controls">
             <div className="search-bar">
               <NavIcon name="search" />
               <input
@@ -373,25 +339,37 @@ export function BranchInventoryViewPage({
               <option value="Sufficient">Sufficient</option>
               {isWarehouse ? <option value="Never Stocked">Never Stocked</option> : null}
             </select>
-            {isWarehouse ? (
-              <label className="text-ink/70" style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: '0.85rem' }}>
-                <input
-                  type="checkbox"
-                  checked={includeNeverStocked}
-                  onChange={(e) => {
-                    setIncludeNeverStocked(e.target.checked);
-                    if (!e.target.checked && statusFilter === 'Never Stocked') setStatusFilter('All');
-                  }}
-                />
-                Include never stocked
-              </label>
-            ) : null}
             {filtersActive ? (
               <button className="button ghost" type="button" onClick={clearFilters}>
                 Clear filters
               </button>
             ) : null}
           </div>
+          {isWarehouse && navigate ? (
+            <div className="list-section-actions branch-stock-toolbar-actions">
+              <button
+                className="button secondary"
+                type="button"
+                onClick={() => navigate('/warehouse/restock-history/new')}
+              >
+                Restock
+              </button>
+              <button
+                className="button secondary"
+                type="button"
+                onClick={() => navigate('/warehouse/transfers/new')}
+              >
+                Transfer
+              </button>
+              <button
+                className="button"
+                type="button"
+                onClick={() => navigate('/warehouse/stock-counts/new')}
+              >
+                Stock Count
+              </button>
+            </div>
+          ) : null}
         </div>
 
         {filtered.length ? (
