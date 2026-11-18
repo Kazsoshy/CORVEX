@@ -84,7 +84,12 @@ export async function lookupCustomersForDuplicate(params) {
     const response = await apiClient.get('/customers/lookup', { params });
     return response.data;
   } catch (error) {
-    return { success: false, data: [] };
+    return {
+      success: false,
+      data: [],
+      summary: 'error',
+      message: error?.response?.data?.message || error?.message || 'Lookup failed.',
+    };
   }
 }
 

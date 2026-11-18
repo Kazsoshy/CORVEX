@@ -65,6 +65,93 @@ export async function ensureSchema(client) {
     ALTER TABLE customers ADD COLUMN IF NOT EXISTS estimated_monthly_revenue DECIMAL(14, 2);
     ALTER TABLE customers ADD COLUMN IF NOT EXISTS estimated_monthly_expenses DECIMAL(14, 2);
     ALTER TABLE customers ADD COLUMN IF NOT EXISTS existing_obligations DECIMAL(14, 2);
+    ALTER TABLE customers ADD COLUMN IF NOT EXISTS name_suffix VARCHAR(20);
+    ALTER TABLE customers ADD COLUMN IF NOT EXISTS privacy_notice_acknowledged_at TIMESTAMPTZ;
+    ALTER TABLE customers ADD COLUMN IF NOT EXISTS privacy_notice_version VARCHAR(40);
+    ALTER TABLE customers ADD COLUMN IF NOT EXISTS marketing_opt_in BOOLEAN NOT NULL DEFAULT false;
+    ALTER TABLE customers ADD COLUMN IF NOT EXISTS phone_verification_status VARCHAR(20) NOT NULL DEFAULT 'Unverified';
+    ALTER TABLE customers ADD COLUMN IF NOT EXISTS identity_match_json JSONB NOT NULL DEFAULT '{}'::jsonb;
+    ALTER TABLE customers ADD COLUMN IF NOT EXISTS identity_review_note TEXT;
+    ALTER TABLE customers ADD COLUMN IF NOT EXISTS identity_reviewed_by INTEGER;
+    ALTER TABLE customers ADD COLUMN IF NOT EXISTS identity_reviewed_at TIMESTAMPTZ;
+  `);
+
+  await client.query(`
+    DO $identity_status$
+    BEGIN
+      IF EXISTS (
+        SELECT 1 FROM pg_constraint WHERE conname = 'customers_status_check'
+      ) THEN
+        ALTER TABLE customers DROP CONSTRAINT customers_status_check;
+      END IF;
+      ALTER TABLE customers
+        ADD CONSTRAINT customers_status_check
+        CHECK (status IN ('Active', 'Inactive', 'Pending Identity Review'));
+    EXCEPTION
+      WHEN duplicate_object THEN NULL;
+    END
+    $identity_status$;
+  `);
+
+  await client.query(`
+    CREATE INDEX IF NOT EXISTS idx_customers_identity_review_queue
+      ON customers (branch_id, status)
+      WHERE status = 'Pending Identity Review';
+  `);
+
+  await client.query(`
+    CREATE TABLE IF NOT EXISTS customer_identity_verifications (
+      verification_id SERIAL PRIMARY KEY,
+      branch_id INTEGER NOT NULL REFERENCES branches(id),
+      requested_by INTEGER NOT NULL REFERENCES users(id),
+      status VARCHAR(30) NOT NULL DEFAULT 'Pending',
+      search_payload_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+      proposed_registration_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+      match_candidates_json JSONB NOT NULL DEFAULT '[]'::jsonb,
+      primary_match_customer_id INTEGER REFERENCES customers(customer_id) ON DELETE SET NULL,
+      decision_note TEXT,
+      decided_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+      decided_at TIMESTAMPTZ,
+      clearance_token UUID,
+      clearance_expires_at TIMESTAMPTZ,
+      search_phone_normalized VARCHAR(20),
+      created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+    ALTER TABLE customer_identity_verifications
+      ADD COLUMN IF NOT EXISTS search_phone_normalized VARCHAR(20);
+    ALTER TABLE customer_identity_verifications
+      ADD COLUMN IF NOT EXISTS linked_transfer_id INTEGER;
+    ALTER TABLE customer_identity_verifications
+      ADD COLUMN IF NOT EXISTS registration_attempt_key VARCHAR(64);
+    DROP INDEX IF EXISTS uq_identity_verify_open_requester_phone;
+    CREATE UNIQUE INDEX IF NOT EXISTS uq_identity_verify_open_requester_phone
+      ON customer_identity_verifications (requested_by, search_phone_normalized)
+      WHERE status IN ('Pending', 'Needs Evidence', 'Transfer Linked')
+        AND search_phone_normalized IS NOT NULL
+        AND search_phone_normalized <> '';
+    CREATE TABLE IF NOT EXISTS customer_branch_transfers (
+      transfer_id SERIAL PRIMARY KEY,
+      customer_id INTEGER NOT NULL REFERENCES customers(customer_id) ON DELETE CASCADE,
+      source_branch_id INTEGER NOT NULL REFERENCES branches(id),
+      target_branch_id INTEGER NOT NULL REFERENCES branches(id),
+      target_territory_id INTEGER REFERENCES territories(territory_id),
+      status VARCHAR(30) NOT NULL DEFAULT 'Pending Source',
+      reason TEXT,
+      revision_note TEXT,
+      rejection_note TEXT,
+      requested_by INTEGER NOT NULL REFERENCES users(id),
+      source_bm_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+      om_decided_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+      decided_at TIMESTAMPTZ,
+      applied_at TIMESTAMPTZ,
+      snapshot_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+  `);
+
+  await client.query(`
 
     ALTER TABLE credit_investigations ADD COLUMN IF NOT EXISTS request_reason VARCHAR(120);
     ALTER TABLE credit_investigations ADD COLUMN IF NOT EXISTS requested_credit_limit DECIMAL(12, 2);

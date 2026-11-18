@@ -73,9 +73,182 @@ export async function createCustomer(payload) {
     const response = await apiClient.post('/customers', payload);
     return response.data;
   } catch (error) {
-    const message = error?.response?.data?.message || error?.message || 'Failed to create customer';
+    const body = error?.response?.data || {};
+    const message = body.message || error?.message || 'Failed to create customer';
     console.error('Failed to create customer:', error);
-    return { success: false, message };
+    return {
+      success: false,
+      message,
+      status: error?.response?.status,
+      code: body.code,
+      match_summary: body.match_summary,
+      matches: body.matches,
+      data: body.data,
+    };
+  }
+}
+
+export async function decideCustomerIdentityReview(customerId, payload) {
+  try {
+    const response = await apiClient.post(`/customers/${customerId}/identity-review`, payload);
+    return response.data;
+  } catch (error) {
+    return {
+      success: false,
+      message: error?.response?.data?.message || error?.message || 'Failed to decide identity review.',
+      status: error?.response?.status,
+    };
+  }
+}
+
+export async function fetchIdentityVerifications(params = {}) {
+  try {
+    const response = await apiClient.get('/customers/identity-verifications', { params });
+    return response.data;
+  } catch (error) {
+    return { success: false, data: [], message: error?.response?.data?.message || error?.message };
+  }
+}
+
+export async function fetchMyIdentityVerifications(params = {}) {
+  try {
+    const response = await apiClient.get('/customers/identity-verifications', {
+      params: { ...params, mine: 1 },
+    });
+    return response.data;
+  } catch (error) {
+    return { success: false, data: [], message: error?.response?.data?.message || error?.message };
+  }
+}
+
+export async function fetchIdentityVerificationById(verificationId) {
+  try {
+    const response = await apiClient.get(`/customers/identity-verifications/${verificationId}`);
+    return response.data;
+  } catch (error) {
+    return {
+      success: false,
+      data: null,
+      message: error?.response?.data?.message || error?.message || 'Failed to load verification.',
+      status: error?.response?.status,
+    };
+  }
+}
+
+export async function requestIdentityVerification(payload) {
+  try {
+    const response = await apiClient.post('/customers/identity-verifications', payload);
+    return response.data;
+  } catch (error) {
+    const body = error?.response?.data || {};
+    return {
+      success: false,
+      message: body.message || error?.message || 'Failed to request verification.',
+      status: error?.response?.status,
+      data: body.data,
+      idempotent: Boolean(body.idempotent),
+    };
+  }
+}
+
+export async function decideIdentityVerification(verificationId, payload) {
+  try {
+    const response = await apiClient.post(`/customers/identity-verifications/${verificationId}/decide`, payload);
+    return response.data;
+  } catch (error) {
+    return {
+      success: false,
+      message: error?.response?.data?.message || error?.message || 'Failed to decide verification.',
+    };
+  }
+}
+
+export async function requestIdentityBranchTransfer(verificationId, payload) {
+  try {
+    const response = await apiClient.post(
+      `/customers/identity-verifications/${verificationId}/request-transfer`,
+      payload
+    );
+    return response.data;
+  } catch (error) {
+    return {
+      success: false,
+      message: error?.response?.data?.message || error?.message || 'Failed to request branch transfer.',
+      status: error?.response?.status,
+      data: error?.response?.data?.data,
+    };
+  }
+}
+
+export async function fetchIdentityCandidateProfile(verificationId, customerId) {
+  try {
+    const response = await apiClient.get(
+      `/customers/identity-verifications/${verificationId}/candidates/${customerId}`
+    );
+    return response.data;
+  } catch (error) {
+    return {
+      success: false,
+      data: null,
+      message: error?.response?.data?.message || error?.message || 'Failed to load candidate profile.',
+      status: error?.response?.status,
+    };
+  }
+}
+
+export async function fetchBranchTransfers(params = {}) {
+  try {
+    const response = await apiClient.get('/customers/branch-transfers', { params });
+    return response.data;
+  } catch (error) {
+    return { success: false, data: [], message: error?.response?.data?.message || error?.message };
+  }
+}
+
+export async function requestCustomerBranchTransfer(customerId, payload) {
+  try {
+    const response = await apiClient.post(`/customers/${customerId}/branch-transfer-requests`, payload);
+    return response.data;
+  } catch (error) {
+    return {
+      success: false,
+      message: error?.response?.data?.message || error?.message || 'Failed to request branch transfer.',
+      status: error?.response?.status,
+      data: error?.response?.data?.data,
+    };
+  }
+}
+
+export async function fetchBranchTransferTargetTerritories(transferId) {
+  try {
+    const response = await apiClient.get(`/customers/branch-transfers/${transferId}/target-territories`);
+    return response.data;
+  } catch (error) {
+    return { success: false, data: [], message: error?.response?.data?.message || error?.message };
+  }
+}
+
+export async function sourceSubmitBranchTransfer(transferId, payload) {
+  try {
+    const response = await apiClient.post(`/customers/branch-transfers/${transferId}/source-submit`, payload);
+    return response.data;
+  } catch (error) {
+    return {
+      success: false,
+      message: error?.response?.data?.message || error?.message || 'Failed to submit transfer.',
+    };
+  }
+}
+
+export async function omDecideBranchTransfer(transferId, payload) {
+  try {
+    const response = await apiClient.post(`/customers/branch-transfers/${transferId}/om-decide`, payload);
+    return response.data;
+  } catch (error) {
+    return {
+      success: false,
+      message: error?.response?.data?.message || error?.message || 'Failed to decide transfer.',
+    };
   }
 }
 

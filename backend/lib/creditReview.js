@@ -508,6 +508,19 @@ export async function createCreditReview(client, {
     err.status = 404;
     throw err;
   }
+  const customerStatus = String(evidence.customer?.status || evidence.status || 'Active');
+  if (customerStatus === 'Pending Identity Review') {
+    const err = new Error(
+      'This customer is Pending Identity Review. Wait for Branch Manager approval before requesting credit.'
+    );
+    err.status = 400;
+    throw err;
+  }
+  if (customerStatus !== 'Active') {
+    const err = new Error('Only Active customers can request a credit review.');
+    err.status = 400;
+    throw err;
+  }
 
   const snapshot = freezeCreditSnapshot(evidence);
   const risk = evidence.risk;

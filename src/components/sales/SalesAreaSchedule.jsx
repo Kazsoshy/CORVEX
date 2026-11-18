@@ -16,6 +16,7 @@ import { EmptyState } from '../shared/EmptyState';
 import { LoadingState } from '../shared/LoadingState';
 import { Pagination } from '../shared/Pagination';
 import { StatusBadge } from '../StatusBadge';
+import { FindExistingCustomerModal } from './FindExistingCustomerModal';
 
 function manilaToday() {
   return new Intl.DateTimeFormat('en-CA', {
@@ -496,6 +497,7 @@ export function AreaAssignmentDetailPage({ assignmentId, navigate, showToast }) 
   const [routeLoading, setRouteLoading] = useState(false);
   const [startOpen, setStartOpen] = useState(false);
   const [doneOpen, setDoneOpen] = useState(false);
+  const [findModalOpen, setFindModalOpen] = useState(false);
   const today = manilaToday();
 
   const reload = async () => {
@@ -683,9 +685,7 @@ export function AreaAssignmentDetailPage({ assignmentId, navigate, showToast }) 
                 <button
                   className="button secondary"
                   type="button"
-                  onClick={() => navigate(
-                    `/sales/customers/new?assignmentId=${assignment.assignment_id}${assignment.territory_id ? `&territoryId=${assignment.territory_id}` : ''}`
-                  )}
+                  onClick={() => setFindModalOpen(true)}
                 >
                   Add Customer
                 </button>
@@ -1171,6 +1171,14 @@ export function AreaAssignmentDetailPage({ assignmentId, navigate, showToast }) 
           </div>
         </div>
       ) : null}
+
+      <FindExistingCustomerModal
+        open={findModalOpen}
+        onClose={() => setFindModalOpen(false)}
+        navigate={navigate}
+        showToast={showToast}
+        registerPath={`/sales/customers/new?assignmentId=${assignment.assignment_id}${assignment.territory_id ? `&territoryId=${assignment.territory_id}` : ''}`}
+      />
     </div>
   );
 }

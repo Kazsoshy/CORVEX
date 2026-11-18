@@ -104,6 +104,10 @@ const MIGRATIONS = [
   { file: '076_customer_credit_seed_repair.sql', label: '076_customer_credit_seed_repair.sql' },
   { file: '077_sales_pricing_policy.sql', label: '077_sales_pricing_policy.sql' },
   { file: '078_optional_customer_alternate_contact.sql', label: '078_optional_customer_alternate_contact.sql' },
+  { file: '079_sa_cash_registration.sql', label: '079_sa_cash_registration.sql' },
+  { file: '080_identity_verify_branch_transfer.sql', label: '080_identity_verify_branch_transfer.sql' },
+  { file: '081_identity_verify_phone_uniqueness.sql', label: '081_identity_verify_phone_uniqueness.sql' },
+  { file: '082_identity_verify_waiting_transfer_link.sql', label: '082_identity_verify_waiting_transfer_link.sql' },
 ];
 
 async function ensureMigrationsTable() {
