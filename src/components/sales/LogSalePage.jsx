@@ -12,7 +12,7 @@ import { isBrowserOnline } from '../../offline/connection.js';
 import { saveOfflineRecord } from '../../offline/db.js';
 import { DeviceQueue, loadWaiting } from '../../offline/DeviceQueue.jsx';
 import { isSalesAutoSyncEnabled, isSalesOfflineEnabled } from '../../offline/prefs.js';
-import { formatCurrency, formatDisplayDate } from '../../data/salesMockData';
+import { formatCurrency, formatDisplayDate } from '../../utils/formatters.js';
 import { formatCustomerFullName } from '../../utils/customerDisplay';
 import { displayCreditReviewStatus } from '../../utils/creditReview';
 import { QuantityStepper } from '../shared/QuantityStepper.jsx';

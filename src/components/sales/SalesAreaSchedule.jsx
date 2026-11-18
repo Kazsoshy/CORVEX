@@ -7,7 +7,7 @@ import {
   previewSalesAreaAssignmentRoute,
   updateSalesAreaAssignmentStatus,
 } from '../../api/salesService';
-import { formatDisplayDate, formatDisplayDateTime } from '../../data/salesMockData';
+import { formatDisplayDate, formatDisplayDateTime } from '../../utils/formatters.js';
 import { openExternalNavigation } from '../../utils/mapsNavigation';
 import { usePagination } from '../../hooks/usePagination';
 import LeafletMap from '../common/LeafletMap';

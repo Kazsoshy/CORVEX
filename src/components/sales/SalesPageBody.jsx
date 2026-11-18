@@ -30,7 +30,7 @@ import { isSalesGpsEnabled } from '../../settings/preferences.js';
 import { UserSettingsPanel } from '../shared/UserSettingsPanel';
 import { AccountProfilePanel } from '../shared/AccountProfilePanel';
 import apiClient from '../../api/apiClient.js';
-import { formatCurrency, formatDisplayDate, formatDisplayDateTime } from '../../data/salesMockData';
+import { formatCurrency, formatDisplayDate, formatDisplayDateTime } from '../../utils/formatters.js';
 import { InvoiceDetailsPage } from './InvoiceDetailsPage';
 import { LogSalePage } from './LogSalePage';
 import { AreaAssignmentDetailPage, SchedulePage } from './SalesAreaSchedule';

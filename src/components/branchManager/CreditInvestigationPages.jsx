@@ -15,7 +15,7 @@ import { Pagination } from '../shared/Pagination';
 import { DetailRowsTable } from '../shared/DetailRowsTable';
 import { StatusBadge } from '../StatusBadge';
 import { useServerPagination, DEFAULT_PAGE_SIZE } from '../../hooks/usePagination';
-import { formatCurrency, formatDisplayDate, formatDisplayDateTime } from '../../data/branchManagerMockData';
+import { formatCurrency, formatDisplayDate, formatDisplayDateTime } from '../../utils/formatters.js';
 import { formatMoneyOrNA, mapCreditReviewRow } from '../../utils/creditReview.js';
 
 function money(value) {

@@ -10,7 +10,7 @@ import { StatusBadge } from '../StatusBadge';
 import { NavIcon } from '../../navIcons';
 import LeafletMap from '../common/LeafletMap';
 import { useServerPagination, DEFAULT_PAGE_SIZE } from '../../hooks/usePagination';
-import { formatCurrency, formatDisplayDate } from '../../data/branchManagerMockData';
+import { formatCurrency, formatDisplayDate } from '../../utils/formatters.js';
 import {
   formatCustomerDisplayId,
   formatCustomerFullName,

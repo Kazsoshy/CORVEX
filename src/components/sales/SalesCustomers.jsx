@@ -14,7 +14,7 @@ import {
 } from '../../utils/customerDisplay';
 import { openExternalNavigation } from '../../utils/mapsNavigation';
 import { paymentStanding as sharedPaymentStanding } from '../../utils/customerStanding.js';
-import { formatCurrency, formatDisplayDate } from '../../data/salesMockData';
+import { formatCurrency, formatDisplayDate } from '../../utils/formatters.js';
 import { useServerPagination, DEFAULT_PAGE_SIZE } from '../../hooks/usePagination';
 import LeafletMap from '../common/LeafletMap';
 import { EmptyState } from '../shared/EmptyState';

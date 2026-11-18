@@ -1,6 +1,7 @@
 /**
- * Standard credentials and branch for CORVEX demo / seed data.
+ * Standard credentials and branch for CORVEX demo / seed data ONLY.
  * Use these in new migrations and seed scripts — do not invent one-off passwords.
+ * Never use SEED_PASSWORD (or its hash) for real/staging/production user accounts.
  */
 export const SEED_PASSWORD = 'Corvex@2026';
 

@@ -5,7 +5,7 @@ import { Stats } from '../shared/StatsGrid';
 import { EmptyState } from '../shared/EmptyState';
 import { LoadingState } from '../shared/LoadingState';
 import { StatusBadge } from '../StatusBadge';
-import { formatCurrency, formatDisplayDate, formatDisplayDateTime } from '../../data/branchManagerMockData';
+import { formatCurrency, formatDisplayDate, formatDisplayDateTime } from '../../utils/formatters.js';
 import {
   fetchCreditInvestigations,
   fetchPendingSalesInvoices,

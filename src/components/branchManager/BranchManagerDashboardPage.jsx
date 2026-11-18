@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom';
 import {
   AreaChart, Area, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
 } from 'recharts';
-import { formatCurrency } from '../../data/branchManagerMockData';
+import { formatCurrency } from '../../utils/formatters.js';
 import { EmptyState } from '../shared/EmptyState';
 import { LoadingState } from '../shared/LoadingState';
 import { StatusBadge } from '../StatusBadge';
