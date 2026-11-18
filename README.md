@@ -136,5 +136,12 @@ npm run dev
 | `npm run seed:demo-customer` | Seeds customer test credentials for the customer self-service portal. |
 | `npm run seed:reset-passwords` | Resets all default role passwords in the database to initial seed values. |
 | `npm run check:schema` | Validates PostgreSQL table schemas against expected application columns. |
-| `npm test` | Runs the automated test suite (Vitest). |
+| `npm test` | Runs the automated test suite (`node --test backend/tests/*.test.js`). |
 | `npm run build` | Compiles the production frontend bundle into `dist/`. |
+
+---
+
+## 6. Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for folder rules, env conventions, formatter imports, and quarantine policy.  
+Cleanup notes for 2026-11-18: [docs/CHANGELOG_CLEANUP_2026-11-18.md](docs/CHANGELOG_CLEANUP_2026-11-18.md).
