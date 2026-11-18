@@ -7,7 +7,7 @@ import { Pagination } from '../shared/Pagination';
 import { usePagination } from '../../hooks/usePagination';
 import { StatusBadge } from '../StatusBadge';
 import LeafletMap from '../common/LeafletMap';
-import { formatCurrency, formatDisplayDate, formatPhone } from '../../data/branchManagerMockData';
+import { formatCurrency, formatDisplayDate, formatPhone } from '../../utils/formatters.js';
 import { getCurrentUser } from '../../api/authService.js';
 import {
   getBranchStaff,

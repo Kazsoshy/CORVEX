@@ -16,13 +16,19 @@
     "check:credit": "node backend/scripts/verify_credit_consistency.js",
     "check:suppliers": "node scripts/check_suppliers.js",
     "check:territories": "node scripts/check_territories.js",
+    "check:migrations": "node scripts/check_migrations.mjs",
+    "lint": "eslint . --max-warnings 99999",
+    "format:check": "prettier --check AGENTS.md CONTRIBUTING.md docs/PROJECT_SCOPE.md docs/ARCHITECTURE.md docs/MIGRATION_REVIEW.md docs/QUALITY_SYSTEM_AUDIT.md docs/QUALITY_SYSTEM_REPORT.md eslint.config.js scripts/check_migrations.mjs .github/workflows",
+    "format": "prettier --write AGENTS.md CONTRIBUTING.md docs/PROJECT_SCOPE.md docs/ARCHITECTURE.md docs/MIGRATION_REVIEW.md docs/QUALITY_SYSTEM_AUDIT.md docs/QUALITY_SYSTEM_REPORT.md eslint.config.js scripts/check_migrations.mjs .github/workflows",
+    "check:dupes": "jscpd src backend --config .jscpd.json",
+    "quality": "npm run lint && npm run format:check && npm run check:migrations && npm test && npm run build",
     "test": "node --test backend/tests/*.test.js",
     "build": "vite build",
     "preview": "vite preview"
   },
   "dependencies": {
     "@jobuntux/psgc": "^0.2.1",
-    "axios": "^1.18.1",
+    "axios": "^1.21.1",
     "bcryptjs": "^3.0.3",
     "cors": "^2.8.6",
     "dotenv": "^17.4.2",
@@ -43,7 +49,14 @@
   "devDependencies": {
     "@vitejs/plugin-react": "^4.3.1",
     "autoprefixer": "^10.6.1",
+    "eslint": "^9.39.5",
+    "eslint-plugin-react": "^7.37.5",
+    "eslint-plugin-react-hooks": "^7.1.1",
+    "eslint-plugin-unused-imports": "^4.4.1",
+    "globals": "^17.14.0",
+    "jscpd": "^5.4.3",
     "postcss": "^8.5.28",
+    "prettier": "^3.10.1",
     "tailwindcss": "^3.4.19",
     "vite": "^5.4.8"
   }

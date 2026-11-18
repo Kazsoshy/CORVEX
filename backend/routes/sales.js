@@ -2532,11 +2532,11 @@ router.patch('/area-assignments/:id/status', async (req, res) => {
 
       const updated = await client.query(
         `UPDATE sales_area_assignments
-         SET status = $1,
+         SET status = $1::text,
              started_at = $2,
              completed_at = $3,
-             closure_notes = CASE WHEN $1 = 'Done' THEN $6 ELSE closure_notes END,
-             closeout_report_id = CASE WHEN $1 = 'Done' THEN $7 ELSE closeout_report_id END,
+             closure_notes = CASE WHEN $1::text = 'Done' THEN $6::text ELSE closure_notes END,
+             closeout_report_id = CASE WHEN $1::text = 'Done' THEN $7::int ELSE closeout_report_id END,
              updated_at = CURRENT_TIMESTAMP
          WHERE assignment_id = $4 AND sales_agent_id = $5
          RETURNING assignment_id`,

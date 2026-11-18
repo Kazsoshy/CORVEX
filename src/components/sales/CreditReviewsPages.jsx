@@ -7,7 +7,7 @@ import {
   fetchSalesCreditInvestigations,
   fetchSalesCreditRecommendations,
 } from '../../api/salesService';
-import { formatCurrency, formatDisplayDate, formatDisplayDateTime } from '../../data/salesMockData';
+import { formatCurrency, formatDisplayDate, formatDisplayDateTime } from '../../utils/formatters.js';
 import { usePagination } from '../../hooks/usePagination';
 import {
   CREDIT_REVIEW_FILTERS,

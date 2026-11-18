@@ -1,0 +1,39 @@
+name: CORVEX Quality
+
+on:
+  push:
+    branches: [main, Bacaron, 'cleanup/**']
+  pull_request:
+
+jobs:
+  quality:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: ESLint
+        run: npm run lint
+
+      - name: Prettier (governance / tooling paths)
+        run: npm run format:check
+
+      - name: Migration hygiene
+        run: npm run check:migrations
+
+      - name: Unit tests
+        run: npm test
+
+      - name: Frontend build
+        run: npm run build
+
+      - name: Duplicate code report (advisory)
+        run: npm run check:dupes
+        continue-on-error: true

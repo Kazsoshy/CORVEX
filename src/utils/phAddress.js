@@ -64,11 +64,22 @@ export function getRegions() {
 }
 
 export function getProvinces(regCode) {
-  if (!regCode) return [];
+  if (!regCode) return getAllProvinces();
   const resolvedRegion = regions.find((row) => row.regCode === regCode)
     || regions.find((row) => namesMatch(row.regionName, regCode));
   const code = resolvedRegion?.regCode || regCode;
   return sortByName(provinces.filter((row) => row.regCode === code).map(displayProvince), 'provName');
+}
+
+/** Province-first cascading: all provinces across regions. */
+export function getAllProvinces() {
+  return sortByName(provinces.map(displayProvince), 'provName');
+}
+
+export function getRegionForProvince(provCode) {
+  const province = provinces.find((row) => row.provCode === String(provCode));
+  if (!province) return null;
+  return regions.find((row) => row.regCode === province.regCode) || null;
 }
 
 /**

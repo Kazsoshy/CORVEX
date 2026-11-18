@@ -6,7 +6,7 @@ import { Pagination } from '../shared/Pagination';
 import { usePagination } from '../../hooks/usePagination';
 import { StatusBadge } from '../StatusBadge';
 import LeafletMap from '../common/LeafletMap';
-import { formatDisplayDate, formatDisplayDateTime, formatPhone } from '../../data/branchManagerMockData';
+import { formatDisplayDate, formatDisplayDateTime, formatPhone } from '../../utils/formatters.js';
 import { getCurrentUser } from '../../api/authService.js';
 import { fetchTerritories } from '../../api/territoriesService.js';
 import {

@@ -30,13 +30,14 @@ import { isSalesGpsEnabled } from '../../settings/preferences.js';
 import { UserSettingsPanel } from '../shared/UserSettingsPanel';
 import { AccountProfilePanel } from '../shared/AccountProfilePanel';
 import apiClient from '../../api/apiClient.js';
-import { formatCurrency, formatDisplayDate, formatDisplayDateTime } from '../../data/salesMockData';
+import { formatCurrency, formatDisplayDate, formatDisplayDateTime } from '../../utils/formatters.js';
 import { InvoiceDetailsPage } from './InvoiceDetailsPage';
 import { LogSalePage } from './LogSalePage';
 import { AreaAssignmentDetailPage, SchedulePage } from './SalesAreaSchedule';
 import { FieldActivityReportDetailPage, FieldActivityReportsPage } from './SalesFieldReports';
 import { CustomerDetailPage, CustomersPage } from './SalesCustomers';
 import { CustomerFormPage } from './CustomerRegistrationForm';
+import { VerificationWaitingPage } from './VerificationWaitingPage';
 import {
   SalesCreditReviewDetailPage,
   SalesCreditReviewRequestPage,
@@ -1416,6 +1417,13 @@ export function SalesPageBody({
       return <FieldActivityReportDetailPage {...props} />;
     case 'customers':
       return <CustomersPage {...props} />;
+    case 'identityVerificationWaiting':
+      return (
+        <VerificationWaitingPage
+          {...props}
+          verificationId={page.params?.verificationId}
+        />
+      );
     case 'customerForm':
     case 'customerEdit':
       return <CustomerFormPage {...props} />;

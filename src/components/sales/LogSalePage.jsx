@@ -12,7 +12,7 @@ import { isBrowserOnline } from '../../offline/connection.js';
 import { saveOfflineRecord } from '../../offline/db.js';
 import { DeviceQueue, loadWaiting } from '../../offline/DeviceQueue.jsx';
 import { isSalesAutoSyncEnabled, isSalesOfflineEnabled } from '../../offline/prefs.js';
-import { formatCurrency, formatDisplayDate } from '../../data/salesMockData';
+import { formatCurrency, formatDisplayDate } from '../../utils/formatters.js';
 import { formatCustomerFullName } from '../../utils/customerDisplay';
 import { displayCreditReviewStatus } from '../../utils/creditReview';
 import { QuantityStepper } from '../shared/QuantityStepper.jsx';
@@ -20,6 +20,7 @@ import { CreditReviewRequestModal } from '../shared/CreditReviewRequestModal';
 import { LoadingState } from '../shared/LoadingState';
 import { StatusBadge } from '../StatusBadge';
 import { NavIcon } from '../../navIcons';
+import { FindExistingCustomerModal } from './FindExistingCustomerModal';
 
 function manilaToday() {
   return new Intl.DateTimeFormat('en-CA', {
@@ -448,6 +449,7 @@ export function LogSalePage({
   const [customerDetailLoading, setCustomerDetailLoading] = useState(false);
   const [creditContext, setCreditContext] = useState(null);
   const [creditReviewOpen, setCreditReviewOpen] = useState(false);
+  const [findModalOpen, setFindModalOpen] = useState(false);
   const [pricing, setPricing] = useState(null);
   const [form, setForm] = useState({
     customerId: customerId ? String(customerId) : '',
@@ -627,6 +629,12 @@ export function LogSalePage({
   const buildValidation = () => {
     const nextErrors = {};
     if (!form.customerId) nextErrors.customerId = 'Select a customer.';
+    const customerStatus = String(customerDetail?.status || selectedCustomer?.status || 'Active');
+    if (form.customerId && customerStatus === 'Pending Identity Review') {
+      nextErrors.customerId = 'This customer is Pending Identity Review. Wait for Branch Manager approval before logging a sale.';
+    } else if (form.customerId && customerStatus !== 'Active') {
+      nextErrors.customerId = 'Only Active customers can be used for Log a Sale.';
+    }
     if (!form.payType) nextErrors.payType = 'Select how the customer will pay.';
 
     const items = lineItems
@@ -851,7 +859,7 @@ export function LogSalePage({
                   <button
                     className="button secondary"
                     type="button"
-                    onClick={() => navigate(`/sales/customers/new?returnTo=${encodeURIComponent(location.pathname + location.search)}`)}
+                    onClick={() => setFindModalOpen(true)}
                   >
                     Add New Customer
                   </button>
@@ -1212,6 +1220,14 @@ export function LogSalePage({
           setCreditReviewOpen(false);
           if (ciId) navigate(`/sales/credit-investigations/${ciId}`);
         }}
+      />
+
+      <FindExistingCustomerModal
+        open={findModalOpen}
+        onClose={() => setFindModalOpen(false)}
+        navigate={navigate}
+        showToast={showToast}
+        registerPath={`/sales/customers/new?returnTo=${encodeURIComponent(location.pathname + location.search)}`}
       />
 
       {confirmOpen ? (

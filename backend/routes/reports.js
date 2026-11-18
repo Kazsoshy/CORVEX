@@ -13,6 +13,7 @@ import {
   OVERDUE_CUSTOMER_SQL,
   overdueCustomerAsOfSql,
 } from '../lib/customerStanding.js';
+import { requireIsoDate, optionalBranchClause } from '../lib/sqlSafety.js';
 
 /** Branch roles are always scoped; only OM / super_admin may see all branches. */
 function branchScope(user, queryBranchId) {
@@ -1409,17 +1410,27 @@ router.get('/operating-manager', requireAuth, async (req, res) => {
       return res.status(400).json({ success: false, message: 'branch_id must be numeric.' });
     }
 
-    const branchFilter = Number.isFinite(branchId) ? `AND branch_id = ${branchId}` : '';
-    const customerBranchFilter = Number.isFinite(branchId) ? `AND c.branch_id = ${branchId}` : '';
-    const userBranchFilter = Number.isFinite(branchId) ? `AND u.branch_id = ${branchId}` : '';
-    const inventoryBranchFilter = Number.isFinite(branchId) ? `AND bi.branch_id = ${branchId}` : '';
+    const startDate = requireIsoDate(dateWindow.startDate, 'startDate');
+    const endDate = requireIsoDate(dateWindow.endDate, 'endDate');
+    const compareStartDate = requireIsoDate(dateWindow.compareStartDate, 'compareStartDate');
+    const compareEndDate = requireIsoDate(dateWindow.compareEndDate, 'compareEndDate');
     const branchScopeLabel = Number.isFinite(branchId) ? 'Selected Branch' : 'All Branches';
 
-    const currentWherePayment = `payment_date >= '${dateWindow.startDate}'::date AND payment_date <= '${dateWindow.endDate}'::date`;
-    const previousWherePayment = `payment_date >= '${dateWindow.compareStartDate}'::date AND payment_date <= '${dateWindow.compareEndDate}'::date`;
-    const currentWhereInvoice = `invoices_date >= '${dateWindow.startDate}'::date AND invoices_date <= '${dateWindow.endDate}'::date`;
-    const previousWhereInvoice = `invoices_date >= '${dateWindow.compareStartDate}'::date AND invoices_date <= '${dateWindow.compareEndDate}'::date`;
-    const currentWhereVisit = `scheduled_date >= '${dateWindow.startDate}'::date AND scheduled_date <= '${dateWindow.endDate}'::date`;
+    const currentRange = [startDate, endDate];
+    const previousRange = [compareStartDate, compareEndDate];
+    const branchOn = (column, startIndex = 3) => optionalBranchClause(column, branchId, startIndex);
+
+    const paymentCurrent = branchOn('branch_id');
+    const paymentPrevious = branchOn('branch_id');
+    const invoiceCurrent = branchOn('branch_id');
+    const invoicePrevious = branchOn('branch_id');
+    const customerBranch = branchOn('c.branch_id', 1);
+    const userBranch = branchOn('u.branch_id', 1);
+    const inventoryBranch = branchOn('bi.branch_id', 1);
+    const visitUserBranch = branchOn('u.branch_id', 3);
+    const branchIdClause = branchOn('b.id', 3);
+    const visitCustomerBranch = branchOn('c.branch_id', 3);
+    const productBranch = branchOn('si.branch_id');
 
     const [
       collectionCurrentResult,
@@ -1443,27 +1454,94 @@ router.get('/operating-manager', requireAuth, async (req, res) => {
       lowStockResult,
       overdueAgingResult,
     ] = await Promise.all([
-      pool.query(`SELECT COALESCE(SUM(amount), 0) AS total, COUNT(*) AS count FROM collection_payment WHERE ${currentWherePayment} ${branchFilter}`),
-      pool.query(`SELECT COALESCE(SUM(amount), 0) AS total, COUNT(*) AS count FROM collection_payment WHERE ${previousWherePayment} ${branchFilter}`),
-      pool.query(`SELECT COALESCE(SUM(total_amount), 0) AS total, COUNT(*) AS count FROM sales_invoices WHERE ${currentWhereInvoice} AND ${COUNTED_INVOICE_STATUS} ${branchFilter}`),
-      pool.query(`SELECT COALESCE(SUM(total_amount), 0) AS total, COUNT(*) AS count FROM sales_invoices WHERE ${previousWhereInvoice} AND ${COUNTED_INVOICE_STATUS} ${branchFilter}`),
-      pool.query(`SELECT COALESCE(SUM(ca.outstanding_balance), 0) AS total, COUNT(*) FILTER (WHERE ${OVERDUE_CUSTOMER}) AS overdue_count, COUNT(*) AS customer_count FROM customer_activity ca JOIN customers c ON c.customer_id = ca.customer_id WHERE 1=1 ${customerBranchFilter}`),
-      pool.query(`SELECT COUNT(*) AS total_customers, COUNT(*) FILTER (WHERE c.status = 'Active') AS active_customers, COUNT(*) FILTER (WHERE c.status = 'Inactive') AS inactive_customers FROM customers c WHERE 1=1 ${customerBranchFilter}`),
-      pool.query(`SELECT COUNT(*) FILTER (WHERE r.slug = 'collector') AS active_collectors, COUNT(*) FILTER (WHERE r.slug = 'sales_staff') AS active_sales_agents, COUNT(*) FILTER (WHERE r.slug = 'branch_manager') AS branch_managers, COUNT(*) FILTER (WHERE r.slug = 'inventory_staff') AS inventory_staff FROM users u JOIN roles r ON r.role_id = u.role_id WHERE u.status = 'Active' ${userBranchFilter}`),
-      pool.query(`SELECT COUNT(*) AS total_visits, COUNT(*) FILTER (WHERE fv.status = 'Completed') AS completed_visits, COUNT(*) FILTER (WHERE fv.visit_type = 'Collection') AS collection_visits, COUNT(*) FILTER (WHERE fv.visit_type = 'Sales') AS sales_visits, COUNT(*) FILTER (WHERE fv.visit_type = 'Collection' AND fv.status = 'Completed') AS completed_collection_visits, COUNT(*) FILTER (WHERE fv.visit_type = 'Sales' AND fv.status = 'Completed') AS completed_sales_visits FROM field_visits fv JOIN users u ON u.id = fv.user_id WHERE ${currentWhereVisit.replace(/scheduled_date/g, 'fv.scheduled_date')} ${userBranchFilter}`),
-      pool.query(`SELECT TO_CHAR(payment_date, 'YYYY-MM-DD') AS day, COALESCE(SUM(amount), 0) AS amount FROM collection_payment WHERE ${currentWherePayment} ${branchFilter} GROUP BY TO_CHAR(payment_date, 'YYYY-MM-DD') ORDER BY day`),
-      pool.query(`SELECT TO_CHAR(payment_date, 'YYYY-MM-DD') AS day, COALESCE(SUM(amount), 0) AS amount FROM collection_payment WHERE ${previousWherePayment} ${branchFilter} GROUP BY TO_CHAR(payment_date, 'YYYY-MM-DD') ORDER BY day`),
-      pool.query(`SELECT TO_CHAR(invoices_date, 'YYYY-MM-DD') AS day, COALESCE(SUM(total_amount), 0) AS amount, COUNT(*) AS invoices FROM sales_invoices WHERE ${currentWhereInvoice} AND ${COUNTED_INVOICE_STATUS} ${branchFilter} GROUP BY TO_CHAR(invoices_date, 'YYYY-MM-DD') ORDER BY day`),
-      pool.query(`SELECT TO_CHAR(invoices_date, 'YYYY-MM-DD') AS day, COALESCE(SUM(total_amount), 0) AS amount, COUNT(*) AS invoices FROM sales_invoices WHERE ${previousWhereInvoice} AND ${COUNTED_INVOICE_STATUS} ${branchFilter} GROUP BY TO_CHAR(invoices_date, 'YYYY-MM-DD') ORDER BY day`),
-      pool.query(`SELECT b.id, b.name AS branch_name, COALESCE((SELECT SUM(cp.amount) FROM collection_payment cp WHERE cp.branch_id = b.id AND ${currentWherePayment.replace(/payment_date/g, 'cp.payment_date')}), 0) AS total_collections, COALESCE((SELECT SUM(si.total_amount) FROM sales_invoices si WHERE si.branch_id = b.id AND ${currentWhereInvoice.replace(/invoices_date/g, 'si.invoices_date')} AND ${COUNTED_INVOICE_STATUS_SI}), 0) AS total_sales, COALESCE((SELECT SUM(ca.outstanding_balance) FROM customers c2 JOIN customer_activity ca ON ca.customer_id = c2.customer_id WHERE c2.branch_id = b.id), 0) AS total_outstanding, (SELECT COUNT(*) FROM customers c3 WHERE c3.branch_id = b.id) AS customer_count, (SELECT COUNT(*) FROM customers c4 WHERE c4.branch_id = b.id AND c4.status = 'Active') AS active_customers, (SELECT COUNT(*) FROM branch_inventory bi WHERE bi.branch_id = b.id AND bi.available_stock <= bi.reorder_level) AS stock_alerts, (SELECT COUNT(*) FROM branch_inventory bi WHERE bi.branch_id = b.id AND bi.available_stock <= 0) AS stockouts, (SELECT COUNT(*) FROM field_visits fv JOIN users u ON u.id = fv.user_id WHERE u.branch_id = b.id AND ${currentWhereVisit.replace(/scheduled_date/g, 'fv.scheduled_date')}) AS total_visits, (SELECT COUNT(*) FROM field_visits fv JOIN users u ON u.id = fv.user_id WHERE u.branch_id = b.id AND fv.status = 'Completed' AND ${currentWhereVisit.replace(/scheduled_date/g, 'fv.scheduled_date')}) AS completed_visits FROM branches b WHERE b.status = 'Active' ${Number.isFinite(branchId) ? `AND b.id = ${branchId}` : ''} ORDER BY b.name`),
-      pool.query(`SELECT b.id AS branch_id, b.name AS branch_name, COUNT(*) AS product_count, COALESCE(SUM(bi.available_stock), 0) AS total_available, COUNT(*) FILTER (WHERE (${STOCK_STATUS_CASE_SQL_BI}) = 'Out of Stock') AS out_of_stock, COUNT(*) FILTER (WHERE (${STOCK_STATUS_CASE_SQL_BI}) = 'Low Stock') AS low_stock, COUNT(*) FILTER (WHERE (${STOCK_STATUS_CASE_SQL_BI}) = 'Critical Stock') AS critical_stock, COUNT(*) FILTER (WHERE (${STOCK_STATUS_CASE_SQL_BI}) = 'Sufficient') AS sufficient FROM branch_inventory bi JOIN branches b ON b.id = bi.branch_id WHERE 1=1 ${inventoryBranchFilter} GROUP BY b.id, b.name ORDER BY b.name`),
-      pool.query(`SELECT c.customer_id, c.first_name || ' ' || c.last_name AS customer_name, b.name AS branch_name, ca.outstanding_balance, ca.purchase_volume, ca.last_collection_date, ca.last_sales_visit, COALESCE(CURRENT_DATE - ca.last_collection_date, 0) AS days_since_collection FROM customer_activity ca JOIN customers c ON c.customer_id = ca.customer_id JOIN branches b ON b.id = c.branch_id WHERE ca.outstanding_balance > 0 ${customerBranchFilter} ORDER BY ca.outstanding_balance DESC LIMIT 10`),
-      pool.query(`SELECT p.id AS product_id, p.name AS product_name, COALESCE(pc.category_name, 'Uncategorized') AS category_name, SUM(sii.quantity) AS quantity_sold, COALESCE(SUM(sii.line_total), 0) AS revenue FROM sales_invoice_items sii JOIN sales_invoices si ON si.sales_invoices_id = sii.invoices_id JOIN products p ON p.id = sii.product_id LEFT JOIN product_categories pc ON pc.category_id = p.category_id WHERE ${currentWhereInvoice.replace(/invoices_date/g, 'si.invoices_date')} AND ${COUNTED_INVOICE_STATUS_SI} ${branchFilter.replace(/branch_id/g, 'si.branch_id')} GROUP BY p.id, p.name, pc.category_name ORDER BY revenue DESC LIMIT 10`),
-      pool.query(`SELECT COALESCE(pc.category_name, 'Uncategorized') AS category_name, SUM(sii.quantity) AS quantity_sold, COALESCE(SUM(sii.line_total), 0) AS revenue FROM sales_invoice_items sii JOIN sales_invoices si ON si.sales_invoices_id = sii.invoices_id JOIN products p ON p.id = sii.product_id LEFT JOIN product_categories pc ON pc.category_id = p.category_id WHERE ${currentWhereInvoice.replace(/invoices_date/g, 'si.invoices_date')} AND ${COUNTED_INVOICE_STATUS_SI} ${branchFilter.replace(/branch_id/g, 'si.branch_id')} GROUP BY pc.category_name ORDER BY revenue DESC`),
-      pool.query(`SELECT fv.visit_id, fv.customer_id, fv.user_id, fv.visit_type, fv.scheduled_date, fv.status, c.first_name || ' ' || c.last_name AS customer_name, u.first_name || ' ' || u.last_name AS staff_name, b.name AS branch_name FROM field_visits fv JOIN customers c ON c.customer_id = fv.customer_id JOIN users u ON u.id = fv.user_id JOIN branches b ON b.id = c.branch_id WHERE fv.status = 'Pending' AND fv.scheduled_date >= '${dateWindow.startDate}'::date AND fv.scheduled_date <= '${dateWindow.endDate}'::date ${Number.isFinite(branchId) ? `AND c.branch_id = ${branchId}` : ''} ORDER BY fv.scheduled_date ASC LIMIT 15`),
-      pool.query(`SELECT p.name AS product_name, b.name AS branch_name, bi.available_stock, bi.reorder_level, CASE WHEN bi.available_stock <= 0 THEN 'Out of Stock' WHEN bi.available_stock <= bi.reorder_level THEN 'Low Stock' ELSE 'Sufficient' END AS status FROM branch_inventory bi JOIN products p ON p.id = bi.product_id JOIN branches b ON b.id = bi.branch_id WHERE bi.available_stock <= bi.reorder_level ${inventoryBranchFilter} ORDER BY bi.available_stock ASC LIMIT 20`),
-      pool.query(`
-        SELECT bucket, customer_count, total_balance
+      pool.query(
+        `SELECT COALESCE(SUM(amount), 0) AS total, COUNT(*) AS count FROM collection_payment WHERE payment_date >= $1::date AND payment_date <= $2::date${paymentCurrent.sql}`,
+        [...currentRange, ...paymentCurrent.params],
+      ),
+      pool.query(
+        `SELECT COALESCE(SUM(amount), 0) AS total, COUNT(*) AS count FROM collection_payment WHERE payment_date >= $1::date AND payment_date <= $2::date${paymentPrevious.sql}`,
+        [...previousRange, ...paymentPrevious.params],
+      ),
+      pool.query(
+        `SELECT COALESCE(SUM(total_amount), 0) AS total, COUNT(*) AS count FROM sales_invoices WHERE invoices_date >= $1::date AND invoices_date <= $2::date AND ${COUNTED_INVOICE_STATUS}${invoiceCurrent.sql}`,
+        [...currentRange, ...invoiceCurrent.params],
+      ),
+      pool.query(
+        `SELECT COALESCE(SUM(total_amount), 0) AS total, COUNT(*) AS count FROM sales_invoices WHERE invoices_date >= $1::date AND invoices_date <= $2::date AND ${COUNTED_INVOICE_STATUS}${invoicePrevious.sql}`,
+        [...previousRange, ...invoicePrevious.params],
+      ),
+      pool.query(
+        `SELECT COALESCE(SUM(ca.outstanding_balance), 0) AS total, COUNT(*) FILTER (WHERE ${OVERDUE_CUSTOMER}) AS overdue_count, COUNT(*) AS customer_count FROM customer_activity ca JOIN customers c ON c.customer_id = ca.customer_id WHERE 1=1${customerBranch.sql}`,
+        customerBranch.params,
+      ),
+      pool.query(
+        `SELECT COUNT(*) AS total_customers, COUNT(*) FILTER (WHERE c.status = 'Active') AS active_customers, COUNT(*) FILTER (WHERE c.status = 'Inactive') AS inactive_customers FROM customers c WHERE 1=1${customerBranch.sql}`,
+        customerBranch.params,
+      ),
+      pool.query(
+        `SELECT COUNT(*) FILTER (WHERE r.slug = 'collector') AS active_collectors, COUNT(*) FILTER (WHERE r.slug = 'sales_staff') AS active_sales_agents, COUNT(*) FILTER (WHERE r.slug = 'branch_manager') AS branch_managers, COUNT(*) FILTER (WHERE r.slug = 'inventory_staff') AS inventory_staff FROM users u JOIN roles r ON r.role_id = u.role_id WHERE u.status = 'Active'${userBranch.sql}`,
+        userBranch.params,
+      ),
+      pool.query(
+        `SELECT COUNT(*) AS total_visits, COUNT(*) FILTER (WHERE fv.status = 'Completed') AS completed_visits, COUNT(*) FILTER (WHERE fv.visit_type = 'Collection') AS collection_visits, COUNT(*) FILTER (WHERE fv.visit_type = 'Sales') AS sales_visits, COUNT(*) FILTER (WHERE fv.visit_type = 'Collection' AND fv.status = 'Completed') AS completed_collection_visits, COUNT(*) FILTER (WHERE fv.visit_type = 'Sales' AND fv.status = 'Completed') AS completed_sales_visits FROM field_visits fv JOIN users u ON u.id = fv.user_id WHERE fv.scheduled_date >= $1::date AND fv.scheduled_date <= $2::date${visitUserBranch.sql}`,
+        [...currentRange, ...visitUserBranch.params],
+      ),
+      pool.query(
+        `SELECT TO_CHAR(payment_date, 'YYYY-MM-DD') AS day, COALESCE(SUM(amount), 0) AS amount FROM collection_payment WHERE payment_date >= $1::date AND payment_date <= $2::date${paymentCurrent.sql} GROUP BY TO_CHAR(payment_date, 'YYYY-MM-DD') ORDER BY day`,
+        [...currentRange, ...paymentCurrent.params],
+      ),
+      pool.query(
+        `SELECT TO_CHAR(payment_date, 'YYYY-MM-DD') AS day, COALESCE(SUM(amount), 0) AS amount FROM collection_payment WHERE payment_date >= $1::date AND payment_date <= $2::date${paymentPrevious.sql} GROUP BY TO_CHAR(payment_date, 'YYYY-MM-DD') ORDER BY day`,
+        [...previousRange, ...paymentPrevious.params],
+      ),
+      pool.query(
+        `SELECT TO_CHAR(invoices_date, 'YYYY-MM-DD') AS day, COALESCE(SUM(total_amount), 0) AS amount, COUNT(*) AS invoices FROM sales_invoices WHERE invoices_date >= $1::date AND invoices_date <= $2::date AND ${COUNTED_INVOICE_STATUS}${invoiceCurrent.sql} GROUP BY TO_CHAR(invoices_date, 'YYYY-MM-DD') ORDER BY day`,
+        [...currentRange, ...invoiceCurrent.params],
+      ),
+      pool.query(
+        `SELECT TO_CHAR(invoices_date, 'YYYY-MM-DD') AS day, COALESCE(SUM(total_amount), 0) AS amount, COUNT(*) AS invoices FROM sales_invoices WHERE invoices_date >= $1::date AND invoices_date <= $2::date AND ${COUNTED_INVOICE_STATUS}${invoicePrevious.sql} GROUP BY TO_CHAR(invoices_date, 'YYYY-MM-DD') ORDER BY day`,
+        [...previousRange, ...invoicePrevious.params],
+      ),
+      pool.query(
+        `SELECT b.id, b.name AS branch_name,
+          COALESCE((SELECT SUM(cp.amount) FROM collection_payment cp WHERE cp.branch_id = b.id AND cp.payment_date >= $1::date AND cp.payment_date <= $2::date), 0) AS total_collections,
+          COALESCE((SELECT SUM(si.total_amount) FROM sales_invoices si WHERE si.branch_id = b.id AND si.invoices_date >= $1::date AND si.invoices_date <= $2::date AND ${COUNTED_INVOICE_STATUS_SI}), 0) AS total_sales,
+          COALESCE((SELECT SUM(ca.outstanding_balance) FROM customers c2 JOIN customer_activity ca ON ca.customer_id = c2.customer_id WHERE c2.branch_id = b.id), 0) AS total_outstanding,
+          (SELECT COUNT(*) FROM customers c3 WHERE c3.branch_id = b.id) AS customer_count,
+          (SELECT COUNT(*) FROM customers c4 WHERE c4.branch_id = b.id AND c4.status = 'Active') AS active_customers,
+          (SELECT COUNT(*) FROM branch_inventory bi WHERE bi.branch_id = b.id AND bi.available_stock <= bi.reorder_level) AS stock_alerts,
+          (SELECT COUNT(*) FROM branch_inventory bi WHERE bi.branch_id = b.id AND bi.available_stock <= 0) AS stockouts,
+          (SELECT COUNT(*) FROM field_visits fv JOIN users u ON u.id = fv.user_id WHERE u.branch_id = b.id AND fv.scheduled_date >= $1::date AND fv.scheduled_date <= $2::date) AS total_visits,
+          (SELECT COUNT(*) FROM field_visits fv JOIN users u ON u.id = fv.user_id WHERE u.branch_id = b.id AND fv.status = 'Completed' AND fv.scheduled_date >= $1::date AND fv.scheduled_date <= $2::date) AS completed_visits
+         FROM branches b WHERE b.status = 'Active'${branchIdClause.sql} ORDER BY b.name`,
+        [...currentRange, ...branchIdClause.params],
+      ),
+      pool.query(
+        `SELECT b.id AS branch_id, b.name AS branch_name, COUNT(*) AS product_count, COALESCE(SUM(bi.available_stock), 0) AS total_available, COUNT(*) FILTER (WHERE (${STOCK_STATUS_CASE_SQL_BI}) = 'Out of Stock') AS out_of_stock, COUNT(*) FILTER (WHERE (${STOCK_STATUS_CASE_SQL_BI}) = 'Low Stock') AS low_stock, COUNT(*) FILTER (WHERE (${STOCK_STATUS_CASE_SQL_BI}) = 'Critical Stock') AS critical_stock, COUNT(*) FILTER (WHERE (${STOCK_STATUS_CASE_SQL_BI}) = 'Sufficient') AS sufficient FROM branch_inventory bi JOIN branches b ON b.id = bi.branch_id WHERE 1=1${inventoryBranch.sql} GROUP BY b.id, b.name ORDER BY b.name`,
+        inventoryBranch.params,
+      ),
+      pool.query(
+        `SELECT c.customer_id, c.first_name || ' ' || c.last_name AS customer_name, b.name AS branch_name, ca.outstanding_balance, ca.purchase_volume, ca.last_collection_date, ca.last_sales_visit, COALESCE(CURRENT_DATE - ca.last_collection_date, 0) AS days_since_collection FROM customer_activity ca JOIN customers c ON c.customer_id = ca.customer_id JOIN branches b ON b.id = c.branch_id WHERE ca.outstanding_balance > 0${customerBranch.sql} ORDER BY ca.outstanding_balance DESC LIMIT 10`,
+        customerBranch.params,
+      ),
+      pool.query(
+        `SELECT p.id AS product_id, p.name AS product_name, COALESCE(pc.category_name, 'Uncategorized') AS category_name, SUM(sii.quantity) AS quantity_sold, COALESCE(SUM(sii.line_total), 0) AS revenue FROM sales_invoice_items sii JOIN sales_invoices si ON si.sales_invoices_id = sii.invoices_id JOIN products p ON p.id = sii.product_id LEFT JOIN product_categories pc ON pc.category_id = p.category_id WHERE si.invoices_date >= $1::date AND si.invoices_date <= $2::date AND ${COUNTED_INVOICE_STATUS_SI}${productBranch.sql} GROUP BY p.id, p.name, pc.category_name ORDER BY revenue DESC LIMIT 10`,
+        [...currentRange, ...productBranch.params],
+      ),
+      pool.query(
+        `SELECT COALESCE(pc.category_name, 'Uncategorized') AS category_name, SUM(sii.quantity) AS quantity_sold, COALESCE(SUM(sii.line_total), 0) AS revenue FROM sales_invoice_items sii JOIN sales_invoices si ON si.sales_invoices_id = sii.invoices_id JOIN products p ON p.id = sii.product_id LEFT JOIN product_categories pc ON pc.category_id = p.category_id WHERE si.invoices_date >= $1::date AND si.invoices_date <= $2::date AND ${COUNTED_INVOICE_STATUS_SI}${productBranch.sql} GROUP BY pc.category_name ORDER BY revenue DESC`,
+        [...currentRange, ...productBranch.params],
+      ),
+      pool.query(
+        `SELECT fv.visit_id, fv.customer_id, fv.user_id, fv.visit_type, fv.scheduled_date, fv.status, c.first_name || ' ' || c.last_name AS customer_name, u.first_name || ' ' || u.last_name AS staff_name, b.name AS branch_name FROM field_visits fv JOIN customers c ON c.customer_id = fv.customer_id JOIN users u ON u.id = fv.user_id JOIN branches b ON b.id = c.branch_id WHERE fv.status = 'Pending' AND fv.scheduled_date >= $1::date AND fv.scheduled_date <= $2::date${visitCustomerBranch.sql} ORDER BY fv.scheduled_date ASC LIMIT 15`,
+        [...currentRange, ...visitCustomerBranch.params],
+      ),
+      pool.query(
+        `SELECT p.name AS product_name, b.name AS branch_name, bi.available_stock, bi.reorder_level, CASE WHEN bi.available_stock <= 0 THEN 'Out of Stock' WHEN bi.available_stock <= bi.reorder_level THEN 'Low Stock' ELSE 'Sufficient' END AS status FROM branch_inventory bi JOIN products p ON p.id = bi.product_id JOIN branches b ON b.id = bi.branch_id WHERE bi.available_stock <= bi.reorder_level${inventoryBranch.sql} ORDER BY bi.available_stock ASC LIMIT 20`,
+        inventoryBranch.params,
+      ),
+      pool.query(
+        `SELECT bucket, customer_count, total_balance
         FROM (
           SELECT
             CASE
@@ -1477,7 +1555,7 @@ router.get('/operating-manager', requireAuth, async (req, res) => {
             COALESCE(SUM(ca.outstanding_balance), 0) AS total_balance
           FROM customer_activity ca
           JOIN customers c ON c.customer_id = ca.customer_id
-          WHERE ca.outstanding_balance > 0 ${customerBranchFilter}
+          WHERE ca.outstanding_balance > 0${customerBranch.sql}
           GROUP BY 1
         ) aging
         ORDER BY CASE bucket
@@ -1486,8 +1564,9 @@ router.get('/operating-manager', requireAuth, async (req, res) => {
           WHEN '31-60 Days' THEN 3
           WHEN '61-90 Days' THEN 4
           ELSE 5
-        END
-      `),
+        END`,
+        customerBranch.params,
+      ),
     ]);
 
     const collectionCurrent = Number(collectionCurrentResult.rows[0]?.total || 0);
@@ -1644,6 +1723,9 @@ router.get('/operating-manager', requireAuth, async (req, res) => {
       },
     });
   } catch (err) {
+    if (err.statusCode === 400) {
+      return res.status(400).json({ success: false, message: err.message });
+    }
     console.error('[Reports] GET /operating-manager error:', err.message);
     return res.status(500).json({ success: false, message: 'Failed to fetch operating manager analytics.' });
   }

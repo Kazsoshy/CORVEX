@@ -7,6 +7,7 @@ const ROUTE_DEFINITIONS = [
   { pattern: /^\/sales\/field-reports\/(\d+)$/, pageType: 'fieldActivityReportDetail', params: ['reportId'] },
   { pattern: /^\/sales\/field-reports$/, pageType: 'fieldActivityReports' },
   { pattern: /^\/sales\/customers$/, pageType: 'customers' },
+  { pattern: /^\/sales\/customers\/verification\/(\d+)$/, pageType: 'identityVerificationWaiting', params: ['verificationId'] },
   { pattern: /^\/sales\/customers\/new$/, pageType: 'customerForm' },
   { pattern: /^\/sales\/customers\/(\d+)\/edit$/, pageType: 'customerEdit', params: ['customerId'] },
   { pattern: /^\/sales\/customer-detail\/([^/]+)$/, pageType: 'customerDetail', params: ['customerId'] },
@@ -93,6 +94,16 @@ export function buildSalesBreadcrumbs(pageType, params = {}, parentContext = 'cu
 
     case 'customers':
       return [...crumbs, { label: 'Customers', to: '/sales/customers' }];
+
+    case 'identityVerificationWaiting':
+      return [
+        ...crumbs,
+        { label: 'Customers', to: '/sales/customers' },
+        {
+          label: 'Identity Verification',
+          to: `/sales/customers/verification/${params.verificationId}`,
+        },
+      ];
 
     case 'customerForm':
       return [...crumbs, { label: 'Customers', to: '/sales/customers' }, { label: 'Add Customer', to: '/sales/customers/new' }];

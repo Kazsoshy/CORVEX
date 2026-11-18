@@ -2,6 +2,21 @@ node_modules
 dist
 .DS_Store
 .env
+reports/
+.eslintcache
+
+# Local tooling / agent worktrees
+.kilo/
+.kiro/
+
+# Quarantine and local data dumps (see _archive/MANIFEST.md)
+_archive/**
+!_archive/MANIFEST.md
+backups/
+*.bak
+*.old
+note..txt
+
 backend/__pycache__
 backend/data/backups
 backend/uploads/avatars/*

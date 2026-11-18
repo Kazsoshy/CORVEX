@@ -4,7 +4,7 @@ import { usePagination } from '../../hooks/usePagination';
 import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { AreaChart, Area, BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
-import { formatCurrency, formatDisplayDate, formatDisplayDateTime, formatPhone } from '../../data/branchManagerMockData';
+import { formatCurrency, formatDisplayDate, formatDisplayDateTime, formatPhone } from '../../utils/formatters.js';
 import { ApprovalCenterPage } from './ApprovalCenterPage.jsx';
 import {
   fetchOperationalAlerts,

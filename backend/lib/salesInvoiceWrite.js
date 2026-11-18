@@ -2,6 +2,7 @@ import { insertStockMovement, upsertBranchInventoryStock } from './branchInvento
 import { manilaDateString } from './sawCollection.js';
 import { ApplyError, SyncConflict } from './syncErrors.js';
 import { calculateSalesPricing, POLICY_VERSION } from './salesPricingPolicy.js';
+import { OVERDUE_CUSTOMER_SQL } from './customerStanding.js';
 
 function positiveInteger(value) {
   const parsed = Number(value);
@@ -145,12 +146,22 @@ export async function applySalesInvoice(client, user, body) {
   await client.query('SELECT pg_advisory_xact_lock($1)', [748392001]);
 
   const customerResult = await client.query(
-    `SELECT customer_id, branch_id FROM customers WHERE customer_id = $1`,
+    `SELECT customer_id, branch_id, status FROM customers WHERE customer_id = $1`,
     [customerId]
   );
   if (!customerResult.rows.length) throw new ApplyError('Customer not found', 404);
   if (customerResult.rows[0].branch_id !== user.branchId) {
     throw new ApplyError('Access denied: customer is not in your assigned branch.', 403);
+  }
+  const customerStatus = String(customerResult.rows[0].status || 'Active');
+  if (customerStatus === 'Pending Identity Review') {
+    throw new ApplyError(
+      'This customer is Pending Identity Review. Wait for Branch Manager approval before logging a sale.',
+      400
+    );
+  }
+  if (customerStatus !== 'Active') {
+    throw new ApplyError('Only Active customers can be used for Log a Sale.', 400);
   }
 
   let paymentMethodId = positiveInteger(body.payment_method_id);
@@ -247,7 +258,8 @@ export async function applySalesInvoice(client, user, body) {
 
     const creditResult = await client.query(
       `SELECT COALESCE(cci.credit_limit, 0) AS credit_limit,
-              COALESCE(ca.outstanding_balance, 0) AS outstanding_balance
+              COALESCE(ca.outstanding_balance, 0) AS outstanding_balance,
+              (${OVERDUE_CUSTOMER_SQL}) AS has_overdue
        FROM customers c
        LEFT JOIN customer_credit_info cci ON cci.customer_id = c.customer_id
        LEFT JOIN customer_activity ca ON ca.customer_id = c.customer_id
@@ -256,6 +268,12 @@ export async function applySalesInvoice(client, user, body) {
     );
     const creditLimit = money(creditResult.rows[0]?.credit_limit || 0);
     const outstanding = money(creditResult.rows[0]?.outstanding_balance || 0);
+    if (creditResult.rows[0]?.has_overdue) {
+      throw new ApplyError(
+        'This customer has overdue credit. Cash sales are allowed; installment/credit stays restricted until Branch Manager exception.',
+        400
+      );
+    }
     if (creditLimit <= 0) {
       throw new ApplyError(
         'Request a Credit Review / wait for Branch Manager to set a credit limit before installment.',

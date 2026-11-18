@@ -6,7 +6,7 @@ import { EmptyState } from '../shared/EmptyState';
 import { LoadingState } from '../shared/LoadingState';
 import { DetailRowsTable } from '../shared/DetailRowsTable';
 import { StatusBadge } from '../StatusBadge';
-import { formatCurrency, formatDisplayDate, formatDisplayDateTime } from '../../data/salesMockData';
+import { formatCurrency, formatDisplayDate, formatDisplayDateTime } from '../../utils/formatters.js';
 
 const sectionStyle = {
   marginBottom: 4,

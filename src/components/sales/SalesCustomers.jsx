@@ -3,6 +3,7 @@ import { useSearchParams } from 'react-router-dom';
 import {
   fetchCustomerById,
   fetchCustomers,
+  fetchMyIdentityVerifications,
   fetchSalesCreditInvestigations,
 } from '../../api/salesService';
 import { getCurrentUser, getUserAssignedLocation } from '../../api/authService.js';
@@ -14,7 +15,7 @@ import {
 } from '../../utils/customerDisplay';
 import { openExternalNavigation } from '../../utils/mapsNavigation';
 import { paymentStanding as sharedPaymentStanding } from '../../utils/customerStanding.js';
-import { formatCurrency, formatDisplayDate } from '../../data/salesMockData';
+import { formatCurrency, formatDisplayDate } from '../../utils/formatters.js';
 import { useServerPagination, DEFAULT_PAGE_SIZE } from '../../hooks/usePagination';
 import LeafletMap from '../common/LeafletMap';
 import { EmptyState } from '../shared/EmptyState';
@@ -24,6 +25,7 @@ import { Pagination } from '../shared/Pagination';
 import { RowActionMenu } from '../shared/RowActionMenu';
 import { StatusBadge } from '../StatusBadge';
 import { CreditReviewRequestModal } from '../shared/CreditReviewRequestModal';
+import { FindExistingCustomerModal } from './FindExistingCustomerModal';
 
 function money(value) {
   return Math.round(Number(value || 0) * 100) / 100;
@@ -149,12 +151,50 @@ export function CustomersPage({ navigate, showToast }) {
   const [loading, setLoading] = useState(true);
   const [customersData, setCustomersData] = useState([]);
   const [totalRecords, setTotalRecords] = useState(0);
+  const [findModalOpen, setFindModalOpen] = useState(false);
+  const [pendingVerificationId, setPendingVerificationId] = useState(null);
   const filterResetKey = `${search}|${filter}|${sortBy}|${sortDir}`;
   const pagination = useServerPagination({
     totalRecords,
     pageSize: DEFAULT_PAGE_SIZE,
     resetKey: filterResetKey,
   });
+
+  useEffect(() => {
+    let active = true;
+    (async () => {
+      const res = await fetchMyIdentityVerifications({ limit: 5 });
+      if (!active || !res.success) return;
+      // Only truly waiting tickets (BM/OM not finished) — do not hijack Add Customer.
+      const openRow = (res.data || []).find((row) => (
+        ['Pending', 'Needs Evidence', 'Transfer Linked'].includes(row.status)
+        || row.next_action === 'wait'
+        || row.next_action === 'wait_transfer'
+      ));
+      if (openRow?.verification_id) {
+        setPendingVerificationId(openRow.verification_id);
+        try {
+          sessionStorage.setItem(
+            'corvex_pending_identity_verification',
+            String(openRow.verification_id)
+          );
+        } catch { /* ignore */ }
+      } else {
+        setPendingVerificationId(null);
+        try { sessionStorage.removeItem('corvex_pending_identity_verification'); } catch { /* ignore */ }
+      }
+    })();
+    return () => { active = false; };
+  }, []);
+
+  const openAddCustomer = () => {
+    setFindModalOpen(true);
+  };
+
+  const resumeVerification = () => {
+    if (!pendingVerificationId) return;
+    navigate(`/sales/customers/verification/${pendingVerificationId}`);
+  };
 
   const toggleSort = (column) => {
     if (sortBy === column) {
@@ -219,11 +259,22 @@ export function CustomersPage({ navigate, showToast }) {
                 <option key={option} value={option}>{option === 'All' ? 'All Customers' : option}</option>
               ))}
             </select>
-            <button className="button" type="button" onClick={() => navigate('/sales/customers/new')}>
+            {pendingVerificationId ? (
+              <button className="button secondary" type="button" onClick={resumeVerification}>
+                Resume Verification
+              </button>
+            ) : null}
+            <button className="button" type="button" onClick={openAddCustomer}>
               Add Customer
             </button>
           </div>
         </div>
+        <FindExistingCustomerModal
+          open={findModalOpen}
+          onClose={() => setFindModalOpen(false)}
+          navigate={navigate}
+          showToast={showToast}
+        />
         {totalRecords ? (
           <>
             <div className="corvex-table-wrapper">
@@ -681,16 +732,25 @@ export function CustomerDetailPage({
             View Payment History
           </button>
         ) : null}
-        <button
-          className="button secondary"
-          type="button"
-          onClick={() => setCreditReviewOpen(true)}
-        >
-          Request Credit Review
-        </button>
-        <button className="button" type="button" onClick={() => navigate(`/sales/log-sale/${customer.customer_id}`)}>
-          Log a Sale
-        </button>
+        {customer.status === 'Active' ? (
+          <button
+            className="button secondary"
+            type="button"
+            onClick={() => setCreditReviewOpen(true)}
+          >
+            Request Credit Review
+          </button>
+        ) : null}
+        {customer.status === 'Pending Identity Review' ? (
+          <p className="muted" style={{ flexBasis: '100%', margin: 0 }}>
+            Pending Identity Review — Branch Manager must approve before cash sales or credit requests.
+          </p>
+        ) : null}
+        {customer.status === 'Active' ? (
+          <button className="button" type="button" onClick={() => navigate(`/sales/log-sale/${customer.customer_id}`)}>
+            Log a Sale
+          </button>
+        ) : null}
       </div>
 
       <CreditReviewRequestModal

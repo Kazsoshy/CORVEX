@@ -13,6 +13,41 @@ import {
   paymentStandingFromFlags,
 } from '../lib/customerStanding.js';
 import { createCreditReview } from '../lib/creditReview.js';
+import {
+  findCustomerDuplicates,
+  limitedMatchCard,
+  digitsOnly,
+  maskPhone,
+} from '../lib/customerDuplicateLookup.js';
+import { upsertOpenOperationalAlert, resolveAlertsBySourceKey } from '../lib/operationalAlerts.js';
+import {
+  createIdentityVerification,
+  listIdentityVerifications,
+  listMyOpenIdentityVerifications,
+  getIdentityVerificationById,
+  deriveIdentityNextAction,
+  decideIdentityVerification,
+  linkBranchTransferToIdentity,
+  consumeClearanceToken,
+  findOpenIdentityForRequester,
+} from '../lib/customerIdentityVerification.js';
+import {
+  createBranchTransferRequest,
+  listBranchTransfers,
+  sourceBmSubmitTransfer,
+  omDecideTransfer,
+} from '../lib/customerBranchTransfer.js';
+
+/** Stable advisory-lock key for concurrent cash registration by phone. */
+const CUSTOMER_CREATE_PHONE_LOCK_NS = 748392210;
+function phoneAdvisoryKey(phoneDigits) {
+  const digits = String(phoneDigits || '');
+  let h = 0;
+  for (let i = 0; i < digits.length; i += 1) {
+    h = ((h << 5) - h + digits.charCodeAt(i)) | 0;
+  }
+  return h || 1;
+}
 
 const GOVERNMENT_ID_TYPES = new Set([
   'Philippine National ID',
@@ -158,6 +193,7 @@ const CUSTOMER_SELECT_CORE = `
          c.first_name,
          c.middle_name,
          c.last_name,
+         c.name_suffix,
          c.mothers_maiden_name,
          c.civil_status,
          c.address,
@@ -187,6 +223,16 @@ const CUSTOMER_SELECT_CORE = `
          c.id_number,
          c.id_photo,
          c.id_verification_status,
+         c.privacy_notice_acknowledged_at,
+         c.privacy_notice_version,
+         c.marketing_opt_in,
+         c.phone_verification_status,
+         c.identity_match_json,
+         c.identity_review_note,
+         c.identity_reviewed_by,
+         c.identity_reviewed_at,
+         c.source_assignment_id,
+         c.territory_override_note,
          c.created_at,
          c.updated_at,
          b.name AS branch_name,
@@ -492,97 +538,605 @@ router.get('/', async (req, res) => {
 router.get('/lookup', async (req, res) => {
   try {
     const pool = req.app.locals.pool;
-    const phone = String(req.query.contact_phone || '').trim();
-    const email = String(req.query.portal_email || '').trim().toLowerCase();
-    const name = String(req.query.name || req.query.customer_name || '').trim();
-    const businessName = String(req.query.business_name || '').trim();
-    const barangay = String(req.query.address_barangay || req.query.barangay || '').trim();
-    const address = String(req.query.address || '').trim();
-    if (!phone && !email && !name && !businessName && !barangay && !address) {
-      return res.status(400).json({
-        success: false,
-        message: 'Provide contact_phone, name, business_name, address, or portal_email to search.',
-      });
+    const actorBranchId = req.currentUser?.branchId != null ? Number(req.currentUser.branchId) : null;
+    const result = await findCustomerDuplicates(pool, req.query, { actorBranchId });
+    if (result.error) {
+      return res.status(400).json({ success: false, message: result.error });
     }
-
-    const phoneDigits = phone.replace(/\D/g, '');
-    const matches = [];
-    const selectCols = `
-      c.customer_id, c.customer_code, c.first_name, c.middle_name, c.last_name,
-      c.business_name, c.customer_type, c.contact_phone, c.portal_email, c.portal_status,
-      c.status, c.branch_id, b.name AS branch_name, c.territory_id, t.territory_name,
-      c.address, c.address_barangay, c.address_city
-    `;
-    const fromSql = `
-      FROM customers c
-      LEFT JOIN branches b ON b.id = c.branch_id
-      LEFT JOIN territories t ON t.territory_id = c.territory_id
-    `;
-
-    if (phone || phoneDigits.length >= 7) {
-      const byPhone = await pool.query(
-        `SELECT ${selectCols}
-         ${fromSql}
-         WHERE c.contact_phone = $1
-            OR c.contact_person_phone = $1
-            OR regexp_replace(COALESCE(c.contact_phone, ''), '\\D', '', 'g') = $2
-            OR regexp_replace(COALESCE(c.contact_person_phone, ''), '\\D', '', 'g') = $2
-         LIMIT 8`,
-        [phone || phoneDigits, phoneDigits || phone]
-      );
-      matches.push(...byPhone.rows.map((row) => ({ ...row, match_reason: 'phone', same_branch: true })));
-    }
-    if (email) {
-      const byEmail = await pool.query(
-        `SELECT ${selectCols}
-         ${fromSql}
-         WHERE LOWER(c.portal_email) = $1
-         LIMIT 5`,
-        [email]
-      );
-      matches.push(...byEmail.rows.map((row) => ({ ...row, match_reason: 'email' })));
-    }
-    if (name.length >= 3 || businessName.length >= 3) {
-      const needle = `%${(businessName || name).replace(/\s+/g, '%')}%`;
-      const byName = await pool.query(
-        `SELECT ${selectCols}
-         ${fromSql}
-         WHERE CONCAT_WS(' ', c.first_name, c.middle_name, c.last_name) ILIKE $1
-            OR c.business_name ILIKE $1
-         LIMIT 8`,
-        [needle]
-      );
-      matches.push(...byName.rows.map((row) => ({ ...row, match_reason: 'name' })));
-    }
-    if (barangay || address) {
-      const byAddr = await pool.query(
-        `SELECT ${selectCols}
-         ${fromSql}
-         WHERE ($1::text = '' OR c.address_barangay ILIKE $2)
-           AND ($3::text = '' OR c.address ILIKE $4 OR c.address_street ILIKE $4)
-         LIMIT 8`,
-        [
-          barangay,
-          barangay ? `%${barangay}%` : '',
-          address,
-          address ? `%${address}%` : '',
-        ]
-      );
-      matches.push(...byAddr.rows.map((row) => ({ ...row, match_reason: 'address' })));
-    }
-
-    const actorBranch = req.currentUser?.branchId != null ? Number(req.currentUser.branchId) : null;
-    const unique = [...new Map(matches.map((row) => [row.customer_id, row])).values()]
-      .map((row) => ({
-        ...row,
-        same_branch: actorBranch == null || Number(row.branch_id) === actorBranch,
-        cross_branch: actorBranch != null && Number(row.branch_id) !== actorBranch,
-      }))
-      .slice(0, 10);
-    return res.status(200).json({ success: true, data: unique, count: unique.length });
+    return res.status(200).json({
+      success: true,
+      data: result.matches,
+      count: result.matches.length,
+      summary: result.summary,
+      requires_bm_verification: Boolean(result.requires_bm_verification),
+    });
   } catch (err) {
     console.error('[Customers] GET /lookup error:', err.message);
     return res.status(500).json({ success: false, message: 'Lookup failed.' });
+  }
+});
+
+router.get('/identity-verifications', allow(ROLE_SETS.customerRead, ROLE_SETS.branchOps), async (req, res) => {
+  try {
+    const pool = req.app.locals.pool;
+    const mine = String(req.query.mine || '') === '1' || String(req.query.scope || '') === 'mine';
+    if (mine) {
+      const rows = await listMyOpenIdentityVerifications(pool, {
+        requestedBy: req.currentUser.id,
+        limit: req.query.limit,
+      });
+      const enriched = rows.map((row) => ({
+        ...row,
+        ...deriveIdentityNextAction(row),
+      }));
+      return res.json({ success: true, data: enriched });
+    }
+    const status = req.query.status || 'Pending';
+    const statuses = req.query.statuses
+      ? String(req.query.statuses).split(',').map((s) => s.trim()).filter(Boolean)
+      : (status === 'Pending' ? ['Pending', 'Needs Evidence'] : null);
+    const branchId = isUnscoped(req.currentUser) ? (req.query.branch_id ? Number(req.query.branch_id) : null) : req.currentUser.branchId;
+    const rows = await listIdentityVerifications(pool, {
+      branchId,
+      status: statuses ? null : status,
+      statuses,
+      limit: req.query.limit,
+    });
+    return res.json({ success: true, data: rows });
+  } catch (err) {
+    console.error('[Customers] GET /identity-verifications error:', err.message);
+    return res.status(500).json({ success: false, message: 'Failed to load identity verifications.' });
+  }
+});
+
+router.get('/identity-verifications/:id', async (req, res) => {
+  try {
+    const verificationId = Number(req.params.id);
+    if (!Number.isInteger(verificationId) || verificationId <= 0) {
+      return res.status(400).json({ success: false, message: 'Invalid verification id.' });
+    }
+    const row = await getIdentityVerificationById(req.app.locals.pool, verificationId);
+    if (!row) {
+      return res.status(404).json({ success: false, message: 'Identity verification not found.' });
+    }
+    const actorId = Number(req.currentUser?.id || req.currentUser?.user_id);
+    const isRequester = Number(row.requested_by) === actorId;
+    const isBranchOps = ROLE_SETS.branchOps.includes(req.currentUser?.roleSlug);
+    if (!isRequester && !isUnscoped(req.currentUser) && !isBranchOps) {
+      return res.status(403).json({ success: false, message: 'Not allowed to view this verification.' });
+    }
+    if (!isRequester && isBranchOps && !isUnscoped(req.currentUser)
+      && !assertSameBranch(res, req.currentUser, row.branch_id)) {
+      return;
+    }
+    const payload = { ...row };
+    if (!isRequester) {
+      payload.clearance_token = null;
+    }
+    const actionMeta = deriveIdentityNextAction(row);
+    return res.json({
+      success: true,
+      data: payload,
+      ...actionMeta,
+      primary_match_customer_id: row.primary_match_customer_id,
+    });
+  } catch (err) {
+    console.error('[Customers] GET /identity-verifications/:id error:', err.message);
+    return res.status(500).json({ success: false, message: 'Failed to load identity verification.' });
+  }
+});
+
+router.post('/identity-verifications', async (req, res) => {
+  const client = await req.app.locals.pool.connect();
+  try {
+    const actorBranchId = req.currentUser?.branchId != null ? Number(req.currentUser.branchId) : null;
+    if (actorBranchId == null && !isUnscoped(req.currentUser)) {
+      return res.status(403).json({ success: false, message: 'No branch assigned.' });
+    }
+    const searchPayload = req.body?.search || req.body?.search_payload || {};
+    const proposed = req.body?.proposed_registration || req.body?.proposed || {};
+    const matchesInput = Array.isArray(req.body?.matches) ? req.body.matches : null;
+    const attemptKey = req.body?.registration_attempt_key || searchPayload.registration_attempt_key || null;
+
+    let matches = matchesInput;
+    if (!matches) {
+      const dup = await findCustomerDuplicates(req.app.locals.pool, {
+        ...searchPayload,
+        contact_phone: searchPayload.contact_phone || proposed.contact_phone,
+        name: searchPayload.name
+          || [proposed.first_name, proposed.last_name].filter(Boolean).join(' '),
+      }, { actorBranchId });
+      matches = dup.matches || [];
+    }
+    const possibleOnly = (matches || []).filter((m) => m.match_tier === 'possible');
+    if (!possibleOnly.length) {
+      return res.status(400).json({
+        success: false,
+        message: 'Exact matches do not require Branch Manager identity verification. Open the existing profile or request a branch transfer.',
+      });
+    }
+
+    await client.query('BEGIN');
+    let row;
+    try {
+      row = await createIdentityVerification(client, {
+        branchId: actorBranchId || Number(req.body?.branch_id),
+        requestedBy: req.currentUser.id,
+        searchPayload,
+        proposedRegistration: proposed,
+        matches: possibleOnly,
+        registrationAttemptKey: attemptKey,
+      });
+    } catch (createErr) {
+      if (createErr.status === 409 && createErr.existingId) {
+        await client.query('ROLLBACK');
+        const existing = createErr.existingRow
+          || await getIdentityVerificationById(req.app.locals.pool, createErr.existingId);
+        return res.status(200).json({
+          success: true,
+          idempotent: true,
+          message: createErr.message,
+          data: existing,
+          ...deriveIdentityNextAction(existing),
+        });
+      }
+      throw createErr;
+    }
+    await client.query('COMMIT');
+
+    await writeAuditFromReq(req.app.locals.pool, req, {
+      module: 'Customer Management',
+      activity: 'Identity Verification',
+      action: 'Request Identity Verification',
+      description: `Requested identity verification #${row.verification_id}.`,
+      status: AUDIT_STATUS.CREATED,
+      affectedRecord: `identity_verification:${row.verification_id}`,
+    });
+
+    return res.status(201).json({
+      success: true,
+      message: 'Identity verification submitted to Branch Manager. Registration stays blocked until decided.',
+      data: row,
+      ...deriveIdentityNextAction(row),
+    });
+  } catch (err) {
+    try { await client.query('ROLLBACK'); } catch { /* ignore */ }
+    console.error('[Customers] POST /identity-verifications error:', err.message);
+    return res.status(err.status || 500).json({
+      success: false,
+      message: err.message || 'Failed to request verification.',
+      data: err.existingId ? { verification_id: err.existingId } : undefined,
+    });
+  } finally {
+    client.release();
+  }
+});
+
+router.post('/identity-verifications/:id/decide', allow(ROLE_SETS.branchOps), async (req, res) => {
+  const client = await req.app.locals.pool.connect();
+  try {
+    const verificationId = Number(req.params.id);
+    await client.query('BEGIN');
+    const existing = await client.query(
+      `SELECT * FROM customer_identity_verifications WHERE verification_id = $1 FOR UPDATE`,
+      [verificationId]
+    );
+    if (!existing.rows.length) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ success: false, message: 'Identity verification not found.' });
+    }
+    if (!assertSameBranch(res, req.currentUser, existing.rows[0].branch_id)) {
+      await client.query('ROLLBACK');
+      return;
+    }
+    const decided = await decideIdentityVerification(client, {
+      verificationId,
+      decision: req.body?.decision,
+      note: req.body?.note || req.body?.remarks,
+      decidedBy: req.currentUser.id,
+      matchCustomerId: req.body?.match_customer_id || req.body?.customer_id || null,
+    });
+    await client.query('COMMIT');
+
+    await writeAuditFromReq(req.app.locals.pool, req, {
+      module: 'Customer Management',
+      activity: 'Identity Verification',
+      action: decided.status === 'Same Person' ? 'Confirm Same Person'
+        : decided.status === 'Different Person' ? 'Clear Duplicate Flag'
+          : `Identity ${decided.status}`,
+      description: `Decided identity verification #${verificationId}: ${decided.status}.`,
+      status: decided.status === 'Same Person' ? AUDIT_STATUS.APPROVED : AUDIT_STATUS.UPDATED,
+      affectedRecord: `identity_verification:${verificationId}`,
+    });
+
+    const message = decided.status === 'Same Person'
+      ? 'Confirmed same person. Sales Agent will be directed to the existing customer profile.'
+      : decided.status === 'Different Person'
+        ? 'Duplicate flag cleared. Sales Agent may proceed with new registration.'
+        : decided.status === 'Needs Evidence'
+          ? 'Requested further evidence. Sales Agent remains on the waiting screen.'
+          : `Identity verification updated (${decided.status}).`;
+
+    return res.json({
+      success: true,
+      message,
+      data: decided,
+      clearance_token: decided.clearance_token || null,
+      primary_match_customer_id: decided.primary_match_customer_id,
+      next_action: decided.next_action || null,
+      same_branch: decided.same_branch,
+      cross_branch: decided.cross_branch,
+      display_status: decided.display_status,
+    });
+  } catch (err) {
+    try { await client.query('ROLLBACK'); } catch { /* ignore */ }
+    console.error('[Customers] POST /identity-verifications/:id/decide error:', err.message);
+    return res.status(err.status || 500).json({ success: false, message: err.message || 'Failed to decide verification.' });
+  } finally {
+    client.release();
+  }
+});
+
+/** BM: create branch transfer for a cross-branch candidate and link it to the identity ticket. */
+router.post('/identity-verifications/:id/request-transfer', allow(ROLE_SETS.branchOps), async (req, res) => {
+  const client = await req.app.locals.pool.connect();
+  try {
+    const verificationId = Number(req.params.id);
+    const matchCustomerId = Number(req.body?.match_customer_id || req.body?.customer_id);
+    const targetBranchId = Number(req.body?.target_branch_id || req.currentUser?.branchId);
+    if (!Number.isInteger(matchCustomerId) || matchCustomerId <= 0) {
+      return res.status(400).json({ success: false, message: 'match_customer_id is required.' });
+    }
+    if (!Number.isInteger(targetBranchId) || targetBranchId <= 0) {
+      return res.status(400).json({ success: false, message: 'target_branch_id is required.' });
+    }
+
+    await client.query('BEGIN');
+    const existing = await client.query(
+      `SELECT * FROM customer_identity_verifications WHERE verification_id = $1 FOR UPDATE`,
+      [verificationId]
+    );
+    if (!existing.rows.length) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ success: false, message: 'Identity verification not found.' });
+    }
+    if (!assertSameBranch(res, req.currentUser, existing.rows[0].branch_id)) {
+      await client.query('ROLLBACK');
+      return;
+    }
+
+    const transfer = await createBranchTransferRequest(client, {
+      customerId: matchCustomerId,
+      targetBranchId,
+      requestedBy: req.currentUser.id,
+      reason: req.body?.reason || 'BM routed possible match to Customer Branch Transfer.',
+    });
+
+    const linked = await linkBranchTransferToIdentity(client, {
+      verificationId,
+      matchCustomerId,
+      transferId: transfer.transfer_id,
+      decidedBy: req.currentUser.id,
+      note: req.body?.note || req.body?.reason || null,
+    });
+    await client.query('COMMIT');
+
+    await writeAuditFromReq(req.app.locals.pool, req, {
+      module: 'Customer Management',
+      activity: 'Identity Verification',
+      action: 'Request Branch Transfer From Identity',
+      description: `Linked identity #${verificationId} to branch transfer #${transfer.transfer_id}.`,
+      status: AUDIT_STATUS.CREATED,
+      affectedRecord: `identity_verification:${verificationId}`,
+    });
+
+    const full = await getIdentityVerificationById(req.app.locals.pool, verificationId);
+    return res.status(201).json({
+      success: true,
+      message: 'Branch transfer requested. Source BM must set territory and submit to OM.',
+      data: full || linked,
+      transfer,
+      ...deriveIdentityNextAction(full || linked),
+    });
+  } catch (err) {
+    try { await client.query('ROLLBACK'); } catch { /* ignore */ }
+    console.error('[Customers] POST /identity-verifications/:id/request-transfer error:', err.message);
+    return res.status(err.status || 500).json({
+      success: false,
+      message: err.message || 'Failed to request branch transfer.',
+      data: err.existingId ? { transfer_id: err.existingId } : undefined,
+    });
+  } finally {
+    client.release();
+  }
+});
+
+/**
+ * Read-only candidate profile for identity review (allows cross-branch candidates
+ * listed on a ticket owned by the BM's branch). Does not mutate customer data.
+ */
+router.get(
+  '/identity-verifications/:id/candidates/:customerId',
+  allow(ROLE_SETS.branchOps),
+  async (req, res) => {
+    try {
+      const verificationId = Number(req.params.id);
+      const customerId = Number(req.params.customerId);
+      if (!Number.isInteger(verificationId) || verificationId <= 0) {
+        return res.status(400).json({ success: false, message: 'Invalid verification id.' });
+      }
+      if (!Number.isInteger(customerId) || customerId <= 0) {
+        return res.status(400).json({ success: false, message: 'Invalid customer id.' });
+      }
+
+      const ticket = await getIdentityVerificationById(req.app.locals.pool, verificationId);
+      if (!ticket) {
+        return res.status(404).json({ success: false, message: 'Identity verification not found.' });
+      }
+      if (!assertSameBranch(res, req.currentUser, ticket.branch_id)) return;
+
+      const candidates = Array.isArray(ticket.match_candidates_json)
+        ? ticket.match_candidates_json
+        : [];
+      const listed = candidates.some((c) => Number(c.customer_id) === customerId);
+      if (!listed) {
+        return res.status(403).json({
+          success: false,
+          message: 'Customer is not a candidate on this verification request.',
+        });
+      }
+
+      const customerResult = await req.app.locals.pool.query(
+        `SELECT ${CUSTOMER_SELECT_CORE}
+         FROM customers c
+         LEFT JOIN branches b ON b.id = c.branch_id
+         LEFT JOIN users mgr ON mgr.id = c.account_manager_id
+         LEFT JOIN users agent ON agent.id = c.assigned_sales_agent_id
+         LEFT JOIN territories t ON t.territory_id = c.territory_id
+         WHERE c.customer_id = $1`,
+        [customerId]
+      );
+      if (!customerResult.rows.length) {
+        return res.status(404).json({ success: false, message: 'Customer not found.' });
+      }
+      const customer = customerResult.rows[0];
+      const canFinance = canViewCustomerFinancialDetails(req.currentUser?.roleSlug);
+
+      let activity = null;
+      let credit = null;
+      if (canFinance) {
+        try {
+          const act = await req.app.locals.pool.query(
+            `SELECT outstanding_balance, purchase_volume, last_collection_date, last_sales_visit
+             FROM customer_activity WHERE customer_id = $1`,
+            [customerId]
+          );
+          activity = act.rows[0] || null;
+        } catch { /* optional table */ }
+        try {
+          const cr = await req.app.locals.pool.query(
+            `SELECT credit_limit, credit_status, available_credit
+             FROM customer_credit_info WHERE customer_id = $1`,
+            [customerId]
+          );
+          credit = cr.rows[0] || null;
+        } catch { /* optional table */ }
+      }
+
+      const candidateMeta = candidates.find((c) => Number(c.customer_id) === customerId) || {};
+      return res.json({
+        success: true,
+        data: {
+          ...customer,
+          contact_phone: undefined,
+          contact_phone_masked: maskPhone(customer.contact_phone),
+          contact_person_phone: canFinance ? customer.contact_person_phone : undefined,
+          id_number: canFinance ? customer.id_number : undefined,
+          id_photo: undefined,
+          match_tier: candidateMeta.match_tier || null,
+          match_reasons: candidateMeta.match_reasons || [],
+          same_branch: Number(customer.branch_id) === Number(ticket.branch_id),
+          cross_branch: Number(customer.branch_id) !== Number(ticket.branch_id),
+          verification_id: verificationId,
+          activity: canFinance ? activity : null,
+          credit: canFinance ? credit : null,
+          read_only: true,
+        },
+      });
+    } catch (err) {
+      console.error('[Customers] GET identity candidate profile error:', err.message);
+      return res.status(500).json({ success: false, message: 'Failed to load candidate profile.' });
+    }
+  }
+);
+
+router.get('/branch-transfers', allow(ROLE_SETS.customerRead, ROLE_SETS.branchOps), async (req, res) => {
+  try {
+    const pool = req.app.locals.pool;
+    const branchId = isUnscoped(req.currentUser) ? null : req.currentUser.branchId;
+    const rows = await listBranchTransfers(pool, {
+      branchId,
+      status: req.query.status || null,
+      forOm: false,
+      limit: req.query.limit,
+    });
+    return res.json({ success: true, data: rows });
+  } catch (err) {
+    console.error('[Customers] GET /branch-transfers error:', err.message);
+    return res.status(500).json({ success: false, message: 'Failed to load branch transfers.' });
+  }
+});
+
+router.post('/:id/branch-transfer-requests', async (req, res) => {
+  const customerId = Number(req.params.id);
+  const targetBranchId = Number(req.body?.target_branch_id || req.currentUser?.branchId);
+  if (!Number.isInteger(customerId) || customerId <= 0) {
+    return res.status(400).json({ success: false, message: 'Invalid customer id.' });
+  }
+  if (!Number.isInteger(targetBranchId) || targetBranchId <= 0) {
+    return res.status(400).json({ success: false, message: 'target_branch_id is required.' });
+  }
+  const client = await req.app.locals.pool.connect();
+  try {
+    await client.query('BEGIN');
+    // SA/BM may request transfer of a cross-branch customer they discovered via lookup.
+    // Source BM ownership is enforced when submitting territory details.
+    const transfer = await createBranchTransferRequest(client, {
+      customerId,
+      targetBranchId,
+      requestedBy: req.currentUser.id,
+      reason: req.body?.reason || null,
+    });
+    await client.query('COMMIT');
+
+    await writeAuditFromReq(req.app.locals.pool, req, {
+      module: 'Customer Management',
+      activity: 'Branch Transfer',
+      action: 'Request Branch Transfer',
+      description: `Requested branch transfer #${transfer.transfer_id} for customer ${customerId}.`,
+      status: AUDIT_STATUS.CREATED,
+      affectedRecord: `customer_branch_transfer:${transfer.transfer_id}`,
+    });
+
+    return res.status(201).json({
+      success: true,
+      message: 'Branch transfer requested. Source Branch Manager must set territory and submit to OM.',
+      data: transfer,
+    });
+  } catch (err) {
+    try { await client.query('ROLLBACK'); } catch { /* ignore */ }
+    console.error('[Customers] POST /:id/branch-transfer-requests error:', err.message);
+    return res.status(err.status || 500).json({
+      success: false,
+      message: err.message || 'Failed to request branch transfer.',
+      data: err.existingId ? { transfer_id: err.existingId } : undefined,
+    });
+  } finally {
+    client.release();
+  }
+});
+
+router.get('/branch-transfers/:id/target-territories', allow(ROLE_SETS.branchOps), async (req, res) => {
+  try {
+    const transferId = Number(req.params.id);
+    const existing = await req.app.locals.pool.query(
+      `SELECT transfer_id, source_branch_id, target_branch_id, status
+       FROM customer_branch_transfers WHERE transfer_id = $1`,
+      [transferId]
+    );
+    if (!existing.rows.length) {
+      return res.status(404).json({ success: false, message: 'Transfer not found.' });
+    }
+    const row = existing.rows[0];
+    // Source BM (or OM) may list receiving-branch territories for this open transfer only.
+    if (!assertSameBranch(res, req.currentUser, row.source_branch_id)) return;
+    const terr = await req.app.locals.pool.query(
+      `SELECT territory_id, territory_name, branch_id, barangay_name, COALESCE(status, 'Active') AS status
+       FROM territories
+       WHERE branch_id = $1 AND COALESCE(status, 'Active') = 'Active'
+       ORDER BY territory_name ASC`,
+      [row.target_branch_id]
+    );
+    return res.json({ success: true, data: terr.rows });
+  } catch (err) {
+    console.error('[Customers] GET /branch-transfers/:id/target-territories error:', err.message);
+    return res.status(500).json({ success: false, message: 'Failed to load territories.' });
+  }
+});
+
+router.post('/branch-transfers/:id/source-submit', allow(ROLE_SETS.branchOps), async (req, res) => {
+  const transferId = Number(req.params.id);
+  const client = await req.app.locals.pool.connect();
+  try {
+    await client.query('BEGIN');
+    const existing = await client.query(
+      `SELECT * FROM customer_branch_transfers WHERE transfer_id = $1 FOR UPDATE`,
+      [transferId]
+    );
+    if (!existing.rows.length) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ success: false, message: 'Transfer not found.' });
+    }
+    if (!assertSameBranch(res, req.currentUser, existing.rows[0].source_branch_id)) {
+      await client.query('ROLLBACK');
+      return;
+    }
+    const transfer = await sourceBmSubmitTransfer(client, {
+      transferId,
+      sourceBmId: req.currentUser.id,
+      targetTerritoryId: Number(req.body?.target_territory_id),
+      reason: req.body?.reason,
+    });
+    await client.query('COMMIT');
+    return res.json({
+      success: true,
+      message: 'Transfer submitted to Operating Manager for approval.',
+      data: transfer,
+    });
+  } catch (err) {
+    try { await client.query('ROLLBACK'); } catch { /* ignore */ }
+    return res.status(err.status || 500).json({ success: false, message: err.message || 'Failed to submit transfer.' });
+  } finally {
+    client.release();
+  }
+});
+
+router.post('/branch-transfers/:id/om-decide', allow(ROLE_SETS.org), async (req, res) => {
+  const transferId = Number(req.params.id);
+  const client = await req.app.locals.pool.connect();
+  try {
+    await client.query('BEGIN');
+    const result = await omDecideTransfer(client, {
+      transferId,
+      decision: req.body?.decision,
+      note: req.body?.note || req.body?.remarks,
+      omUserId: req.currentUser.id,
+      assignedSalesAgentId: req.body?.assigned_sales_agent_id
+        ? Number(req.body.assigned_sales_agent_id)
+        : null,
+    });
+
+    // Keep linked identity tickets in sync so SA waiting screens can resolve.
+    if (result.applied) {
+      await client.query(
+        `UPDATE customer_identity_verifications
+         SET status = 'Completed', updated_at = CURRENT_TIMESTAMP
+         WHERE linked_transfer_id = $1 AND status = 'Transfer Linked'`,
+        [transferId]
+      );
+    } else if (result.transfer?.status === 'Rejected') {
+      await client.query(
+        `UPDATE customer_identity_verifications
+         SET decision_note = COALESCE(decision_note, '') || $2,
+             updated_at = CURRENT_TIMESTAMP
+         WHERE linked_transfer_id = $1 AND status = 'Transfer Linked'`,
+        [transferId, `\nTransfer rejected: ${req.body?.note || req.body?.remarks || ''}`.trim()]
+      );
+    }
+
+    await client.query('COMMIT');
+
+    await writeAuditFromReq(req.app.locals.pool, req, {
+      module: 'Customer Management',
+      activity: 'Branch Transfer',
+      action: `OM ${String(req.body?.decision || '').trim()}`,
+      description: `OM decided branch transfer #${transferId}.`,
+      status: result.applied ? AUDIT_STATUS.APPROVED : AUDIT_STATUS.UPDATED,
+      affectedRecord: `customer_branch_transfer:${transferId}`,
+    });
+
+    return res.json({
+      success: true,
+      message: result.applied
+        ? 'Branch transfer approved. Customer is now in the receiving branch.'
+        : `Transfer updated (${result.transfer.status}).`,
+      data: result.transfer,
+    });
+  } catch (err) {
+    try { await client.query('ROLLBACK'); } catch { /* ignore */ }
+    return res.status(err.status || 500).json({ success: false, message: err.message || 'Failed to decide transfer.' });
+  } finally {
+    client.release();
   }
 });
 
@@ -832,7 +1386,7 @@ router.get('/:id', async (req, res) => {
 
 router.post('/', async (req, res) => {
   const {
-    first_name, middle_name, last_name, mothers_maiden_name, civil_status,
+    first_name, middle_name, last_name, name_suffix, mothers_maiden_name, civil_status,
     address, latitude, longitude,
     address_region, address_province, address_city, address_barangay, address_street, address_zip,
     contact_phone, contact_person_fname, contact_person_mname, contact_person_lname,
@@ -855,6 +1409,12 @@ router.post('/', async (req, res) => {
     credit_request_reason: creditRequestReasonRaw,
     credit_request_remarks: creditRequestRemarksRaw,
     acknowledge_duplicate: acknowledgeDuplicateRaw,
+    privacy_notice_acknowledged: privacyNoticeAcknowledgedRaw,
+    privacy_notice_version: privacyNoticeVersionRaw,
+    marketing_opt_in: marketingOptInRaw,
+    phone_verification_status: phoneVerificationStatusRaw,
+    cash_registration: cashRegistrationRaw,
+    identity_clearance_token: identityClearanceTokenRaw,
   } = req.body;
 
   const isSalesAgent = req.currentUser?.roleSlug === 'sales_staff';
@@ -882,19 +1442,26 @@ router.post('/', async (req, res) => {
   };
   const composedAddress = composeAddress(addressParts) || cleanPart(address);
 
-  const customerType = String(customerTypeRaw || 'Individual').trim() === 'Business' ? 'Business' : 'Individual';
+  const cashRegistration = Boolean(cashRegistrationRaw)
+    || String(cashRegistrationRaw || '').toLowerCase() === 'true'
+    || isSalesAgent;
+  // Sales Agent cash registration always creates natural-person records.
+  const customerType = (cashRegistration || String(customerTypeRaw || 'Individual').trim() !== 'Business')
+    ? 'Individual'
+    : 'Business';
   const businessName = cleanPart(businessNameRaw);
-  const maidenName = cleanPart(mothers_maiden_name);
-  const civilStatus = cleanPart(civil_status);
+  const maidenName = cashRegistration ? null : cleanPart(mothers_maiden_name);
+  const civilStatus = cashRegistration ? null : cleanPart(civil_status);
+  const nameSuffix = cleanPart(name_suffix);
   const resolvedFirstName = cleanPart(first_name)
     || (customerType === 'Business' ? cleanPart(contact_person_fname) : '');
   const resolvedLastName = cleanPart(last_name)
     || (customerType === 'Business' ? cleanPart(contact_person_lname) : '');
-  const alternateFirstName = cleanPart(contact_person_fname);
-  const alternateMiddleName = cleanPart(contact_person_mname);
-  const alternateLastName = cleanPart(contact_person_lname);
-  const alternatePhone = cleanPart(contact_person_phone);
-  const alternateRelationship = cleanPart(contact_person_relationship);
+  const alternateFirstName = cashRegistration ? null : cleanPart(contact_person_fname);
+  const alternateMiddleName = cashRegistration ? null : cleanPart(contact_person_mname);
+  const alternateLastName = cashRegistration ? null : cleanPart(contact_person_lname);
+  const alternatePhone = cashRegistration ? null : cleanPart(contact_person_phone);
+  const alternateRelationship = cashRegistration ? null : cleanPart(contact_person_relationship);
 
   if (customerType === 'Business' && !businessName) {
     return res.status(400).json({ success: false, message: 'Business name is required for business customers.' });
@@ -902,7 +1469,7 @@ router.post('/', async (req, res) => {
   if (!resolvedFirstName || !resolvedLastName || !composedAddress || !contact_phone) {
     return res.status(400).json({ success: false, message: 'All required customer fields must be provided.' });
   }
-  if (customerType === 'Individual') {
+  if (!cashRegistration && customerType === 'Individual') {
     if (civilStatus && !CIVIL_STATUSES.has(civilStatus)) {
       return res.status(400).json({ success: false, message: 'A valid civil status is required.' });
     }
@@ -913,33 +1480,60 @@ router.post('/', async (req, res) => {
       message: 'Province, city/municipality, and barangay are required.',
     });
   }
-
-  const customerFullName = [resolvedFirstName, middle_name, resolvedLastName].filter(Boolean).join(' ');
-  const contactFullName = [contact_person_fname, contact_person_mname, contact_person_lname].filter(Boolean).join(' ');
-  const alternateContactProvided = Boolean(
-    contact_person_fname || contact_person_mname || contact_person_lname
-      || contact_person_phone || contact_person_relationship
-  );
-  if (alternateContactProvided && (!contact_person_fname || !contact_person_lname
-    || !contact_person_phone || !contact_person_relationship)) {
+  if (cashRegistration && !addressParts.address_street) {
     return res.status(400).json({
       success: false,
-      message: 'Complete all alternate contact fields or leave the alternate contact blank.',
-    });
-  }
-  if (alternateContactProvided && customerType === 'Individual'
-    && (namesMatchCustomer(customerFullName, contactFullName) || phonesMatch(contact_phone, contact_person_phone))) {
-    return res.status(400).json({
-      success: false,
-      message: 'Primary contact must be someone else to call when the customer is unreachable.',
+      message: 'House number / street / landmark is required.',
     });
   }
 
-  const idType = typeof id_type === 'string' ? id_type.trim() : '';
-  const idNumber = typeof id_number === 'string' ? id_number.trim() : '';
-  const wantsCredit = Boolean(requestCreditRaw)
-    || String(requestCreditRaw || '').toLowerCase() === 'true'
-    || String(req.body?.apply_for_credit || '').toLowerCase() === 'true';
+  const privacyAcknowledged = Boolean(privacyNoticeAcknowledgedRaw)
+    || String(privacyNoticeAcknowledgedRaw || '').toLowerCase() === 'true'
+    || Boolean(req.body?.privacy_notice_acknowledged_at);
+  if (cashRegistration && !privacyAcknowledged) {
+    return res.status(400).json({
+      success: false,
+      message: 'CORVEX Privacy Notice acknowledgment is required before registration.',
+    });
+  }
+  const privacyVersion = cleanPart(privacyNoticeVersionRaw) || 'corvex-privacy-2026';
+  const marketingOptIn = Boolean(marketingOptInRaw)
+    || String(marketingOptInRaw || '').toLowerCase() === 'true';
+  const phoneVerificationStatus = String(phoneVerificationStatusRaw || 'Unverified').trim() === 'Verified'
+    ? 'Verified'
+    : 'Unverified';
+
+  if (!cashRegistration) {
+    const customerFullName = [resolvedFirstName, middle_name, resolvedLastName].filter(Boolean).join(' ');
+    const contactFullName = [contact_person_fname, contact_person_mname, contact_person_lname].filter(Boolean).join(' ');
+    const alternateContactProvided = Boolean(
+      contact_person_fname || contact_person_mname || contact_person_lname
+        || contact_person_phone || contact_person_relationship
+    );
+    if (alternateContactProvided && (!contact_person_fname || !contact_person_lname
+      || !contact_person_phone || !contact_person_relationship)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Complete all alternate contact fields or leave the alternate contact blank.',
+      });
+    }
+    if (alternateContactProvided && customerType === 'Individual'
+      && (namesMatchCustomer(customerFullName, contactFullName) || phonesMatch(contact_phone, contact_person_phone))) {
+      return res.status(400).json({
+        success: false,
+        message: 'Primary contact must be someone else to call when the customer is unreachable.',
+      });
+    }
+  }
+
+  const idType = cashRegistration ? '' : (typeof id_type === 'string' ? id_type.trim() : '');
+  const idNumber = cashRegistration ? '' : (typeof id_number === 'string' ? id_number.trim() : '');
+  // Credit is a separate process for SA cash registration.
+  const wantsCredit = cashRegistration
+    ? false
+    : (Boolean(requestCreditRaw)
+      || String(requestCreditRaw || '').toLowerCase() === 'true'
+      || String(req.body?.apply_for_credit || '').toLowerCase() === 'true');
   if (customerType === 'Individual' && wantsCredit) {
     if (!idType || !GOVERNMENT_ID_TYPES.has(idType)) {
       return res.status(400).json({ success: false, message: 'A valid government ID type is required.' });
@@ -978,14 +1572,94 @@ router.post('/', async (req, res) => {
 
     await client.query('BEGIN');
 
-    const customerStatus = isSalesAgent ? 'Active' : (status || 'Active');
     let resolvedTerritoryId = territory_id ? Number(territory_id) : null;
+    const customerFullNameForLookup = [resolvedFirstName, middle_name, resolvedLastName]
+      .filter(Boolean)
+      .join(' ');
 
-    if (customerStatus === 'Active' && !resolvedTerritoryId) {
+    let identityMatchJson = {};
+    let customerStatus = isSalesAgent ? 'Active' : (status || 'Active');
+    const clearanceToken = cleanPart(identityClearanceTokenRaw);
+
+    if (cashRegistration) {
+      const phoneDigits = digitsOnly(contact_phone);
+      if (phoneDigits) {
+        await client.query(
+          'SELECT pg_advisory_xact_lock($1, $2)',
+          [CUSTOMER_CREATE_PHONE_LOCK_NS, phoneAdvisoryKey(phoneDigits)]
+        );
+      }
+
+      // Block create only when this SA has an open verification for the same phone
+      // (same registration attempt). Other customers may still be registered.
+      if (phoneDigits) {
+        const openVerify = await findOpenIdentityForRequester(client, {
+          requestedBy: req.currentUser.id,
+          phoneNorm: phoneDigits,
+        });
+        if (openVerify && !clearanceToken) {
+          await client.query('ROLLBACK');
+          return res.status(409).json({
+            success: false,
+            message: 'You have a pending Branch Manager identity verification for this phone. Resume that request or wait for the decision.',
+            code: 'IDENTITY_VERIFICATION_PENDING',
+            data: { verification_id: Number(openVerify.verification_id) },
+          });
+        }
+      }
+
+      const dup = await findCustomerDuplicates(client, {
+        contact_phone: contact_phone.trim(),
+        portal_email: portal_email,
+        name: customerFullNameForLookup,
+        address_barangay: addressParts.address_barangay,
+        address: composedAddress,
+        customer_code: req.body?.customer_code,
+        id_number: idNumber || req.body?.id_number,
+      }, { actorBranchId: resolvedBranchId });
+
+      const exactMatches = (dup.matches || []).filter((m) => m.match_tier === 'exact');
+      const possibleMatches = (dup.matches || []).filter((m) => m.match_tier === 'possible');
+
+      if (exactMatches.length) {
+        await client.query('ROLLBACK');
+        const primary = exactMatches[0];
+        return res.status(409).json({
+          success: false,
+          message: primary.same_branch
+            ? 'An exact customer match already exists in your branch. Open the existing profile instead of creating a duplicate.'
+            : 'An exact customer match exists in another branch. Request a branch transfer — do not create a duplicate.',
+          code: primary.same_branch ? 'EXACT_SAME_BRANCH' : 'EXACT_CROSS_BRANCH',
+          match_summary: 'exact',
+          matches: exactMatches.map(limitedMatchCard),
+          data: limitedMatchCard(primary),
+        });
+      }
+
+      if (possibleMatches.length) {
+        if (!clearanceToken) {
+          await client.query('ROLLBACK');
+          return res.status(409).json({
+            success: false,
+            message: 'Possible duplicate detected. Request Branch Manager identity verification before registering. Do not create another account.',
+            code: 'REQUIRES_IDENTITY_VERIFICATION',
+            match_summary: 'possible',
+            matches: possibleMatches.map(limitedMatchCard),
+          });
+        }
+        await consumeClearanceToken(client, clearanceToken, resolvedBranchId);
+      } else if (clearanceToken) {
+        // Clearance provided but no longer needed — consume to prevent reuse.
+        try { await consumeClearanceToken(client, clearanceToken, resolvedBranchId); } catch { /* ignore */ }
+      }
+    }
+
+    const requiresTerritory = customerStatus === 'Active' || customerStatus === 'Pending Identity Review';
+    if (requiresTerritory && !resolvedTerritoryId) {
       await client.query('ROLLBACK');
       return res.status(400).json({
         success: false,
-        message: 'An Active customer must be assigned to an Active territory in the same branch.',
+        message: 'Customer must be assigned to an Active territory in the same branch.',
       });
     }
 
@@ -1007,11 +1681,11 @@ router.post('/', async (req, res) => {
           message: 'Territory belongs to a different branch than the customer.',
         });
       }
-      if (customerStatus === 'Active' && territoryCheck.rows[0].status !== 'Active') {
+      if (requiresTerritory && territoryCheck.rows[0].status !== 'Active') {
         await client.query('ROLLBACK');
         return res.status(400).json({
           success: false,
-          message: 'Active customers can only be assigned to Active territories.',
+          message: 'Customers can only be assigned to Active territories.',
         });
       }
     }
@@ -1054,9 +1728,9 @@ router.post('/', async (req, res) => {
       const n = Number(v);
       return Number.isFinite(n) && n >= 0 ? Math.round(n * 100) / 100 : null;
     };
-    const estimatedMonthlyRevenue = parseMoney(estimatedMonthlyRevenueRaw);
-    const estimatedMonthlyExpenses = parseMoney(estimatedMonthlyExpensesRaw);
-    const existingObligations = parseMoney(existingObligationsRaw);
+    const estimatedMonthlyRevenue = cashRegistration ? null : parseMoney(estimatedMonthlyRevenueRaw);
+    const estimatedMonthlyExpenses = cashRegistration ? null : parseMoney(estimatedMonthlyExpensesRaw);
+    const existingObligations = cashRegistration ? null : parseMoney(existingObligationsRaw);
     const profileInput = registrationProfileRaw && typeof registrationProfileRaw === 'object'
       ? registrationProfileRaw
       : {};
@@ -1067,7 +1741,7 @@ router.post('/', async (req, res) => {
       estimated_monthly_revenue: estimatedMonthlyRevenue,
       estimated_monthly_expenses: estimatedMonthlyExpenses,
       existing_obligations: existingObligations,
-      requested_credit_limit: parseMoney(requestedCreditLimitRaw),
+      requested_credit_limit: cashRegistration ? null : parseMoney(requestedCreditLimitRaw),
       preferred_payment_terms: profileInput.preferred_payment_terms || null,
       business_type: profileInput.business_type || null,
       business_category: profileInput.business_category || null,
@@ -1079,12 +1753,15 @@ router.post('/', async (req, res) => {
         ? profileInput.evidence_photos.slice(0, 3)
         : [],
       acknowledge_duplicate: Boolean(acknowledgeDuplicateRaw),
+      cash_registration: Boolean(cashRegistration),
+      territory_outside_review: Boolean(territoryOverrideNote) || Boolean(profileInput.territory_outside_review),
+      account_eligibility: 'Cash',
     };
 
     const result = await client.query(
       `INSERT INTO customers
         (branch_id, account_manager_id, assigned_sales_agent_id, territory_id,
-         first_name, middle_name, last_name, mothers_maiden_name, civil_status, address,
+         first_name, middle_name, last_name, name_suffix, mothers_maiden_name, civil_status, address,
          address_region, address_province, address_city, address_barangay, address_street, address_zip,
          latitude, longitude,
          contact_phone, contact_person_fname, contact_person_mname, contact_person_lname, contact_person_phone,
@@ -1093,8 +1770,11 @@ router.post('/', async (req, res) => {
          secondary_contact_relationship, status,
          id_type, id_number, id_photo, id_verification_status,
          customer_type, business_name, registration_profile_json, source_assignment_id,
-         territory_override_note, estimated_monthly_revenue, estimated_monthly_expenses, existing_obligations)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,'Unverified',$33,$34,$35::jsonb,$36,$37,$38,$39,$40)
+         territory_override_note, estimated_monthly_revenue, estimated_monthly_expenses, existing_obligations,
+         privacy_notice_acknowledged_at, privacy_notice_version, marketing_opt_in,
+         phone_verification_status, identity_match_json)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,'Unverified',$34,$35,$36::jsonb,$37,$38,$39,$40,$41,
+         $42,$43,$44,$45,$46::jsonb)
        RETURNING customer_id, created_at`,
       [
         resolvedBranchId,
@@ -1104,6 +1784,7 @@ router.post('/', async (req, res) => {
         resolvedFirstName,
         middle_name ? String(middle_name).trim() : null,
         resolvedLastName,
+        nameSuffix || null,
         maidenName || null,
         civilStatus || null,
         composedAddress,
@@ -1121,10 +1802,10 @@ router.post('/', async (req, res) => {
         alternateLastName,
         alternatePhone,
         alternateRelationship,
-        cleanPart(secondary_contact_fname),
-        cleanPart(secondary_contact_lname),
-        cleanPart(secondary_contact_phone),
-        cleanPart(secondary_contact_relationship),
+        cashRegistration ? null : cleanPart(secondary_contact_fname),
+        cashRegistration ? null : cleanPart(secondary_contact_lname),
+        cashRegistration ? null : cleanPart(secondary_contact_phone),
+        cashRegistration ? null : cleanPart(secondary_contact_relationship),
         customerStatus,
         idType || null,
         idNumber || null,
@@ -1137,6 +1818,11 @@ router.post('/', async (req, res) => {
         estimatedMonthlyRevenue,
         estimatedMonthlyExpenses,
         existingObligations,
+        privacyAcknowledged ? new Date() : null,
+        privacyAcknowledged ? privacyVersion : null,
+        marketingOptIn,
+        phoneVerificationStatus,
+        JSON.stringify(identityMatchJson),
       ]
     );
 
@@ -1262,6 +1948,107 @@ router.post('/', async (req, res) => {
       message: clientMessage,
       data: err.existingId ? { ci_id: err.existingId } : undefined,
     });
+  } finally {
+    client.release();
+  }
+});
+
+router.post('/:id/identity-review', allow(ROLE_SETS.branchOps), async (req, res) => {
+  const customerId = Number(req.params.id);
+  if (!Number.isInteger(customerId) || customerId <= 0) {
+    return res.status(400).json({ success: false, message: 'Invalid customer id.' });
+  }
+  const decision = String(req.body?.decision || '').trim().toLowerCase();
+  if (!['approve', 'reject'].includes(decision)) {
+    return res.status(400).json({
+      success: false,
+      message: 'decision must be approve or reject.',
+    });
+  }
+  const note = cleanPart(req.body?.note) || cleanPart(req.body?.remarks) || null;
+
+  const client = await req.app.locals.pool.connect();
+  try {
+    await client.query('BEGIN');
+    const existing = await client.query(
+      `SELECT customer_id, branch_id, status, first_name, last_name, contact_phone
+       FROM customers
+       WHERE customer_id = $1
+       FOR UPDATE`,
+      [customerId]
+    );
+    if (!existing.rows.length) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ success: false, message: 'Customer not found.' });
+    }
+    const customer = existing.rows[0];
+    if (!assertSameBranch(res, req.currentUser, customer.branch_id)) {
+      await client.query('ROLLBACK');
+      return;
+    }
+    if (String(customer.status) !== 'Pending Identity Review') {
+      await client.query('ROLLBACK');
+      return res.status(400).json({
+        success: false,
+        message: 'Only customers in Pending Identity Review can be decided here.',
+      });
+    }
+
+    const nextStatus = decision === 'approve' ? 'Active' : 'Inactive';
+    const updated = await client.query(
+      `UPDATE customers
+       SET status = $2,
+           identity_match_json = CASE WHEN $2 = 'Active' THEN '{}'::jsonb ELSE identity_match_json END,
+           identity_review_note = $3,
+           identity_reviewed_by = $4,
+           identity_reviewed_at = CURRENT_TIMESTAMP,
+           updated_at = CURRENT_TIMESTAMP
+       WHERE customer_id = $1
+       RETURNING customer_id, status, identity_review_note, identity_reviewed_at`,
+      [customerId, nextStatus, note, req.currentUser.id]
+    );
+
+    await resolveAlertsBySourceKey(client, `customer-identity-review:${customerId}`, {
+      resolvedBy: req.currentUser.id,
+      resolutionNote: decision === 'approve'
+        ? (note || 'Identity review approved — customer activated.')
+        : (note || 'Identity review rejected — customer set Inactive.'),
+    });
+
+    await client.query('COMMIT');
+
+    const displayName = [customer.first_name, customer.last_name].filter(Boolean).join(' ');
+    await writeAuditFromReq(req.app.locals.pool, req, {
+      module: 'Customer Management',
+      activity: 'Identity Review',
+      action: decision === 'approve' ? 'Approve Identity' : 'Reject Identity',
+      description: `${decision === 'approve' ? 'Approved' : 'Rejected'} identity review for ${displayName} (#${customerId}).`,
+      status: decision === 'approve' ? AUDIT_STATUS.APPROVED : AUDIT_STATUS.REJECTED,
+      affectedRecord: `customer:${customerId}`,
+    });
+
+    const detail = await req.app.locals.pool.query(
+      `SELECT ${CUSTOMER_SELECT_CORE}
+       FROM customers c
+       LEFT JOIN branches b ON b.id = c.branch_id
+       LEFT JOIN users mgr ON mgr.id = c.account_manager_id
+       LEFT JOIN users agent ON agent.id = c.assigned_sales_agent_id
+       LEFT JOIN territories t ON t.territory_id = c.territory_id
+       WHERE c.customer_id = $1`,
+      [customerId]
+    );
+
+    return res.json({
+      success: true,
+      message: decision === 'approve'
+        ? 'Customer identity approved. Account is now Active for cash sales.'
+        : 'Customer identity rejected. Account set to Inactive.',
+      data: detail.rows[0] || updated.rows[0],
+    });
+  } catch (err) {
+    try { await client.query('ROLLBACK'); } catch { /* ignore */ }
+    console.error('[Customers] POST /:id/identity-review error:', err.message);
+    return res.status(500).json({ success: false, message: 'Failed to decide identity review.' });
   } finally {
     client.release();
   }

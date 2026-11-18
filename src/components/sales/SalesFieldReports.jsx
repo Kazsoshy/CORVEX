@@ -7,7 +7,7 @@ import {
   submitSalesFieldReport,
   updateSalesFieldReport,
 } from '../../api/salesService';
-import { formatDisplayDate, formatDisplayDateTime } from '../../data/salesMockData';
+import { formatDisplayDate, formatDisplayDateTime } from '../../utils/formatters.js';
 import { usePagination } from '../../hooks/usePagination';
 import { isBrowserOnline } from '../../offline/connection.js';
 import { saveOfflineRecord } from '../../offline/db.js';

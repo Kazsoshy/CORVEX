@@ -1,11 +1,11 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Pagination } from '../shared/Pagination';
 import { usePagination } from '../../hooks/usePagination';
-import { Stats } from '../shared/StatsGrid';
 import { EmptyState } from '../shared/EmptyState';
 import { LoadingState } from '../shared/LoadingState';
+import { RowActionMenu } from '../shared/RowActionMenu';
 import { StatusBadge } from '../StatusBadge';
-import { formatCurrency, formatDisplayDate, formatDisplayDateTime } from '../../data/branchManagerMockData';
+import { formatCurrency, formatDisplayDate, formatDisplayDateTime } from '../../utils/formatters.js';
 import {
   fetchCreditInvestigations,
   fetchPendingSalesInvoices,
@@ -29,13 +29,38 @@ import {
   patchInventoryTransfer,
   mapInventoryTransferRow,
 } from '../../api/inventoryService.js';
+import {
+  fetchCustomers,
+  fetchCustomerById,
+  decideCustomerIdentityReview,
+  fetchIdentityVerifications,
+  decideIdentityVerification,
+  requestIdentityBranchTransfer,
+  fetchIdentityCandidateProfile,
+  fetchBranchTransfers,
+  sourceSubmitBranchTransfer,
+  omDecideBranchTransfer,
+  fetchBranchTransferTargetTerritories,
+} from '../../api/salesService.js';
+import { getCurrentUser } from '../../api/authService.js';
 import { formatMoneyOrNA } from '../../utils/creditReview';
 import { CreditInvestigationDetailPage } from './CreditInvestigationPages';
+import {
+  getUserBranchId,
+  isCrossBranchCandidate,
+  customerDisplayName,
+} from './approvalCenterHelpers.js';
 
 function tabFromSearch() {
   try {
-    const raw = new URLSearchParams(window.location.search).get('tab') || '';
-    const allowed = new Set(['collections', 'invoices', 'transfers', 'restocks', 'stock-counts', 'ci', 'customer-changes']);
+    const params = new URLSearchParams(window.location.search);
+    const focus = params.get('focus');
+    if (focus === 'identity') return 'identity';
+    const raw = params.get('tab') || '';
+    const allowed = new Set([
+      'collections', 'invoices', 'transfers', 'restocks', 'stock-counts',
+      'ci', 'customer-changes', 'identity', 'branch-transfers',
+    ]);
     return allowed.has(raw) ? raw : null;
   } catch {
     return null;
@@ -58,6 +83,129 @@ function waitingLabel(dateValue) {
   if (days <= 0) return 'Waiting today';
   if (days === 1) return 'Waiting 1 day';
   return `Waiting ${days} days`;
+}
+
+function QueueSummaryModal({ open, title, rows = [], onClose }) {
+  if (!open) return null;
+  return (
+    <div className="modal-overlay" role="dialog" aria-modal="true" onClick={onClose}>
+      <div className="modal-content" style={{ maxWidth: 560 }} onClick={(e) => e.stopPropagation()}>
+        <h3 style={{ marginTop: 0 }}>{title || 'Details'}</h3>
+        <dl className="account-detail-grid two-up" style={{ margin: 0 }}>
+          {rows.map((row) => (
+            <div key={row.label}>
+              <dt className="muted">{row.label}</dt>
+              <dd style={{ margin: 0 }}>{row.value ?? '—'}</dd>
+            </div>
+          ))}
+        </dl>
+        <div className="modal-actions" style={{ marginTop: 16 }}>
+          <button className="button" type="button" onClick={onClose}>Close</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function CustomerProfileDrawer({ open, loading, profile, onClose, title = 'Customer Profile' }) {
+  if (!open) return null;
+  const name = customerDisplayName(profile);
+  return (
+    <div className="modal-overlay" role="dialog" aria-modal="true" onClick={onClose}>
+      <div
+        className="modal-content"
+        style={{ maxWidth: 720, maxHeight: '90vh', overflow: 'auto' }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        {loading || !profile ? (
+          <LoadingState message="Loading customer profile…" />
+        ) : (
+          <>
+            <div className="flex flex-wrap justify-between gap-2 items-start">
+              <div>
+                <h3 style={{ marginTop: 0, marginBottom: 4 }}>{title}</h3>
+                <p className="muted" style={{ margin: 0 }}>Read-only — viewing does not approve or change the record.</p>
+              </div>
+              <StatusBadge status={profile.status || 'Active'} />
+            </div>
+            <dl className="account-detail-grid two-up" style={{ marginTop: 16 }}>
+              <div>
+                <dt className="muted">Customer</dt>
+                <dd style={{ margin: 0 }}><strong>{name}</strong></dd>
+              </div>
+              <div>
+                <dt className="muted">Customer code</dt>
+                <dd style={{ margin: 0 }}>{profile.customer_code || '—'}</dd>
+              </div>
+              <div>
+                <dt className="muted">Mobile</dt>
+                <dd style={{ margin: 0 }}>{profile.contact_phone_masked || profile.contact_phone || '—'}</dd>
+              </div>
+              <div>
+                <dt className="muted">Home branch</dt>
+                <dd style={{ margin: 0 }}>{profile.branch_name || '—'}</dd>
+              </div>
+              <div>
+                <dt className="muted">Territory</dt>
+                <dd style={{ margin: 0 }}>{profile.territory_name || '—'}</dd>
+              </div>
+              <div>
+                <dt className="muted">Registered</dt>
+                <dd style={{ margin: 0 }}>{formatDisplayDateTime(profile.created_at)}</dd>
+              </div>
+              <div style={{ gridColumn: '1 / -1' }}>
+                <dt className="muted">Address</dt>
+                <dd style={{ margin: 0 }}>
+                  {profile.address
+                    || [profile.address_street, profile.address_barangay, profile.address_city, profile.address_province]
+                      .filter(Boolean)
+                      .join(', ')
+                    || '—'}
+                </dd>
+              </div>
+              {(profile.match_reasons || []).length ? (
+                <div style={{ gridColumn: '1 / -1' }}>
+                  <dt className="muted">Match indicators</dt>
+                  <dd style={{ margin: 0 }}>{(profile.match_reasons || []).join(', ')}</dd>
+                </div>
+              ) : null}
+              {profile.activity || profile.credit ? (
+                <>
+                  <div>
+                    <dt className="muted">Outstanding balance</dt>
+                    <dd style={{ margin: 0 }}>
+                      {profile.activity?.outstanding_balance != null
+                        ? formatCurrency(Number(profile.activity.outstanding_balance))
+                        : '—'}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt className="muted">Credit</dt>
+                    <dd style={{ margin: 0 }}>
+                      {profile.credit
+                        ? `${profile.credit.credit_status || '—'} · limit ${formatMoneyOrNA(profile.credit.credit_limit)}`
+                        : '—'}
+                    </dd>
+                  </div>
+                </>
+              ) : null}
+              <div>
+                <dt className="muted">ID verification</dt>
+                <dd style={{ margin: 0 }}>{profile.id_verification_status || '—'}</dd>
+              </div>
+              <div>
+                <dt className="muted">Phone verification</dt>
+                <dd style={{ margin: 0 }}>{profile.phone_verification_status || '—'}</dd>
+              </div>
+            </dl>
+            <div className="modal-actions" style={{ marginTop: 16 }}>
+              <button className="button" type="button" onClick={onClose}>Back to Identity Review</button>
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  );
 }
 
 function ReasonDialog({
@@ -255,9 +403,21 @@ export function ApprovalCenterPage({
   const [invoiceList, setInvoiceList] = useState([]);
   const [collectionList, setCollectionList] = useState([]);
   const [customerChangeList, setCustomerChangeList] = useState([]);
+  const [identityList, setIdentityList] = useState([]);
+  const [identityTicketList, setIdentityTicketList] = useState([]);
+  const [selectedIdentityTicketId, setSelectedIdentityTicketId] = useState(null);
+  const [branchTransferList, setBranchTransferList] = useState([]);
+  const [targetTerritoryOptionsByTransfer, setTargetTerritoryOptionsByTransfer] = useState({});
+  const [transferDrafts, setTransferDrafts] = useState({});
   const [summary, setSummary] = useState(null);
+  const [queueSummary, setQueueSummary] = useState(null);
+  const [profileDrawer, setProfileDrawer] = useState({ open: false, loading: false, profile: null });
   const [loading, setLoading] = useState(true);
   const [busyKey, setBusyKey] = useState(null);
+  const currentUser = getCurrentUser();
+  const isOm = ['operating_manager', 'super_admin'].includes(
+    String(currentUser?.roleSlug || currentUser?.role?.slug || '')
+  );
 
   const [transferDetail, setTransferDetail] = useState(null);
   const [transferDetailLoading, setTransferDetailLoading] = useState(false);
@@ -271,7 +431,7 @@ export function ApprovalCenterPage({
 
   const reload = async () => {
     setLoading(true);
-    const [ciRes, trRes, restockRes, countRes, invRes, pendingPayRes, summaryRes, changesRes] = await Promise.all([
+    const [ciRes, trRes, restockRes, countRes, invRes, pendingPayRes, summaryRes, changesRes, identityRes, ticketRes, xferRes] = await Promise.all([
       fetchCreditInvestigations({ status: 'Needs BM', limit: 100 }),
       fetchInventoryTransfers({ status: 'pending', limit: 100 }),
       fetchPendingRestocks(),
@@ -280,6 +440,9 @@ export function ApprovalCenterPage({
       fetchCollectionsForReview('Pending'),
       fetchApprovalCenterSummary(),
       fetchCustomerChangeRequests({ status: 'Pending' }),
+      fetchCustomers({ status: 'Pending Identity Review', limit: 100 }),
+      fetchIdentityVerifications({ status: 'Pending', limit: 100 }),
+      fetchBranchTransfers({ limit: 100 }),
     ]);
 
     const nextCi = ciRes.success
@@ -319,10 +482,30 @@ export function ApprovalCenterPage({
     setInvoiceList(nextInvoices);
     setCollectionList(nextCollections);
     setCustomerChangeList(changesRes.success ? (changesRes.data || []) : []);
+    const nextIdentity = identityRes.success
+      ? sortOldestFirst(identityRes.data || [], 'created_at')
+      : [];
+    setIdentityList(nextIdentity);
+    const nextTickets = ticketRes.success
+      ? sortOldestFirst(ticketRes.data || [], 'created_at')
+      : [];
+    setIdentityTicketList(nextTickets);
+    try {
+      const focusVerificationId = Number(new URLSearchParams(window.location.search).get('verificationId'));
+      if (Number.isInteger(focusVerificationId) && focusVerificationId > 0
+        && nextTickets.some((t) => Number(t.verification_id) === focusVerificationId)) {
+        setSelectedIdentityTicketId(focusVerificationId);
+      }
+    } catch { /* ignore */ }
+    const nextXfers = xferRes.success
+      ? sortOldestFirst(xferRes.data || [], 'created_at')
+      : [];
+    setBranchTransferList(nextXfers);
     if (summaryRes.success) setSummary(summaryRes.data || null);
     else setSummary(null);
 
     const preferred = tabFromSearch();
+    const identityCount = nextTickets.length + nextIdentity.length;
     const counts = {
       collections: nextCollections.length,
       invoices: nextInvoices.length,
@@ -331,6 +514,8 @@ export function ApprovalCenterPage({
       'stock-counts': nextCounts.length,
       ci: nextCi.length,
       'customer-changes': changesRes.success ? (changesRes.data || []).length : 0,
+      identity: identityCount,
+      'branch-transfers': nextXfers.length,
     };
     setTab((current) => {
       if (preferred && counts[preferred] != null) return preferred;
@@ -342,6 +527,8 @@ export function ApprovalCenterPage({
       if (counts['stock-counts'] > 0) return 'stock-counts';
       if (counts.ci > 0) return 'ci';
       if (counts['customer-changes'] > 0) return 'customer-changes';
+      if (counts.identity > 0) return 'identity';
+      if (counts['branch-transfers'] > 0) return 'branch-transfers';
       return 'collections';
     });
 
@@ -360,20 +547,9 @@ export function ApprovalCenterPage({
     'stock-counts': stockCountList.length,
     ci: ciList.length,
     'customer-changes': customerChangeList.length,
-  }), [collectionList, invoiceList, transferList, restockList, stockCountList, ciList, customerChangeList]);
-
-  const needsAction = useMemo(() => {
-    if (summary && Number.isFinite(Number(summary.needs_action))) {
-      return Number(summary.needs_action);
-    }
-    return counts.collections
-      + counts.invoices
-      + counts.transfers
-      + counts.restocks
-      + counts['stock-counts']
-      + counts.ci
-      + counts['customer-changes'];
-  }, [summary, counts]);
+    identity: identityTicketList.length + identityList.length,
+    'branch-transfers': branchTransferList.length,
+  }), [collectionList, invoiceList, transferList, restockList, stockCountList, ciList, customerChangeList, identityList, identityTicketList, branchTransferList]);
 
   const tabs = [
     { key: 'collections', label: `Collections (${counts.collections})` },
@@ -383,6 +559,8 @@ export function ApprovalCenterPage({
     { key: 'stock-counts', label: `Stock Counts (${counts['stock-counts']})` },
     { key: 'ci', label: `Credit Reviews (${counts.ci})` },
     { key: 'customer-changes', label: `Customer Changes (${counts['customer-changes']})` },
+    { key: 'identity', label: `Identity Review (${counts.identity})` },
+    { key: 'branch-transfers', label: `Branch Transfers (${counts['branch-transfers']})` },
   ];
 
   const paginationCollections = usePagination(collectionList);
@@ -647,6 +825,225 @@ export function ApprovalCenterPage({
     });
   };
 
+  const approveIdentityReview = async (customerId) => {
+    setBusyKey(`identity-approve-${customerId}`);
+    const result = await decideCustomerIdentityReview(customerId, { decision: 'approve' });
+    setBusyKey(null);
+    if (result.success) {
+      showToast?.(result.message || 'Customer identity approved.', 'success');
+      reload();
+    } else showToast?.(result.message || 'Approve failed.', 'error');
+  };
+
+  const rejectIdentityReview = (customerId) => {
+    openReasonDialog({
+      key: `identity-reject-${customerId}`,
+      title: 'Reject customer identity',
+      description: 'The customer will be set Inactive and remain blocked from sales.',
+      confirmLabel: 'Reject Identity',
+      onSubmit: async (reason) => {
+        const result = await decideCustomerIdentityReview(customerId, {
+          decision: 'reject',
+          note: reason,
+        });
+        if (result.success) {
+          showToast?.(result.message || 'Customer identity rejected.', 'success');
+          reload();
+        } else {
+          showToast?.(result.message || 'Reject failed.', 'error');
+          throw new Error(result.message || 'Reject failed.');
+        }
+      },
+    });
+  };
+
+  const decideTicketSamePerson = (verificationId, matchCustomerId) => {
+    openReasonDialog({
+      key: `ticket-same-${verificationId}-${matchCustomerId}`,
+      title: 'Confirm Same Person',
+      description: 'Confirm this same-branch candidate is the same individual. The Sales Agent will be directed to the existing profile.',
+      confirmLabel: 'Confirm Same Person',
+      onSubmit: async (reason) => {
+        setBusyKey(`ticket-same-${verificationId}-${matchCustomerId}`);
+        const result = await decideIdentityVerification(verificationId, {
+          decision: 'same_person',
+          match_customer_id: matchCustomerId,
+          note: reason,
+        });
+        setBusyKey(null);
+        if (result.success) {
+          showToast?.(result.message || 'Marked as same person.', 'success');
+          setSelectedIdentityTicketId(null);
+          reload();
+        } else {
+          showToast?.(result.message || 'Decision failed.', 'error');
+          throw new Error(result.message || 'Decision failed.');
+        }
+      },
+    });
+  };
+
+  const decideTicketDifferentPerson = (verificationId, matchCustomerId) => {
+    openReasonDialog({
+      key: `ticket-diff-${verificationId}-${matchCustomerId}`,
+      title: 'Clear duplicate flag',
+      description: 'Confirm this same-branch candidate is a different person. The Sales Agent may then register a new customer.',
+      confirmLabel: 'Clear Flag',
+      onSubmit: async (reason) => {
+        const result = await decideIdentityVerification(verificationId, {
+          decision: 'different_person',
+          note: reason,
+          match_customer_id: matchCustomerId,
+        });
+        if (result.success) {
+          showToast?.(result.message || 'Duplicate flag cleared.', 'success');
+          reload();
+        } else {
+          showToast?.(result.message || 'Decision failed.', 'error');
+          throw new Error(result.message || 'Decision failed.');
+        }
+      },
+    });
+  };
+
+  const requestTicketBranchTransfer = async (verificationId, matchCustomerId, ticketBranchId = null) => {
+    const ticket = identityTicketList.find((t) => Number(t.verification_id) === Number(verificationId));
+    const targetBranchId = Number(
+      ticketBranchId
+      || ticket?.branch_id
+      || getUserBranchId(currentUser)
+    );
+    if (!Number.isInteger(targetBranchId) || targetBranchId <= 0) {
+      showToast?.('Could not determine the receiving branch for this transfer.', 'error');
+      return;
+    }
+    openReasonDialog({
+      key: `ticket-xfer-${verificationId}-${matchCustomerId}`,
+      title: 'Request Customer Branch Transfer',
+      description: 'Route this cross-branch match into the Source BM → OM transfer workflow. Do not create a second customer.',
+      confirmLabel: 'Request Transfer',
+      onSubmit: async (reason) => {
+        setBusyKey(`ticket-xfer-${verificationId}-${matchCustomerId}`);
+        const result = await requestIdentityBranchTransfer(verificationId, {
+          match_customer_id: matchCustomerId,
+          target_branch_id: targetBranchId,
+          reason: reason || 'BM routed cross-branch possible match to Customer Branch Transfer.',
+        });
+        setBusyKey(null);
+        if (result.success) {
+          showToast?.(result.message || 'Branch transfer requested. Continue in Branch Transfers tab.', 'success');
+          setSelectedIdentityTicketId(null);
+          setTab('branch-transfers');
+          reload();
+        } else {
+          showToast?.(result.message || 'Could not request branch transfer.', 'error');
+          throw new Error(result.message || 'Could not request branch transfer.');
+        }
+      },
+    });
+  };
+
+  const openIdentityCandidateProfile = async (verificationId, candidate) => {
+    if (!candidate?.customer_id) return;
+    setProfileDrawer({ open: true, loading: true, profile: null });
+    const ticket = identityTicketList.find(
+      (t) => Number(t.verification_id) === Number(verificationId)
+    );
+    let res;
+    if (verificationId) {
+      res = await fetchIdentityCandidateProfile(verificationId, candidate.customer_id);
+      if (!res.success && !isCrossBranchCandidate(candidate, ticket?.branch_id)) {
+        res = await fetchCustomerById(candidate.customer_id);
+      }
+    } else {
+      res = await fetchCustomerById(candidate.customer_id);
+    }
+    if (!res.success || !res.data) {
+      setProfileDrawer({ open: false, loading: false, profile: null });
+      showToast?.(res.message || 'Could not load customer profile.', 'error');
+      return;
+    }
+    const profile = {
+      ...res.data,
+      contact_phone_masked: res.data.contact_phone_masked
+        || candidate.contact_phone_masked
+        || res.data.contact_phone,
+      match_reasons: res.data.match_reasons || candidate.match_reasons || [],
+      activity: res.data.activity || res.activity || null,
+      credit: res.data.credit || res.data.credit_info || res.credit || null,
+    };
+    setProfileDrawer({ open: true, loading: false, profile });
+  };
+
+  const loadTerritoriesForTransfer = async (transferId) => {
+    const res = await fetchBranchTransferTargetTerritories(transferId);
+    const rows = res.success ? (res.data || []) : [];
+    setTargetTerritoryOptionsByTransfer((prev) => ({ ...prev, [transferId]: rows }));
+  };
+
+  const submitSourceTransfer = async (transfer) => {
+    const draft = transferDrafts[transfer.transfer_id] || {};
+    const territoryId = Number(draft.target_territory_id || transfer.target_territory_id);
+    const reason = String(draft.reason || transfer.reason || '').trim();
+    if (!territoryId || !reason) {
+      showToast?.('Select a receiving territory and enter a transfer reason.', 'error');
+      return;
+    }
+    setBusyKey(`xfer-source-${transfer.transfer_id}`);
+    const result = await sourceSubmitBranchTransfer(transfer.transfer_id, {
+      target_territory_id: territoryId,
+      reason,
+    });
+    setBusyKey(null);
+    if (result.success) {
+      showToast?.(result.message || 'Submitted to OM.', 'success');
+      reload();
+    } else showToast?.(result.message || 'Submit failed.', 'error');
+  };
+
+  const decideOmTransfer = (transfer, decision) => {
+    if (decision === 'approve') {
+      setBusyKey(`xfer-om-${transfer.transfer_id}`);
+      omDecideBranchTransfer(transfer.transfer_id, { decision: 'approve' }).then((result) => {
+        setBusyKey(null);
+        if (result.success) {
+          showToast?.(result.message || 'Transfer approved.', 'success');
+          reload();
+        } else showToast?.(result.message || 'Approve failed.', 'error');
+      });
+      return;
+    }
+    openReasonDialog({
+      key: `xfer-om-${decision}-${transfer.transfer_id}`,
+      title: decision === 'reject' ? 'Reject branch transfer' : 'Request revision',
+      description: decision === 'reject'
+        ? 'Customer remains in the source branch.'
+        : 'Source BM must correct territory/reason.',
+      confirmLabel: decision === 'reject' ? 'Reject Transfer' : 'Send Back',
+      onSubmit: async (reason) => {
+        const result = await omDecideBranchTransfer(transfer.transfer_id, {
+          decision,
+          note: reason,
+        });
+        if (result.success) {
+          showToast?.(result.message || 'Updated.', 'success');
+          reload();
+        } else {
+          showToast?.(result.message || 'Failed.', 'error');
+          throw new Error(result.message || 'Failed.');
+        }
+      },
+    });
+  };
+
+  const focusCustomerId = (() => {
+    try {
+      return Number(new URLSearchParams(window.location.search).get('customerId')) || null;
+    } catch {
+      return null;
+    }
+  })();
+
   if (
     loading
     && !collectionList.length
@@ -655,6 +1052,7 @@ export function ApprovalCenterPage({
     && !restockList.length
     && !stockCountList.length
     && !ciList.length
+    && !identityList.length
   ) {
     return <LoadingState message="Loading approval center…" />;
   }
@@ -674,11 +1072,6 @@ export function ApprovalCenterPage({
           </button>
         </div>
       </section>
-
-      <Stats stats={[
-        { label: 'Needs Your Action', value: String(needsAction) },
-      ]}
-      />
 
       <div className="segmented-control">
         {tabs.map((item) => (
@@ -734,23 +1127,41 @@ export function ApprovalCenterPage({
                             </div>
                           ) : null}
                         </td>
-                        <td className="table-actions">
-                          <button
-                            className="button"
-                            type="button"
-                            disabled={Boolean(busyKey)}
-                            onClick={() => confirmCollection(payment.collectionpayment_id)}
-                          >
-                            Confirm
-                          </button>
-                          <button
-                            className="button secondary"
-                            type="button"
-                            disabled={Boolean(busyKey)}
-                            onClick={() => rejectCollection(payment.collectionpayment_id)}
-                          >
-                            Reject
-                          </button>
+                        <td className="table-actions" onClick={(e) => e.stopPropagation()}>
+                          <RowActionMenu
+                            label={`Actions for collection ${payment.receipt_number || payment.collectionpayment_id}`}
+                            items={[
+                              {
+                                key: 'view',
+                                label: 'View',
+                                disabled: Boolean(busyKey),
+                                onSelect: () => setQueueSummary({
+                                  title: `Collection ${payment.receipt_number || ''}`.trim(),
+                                  rows: [
+                                    { label: 'Receipt', value: payment.receipt_number || '—' },
+                                    { label: 'Customer', value: payment.customer_name || '—' },
+                                    { label: 'Collector', value: payment.collector_name || '—' },
+                                    { label: 'Method', value: payment.payment_method || '—' },
+                                    { label: 'Reference', value: payment.reference_number || '—' },
+                                    { label: 'Amount', value: formatCurrency(Number(payment.amount)) },
+                                    { label: 'Submitted', value: formatDisplayDateTime(payment.payment_date || payment.created_at) },
+                                  ],
+                                }),
+                              },
+                              {
+                                key: 'confirm',
+                                label: 'Confirm',
+                                disabled: Boolean(busyKey),
+                                onSelect: () => confirmCollection(payment.collectionpayment_id),
+                              },
+                              {
+                                key: 'reject',
+                                label: 'Reject',
+                                disabled: Boolean(busyKey),
+                                onSelect: () => rejectCollection(payment.collectionpayment_id),
+                              },
+                            ]}
+                          />
                         </td>
                       </tr>
                     ))}
@@ -811,23 +1222,40 @@ export function ApprovalCenterPage({
                             </div>
                           ) : null}
                         </td>
-                        <td className="table-actions">
-                          <button
-                            className="button"
-                            type="button"
-                            disabled={Boolean(busyKey)}
-                            onClick={() => confirmInvoice(inv.sales_invoices_id)}
-                          >
-                            Acknowledge
-                          </button>
-                          <button
-                            className="button secondary"
-                            type="button"
-                            disabled={Boolean(busyKey)}
-                            onClick={() => rejectInvoice(inv.sales_invoices_id)}
-                          >
-                            Reject
-                          </button>
+                        <td className="table-actions" onClick={(e) => e.stopPropagation()}>
+                          <RowActionMenu
+                            label={`Actions for invoice ${inv.invoice_number || inv.sales_invoices_id}`}
+                            items={[
+                              {
+                                key: 'view',
+                                label: 'View',
+                                disabled: Boolean(busyKey),
+                                onSelect: () => setQueueSummary({
+                                  title: `Invoice ${inv.invoice_number || inv.sales_invoices_id}`,
+                                  rows: [
+                                    { label: 'Invoice', value: inv.invoice_number || inv.sales_invoices_id },
+                                    { label: 'Customer', value: inv.customer_name || '—' },
+                                    { label: 'Sales Agent', value: inv.sales_agent_name || inv.agent_name || '—' },
+                                    { label: 'Amount', value: formatCurrency(Number(inv.total_amount ?? inv.amount ?? 0)) },
+                                    { label: 'Status', value: inv.status || '—' },
+                                    { label: 'Submitted', value: formatDisplayDateTime(inv.created_at || inv.invoice_date) },
+                                  ],
+                                }),
+                              },
+                              {
+                                key: 'ack',
+                                label: 'Acknowledge',
+                                disabled: Boolean(busyKey),
+                                onSelect: () => confirmInvoice(inv.sales_invoices_id),
+                              },
+                              {
+                                key: 'reject',
+                                label: 'Reject',
+                                disabled: Boolean(busyKey),
+                                onSelect: () => rejectInvoice(inv.sales_invoices_id),
+                              },
+                            ]}
+                          />
                         </td>
                       </tr>
                     ))}
@@ -886,31 +1314,15 @@ export function ApprovalCenterPage({
                           ) : null}
                         </td>
                         <td><StatusBadge status={t.status} /></td>
-                        <td className="table-actions">
-                          <button
-                            className="button ghost"
-                            type="button"
-                            disabled={Boolean(busyKey)}
-                            onClick={() => openTransferDetail(t.id)}
-                          >
-                            View Details
-                          </button>
-                          <button
-                            className="button"
-                            type="button"
-                            disabled={Boolean(busyKey)}
-                            onClick={() => approveTransfer(t.id)}
-                          >
-                            Approve
-                          </button>
-                          <button
-                            className="button secondary"
-                            type="button"
-                            disabled={Boolean(busyKey)}
-                            onClick={() => rejectTransfer(t.id)}
-                          >
-                            Reject
-                          </button>
+                        <td className="table-actions" onClick={(e) => e.stopPropagation()}>
+                          <RowActionMenu
+                            label={`Actions for transfer ${t.transfer_ref || t.id}`}
+                            items={[
+                              { key: 'view', label: 'View', disabled: Boolean(busyKey), onSelect: () => openTransferDetail(t.id) },
+                              { key: 'approve', label: 'Approve', disabled: Boolean(busyKey), onSelect: () => approveTransfer(t.id) },
+                              { key: 'reject', label: 'Reject', disabled: Boolean(busyKey), onSelect: () => rejectTransfer(t.id) },
+                            ]}
+                          />
                         </td>
                       </tr>
                     ))}
@@ -969,16 +1381,15 @@ export function ApprovalCenterPage({
                           ) : null}
                         </td>
                         <td><StatusBadge status={row.status} /></td>
-                        <td className="table-actions">
-                          <button className="button ghost" type="button" disabled={Boolean(busyKey)} onClick={() => openRestockDetail(row.restock_id)}>
-                            View Details
-                          </button>
-                          <button className="button" type="button" disabled={Boolean(busyKey)} onClick={() => approveRestock(row.restock_id)}>
-                            Approve
-                          </button>
-                          <button className="button secondary" type="button" disabled={Boolean(busyKey)} onClick={() => rejectRestock(row.restock_id)}>
-                            Reject
-                          </button>
+                        <td className="table-actions" onClick={(e) => e.stopPropagation()}>
+                          <RowActionMenu
+                            label={`Actions for restock ${row.restock_id}`}
+                            items={[
+                              { key: 'view', label: 'View', disabled: Boolean(busyKey), onSelect: () => openRestockDetail(row.restock_id) },
+                              { key: 'approve', label: 'Approve', disabled: Boolean(busyKey), onSelect: () => approveRestock(row.restock_id) },
+                              { key: 'reject', label: 'Reject', disabled: Boolean(busyKey), onSelect: () => rejectRestock(row.restock_id) },
+                            ]}
+                          />
                         </td>
                       </tr>
                     ))}
@@ -1035,16 +1446,15 @@ export function ApprovalCenterPage({
                           ) : null}
                         </td>
                         <td><StatusBadge status={row.status} /></td>
-                        <td className="table-actions">
-                          <button className="button ghost" type="button" disabled={Boolean(busyKey)} onClick={() => openStockCountDetail(row.count_id)}>
-                            View Details
-                          </button>
-                          <button className="button" type="button" disabled={Boolean(busyKey)} onClick={() => approveStockCount(row.count_id)}>
-                            Approve
-                          </button>
-                          <button className="button secondary" type="button" disabled={Boolean(busyKey)} onClick={() => rejectStockCount(row.count_id)}>
-                            Reject
-                          </button>
+                        <td className="table-actions" onClick={(e) => e.stopPropagation()}>
+                          <RowActionMenu
+                            label={`Actions for stock count ${row.count_id}`}
+                            items={[
+                              { key: 'view', label: 'View', disabled: Boolean(busyKey), onSelect: () => openStockCountDetail(row.count_id) },
+                              { key: 'approve', label: 'Approve', disabled: Boolean(busyKey), onSelect: () => approveStockCount(row.count_id) },
+                              { key: 'reject', label: 'Reject', disabled: Boolean(busyKey), onSelect: () => rejectStockCount(row.count_id) },
+                            ]}
+                          />
                         </td>
                       </tr>
                     ))}
@@ -1157,20 +1567,13 @@ export function ApprovalCenterPage({
                         </td>
                         <td><StatusBadge status={ci.displayStatus || ci.status} /></td>
                         <td className="table-actions" onClick={(e) => e.stopPropagation()}>
-                          <button
-                            className="button"
-                            type="button"
-                            onClick={() => setSelectedCiId(ci.ciId || ci.id)}
-                          >
-                            Open Decision
-                          </button>
-                          <button
-                            className="button ghost"
-                            type="button"
-                            onClick={() => navigate(`${opsBase}/ci-approvals/${ci.ciId || ci.id}`)}
-                          >
-                            Open full desk
-                          </button>
+                          <RowActionMenu
+                            label={`Actions for credit review ${ci.ciId || ci.id}`}
+                            items={[
+                              { key: 'view', label: 'View', onSelect: () => setSelectedCiId(ci.ciId || ci.id) },
+                              { key: 'desk', label: 'Open full desk', onSelect: () => navigate(`${opsBase}/ci-approvals/${ci.ciId || ci.id}`) },
+                            ]}
+                          />
                         </td>
                       </tr>
                     ))}
@@ -1219,9 +1622,29 @@ export function ApprovalCenterPage({
                       <td>{request.change_type}</td>
                       <td>{request.reason || '—'}</td>
                       <td>{formatDisplayDateTime(request.created_at)}</td>
-                      <td className="table-actions">
-                        <button className="button" type="button" disabled={Boolean(busyKey)} onClick={() => approveCustomerChange(request.request_id)}>Approve</button>
-                        <button className="button secondary" type="button" disabled={Boolean(busyKey)} onClick={() => rejectCustomerChange(request.request_id)}>Reject</button>
+                      <td className="table-actions" onClick={(e) => e.stopPropagation()}>
+                        <RowActionMenu
+                          label={`Actions for customer change ${request.request_id}`}
+                          items={[
+                            {
+                              key: 'view',
+                              label: 'View',
+                              disabled: Boolean(busyKey),
+                              onSelect: () => setQueueSummary({
+                                title: `Customer change #${request.request_id}`,
+                                rows: [
+                                  { label: 'Customer', value: request.customer_name || request.customer_code || request.customer_id || '—' },
+                                  { label: 'Requested by', value: request.requester_name || '—' },
+                                  { label: 'Change type', value: request.change_type || request.request_type || '—' },
+                                  { label: 'Summary', value: request.summary || request.change_summary || request.notes || '—' },
+                                  { label: 'Submitted', value: formatDisplayDateTime(request.created_at) },
+                                ],
+                              }),
+                            },
+                            { key: 'approve', label: 'Approve', disabled: Boolean(busyKey), onSelect: () => approveCustomerChange(request.request_id) },
+                            { key: 'reject', label: 'Reject', disabled: Boolean(busyKey), onSelect: () => rejectCustomerChange(request.request_id) },
+                          ]}
+                        />
                       </td>
                     </tr>
                   ))}
@@ -1234,6 +1657,447 @@ export function ApprovalCenterPage({
         </section>
       ) : null}
 
+      {tab === 'identity' ? (
+        <section className="panel content-panel relative overflow-hidden">
+          <div className="list-section-header">
+            <h3>Customer Identity Review</h3>
+            <p className="list-section-subtitle">
+              Open a verification request to review each candidate separately. Same-branch matches use Same Person / Different Person. Cross-branch matches must use Customer Branch Transfer.
+            </p>
+          </div>
+
+          {selectedIdentityTicketId ? (() => {
+            const ticket = identityTicketList.find((t) => Number(t.verification_id) === Number(selectedIdentityTicketId));
+            if (!ticket) {
+              return (
+                <>
+                  <button className="button ghost" type="button" onClick={() => setSelectedIdentityTicketId(null)}>
+                    ← Back to Identity Review
+                  </button>
+                  <EmptyState
+                    title="Verification not found"
+                    description="This request may have been decided. Return to the list and refresh."
+                  />
+                </>
+              );
+            }
+            const candidates = ticket.match_candidates_json || [];
+            const search = ticket.search_payload_json || {};
+            return (
+              <div>
+                <div className="flex flex-wrap justify-between gap-2 items-start" style={{ marginBottom: 16 }}>
+                  <div>
+                    <button className="button ghost" type="button" onClick={() => setSelectedIdentityTicketId(null)}>
+                      ← Back to Identity Review
+                    </button>
+                    <h4 style={{ margin: '8px 0 4px' }}>Verification #{ticket.verification_id}</h4>
+                    <div className="muted" style={{ fontSize: '0.85rem' }}>
+                      Requested by {ticket.requester_name || '—'}
+                      {' · '}
+                      {formatDisplayDateTime(ticket.created_at)}
+                    </div>
+                    <div className="muted" style={{ fontSize: '0.8rem' }}>
+                      Search: {search.name || '—'} · {search.contact_phone || search.customer_code || '—'}
+                    </div>
+                  </div>
+                  <StatusBadge status={ticket.status || 'Pending'} />
+                </div>
+
+                {candidates.length ? (
+                  <div className="corvex-table-wrapper">
+                    <table className="corvex-table">
+                      <thead>
+                        <tr>
+                          <th>Customer Name</th>
+                          <th>Customer Code</th>
+                          <th>Home Branch</th>
+                          <th>Match / Branch Indicator</th>
+                          <th>Account Status</th>
+                          <th>Actions</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {candidates.map((m) => {
+                          const cross = isCrossBranchCandidate(m, ticket.branch_id);
+                          return (
+                            <tr key={`${ticket.verification_id}-${m.customer_id}`}>
+                              <td><strong>{customerDisplayName(m)}</strong></td>
+                              <td>{m.customer_code || '—'}</td>
+                              <td>{m.branch_name || '—'}</td>
+                              <td>
+                                {cross ? 'Other branch' : 'Same branch'}
+                                <div className="muted" style={{ fontSize: '0.75rem' }}>
+                                  {(m.match_reasons || []).filter(Boolean).join(', ') || 'possible match'}
+                                  {m.same_phone_diff_name ? ' · same phone / different name' : ''}
+                                </div>
+                              </td>
+                              <td><StatusBadge status={m.status || 'Active'} /></td>
+                              <td className="table-actions" onClick={(e) => e.stopPropagation()}>
+                                <RowActionMenu
+                                  label={`Actions for ${customerDisplayName(m)}`}
+                                  items={[
+                                    {
+                                      key: 'view',
+                                      label: 'View Profile',
+                                      disabled: Boolean(busyKey),
+                                      onSelect: () => openIdentityCandidateProfile(ticket.verification_id, m),
+                                    },
+                                    !cross && {
+                                      key: 'same',
+                                      label: 'Same Person',
+                                      disabled: Boolean(busyKey),
+                                      onSelect: () => decideTicketSamePerson(ticket.verification_id, m.customer_id),
+                                    },
+                                    !cross && {
+                                      key: 'diff',
+                                      label: 'Different Person',
+                                      disabled: Boolean(busyKey),
+                                      onSelect: () => decideTicketDifferentPerson(ticket.verification_id, m.customer_id),
+                                    },
+                                    cross && {
+                                      key: 'xfer',
+                                      label: 'Request Customer Branch Transfer',
+                                      disabled: Boolean(busyKey),
+                                      onSelect: () => requestTicketBranchTransfer(
+                                        ticket.verification_id,
+                                        m.customer_id,
+                                        ticket.branch_id,
+                                      ),
+                                    },
+                                  ]}
+                                />
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                ) : (
+                  <EmptyState title="No candidates" description="No customer candidates were attached to this request." />
+                )}
+              </div>
+            );
+          })() : (
+            <>
+              {identityTicketList.length ? (
+                <div className="corvex-table-wrapper" style={{ marginBottom: 24 }}>
+                  <table className="corvex-table">
+                    <thead>
+                      <tr>
+                        <th>Verification #</th>
+                        <th>Requested By</th>
+                        <th>Search</th>
+                        <th>Submitted</th>
+                        <th>Status</th>
+                        <th>Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {identityTicketList.map((ticket) => {
+                        const search = ticket.search_payload_json || {};
+                        const candidateCount = (ticket.match_candidates_json || []).length;
+                        return (
+                          <tr key={ticket.verification_id}>
+                            <td><strong>#{ticket.verification_id}</strong></td>
+                            <td>{ticket.requester_name || '—'}</td>
+                            <td>
+                              <div>{search.name || '—'}</div>
+                              <div className="muted" style={{ fontSize: '0.75rem' }}>
+                                {search.contact_phone || search.customer_code || '—'}
+                                {candidateCount ? ` · ${candidateCount} candidate${candidateCount === 1 ? '' : 's'}` : ''}
+                              </div>
+                            </td>
+                            <td>{formatDisplayDateTime(ticket.created_at)}</td>
+                            <td><StatusBadge status={ticket.status || 'Pending'} /></td>
+                            <td className="table-actions" onClick={(e) => e.stopPropagation()}>
+                              <RowActionMenu
+                                label={`Actions for verification ${ticket.verification_id}`}
+                                items={[
+                                  {
+                                    key: 'view',
+                                    label: 'View',
+                                    onSelect: () => setSelectedIdentityTicketId(ticket.verification_id),
+                                  },
+                                ]}
+                              />
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              ) : null}
+
+              {identityList.length ? (
+                <>
+                  <h4 className="subsection-title">Legacy held customers (Pending Identity Review)</h4>
+                  <div className="corvex-table-wrapper">
+                    <table className="corvex-table">
+                      <thead>
+                        <tr>
+                          <th>Customer</th>
+                          <th>Phone</th>
+                          <th>Matches</th>
+                          <th>Submitted</th>
+                          <th>Actions</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {identityList.map((customer) => {
+                          const candidates = customer.identity_match_json?.candidates || [];
+                          return (
+                            <tr key={customer.customer_id}>
+                              <td>
+                                <strong>
+                                  {[customer.first_name, customer.last_name].filter(Boolean).join(' ')
+                                    || `#${customer.customer_id}`}
+                                </strong>
+                                <StatusBadge status={customer.status} />
+                              </td>
+                              <td>{customer.contact_phone || '—'}</td>
+                              <td>
+                                {candidates.map((m) => (
+                                  <div key={m.customer_id} className="muted" style={{ fontSize: '0.8rem' }}>
+                                    {m.display_name || m.customer_code}
+                                    {m.branch_name ? ` · ${m.branch_name}` : ''}
+                                    {m.cross_branch ? ' (other branch)' : ''}
+                                  </div>
+                                ))}
+                              </td>
+                              <td>{formatDisplayDateTime(customer.created_at)}</td>
+                              <td className="table-actions" onClick={(e) => e.stopPropagation()}>
+                                <RowActionMenu
+                                  label={`Actions for customer ${customer.customer_id}`}
+                                  items={[
+                                    {
+                                      key: 'view',
+                                      label: 'View Profile',
+                                      disabled: Boolean(busyKey),
+                                      onSelect: async () => {
+                                        setProfileDrawer({ open: true, loading: true, profile: null });
+                                        const res = await fetchCustomerById(customer.customer_id);
+                                        if (!res.success || !res.data) {
+                                          setProfileDrawer({ open: false, loading: false, profile: null });
+                                          showToast?.(res.message || 'Could not load customer profile.', 'error');
+                                          return;
+                                        }
+                                        setProfileDrawer({
+                                          open: true,
+                                          loading: false,
+                                          profile: {
+                                            ...res.data,
+                                            contact_phone_masked: res.data.contact_phone,
+                                          },
+                                        });
+                                      },
+                                    },
+                                    {
+                                      key: 'approve',
+                                      label: 'Approve',
+                                      disabled: Boolean(busyKey),
+                                      onSelect: () => approveIdentityReview(customer.customer_id),
+                                    },
+                                    {
+                                      key: 'reject',
+                                      label: 'Reject',
+                                      disabled: Boolean(busyKey),
+                                      onSelect: () => rejectIdentityReview(customer.customer_id),
+                                    },
+                                  ]}
+                                />
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                </>
+              ) : null}
+
+              {!identityTicketList.length && !identityList.length ? (
+                <EmptyState
+                  title="Nothing waiting for your decision"
+                  description="No identity verifications are awaiting review."
+                />
+              ) : null}
+            </>
+          )}
+        </section>
+      ) : null}
+
+      {tab === 'branch-transfers' ? (
+        <section className="panel content-panel relative overflow-hidden">
+          <div className="list-section-header">
+            <h3>Customer Branch Transfers</h3>
+            <p className="list-section-subtitle">
+              Source BM sets receiving territory and reason, then OM approves. Debt and history stay on the same customer.
+            </p>
+          </div>
+          {branchTransferList.length ? (
+            <div className="corvex-table-wrapper">
+              <table className="corvex-table">
+                <thead>
+                  <tr>
+                    <th>Customer</th>
+                    <th>From → To</th>
+                    <th>Status</th>
+                    <th>Territory / Reason</th>
+                    <th>Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {branchTransferList.map((transfer) => {
+                    const draft = transferDrafts[transfer.transfer_id] || {};
+                    const isSourceBm = !isOm && Number(getUserBranchId(currentUser)) === Number(transfer.source_branch_id);
+                    const needsSource = ['Pending Source', 'Needs Revision'].includes(transfer.status);
+                    return (
+                      <tr key={transfer.transfer_id}>
+                        <td>
+                          <strong>
+                            {[transfer.first_name, transfer.last_name].filter(Boolean).join(' ')
+                              || transfer.customer_code
+                              || `#${transfer.customer_id}`}
+                          </strong>
+                          <div className="muted" style={{ fontSize: '0.75rem' }}>{transfer.customer_code}</div>
+                          <StatusBadge status={transfer.customer_status || 'Active'} />
+                        </td>
+                        <td>
+                          {transfer.source_branch_name || transfer.source_branch_id}
+                          {' → '}
+                          {transfer.target_branch_name || transfer.target_branch_id}
+                          <div className="muted" style={{ fontSize: '0.75rem' }}>
+                            Requested by {transfer.requester_name || '—'}
+                          </div>
+                        </td>
+                        <td><StatusBadge status={transfer.status} /></td>
+                        <td style={{ minWidth: 220 }}>
+                          {needsSource && isSourceBm ? (
+                            <>
+                              <select
+                                className="filter-select"
+                                value={draft.target_territory_id || transfer.target_territory_id || ''}
+                                onFocus={() => loadTerritoriesForTransfer(transfer.transfer_id)}
+                                onChange={(e) => setTransferDrafts((prev) => ({
+                                  ...prev,
+                                  [transfer.transfer_id]: {
+                                    ...prev[transfer.transfer_id],
+                                    target_territory_id: e.target.value,
+                                  },
+                                }))}
+                              >
+                                <option value="">Select receiving territory</option>
+                                {(targetTerritoryOptionsByTransfer[transfer.transfer_id] || []).map((t) => (
+                                  <option key={t.territory_id} value={t.territory_id}>
+                                    {t.territory_name}
+                                  </option>
+                                ))}
+                              </select>
+                              <textarea
+                                className="filter-input"
+                                rows={2}
+                                style={{ marginTop: 6, width: '100%' }}
+                                placeholder="Transfer reason *"
+                                value={draft.reason ?? transfer.reason ?? ''}
+                                onChange={(e) => setTransferDrafts((prev) => ({
+                                  ...prev,
+                                  [transfer.transfer_id]: {
+                                    ...prev[transfer.transfer_id],
+                                    reason: e.target.value,
+                                  },
+                                }))}
+                              />
+                              {transfer.revision_note ? (
+                                <p className="muted" style={{ fontSize: '0.75rem' }}>
+                                  OM revision: {transfer.revision_note}
+                                </p>
+                              ) : null}
+                            </>
+                          ) : (
+                            <>
+                              <div>{transfer.target_territory_name || transfer.target_territory_id || '—'}</div>
+                              <div className="muted" style={{ fontSize: '0.8rem' }}>{transfer.reason || '—'}</div>
+                            </>
+                          )}
+                        </td>
+                        <td className="table-actions" onClick={(e) => e.stopPropagation()}>
+                          <RowActionMenu
+                            label={`Actions for branch transfer ${transfer.transfer_id}`}
+                            items={[
+                              {
+                                key: 'view',
+                                label: 'View',
+                                onSelect: () => setQueueSummary({
+                                  title: `Branch transfer #${transfer.transfer_id}`,
+                                  rows: [
+                                    { label: 'Customer', value: [transfer.first_name, transfer.last_name].filter(Boolean).join(' ') || transfer.customer_code || transfer.customer_id },
+                                    { label: 'From → To', value: `${transfer.source_branch_name || transfer.source_branch_id} → ${transfer.target_branch_name || transfer.target_branch_id}` },
+                                    { label: 'Status', value: transfer.status },
+                                    { label: 'Requested by', value: transfer.requester_name || '—' },
+                                    { label: 'Reason', value: transfer.reason || '—' },
+                                    { label: 'Territory', value: transfer.target_territory_name || transfer.target_territory_id || '—' },
+                                  ],
+                                }),
+                              },
+                              needsSource && isSourceBm && {
+                                key: 'submit',
+                                label: 'Submit to OM',
+                                disabled: Boolean(busyKey),
+                                onSelect: () => submitSourceTransfer(transfer),
+                              },
+                              isOm && transfer.status === 'Pending OM' && {
+                                key: 'approve',
+                                label: 'Approve',
+                                disabled: Boolean(busyKey),
+                                onSelect: () => decideOmTransfer(transfer, 'approve'),
+                              },
+                              isOm && transfer.status === 'Pending OM' && {
+                                key: 'revision',
+                                label: 'Needs Revision',
+                                disabled: Boolean(busyKey),
+                                onSelect: () => decideOmTransfer(transfer, 'needs_revision'),
+                              },
+                              isOm && transfer.status === 'Pending OM' && {
+                                key: 'reject',
+                                label: 'Reject',
+                                disabled: Boolean(busyKey),
+                                onSelect: () => decideOmTransfer(transfer, 'reject'),
+                              },
+                            ]}
+                          />
+                          {!isOm && !isSourceBm ? (
+                            <div className="muted" style={{ fontSize: '0.75rem', marginTop: 4 }}>Waiting on Source BM / OM</div>
+                          ) : null}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          ) : (
+            <EmptyState
+              title="Nothing waiting for your decision"
+              description="No customer branch transfers are in progress."
+            />
+          )}
+        </section>
+      ) : null}
+
+      <QueueSummaryModal
+        open={Boolean(queueSummary)}
+        title={queueSummary?.title}
+        rows={queueSummary?.rows || []}
+        onClose={() => setQueueSummary(null)}
+      />
+      <CustomerProfileDrawer
+        open={profileDrawer.open}
+        loading={profileDrawer.loading}
+        profile={profileDrawer.profile}
+        onClose={() => setProfileDrawer({ open: false, loading: false, profile: null })}
+      />
       <TransferDetailModal
         detail={transferDetail}
         loading={transferDetailLoading}
