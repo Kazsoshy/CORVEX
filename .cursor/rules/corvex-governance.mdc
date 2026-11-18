@@ -1,0 +1,16 @@
+---
+description: CORVEX governance — scope, reuse, and architecture guards for all coding agents
+alwaysApply: true
+---
+
+# CORVEX governance
+
+Before writing or changing application code:
+
+1. Read root `AGENTS.md` (Rules 1–6 + mandatory workflow).
+2. Read `docs/PROJECT_SCOPE.md` — stay inside approved capstone scope.
+3. Read `docs/ARCHITECTURE.md` — preserve as-built layout (`src/` + `backend/` + PostgreSQL).
+4. Search existing implementations; reuse `src/utils/formatters.js`, `src/components/shared/`, `backend/lib/*`, and `ROLE_SETS` in `backend/middleware/auth.js`.
+5. For schema work, complete `docs/MIGRATION_REVIEW.md` and run `npm run check:migrations`.
+
+Do not invent requirements. Do not add out-of-scope modules (accounting, live GPS, extra roles, unapproved integrations). Do not delete lookalike code or run destructive migrations without explicit user authorization. Prefer small, necessary changes; report pre-existing debt separately from new issues.

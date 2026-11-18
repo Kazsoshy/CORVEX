@@ -141,7 +141,18 @@ npm run dev
 
 ---
 
-## 6. Contributing
+## 6. Contributing and quality gates
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for folder rules, env conventions, formatter imports, and quarantine policy.  
-Cleanup notes for 2026-11-18: [docs/CHANGELOG_CLEANUP_2026-11-18.md](docs/CHANGELOG_CLEANUP_2026-11-18.md).
+**AI / agents:** [AGENTS.md](AGENTS.md) · **Scope:** [docs/PROJECT_SCOPE.md](docs/PROJECT_SCOPE.md) · **Architecture:** [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+
+| Command | Description |
+|---|---|
+| `npm run lint` | ESLint (React / hooks / unused imports) |
+| `npm run format:check` | Prettier check on governance and tooling paths |
+| `npm run check:migrations` | Migration prefix and destructive-SQL hygiene |
+| `npm run check:dupes` | jscpd duplicate-code report (advisory) |
+| `npm run quality` | lint + format:check + check:migrations + test + build |
+
+Cleanup notes for 2026-11-18: [docs/CHANGELOG_CLEANUP_2026-11-18.md](docs/CHANGELOG_CLEANUP_2026-11-18.md).  
+Quality system report: [docs/QUALITY_SYSTEM_REPORT.md](docs/QUALITY_SYSTEM_REPORT.md).

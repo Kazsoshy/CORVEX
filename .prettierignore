@@ -1,0 +1,9 @@
+dist
+node_modules
+_archive
+backups
+reports
+docs/audit_extracts
+package-lock.json
+*.min.js
+*.min.css

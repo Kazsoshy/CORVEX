@@ -1,5 +1,9 @@
 # Contributing to CORVEX
 
+**AI / agent development rules:** see root [`AGENTS.md`](AGENTS.md).  
+**Approved scope:** [`docs/PROJECT_SCOPE.md`](docs/PROJECT_SCOPE.md).  
+**As-built architecture:** [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
+
 ## Environment
 
 - Copy `.env.example` → `.env`. Use discrete `DB_*` variables and set `AUTH_SECRET` (sessions end on restart if unset).
@@ -7,15 +11,15 @@
 
 ## Folder layout
 
-| Path | Purpose |
-|---|---|
-| `src/` | React + Vite frontend |
-| `backend/` | Express API, migrations, libs, route tests |
-| `scripts/` | Durable check helpers only (`check_*`) |
-| `docs/` | Deploy notes, audits, design extracts |
-| `public/` | Static assets |
+| Path        | Purpose                                        |
+| ----------- | ---------------------------------------------- |
+| `src/`      | React + Vite frontend                          |
+| `backend/`  | Express API, migrations, libs, route tests     |
+| `scripts/`  | Durable check helpers only (`check_*`)         |
+| `docs/`     | Deploy notes, audits, design extracts          |
+| `public/`   | Static assets                                  |
 | `_archive/` | Quarantined clutter (local; see `MANIFEST.md`) |
-| `backups/` | Local JSON dumps only (gitignored) |
+| `backups/`  | Local JSON dumps only (gitignored)             |
 
 Do not leave scratch notes (`note..txt`), one-off AST/refactor scripts, or DB dumps at the repo root.
 
