@@ -37,7 +37,6 @@ import { AreaAssignmentDetailPage, SchedulePage } from './SalesAreaSchedule';
 import { FieldActivityReportDetailPage, FieldActivityReportsPage } from './SalesFieldReports';
 import { CustomerDetailPage, CustomersPage } from './SalesCustomers';
 import { CustomerFormPage } from './CustomerRegistrationForm';
-import { VerificationWaitingPage } from './VerificationWaitingPage';
 import {
   SalesCreditReviewDetailPage,
   SalesCreditReviewRequestPage,
@@ -1417,13 +1416,6 @@ export function SalesPageBody({
       return <FieldActivityReportDetailPage {...props} />;
     case 'customers':
       return <CustomersPage {...props} />;
-    case 'identityVerificationWaiting':
-      return (
-        <VerificationWaitingPage
-          {...props}
-          verificationId={page.params?.verificationId}
-        />
-      );
     case 'customerForm':
     case 'customerEdit':
       return <CustomerFormPage {...props} />;

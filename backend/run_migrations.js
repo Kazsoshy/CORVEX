@@ -108,6 +108,7 @@ const MIGRATIONS = [
   { file: '080_identity_verify_branch_transfer.sql', label: '080_identity_verify_branch_transfer.sql' },
   { file: '081_identity_verify_phone_uniqueness.sql', label: '081_identity_verify_phone_uniqueness.sql' },
   { file: '082_identity_verify_waiting_transfer_link.sql', label: '082_identity_verify_waiting_transfer_link.sql' },
+  { file: '083_branch_transfer_receiving_first.sql', label: '083_branch_transfer_receiving_first.sql' },
 ];
 
 async function ensureMigrationsTable() {

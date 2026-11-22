@@ -17,23 +17,16 @@ import {
   findCustomerDuplicates,
   limitedMatchCard,
   digitsOnly,
-  maskPhone,
 } from '../lib/customerDuplicateLookup.js';
-import { upsertOpenOperationalAlert, resolveAlertsBySourceKey } from '../lib/operationalAlerts.js';
-import {
-  createIdentityVerification,
-  listIdentityVerifications,
-  listMyOpenIdentityVerifications,
-  getIdentityVerificationById,
-  deriveIdentityNextAction,
-  decideIdentityVerification,
-  linkBranchTransferToIdentity,
-  consumeClearanceToken,
-  findOpenIdentityForRequester,
-} from '../lib/customerIdentityVerification.js';
+import { resolveAlertsBySourceKey } from '../lib/operationalAlerts.js';
 import {
   createBranchTransferRequest,
+  findOpenBranchTransferForCustomer,
   listBranchTransfers,
+  getBranchTransferById,
+  deriveTransferProgress,
+  receivingBmSubmitTransfer,
+  resubmitBranchTransferBySa,
   sourceBmSubmitTransfer,
   omDecideTransfer,
 } from '../lib/customerBranchTransfer.js';
@@ -556,420 +549,93 @@ router.get('/lookup', async (req, res) => {
   }
 });
 
-router.get('/identity-verifications', allow(ROLE_SETS.customerRead, ROLE_SETS.branchOps), async (req, res) => {
-  try {
-    const pool = req.app.locals.pool;
-    const mine = String(req.query.mine || '') === '1' || String(req.query.scope || '') === 'mine';
-    if (mine) {
-      const rows = await listMyOpenIdentityVerifications(pool, {
-        requestedBy: req.currentUser.id,
-        limit: req.query.limit,
-      });
-      const enriched = rows.map((row) => ({
-        ...row,
-        ...deriveIdentityNextAction(row),
-      }));
-      return res.json({ success: true, data: enriched });
-    }
-    const status = req.query.status || 'Pending';
-    const statuses = req.query.statuses
-      ? String(req.query.statuses).split(',').map((s) => s.trim()).filter(Boolean)
-      : (status === 'Pending' ? ['Pending', 'Needs Evidence'] : null);
-    const branchId = isUnscoped(req.currentUser) ? (req.query.branch_id ? Number(req.query.branch_id) : null) : req.currentUser.branchId;
-    const rows = await listIdentityVerifications(pool, {
-      branchId,
-      status: statuses ? null : status,
-      statuses,
-      limit: req.query.limit,
-    });
-    return res.json({ success: true, data: rows });
-  } catch (err) {
-    console.error('[Customers] GET /identity-verifications error:', err.message);
-    return res.status(500).json({ success: false, message: 'Failed to load identity verifications.' });
-  }
-});
-
-router.get('/identity-verifications/:id', async (req, res) => {
-  try {
-    const verificationId = Number(req.params.id);
-    if (!Number.isInteger(verificationId) || verificationId <= 0) {
-      return res.status(400).json({ success: false, message: 'Invalid verification id.' });
-    }
-    const row = await getIdentityVerificationById(req.app.locals.pool, verificationId);
-    if (!row) {
-      return res.status(404).json({ success: false, message: 'Identity verification not found.' });
-    }
-    const actorId = Number(req.currentUser?.id || req.currentUser?.user_id);
-    const isRequester = Number(row.requested_by) === actorId;
-    const isBranchOps = ROLE_SETS.branchOps.includes(req.currentUser?.roleSlug);
-    if (!isRequester && !isUnscoped(req.currentUser) && !isBranchOps) {
-      return res.status(403).json({ success: false, message: 'Not allowed to view this verification.' });
-    }
-    if (!isRequester && isBranchOps && !isUnscoped(req.currentUser)
-      && !assertSameBranch(res, req.currentUser, row.branch_id)) {
-      return;
-    }
-    const payload = { ...row };
-    if (!isRequester) {
-      payload.clearance_token = null;
-    }
-    const actionMeta = deriveIdentityNextAction(row);
-    return res.json({
-      success: true,
-      data: payload,
-      ...actionMeta,
-      primary_match_customer_id: row.primary_match_customer_id,
-    });
-  } catch (err) {
-    console.error('[Customers] GET /identity-verifications/:id error:', err.message);
-    return res.status(500).json({ success: false, message: 'Failed to load identity verification.' });
-  }
-});
-
-router.post('/identity-verifications', async (req, res) => {
-  const client = await req.app.locals.pool.connect();
-  try {
-    const actorBranchId = req.currentUser?.branchId != null ? Number(req.currentUser.branchId) : null;
-    if (actorBranchId == null && !isUnscoped(req.currentUser)) {
-      return res.status(403).json({ success: false, message: 'No branch assigned.' });
-    }
-    const searchPayload = req.body?.search || req.body?.search_payload || {};
-    const proposed = req.body?.proposed_registration || req.body?.proposed || {};
-    const matchesInput = Array.isArray(req.body?.matches) ? req.body.matches : null;
-    const attemptKey = req.body?.registration_attempt_key || searchPayload.registration_attempt_key || null;
-
-    let matches = matchesInput;
-    if (!matches) {
-      const dup = await findCustomerDuplicates(req.app.locals.pool, {
-        ...searchPayload,
-        contact_phone: searchPayload.contact_phone || proposed.contact_phone,
-        name: searchPayload.name
-          || [proposed.first_name, proposed.last_name].filter(Boolean).join(' '),
-      }, { actorBranchId });
-      matches = dup.matches || [];
-    }
-    const possibleOnly = (matches || []).filter((m) => m.match_tier === 'possible');
-    if (!possibleOnly.length) {
-      return res.status(400).json({
-        success: false,
-        message: 'Exact matches do not require Branch Manager identity verification. Open the existing profile or request a branch transfer.',
-      });
-    }
-
-    await client.query('BEGIN');
-    let row;
-    try {
-      row = await createIdentityVerification(client, {
-        branchId: actorBranchId || Number(req.body?.branch_id),
-        requestedBy: req.currentUser.id,
-        searchPayload,
-        proposedRegistration: proposed,
-        matches: possibleOnly,
-        registrationAttemptKey: attemptKey,
-      });
-    } catch (createErr) {
-      if (createErr.status === 409 && createErr.existingId) {
-        await client.query('ROLLBACK');
-        const existing = createErr.existingRow
-          || await getIdentityVerificationById(req.app.locals.pool, createErr.existingId);
-        return res.status(200).json({
-          success: true,
-          idempotent: true,
-          message: createErr.message,
-          data: existing,
-          ...deriveIdentityNextAction(existing),
-        });
-      }
-      throw createErr;
-    }
-    await client.query('COMMIT');
-
-    await writeAuditFromReq(req.app.locals.pool, req, {
-      module: 'Customer Management',
-      activity: 'Identity Verification',
-      action: 'Request Identity Verification',
-      description: `Requested identity verification #${row.verification_id}.`,
-      status: AUDIT_STATUS.CREATED,
-      affectedRecord: `identity_verification:${row.verification_id}`,
-    });
-
-    return res.status(201).json({
-      success: true,
-      message: 'Identity verification submitted to Branch Manager. Registration stays blocked until decided.',
-      data: row,
-      ...deriveIdentityNextAction(row),
-    });
-  } catch (err) {
-    try { await client.query('ROLLBACK'); } catch { /* ignore */ }
-    console.error('[Customers] POST /identity-verifications error:', err.message);
-    return res.status(err.status || 500).json({
-      success: false,
-      message: err.message || 'Failed to request verification.',
-      data: err.existingId ? { verification_id: err.existingId } : undefined,
-    });
-  } finally {
-    client.release();
-  }
-});
-
-router.post('/identity-verifications/:id/decide', allow(ROLE_SETS.branchOps), async (req, res) => {
-  const client = await req.app.locals.pool.connect();
-  try {
-    const verificationId = Number(req.params.id);
-    await client.query('BEGIN');
-    const existing = await client.query(
-      `SELECT * FROM customer_identity_verifications WHERE verification_id = $1 FOR UPDATE`,
-      [verificationId]
-    );
-    if (!existing.rows.length) {
-      await client.query('ROLLBACK');
-      return res.status(404).json({ success: false, message: 'Identity verification not found.' });
-    }
-    if (!assertSameBranch(res, req.currentUser, existing.rows[0].branch_id)) {
-      await client.query('ROLLBACK');
-      return;
-    }
-    const decided = await decideIdentityVerification(client, {
-      verificationId,
-      decision: req.body?.decision,
-      note: req.body?.note || req.body?.remarks,
-      decidedBy: req.currentUser.id,
-      matchCustomerId: req.body?.match_customer_id || req.body?.customer_id || null,
-    });
-    await client.query('COMMIT');
-
-    await writeAuditFromReq(req.app.locals.pool, req, {
-      module: 'Customer Management',
-      activity: 'Identity Verification',
-      action: decided.status === 'Same Person' ? 'Confirm Same Person'
-        : decided.status === 'Different Person' ? 'Clear Duplicate Flag'
-          : `Identity ${decided.status}`,
-      description: `Decided identity verification #${verificationId}: ${decided.status}.`,
-      status: decided.status === 'Same Person' ? AUDIT_STATUS.APPROVED : AUDIT_STATUS.UPDATED,
-      affectedRecord: `identity_verification:${verificationId}`,
-    });
-
-    const message = decided.status === 'Same Person'
-      ? 'Confirmed same person. Sales Agent will be directed to the existing customer profile.'
-      : decided.status === 'Different Person'
-        ? 'Duplicate flag cleared. Sales Agent may proceed with new registration.'
-        : decided.status === 'Needs Evidence'
-          ? 'Requested further evidence. Sales Agent remains on the waiting screen.'
-          : `Identity verification updated (${decided.status}).`;
-
-    return res.json({
-      success: true,
-      message,
-      data: decided,
-      clearance_token: decided.clearance_token || null,
-      primary_match_customer_id: decided.primary_match_customer_id,
-      next_action: decided.next_action || null,
-      same_branch: decided.same_branch,
-      cross_branch: decided.cross_branch,
-      display_status: decided.display_status,
-    });
-  } catch (err) {
-    try { await client.query('ROLLBACK'); } catch { /* ignore */ }
-    console.error('[Customers] POST /identity-verifications/:id/decide error:', err.message);
-    return res.status(err.status || 500).json({ success: false, message: err.message || 'Failed to decide verification.' });
-  } finally {
-    client.release();
-  }
-});
-
-/** BM: create branch transfer for a cross-branch candidate and link it to the identity ticket. */
-router.post('/identity-verifications/:id/request-transfer', allow(ROLE_SETS.branchOps), async (req, res) => {
-  const client = await req.app.locals.pool.connect();
-  try {
-    const verificationId = Number(req.params.id);
-    const matchCustomerId = Number(req.body?.match_customer_id || req.body?.customer_id);
-    const targetBranchId = Number(req.body?.target_branch_id || req.currentUser?.branchId);
-    if (!Number.isInteger(matchCustomerId) || matchCustomerId <= 0) {
-      return res.status(400).json({ success: false, message: 'match_customer_id is required.' });
-    }
-    if (!Number.isInteger(targetBranchId) || targetBranchId <= 0) {
-      return res.status(400).json({ success: false, message: 'target_branch_id is required.' });
-    }
-
-    await client.query('BEGIN');
-    const existing = await client.query(
-      `SELECT * FROM customer_identity_verifications WHERE verification_id = $1 FOR UPDATE`,
-      [verificationId]
-    );
-    if (!existing.rows.length) {
-      await client.query('ROLLBACK');
-      return res.status(404).json({ success: false, message: 'Identity verification not found.' });
-    }
-    if (!assertSameBranch(res, req.currentUser, existing.rows[0].branch_id)) {
-      await client.query('ROLLBACK');
-      return;
-    }
-
-    const transfer = await createBranchTransferRequest(client, {
-      customerId: matchCustomerId,
-      targetBranchId,
-      requestedBy: req.currentUser.id,
-      reason: req.body?.reason || 'BM routed possible match to Customer Branch Transfer.',
-    });
-
-    const linked = await linkBranchTransferToIdentity(client, {
-      verificationId,
-      matchCustomerId,
-      transferId: transfer.transfer_id,
-      decidedBy: req.currentUser.id,
-      note: req.body?.note || req.body?.reason || null,
-    });
-    await client.query('COMMIT');
-
-    await writeAuditFromReq(req.app.locals.pool, req, {
-      module: 'Customer Management',
-      activity: 'Identity Verification',
-      action: 'Request Branch Transfer From Identity',
-      description: `Linked identity #${verificationId} to branch transfer #${transfer.transfer_id}.`,
-      status: AUDIT_STATUS.CREATED,
-      affectedRecord: `identity_verification:${verificationId}`,
-    });
-
-    const full = await getIdentityVerificationById(req.app.locals.pool, verificationId);
-    return res.status(201).json({
-      success: true,
-      message: 'Branch transfer requested. Source BM must set territory and submit to OM.',
-      data: full || linked,
-      transfer,
-      ...deriveIdentityNextAction(full || linked),
-    });
-  } catch (err) {
-    try { await client.query('ROLLBACK'); } catch { /* ignore */ }
-    console.error('[Customers] POST /identity-verifications/:id/request-transfer error:', err.message);
-    return res.status(err.status || 500).json({
-      success: false,
-      message: err.message || 'Failed to request branch transfer.',
-      data: err.existingId ? { transfer_id: err.existingId } : undefined,
-    });
-  } finally {
-    client.release();
-  }
-});
-
-/**
- * Read-only candidate profile for identity review (allows cross-branch candidates
- * listed on a ticket owned by the BM's branch). Does not mutate customer data.
- */
-router.get(
-  '/identity-verifications/:id/candidates/:customerId',
-  allow(ROLE_SETS.branchOps),
-  async (req, res) => {
-    try {
-      const verificationId = Number(req.params.id);
-      const customerId = Number(req.params.customerId);
-      if (!Number.isInteger(verificationId) || verificationId <= 0) {
-        return res.status(400).json({ success: false, message: 'Invalid verification id.' });
-      }
-      if (!Number.isInteger(customerId) || customerId <= 0) {
-        return res.status(400).json({ success: false, message: 'Invalid customer id.' });
-      }
-
-      const ticket = await getIdentityVerificationById(req.app.locals.pool, verificationId);
-      if (!ticket) {
-        return res.status(404).json({ success: false, message: 'Identity verification not found.' });
-      }
-      if (!assertSameBranch(res, req.currentUser, ticket.branch_id)) return;
-
-      const candidates = Array.isArray(ticket.match_candidates_json)
-        ? ticket.match_candidates_json
-        : [];
-      const listed = candidates.some((c) => Number(c.customer_id) === customerId);
-      if (!listed) {
-        return res.status(403).json({
-          success: false,
-          message: 'Customer is not a candidate on this verification request.',
-        });
-      }
-
-      const customerResult = await req.app.locals.pool.query(
-        `SELECT ${CUSTOMER_SELECT_CORE}
-         FROM customers c
-         LEFT JOIN branches b ON b.id = c.branch_id
-         LEFT JOIN users mgr ON mgr.id = c.account_manager_id
-         LEFT JOIN users agent ON agent.id = c.assigned_sales_agent_id
-         LEFT JOIN territories t ON t.territory_id = c.territory_id
-         WHERE c.customer_id = $1`,
-        [customerId]
-      );
-      if (!customerResult.rows.length) {
-        return res.status(404).json({ success: false, message: 'Customer not found.' });
-      }
-      const customer = customerResult.rows[0];
-      const canFinance = canViewCustomerFinancialDetails(req.currentUser?.roleSlug);
-
-      let activity = null;
-      let credit = null;
-      if (canFinance) {
-        try {
-          const act = await req.app.locals.pool.query(
-            `SELECT outstanding_balance, purchase_volume, last_collection_date, last_sales_visit
-             FROM customer_activity WHERE customer_id = $1`,
-            [customerId]
-          );
-          activity = act.rows[0] || null;
-        } catch { /* optional table */ }
-        try {
-          const cr = await req.app.locals.pool.query(
-            `SELECT credit_limit, credit_status, available_credit
-             FROM customer_credit_info WHERE customer_id = $1`,
-            [customerId]
-          );
-          credit = cr.rows[0] || null;
-        } catch { /* optional table */ }
-      }
-
-      const candidateMeta = candidates.find((c) => Number(c.customer_id) === customerId) || {};
-      return res.json({
-        success: true,
-        data: {
-          ...customer,
-          contact_phone: undefined,
-          contact_phone_masked: maskPhone(customer.contact_phone),
-          contact_person_phone: canFinance ? customer.contact_person_phone : undefined,
-          id_number: canFinance ? customer.id_number : undefined,
-          id_photo: undefined,
-          match_tier: candidateMeta.match_tier || null,
-          match_reasons: candidateMeta.match_reasons || [],
-          same_branch: Number(customer.branch_id) === Number(ticket.branch_id),
-          cross_branch: Number(customer.branch_id) !== Number(ticket.branch_id),
-          verification_id: verificationId,
-          activity: canFinance ? activity : null,
-          credit: canFinance ? credit : null,
-          read_only: true,
-        },
-      });
-    } catch (err) {
-      console.error('[Customers] GET identity candidate profile error:', err.message);
-      return res.status(500).json({ success: false, message: 'Failed to load candidate profile.' });
-    }
-  }
-);
-
 router.get('/branch-transfers', allow(ROLE_SETS.customerRead, ROLE_SETS.branchOps), async (req, res) => {
   try {
     const pool = req.app.locals.pool;
+    const mine = String(req.query.mine || '') === '1';
+    const forOm = String(req.query.for_om || '') === '1' && isUnscoped(req.currentUser);
     const branchId = isUnscoped(req.currentUser) ? null : req.currentUser.branchId;
     const rows = await listBranchTransfers(pool, {
-      branchId,
+      branchId: mine ? null : branchId,
       status: req.query.status || null,
-      forOm: false,
+      forOm,
+      requestedBy: mine ? req.currentUser.id : null,
       limit: req.query.limit,
     });
-    return res.json({ success: true, data: rows });
+    const enriched = rows.map((row) => ({ ...row, progress: deriveTransferProgress(row) }));
+    return res.json({ success: true, data: enriched });
   } catch (err) {
     console.error('[Customers] GET /branch-transfers error:', err.message);
     return res.status(500).json({ success: false, message: 'Failed to load branch transfers.' });
   }
 });
 
+router.get('/branch-transfers/:id', allow(ROLE_SETS.customerRead, ROLE_SETS.branchOps), async (req, res) => {
+  try {
+    const transferId = Number(req.params.id);
+    if (!Number.isInteger(transferId) || transferId <= 0) {
+      return res.status(400).json({ success: false, message: 'Invalid transfer id.' });
+    }
+    const row = await getBranchTransferById(req.app.locals.pool, transferId);
+    if (!row) {
+      return res.status(404).json({ success: false, message: 'Transfer not found.' });
+    }
+    const actorId = Number(req.currentUser?.id || req.currentUser?.user_id);
+    const isRequester = Number(row.requested_by) === actorId;
+    const isBranchOps = ROLE_SETS.branchOps.includes(req.currentUser?.roleSlug);
+    if (!isRequester && !isUnscoped(req.currentUser) && !isBranchOps) {
+      return res.status(403).json({ success: false, message: 'Not allowed to view this transfer.' });
+    }
+    if (!isRequester && isBranchOps && !isUnscoped(req.currentUser)) {
+      const actorBranch = Number(req.currentUser.branchId);
+      if (actorBranch !== Number(row.source_branch_id) && actorBranch !== Number(row.target_branch_id)) {
+        return res.status(403).json({ success: false, message: 'Transfer is outside your branch.' });
+      }
+    }
+    return res.json({
+      success: true,
+      data: { ...row, progress: deriveTransferProgress(row) },
+    });
+  } catch (err) {
+    console.error('[Customers] GET /branch-transfers/:id error:', err.message);
+    return res.status(500).json({ success: false, message: 'Failed to load transfer.' });
+  }
+});
+
+router.get('/:id/open-branch-transfer', allow(ROLE_SETS.customerRead, ROLE_SETS.branchOps), async (req, res) => {
+  const customerId = Number(req.params.id);
+  if (!Number.isInteger(customerId) || customerId <= 0) {
+    return res.status(400).json({ success: false, message: 'Invalid customer id.' });
+  }
+  try {
+    const row = await findOpenBranchTransferForCustomer(req.app.locals.pool, customerId);
+    if (!row) {
+      return res.json({ success: true, data: null });
+    }
+    const actorId = Number(req.currentUser?.id || req.currentUser?.user_id);
+    const isRequester = Number(row.requested_by) === actorId;
+    const isBranchOps = ROLE_SETS.branchOps.includes(req.currentUser?.roleSlug);
+    if (!isRequester && !isUnscoped(req.currentUser) && !isBranchOps) {
+      return res.status(403).json({ success: false, message: 'Not allowed to view this transfer.' });
+    }
+    return res.json({
+      success: true,
+      data: { ...row, progress: deriveTransferProgress(row) },
+    });
+  } catch (err) {
+    console.error('[Customers] GET /:id/open-branch-transfer error:', err.message);
+    return res.status(500).json({ success: false, message: 'Failed to load open transfer.' });
+  }
+});
+
 router.post('/:id/branch-transfer-requests', async (req, res) => {
   const customerId = Number(req.params.id);
-  const targetBranchId = Number(req.body?.target_branch_id || req.currentUser?.branchId);
+  const targetBranchId = Number(
+    req.body?.target_branch_id
+    || req.currentUser?.branchId
+    || req.currentUser?.branch_id
+    || req.currentUser?.branch?.id
+  );
   if (!Number.isInteger(customerId) || customerId <= 0) {
     return res.status(400).json({ success: false, message: 'Invalid customer id.' });
   }
@@ -979,13 +645,24 @@ router.post('/:id/branch-transfer-requests', async (req, res) => {
   const client = await req.app.locals.pool.connect();
   try {
     await client.query('BEGIN');
-    // SA/BM may request transfer of a cross-branch customer they discovered via lookup.
-    // Source BM ownership is enforced when submitting territory details.
     const transfer = await createBranchTransferRequest(client, {
       customerId,
       targetBranchId,
       requestedBy: req.currentUser.id,
       reason: req.body?.reason || null,
+      location: {
+        address_region: req.body?.address_region,
+        address_province: req.body?.address_province,
+        address_city: req.body?.address_city,
+        address_barangay: req.body?.address_barangay,
+        address_street: req.body?.address_street,
+        address: req.body?.address,
+        latitude: req.body?.latitude,
+        longitude: req.body?.longitude,
+      },
+      proposedTerritoryId: req.body?.proposed_territory_id
+        ? Number(req.body.proposed_territory_id)
+        : null,
     });
     await client.query('COMMIT');
 
@@ -998,18 +675,82 @@ router.post('/:id/branch-transfer-requests', async (req, res) => {
       affectedRecord: `customer_branch_transfer:${transfer.transfer_id}`,
     });
 
+    const full = await getBranchTransferById(req.app.locals.pool, transfer.transfer_id);
     return res.status(201).json({
       success: true,
-      message: 'Branch transfer requested. Source Branch Manager must set territory and submit to OM.',
-      data: transfer,
+      message: 'Branch transfer requested. Receiving Branch Manager will validate location and territory.',
+      data: { ...full, progress: deriveTransferProgress(full) },
     });
   } catch (err) {
     try { await client.query('ROLLBACK'); } catch { /* ignore */ }
+    const isConflict = err.status === 409 || err.code === '23505' || err.code === 'TRANSFER_IN_PROGRESS'
+      || /uq_customer_branch_transfers_open/i.test(String(err.message || ''));
+    if (isConflict) {
+      let existingId = err.existingId || null;
+      if (!existingId) {
+        try {
+          const open = await findOpenBranchTransferForCustomer(req.app.locals.pool, customerId);
+          existingId = open?.transfer_id || null;
+        } catch { /* ignore */ }
+      }
+      console.error('[Customers] POST /:id/branch-transfer-requests conflict:', err.message);
+      return res.status(409).json({
+        success: false,
+        code: 'TRANSFER_IN_PROGRESS',
+        message: 'A branch transfer is already in progress for this customer.',
+        data: {
+          transfer_id: existingId,
+          status: err.existingStatus || null,
+          can_resubmit: Boolean(err.canResubmit),
+        },
+      });
+    }
     console.error('[Customers] POST /:id/branch-transfer-requests error:', err.message);
     return res.status(err.status || 500).json({
       success: false,
       message: err.message || 'Failed to request branch transfer.',
       data: err.existingId ? { transfer_id: err.existingId } : undefined,
+    });
+  } finally {
+    client.release();
+  }
+});
+
+router.post('/branch-transfers/:id/sa-resubmit', async (req, res) => {
+  const transferId = Number(req.params.id);
+  const client = await req.app.locals.pool.connect();
+  try {
+    await client.query('BEGIN');
+    const transfer = await resubmitBranchTransferBySa(client, {
+      transferId,
+      requestedBy: req.currentUser.id,
+      reason: req.body?.reason || null,
+      location: {
+        address_region: req.body?.address_region,
+        address_province: req.body?.address_province,
+        address_city: req.body?.address_city,
+        address_barangay: req.body?.address_barangay,
+        address_street: req.body?.address_street,
+        address: req.body?.address,
+        latitude: req.body?.latitude,
+        longitude: req.body?.longitude,
+      },
+      proposedTerritoryId: req.body?.proposed_territory_id
+        ? Number(req.body.proposed_territory_id)
+        : null,
+    });
+    await client.query('COMMIT');
+    const full = await getBranchTransferById(req.app.locals.pool, transfer.transfer_id);
+    return res.json({
+      success: true,
+      message: 'Transfer resubmitted to Receiving Branch Manager.',
+      data: { ...full, progress: deriveTransferProgress(full) },
+    });
+  } catch (err) {
+    try { await client.query('ROLLBACK'); } catch { /* ignore */ }
+    return res.status(err.status || 500).json({
+      success: false,
+      message: err.message || 'Failed to resubmit transfer.',
     });
   } finally {
     client.release();
@@ -1028,8 +769,10 @@ router.get('/branch-transfers/:id/target-territories', allow(ROLE_SETS.branchOps
       return res.status(404).json({ success: false, message: 'Transfer not found.' });
     }
     const row = existing.rows[0];
-    // Source BM (or OM) may list receiving-branch territories for this open transfer only.
-    if (!assertSameBranch(res, req.currentUser, row.source_branch_id)) return;
+    // Receiving BM (or OM) lists receiving-branch territories.
+    if (!isUnscoped(req.currentUser) && !assertSameBranch(res, req.currentUser, row.target_branch_id)) {
+      return;
+    }
     const terr = await req.app.locals.pool.query(
       `SELECT territory_id, territory_name, branch_id, barangay_name, COALESCE(status, 'Active') AS status
        FROM territories
@@ -1041,6 +784,52 @@ router.get('/branch-transfers/:id/target-territories', allow(ROLE_SETS.branchOps
   } catch (err) {
     console.error('[Customers] GET /branch-transfers/:id/target-territories error:', err.message);
     return res.status(500).json({ success: false, message: 'Failed to load territories.' });
+  }
+});
+
+router.post('/branch-transfers/:id/receiving-submit', allow(ROLE_SETS.branchOps), async (req, res) => {
+  const transferId = Number(req.params.id);
+  const client = await req.app.locals.pool.connect();
+  try {
+    await client.query('BEGIN');
+    const existing = await client.query(
+      `SELECT * FROM customer_branch_transfers WHERE transfer_id = $1 FOR UPDATE`,
+      [transferId]
+    );
+    if (!existing.rows.length) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ success: false, message: 'Transfer not found.' });
+    }
+    if (!assertSameBranch(res, req.currentUser, existing.rows[0].target_branch_id)) {
+      await client.query('ROLLBACK');
+      return;
+    }
+    const transfer = await receivingBmSubmitTransfer(client, {
+      transferId,
+      receivingBmId: req.currentUser.id,
+      decision: req.body?.decision || 'confirm',
+      targetTerritoryId: req.body?.target_territory_id
+        ? Number(req.body.target_territory_id)
+        : null,
+      note: req.body?.note || req.body?.remarks || null,
+    });
+    await client.query('COMMIT');
+    const full = await getBranchTransferById(req.app.locals.pool, transfer.transfer_id);
+    return res.json({
+      success: true,
+      message: transfer.status === 'Pending Source'
+        ? 'Territory confirmed. Waiting on Source Branch Manager ownership release.'
+        : 'Transfer returned to Sales Agent for location correction.',
+      data: { ...full, progress: deriveTransferProgress(full) },
+    });
+  } catch (err) {
+    try { await client.query('ROLLBACK'); } catch { /* ignore */ }
+    return res.status(err.status || 500).json({
+      success: false,
+      message: err.message || 'Failed to submit receiving review.',
+    });
+  } finally {
+    client.release();
   }
 });
 
@@ -1064,14 +853,17 @@ router.post('/branch-transfers/:id/source-submit', allow(ROLE_SETS.branchOps), a
     const transfer = await sourceBmSubmitTransfer(client, {
       transferId,
       sourceBmId: req.currentUser.id,
-      targetTerritoryId: Number(req.body?.target_territory_id),
-      reason: req.body?.reason,
+      decision: req.body?.decision || 'release',
+      note: req.body?.note || req.body?.remarks || req.body?.reason || null,
     });
     await client.query('COMMIT');
+    const full = await getBranchTransferById(req.app.locals.pool, transfer.transfer_id);
     return res.json({
       success: true,
-      message: 'Transfer submitted to Operating Manager for approval.',
-      data: transfer,
+      message: transfer.status === 'Pending OM'
+        ? 'Ownership released. Transfer submitted to Operating Manager.'
+        : `Transfer updated (${transfer.status}).`,
+      data: { ...full, progress: deriveTransferProgress(full) },
     });
   } catch (err) {
     try { await client.query('ROLLBACK'); } catch { /* ignore */ }
@@ -1414,7 +1206,6 @@ router.post('/', async (req, res) => {
     marketing_opt_in: marketingOptInRaw,
     phone_verification_status: phoneVerificationStatusRaw,
     cash_registration: cashRegistrationRaw,
-    identity_clearance_token: identityClearanceTokenRaw,
   } = req.body;
 
   const isSalesAgent = req.currentUser?.roleSlug === 'sales_staff';
@@ -1579,7 +1370,6 @@ router.post('/', async (req, res) => {
 
     let identityMatchJson = {};
     let customerStatus = isSalesAgent ? 'Active' : (status || 'Active');
-    const clearanceToken = cleanPart(identityClearanceTokenRaw);
 
     if (cashRegistration) {
       const phoneDigits = digitsOnly(contact_phone);
@@ -1588,24 +1378,6 @@ router.post('/', async (req, res) => {
           'SELECT pg_advisory_xact_lock($1, $2)',
           [CUSTOMER_CREATE_PHONE_LOCK_NS, phoneAdvisoryKey(phoneDigits)]
         );
-      }
-
-      // Block create only when this SA has an open verification for the same phone
-      // (same registration attempt). Other customers may still be registered.
-      if (phoneDigits) {
-        const openVerify = await findOpenIdentityForRequester(client, {
-          requestedBy: req.currentUser.id,
-          phoneNorm: phoneDigits,
-        });
-        if (openVerify && !clearanceToken) {
-          await client.query('ROLLBACK');
-          return res.status(409).json({
-            success: false,
-            message: 'You have a pending Branch Manager identity verification for this phone. Resume that request or wait for the decision.',
-            code: 'IDENTITY_VERIFICATION_PENDING',
-            data: { verification_id: Number(openVerify.verification_id) },
-          });
-        }
       }
 
       const dup = await findCustomerDuplicates(client, {
@@ -1637,20 +1409,14 @@ router.post('/', async (req, res) => {
       }
 
       if (possibleMatches.length) {
-        if (!clearanceToken) {
-          await client.query('ROLLBACK');
-          return res.status(409).json({
-            success: false,
-            message: 'Possible duplicate detected. Request Branch Manager identity verification before registering. Do not create another account.',
-            code: 'REQUIRES_IDENTITY_VERIFICATION',
-            match_summary: 'possible',
-            matches: possibleMatches.map(limitedMatchCard),
-          });
-        }
-        await consumeClearanceToken(client, clearanceToken, resolvedBranchId);
-      } else if (clearanceToken) {
-        // Clearance provided but no longer needed — consume to prevent reuse.
-        try { await consumeClearanceToken(client, clearanceToken, resolvedBranchId); } catch { /* ignore */ }
+        await client.query('ROLLBACK');
+        return res.status(409).json({
+          success: false,
+          message: 'Possible duplicate detected. Registration cannot continue. Review existing profiles from Find Existing Customer.',
+          code: 'REQUIRES_IDENTITY_VERIFICATION',
+          match_summary: 'possible',
+          matches: possibleMatches.map(limitedMatchCard),
+        });
       }
     }
 

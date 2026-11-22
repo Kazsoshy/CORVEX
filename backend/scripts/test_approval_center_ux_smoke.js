@@ -1,11 +1,11 @@
 /**
- * Smoke checks for BM Approval Center UX helpers + candidate profile endpoint wiring.
+ * Smoke checks for BM Approval Center UX helpers (branch resolution + masking).
+ * Identity verification tickets are no longer part of Approval Center.
  * Usage: node scripts/test_approval_center_ux_smoke.js
  */
 import dotenv from 'dotenv';
 import path from 'path';
 import pkg from 'pg';
-import { getIdentityVerificationById } from '../lib/customerIdentityVerification.js';
 import { maskPhone } from '../lib/customerDuplicateLookup.js';
 
 dotenv.config();
@@ -36,36 +36,21 @@ try {
   check('session branch.id resolves', getUserBranchId({ branch: { id: 7 } }) === 7);
   check('session branchId resolves', getUserBranchId({ branchId: 3 }) === 3);
   check('missing branch returns null', getUserBranchId({}) == null);
+  check('maskPhone works', Boolean(maskPhone('09171234567')));
 
-  const ticket = await pool.query(
-    `SELECT verification_id, branch_id, match_candidates_json
-     FROM customer_identity_verifications
-     WHERE status IN ('Pending', 'Needs Evidence')
-     ORDER BY verification_id DESC
+  const pendingLegacy = await pool.query(
+    `SELECT customer_id FROM customers
+     WHERE status = 'Pending Identity Review'
+     ORDER BY customer_id DESC
      LIMIT 1`
   );
-  if (!ticket.rows.length) {
-    check('pending identity ticket available for candidate smoke', true, 'skipped — none pending');
-  } else {
-    const row = await getIdentityVerificationById(pool, ticket.rows[0].verification_id);
-    const candidates = row.match_candidates_json || [];
-    check('getIdentityVerificationById returns ticket', Boolean(row?.verification_id));
-    check('ticket has candidates array', Array.isArray(candidates));
-    if (candidates[0]?.customer_id) {
-      const cust = await pool.query(
-        `SELECT customer_id, contact_phone, branch_id FROM customers WHERE customer_id = $1`,
-        [candidates[0].customer_id]
-      );
-      check(
-        'candidate customer exists for profile endpoint',
-        cust.rows.length === 1,
-        `customer=${candidates[0].customer_id}`
-      );
-      check('maskPhone works', Boolean(maskPhone(cust.rows[0]?.contact_phone || '09171234567')));
-    } else {
-      check('candidate customer exists for profile endpoint', true, 'skipped — empty candidates');
-    }
-  }
+  check(
+    'legacy Pending Identity Review query runs',
+    true,
+    pendingLegacy.rows.length
+      ? `customer=${pendingLegacy.rows[0].customer_id}`
+      : 'none pending'
+  );
 } finally {
   await pool.end();
 }

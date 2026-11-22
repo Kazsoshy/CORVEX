@@ -3,7 +3,6 @@ import { useSearchParams } from 'react-router-dom';
 import {
   fetchCustomerById,
   fetchCustomers,
-  fetchMyIdentityVerifications,
   fetchSalesCreditInvestigations,
 } from '../../api/salesService';
 import { getCurrentUser, getUserAssignedLocation } from '../../api/authService.js';
@@ -152,7 +151,6 @@ export function CustomersPage({ navigate, showToast }) {
   const [customersData, setCustomersData] = useState([]);
   const [totalRecords, setTotalRecords] = useState(0);
   const [findModalOpen, setFindModalOpen] = useState(false);
-  const [pendingVerificationId, setPendingVerificationId] = useState(null);
   const filterResetKey = `${search}|${filter}|${sortBy}|${sortDir}`;
   const pagination = useServerPagination({
     totalRecords,
@@ -160,40 +158,8 @@ export function CustomersPage({ navigate, showToast }) {
     resetKey: filterResetKey,
   });
 
-  useEffect(() => {
-    let active = true;
-    (async () => {
-      const res = await fetchMyIdentityVerifications({ limit: 5 });
-      if (!active || !res.success) return;
-      // Only truly waiting tickets (BM/OM not finished) — do not hijack Add Customer.
-      const openRow = (res.data || []).find((row) => (
-        ['Pending', 'Needs Evidence', 'Transfer Linked'].includes(row.status)
-        || row.next_action === 'wait'
-        || row.next_action === 'wait_transfer'
-      ));
-      if (openRow?.verification_id) {
-        setPendingVerificationId(openRow.verification_id);
-        try {
-          sessionStorage.setItem(
-            'corvex_pending_identity_verification',
-            String(openRow.verification_id)
-          );
-        } catch { /* ignore */ }
-      } else {
-        setPendingVerificationId(null);
-        try { sessionStorage.removeItem('corvex_pending_identity_verification'); } catch { /* ignore */ }
-      }
-    })();
-    return () => { active = false; };
-  }, []);
-
   const openAddCustomer = () => {
     setFindModalOpen(true);
-  };
-
-  const resumeVerification = () => {
-    if (!pendingVerificationId) return;
-    navigate(`/sales/customers/verification/${pendingVerificationId}`);
   };
 
   const toggleSort = (column) => {
@@ -259,11 +225,6 @@ export function CustomersPage({ navigate, showToast }) {
                 <option key={option} value={option}>{option === 'All' ? 'All Customers' : option}</option>
               ))}
             </select>
-            {pendingVerificationId ? (
-              <button className="button secondary" type="button" onClick={resumeVerification}>
-                Resume Verification
-              </button>
-            ) : null}
             <button className="button" type="button" onClick={openAddCustomer}>
               Add Customer
             </button>

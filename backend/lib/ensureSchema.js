@@ -136,7 +136,7 @@ export async function ensureSchema(client) {
       source_branch_id INTEGER NOT NULL REFERENCES branches(id),
       target_branch_id INTEGER NOT NULL REFERENCES branches(id),
       target_territory_id INTEGER REFERENCES territories(territory_id),
-      status VARCHAR(30) NOT NULL DEFAULT 'Pending Source',
+      status VARCHAR(30) NOT NULL DEFAULT 'Pending Receiving',
       reason TEXT,
       revision_note TEXT,
       rejection_note TEXT,
@@ -149,6 +149,17 @@ export async function ensureSchema(client) {
       created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
       updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
     );
+    ALTER TABLE customer_branch_transfers ADD COLUMN IF NOT EXISTS address_region VARCHAR(100);
+    ALTER TABLE customer_branch_transfers ADD COLUMN IF NOT EXISTS address_province VARCHAR(100);
+    ALTER TABLE customer_branch_transfers ADD COLUMN IF NOT EXISTS address_city VARCHAR(100);
+    ALTER TABLE customer_branch_transfers ADD COLUMN IF NOT EXISTS address_barangay VARCHAR(100);
+    ALTER TABLE customer_branch_transfers ADD COLUMN IF NOT EXISTS address_street VARCHAR(255);
+    ALTER TABLE customer_branch_transfers ADD COLUMN IF NOT EXISTS address TEXT;
+    ALTER TABLE customer_branch_transfers ADD COLUMN IF NOT EXISTS latitude DOUBLE PRECISION;
+    ALTER TABLE customer_branch_transfers ADD COLUMN IF NOT EXISTS longitude DOUBLE PRECISION;
+    ALTER TABLE customer_branch_transfers ADD COLUMN IF NOT EXISTS proposed_territory_id INTEGER REFERENCES territories(territory_id) ON DELETE SET NULL;
+    ALTER TABLE customer_branch_transfers ADD COLUMN IF NOT EXISTS receiving_bm_id INTEGER REFERENCES users(id) ON DELETE SET NULL;
+    ALTER TABLE customer_branch_transfers ADD COLUMN IF NOT EXISTS source_release_note TEXT;
   `);
 
   await client.query(`
