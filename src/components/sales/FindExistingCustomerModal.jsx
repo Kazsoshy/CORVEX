@@ -1,18 +1,34 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
-  requestIdentityVerification,
   requestCustomerBranchTransfer,
+  resubmitBranchTransfer,
+  fetchCustomerById,
+  fetchBranchTransferById,
+  fetchOpenBranchTransferForCustomer,
 } from '../../api/salesService';
 import { lookupCustomersForDuplicate } from '../../api/customerPortalService';
-import { getCurrentUser } from '../../api/authService.js';
+import { getCurrentUser, getUserAssignedLocation } from '../../api/authService.js';
 import { EmptyState } from '../shared/EmptyState';
+import { RowActionMenu } from '../shared/RowActionMenu';
 import { StatusBadge } from '../StatusBadge';
+import { formatDisplayDateTime, formatCurrency } from '../../utils/formatters.js';
+import { getUserBranchId } from '../branchManager/approvalCenterHelpers.js';
+import { BranchTransferRequestForm } from './BranchTransferRequestForm';
+import {
+  BranchTransferProgressModal,
+  persistOpenTransferId,
+  readPersistedOpenTransferId,
+} from './BranchTransferProgressModal';
+
+function customerDisplayName(match) {
+  return match?.display_name
+    || match?.business_name
+    || [match?.first_name, match?.last_name].filter(Boolean).join(' ')
+    || 'Customer';
+}
 
 function MatchCard({ match, onOpen, action }) {
-  const name = match.display_name
-    || match.business_name
-    || [match.first_name, match.last_name].filter(Boolean).join(' ')
-    || 'Customer';
+  const name = customerDisplayName(match);
   return (
     <div className="panel" style={{ padding: 12, marginBottom: 8 }}>
       <div className="flex flex-wrap justify-between gap-2">
@@ -43,6 +59,92 @@ function MatchCard({ match, onOpen, action }) {
   );
 }
 
+/** Read-only profile drawer — field layout mirrors Approval Center CustomerProfileDrawer. */
+function PossibleMatchProfileDrawer({ open, loading, profile, onClose }) {
+  if (!open) return null;
+  const name = customerDisplayName(profile);
+  return (
+    <div className="modal-overlay" role="dialog" aria-modal="true" onClick={onClose} style={{ zIndex: 1100 }}>
+      <div
+        className="modal-content"
+        style={{ maxWidth: 720, maxHeight: '90vh', overflow: 'auto' }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        {loading || !profile ? (
+          <p className="muted">Loading customer profile…</p>
+        ) : (
+          <>
+            <div className="flex flex-wrap justify-between gap-2 items-start">
+              <div>
+                <h3 style={{ marginTop: 0, marginBottom: 4 }}>Customer Profile</h3>
+                <p className="muted" style={{ margin: 0 }}>
+                  Read-only. Viewing does not clear the possible-match block or create a registration.
+                </p>
+              </div>
+              <StatusBadge status={profile.status || 'Active'} />
+            </div>
+            <dl className="account-detail-grid two-up" style={{ marginTop: 16 }}>
+              <div>
+                <dt className="muted">Customer</dt>
+                <dd style={{ margin: 0 }}><strong>{name}</strong></dd>
+              </div>
+              <div>
+                <dt className="muted">Customer code</dt>
+                <dd style={{ margin: 0 }}>{profile.customer_code || '—'}</dd>
+              </div>
+              <div>
+                <dt className="muted">Mobile</dt>
+                <dd style={{ margin: 0 }}>{profile.contact_phone_masked || profile.contact_phone || '—'}</dd>
+              </div>
+              <div>
+                <dt className="muted">Home branch</dt>
+                <dd style={{ margin: 0 }}>{profile.branch_name || '—'}</dd>
+              </div>
+              <div>
+                <dt className="muted">Territory</dt>
+                <dd style={{ margin: 0 }}>{profile.territory_name || '—'}</dd>
+              </div>
+              <div>
+                <dt className="muted">Registered</dt>
+                <dd style={{ margin: 0 }}>{formatDisplayDateTime(profile.created_at) || '—'}</dd>
+              </div>
+              <div style={{ gridColumn: '1 / -1' }}>
+                <dt className="muted">Address</dt>
+                <dd style={{ margin: 0 }}>
+                  {profile.address
+                    || [profile.address_street, profile.address_barangay, profile.address_city, profile.address_province]
+                      .filter(Boolean)
+                      .join(', ')
+                    || '—'}
+                </dd>
+              </div>
+              {(profile.match_reasons || [profile.match_reason]).filter(Boolean).length ? (
+                <div style={{ gridColumn: '1 / -1' }}>
+                  <dt className="muted">Match indicators</dt>
+                  <dd style={{ margin: 0 }}>
+                    {(profile.match_reasons || [profile.match_reason]).filter(Boolean).join(', ')}
+                  </dd>
+                </div>
+              ) : null}
+              {profile.activity?.outstanding_balance != null ? (
+                <div>
+                  <dt className="muted">Outstanding balance</dt>
+                  <dd style={{ margin: 0 }}>
+                    {formatCurrency(Number(profile.activity.outstanding_balance))}
+                  </dd>
+                </div>
+              ) : null}
+            </dl>
+            <div className="modal-actions" style={{ marginTop: 16 }}>
+              <button className="button" type="button" onClick={onClose}>Back to Possible Matches</button>
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
 /**
  * Gate before registration: search for duplicates in a modal, then continue to the form.
  */
@@ -63,34 +165,41 @@ export function FindExistingCustomerModal({
   const [findLoading, setFindLoading] = useState(false);
   const [findResult, setFindResult] = useState(null);
   const [lookupSummary, setLookupSummary] = useState(null);
-  const [identityClearanceToken, setIdentityClearanceToken] = useState('');
-  const [verificationSubmitted, setVerificationSubmitted] = useState(false);
-  const [verificationBusy, setVerificationBusy] = useState(false);
   const [transferBusy, setTransferBusy] = useState(false);
   const [transferTarget, setTransferTarget] = useState(null);
-  const [attemptKey] = useState(() => {
-    try {
-      const existing = sessionStorage.getItem('corvex_registration_attempt_key');
-      if (existing) return existing;
-      const key = (typeof crypto !== 'undefined' && crypto.randomUUID)
-        ? crypto.randomUUID()
-        : `attempt-${Date.now()}`;
-      sessionStorage.setItem('corvex_registration_attempt_key', key);
-      return key;
-    } catch {
-      return `attempt-${Date.now()}`;
+  const [transferFormOpen, setTransferFormOpen] = useState(false);
+  const [transferFormMatch, setTransferFormMatch] = useState(null);
+  const [transferFormMode, setTransferFormMode] = useState('create');
+  const [progressOpen, setProgressOpen] = useState(false);
+  const [progressTransferId, setProgressTransferId] = useState(null);
+  const [resubmitTransfer, setResubmitTransfer] = useState(null);
+  const [profileOpen, setProfileOpen] = useState(false);
+  const [profileLoading, setProfileLoading] = useState(false);
+  const [profileData, setProfileData] = useState(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const persisted = readPersistedOpenTransferId();
+    if (persisted) {
+      setProgressTransferId(persisted);
+      setProgressOpen(true);
     }
-  });
+  }, [open]);
 
   if (!open) return null;
+
+  const receivingBranchId = getUserBranchId(currentUser);
+  const receivingBranchLabel = getUserAssignedLocation(currentUser)
+    || currentUser?.branch?.name
+    || currentUser?.branch_name
+    || 'Assigned branch';
 
   const exactMatches = (findResult || []).filter((m) => m.match_tier === 'exact');
   const possibleMatches = (findResult || []).filter((m) => m.match_tier === 'possible');
   const exactSameBranch = exactMatches.find((m) => m.same_branch);
   const exactCrossBranch = transferTarget
     || exactMatches.find((m) => m.cross_branch || m.same_branch === false);
-  const canContinue = lookupSummary === 'no_match'
-    || (lookupSummary === 'possible' && Boolean(identityClearanceToken));
+  const canContinue = lookupSummary === 'no_match';
 
   const buildRegisterUrl = () => {
     const params = new URLSearchParams();
@@ -104,7 +213,6 @@ export function FindExistingCustomerModal({
     if (findQuery.middle_name.trim()) params.set('middleName', findQuery.middle_name.trim());
     if (findQuery.last_name.trim()) params.set('lastName', findQuery.last_name.trim());
     params.set('fromFind', '1');
-    if (identityClearanceToken) params.set('clearance', identityClearanceToken);
     const qs = params.toString();
     return qs ? `${base}?${qs}` : base;
   };
@@ -112,9 +220,8 @@ export function FindExistingCustomerModal({
   const continueToRegister = () => {
     try {
       sessionStorage.setItem('corvex_find_done', '1');
-      if (identityClearanceToken) {
-        sessionStorage.setItem('corvex_identity_clearance', identityClearanceToken);
-      }
+      sessionStorage.removeItem('corvex_identity_clearance');
+      sessionStorage.removeItem('corvex_pending_identity_verification');
     } catch { /* ignore */ }
     onClose?.();
     navigate(buildRegisterUrl());
@@ -126,38 +233,128 @@ export function FindExistingCustomerModal({
     navigate(`/sales/customer-detail/${customerId}?from=customers`);
   };
 
-  const goToWaiting = (verificationId) => {
+  const viewPossibleProfile = async (match) => {
+    setProfileOpen(true);
+    setProfileLoading(true);
+    setProfileData(null);
     try {
-      sessionStorage.setItem('corvex_pending_identity_verification', String(verificationId));
-    } catch { /* ignore */ }
-    setVerificationSubmitted(true);
-    onClose?.();
-    navigate(`/sales/customers/verification/${verificationId}`);
+      const res = await fetchCustomerById(match.customer_id);
+      if (res.success && res.data) {
+        setProfileData({
+          ...res.data,
+          match_reasons: match.match_reasons || [match.match_reason].filter(Boolean),
+        });
+      } else {
+        // Cross-branch or restricted: fall back to masked lookup card from search.
+        setProfileData(match);
+        if (res.status && res.status !== 403) {
+          showToast?.(res.message || 'Showing search card only — full profile unavailable.', 'info');
+        }
+      }
+    } catch {
+      setProfileData(match);
+    } finally {
+      setProfileLoading(false);
+    }
   };
 
-  const requestTransfer = async (match) => {
-    if (!match?.customer_id) return false;
-    const targetBranchId = currentUser?.branchId || currentUser?.branch_id;
-    if (!targetBranchId) {
+  const openTransferProgress = (transferId) => {
+    if (!transferId) return;
+    persistOpenTransferId(transferId);
+    setProgressTransferId(Number(transferId));
+    setProgressOpen(true);
+    setTransferFormOpen(false);
+  };
+
+  const beginResubmitFromOpen = (match, openTransfer) => {
+    setTransferFormMatch(match);
+    setTransferFormMode('resubmit');
+    setResubmitTransfer(openTransfer);
+    setTransferFormOpen(true);
+  };
+
+  const beginTransferRequest = async (match) => {
+    if (!match?.customer_id) return;
+    if (!receivingBranchId) {
       showToast?.('Your account has no assigned branch.', 'error');
-      return false;
+      return;
     }
+
+    const openRes = await fetchOpenBranchTransferForCustomer(match.customer_id);
+    if (openRes.success && openRes.data?.transfer_id) {
+      const openTransfer = openRes.data;
+      if (['Returned to SA', 'Needs Revision'].includes(String(openTransfer.status))) {
+        showToast?.('Correct the location and resubmit this transfer.', 'info');
+        beginResubmitFromOpen(match, openTransfer);
+        return;
+      }
+      showToast?.('A branch transfer is already in progress — opening status.', 'info');
+      openTransferProgress(openTransfer.transfer_id);
+      return;
+    }
+
+    const persisted = readPersistedOpenTransferId();
+    if (persisted) {
+      const existing = await fetchBranchTransferById(persisted);
+      if (existing.success && existing.data
+        && Number(existing.data.customer_id) === Number(match.customer_id)
+        && !['Approved', 'Rejected', 'Cancelled'].includes(existing.data.status)) {
+        if (['Returned to SA', 'Needs Revision'].includes(String(existing.data.status))) {
+          beginResubmitFromOpen(match, existing.data);
+          return;
+        }
+        showToast?.('Opening existing transfer in progress.', 'info');
+        openTransferProgress(persisted);
+        return;
+      }
+    }
+    setTransferFormMatch(match);
+    setTransferFormMode('create');
+    setResubmitTransfer(null);
+    setTransferFormOpen(true);
+  };
+
+  const submitTransferForm = async (payload) => {
     setTransferBusy(true);
     try {
-      const res = await requestCustomerBranchTransfer(match.customer_id, {
-        target_branch_id: Number(targetBranchId),
-        reason: 'Sales Agent found existing customer in another branch during registration.',
-      });
-      if (res.success) {
-        showToast?.(res.message || 'Branch transfer requested for Source BM → OM approval.', 'success');
-        return true;
+      if (transferFormMode === 'resubmit' && resubmitTransfer?.transfer_id) {
+        const res = await resubmitBranchTransfer(resubmitTransfer.transfer_id, payload);
+        if (res.success) {
+          showToast?.(res.message || 'Transfer resubmitted.', 'success');
+          openTransferProgress(res.data?.transfer_id || resubmitTransfer.transfer_id);
+          return;
+        }
+        showToast?.(res.message || 'Could not resubmit transfer.', 'error');
+        return;
       }
-      if (res.status === 409) {
-        showToast?.(res.message || 'A branch transfer is already in progress for this customer.', 'error');
-        return false;
+      const customerId = transferFormMatch?.customer_id;
+      const res = await requestCustomerBranchTransfer(customerId, payload);
+      if (res.success) {
+        showToast?.(res.message || 'Branch transfer requested.', 'success');
+        openTransferProgress(res.data?.transfer_id);
+        return;
+      }
+      const conflict = res.status === 409
+        || res.code === 'TRANSFER_IN_PROGRESS'
+        || /already in progress|uq_customer_branch_transfers_open/i.test(String(res.message || ''));
+      if (conflict) {
+        let transferId = res.data?.transfer_id;
+        if (!transferId && customerId) {
+          const openRes = await fetchOpenBranchTransferForCustomer(customerId);
+          transferId = openRes.data?.transfer_id;
+          if (openRes.data && ['Returned to SA', 'Needs Revision'].includes(String(openRes.data.status))) {
+            showToast?.('Correct the location and resubmit this transfer.', 'info');
+            beginResubmitFromOpen(transferFormMatch, openRes.data);
+            return;
+          }
+        }
+        if (transferId) {
+          showToast?.('A branch transfer is already in progress — opening status.', 'info');
+          openTransferProgress(transferId);
+          return;
+        }
       }
       showToast?.(res.message || 'Could not request branch transfer.', 'error');
-      return false;
     } finally {
       setTransferBusy(false);
     }
@@ -168,16 +365,16 @@ export function FindExistingCustomerModal({
     const firstName = findQuery.first_name.trim();
     const middleName = findQuery.middle_name.trim();
     const lastName = findQuery.last_name.trim();
-    const name = [firstName, middleName, lastName].filter(Boolean).join(' ');
     if (!phone && !firstName && !lastName && !middleName) {
       showToast?.('Enter a mobile number and/or customer name to search.', 'error');
       return;
     }
     setFindLoading(true);
-    setIdentityClearanceToken('');
-    setVerificationSubmitted(false);
     setTransferTarget(null);
+    setProfileOpen(false);
+    setProfileData(null);
     try {
+      const name = [firstName, middleName, lastName].filter(Boolean).join(' ');
       const res = await lookupCustomersForDuplicate({
         contact_phone: phone || undefined,
         name: name || undefined,
@@ -199,55 +396,11 @@ export function FindExistingCustomerModal({
     }
   };
 
-  const requestBmVerification = async () => {
-    if (verificationBusy || verificationSubmitted) return;
-    setVerificationBusy(true);
-    setVerificationSubmitted(true);
-    try {
-      const searchName = [
-        findQuery.first_name.trim(),
-        findQuery.middle_name.trim(),
-        findQuery.last_name.trim(),
-      ].filter(Boolean).join(' ');
-      const res = await requestIdentityVerification({
-        registration_attempt_key: attemptKey,
-        search: {
-          contact_phone: findQuery.phone.trim(),
-          name: searchName,
-          registration_attempt_key: attemptKey,
-        },
-        proposed_registration: {
-          first_name: findQuery.first_name.trim(),
-          middle_name: findQuery.middle_name.trim(),
-          last_name: findQuery.last_name.trim(),
-          contact_phone: findQuery.phone.trim(),
-        },
-        matches: possibleMatches.length ? possibleMatches : findResult,
-      });
-      const verificationId = res.data?.verification_id;
-      if ((res.success || res.idempotent) && verificationId) {
-        showToast?.(
-          res.idempotent
-            ? 'Existing verification restored — opening waiting screen.'
-            : (res.message || 'Sent to Branch Manager for identity verification.'),
-          'success'
-        );
-        goToWaiting(verificationId);
-        return;
-      }
-      // Allow retry only if the server truly failed without an existing ticket.
-      setVerificationSubmitted(false);
-      showToast?.(res.message || 'Could not request verification.', 'error');
-    } finally {
-      setVerificationBusy(false);
-    }
-  };
-
   return (
     <div className="modal-overlay" role="dialog" aria-modal="true" onClick={onClose}>
       <div
         className="modal-content"
-        style={{ maxWidth: 640 }}
+        style={{ maxWidth: lookupSummary === 'possible' ? 820 : 640 }}
         onClick={(e) => e.stopPropagation()}
       >
         <h3 style={{ marginTop: 0 }}>Find Existing Customer</h3>
@@ -333,9 +486,9 @@ export function FindExistingCustomerModal({
                     className="button"
                     type="button"
                     disabled={transferBusy}
-                    onClick={() => requestTransfer(m)}
+                    onClick={() => beginTransferRequest(m)}
                   >
-                    {transferBusy ? 'Requesting…' : 'Request Branch Transfer'}
+                    Request Branch Transfer
                   </button>
                 )}
               />
@@ -345,32 +498,47 @@ export function FindExistingCustomerModal({
 
         {lookupSummary === 'possible' ? (
           <div style={{ marginTop: 16 }}>
-            {identityClearanceToken ? (
-              <p className="muted">
-                Branch Manager confirmed a different person. Duplicate flag cleared — you may continue registration.
-              </p>
-            ) : (
-              <p className="form-error">
-                Potential duplicate found. Registration is on hold until the Branch Manager reviews this possible match.
-              </p>
-            )}
-            {possibleMatches.map((m) => (
-              <MatchCard key={m.customer_id} match={m} />
-            ))}
-            {!identityClearanceToken ? (
-              <div className="flex flex-wrap gap-2" style={{ marginTop: 8 }}>
-                <button
-                  className="button"
-                  type="button"
-                  disabled={verificationBusy || verificationSubmitted}
-                  onClick={requestBmVerification}
-                >
-                  {verificationBusy || verificationSubmitted
-                    ? 'Submitting…'
-                    : 'Request BM Verification'}
-                </button>
-              </div>
-            ) : null}
+            <p className="form-error">
+              Possible matches found. Registration cannot continue. Review the profiles below —
+              if one is the same person, open their existing account or request a branch transfer from Exact Match flow after refining your search.
+            </p>
+            <div className="table-wrap" style={{ marginTop: 8 }}>
+              <table className="data-table">
+                <thead>
+                  <tr>
+                    <th>Name</th>
+                    <th>Code</th>
+                    <th>Mobile</th>
+                    <th>Home Branch</th>
+                    <th>Status</th>
+                    <th aria-label="Actions" />
+                  </tr>
+                </thead>
+                <tbody>
+                  {possibleMatches.map((m) => (
+                    <tr key={m.customer_id}>
+                      <td>{customerDisplayName(m)}</td>
+                      <td>{m.customer_code || '—'}</td>
+                      <td>{m.contact_phone_masked || m.contact_phone || '—'}</td>
+                      <td>{m.branch_name || '—'}{m.cross_branch ? ' (other)' : ''}</td>
+                      <td><StatusBadge status={m.status || 'Active'} /></td>
+                      <td>
+                        <RowActionMenu
+                          label={`Actions for ${customerDisplayName(m)}`}
+                          items={[
+                            {
+                              key: 'view',
+                              label: 'View Profile',
+                              onSelect: () => viewPossibleProfile(m),
+                            },
+                          ]}
+                        />
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           </div>
         ) : null}
 
@@ -381,11 +549,68 @@ export function FindExistingCustomerModal({
             type="button"
             disabled={!canContinue}
             onClick={continueToRegister}
+            title={lookupSummary === 'possible' ? 'Clear possible matches before registering' : undefined}
           >
-            {lookupSummary === 'no_match' ? 'Continue Registration' : 'Continue to Registration'}
+            Continue Registration
           </button>
         </div>
       </div>
+
+      <PossibleMatchProfileDrawer
+        open={profileOpen}
+        loading={profileLoading}
+        profile={profileData}
+        onClose={() => {
+          setProfileOpen(false);
+          setProfileData(null);
+        }}
+      />
+
+      <BranchTransferRequestForm
+        open={transferFormOpen}
+        match={transferFormMatch}
+        receivingBranchId={receivingBranchId}
+        receivingBranchLabel={receivingBranchLabel}
+        mode={transferFormMode}
+        busy={transferBusy}
+        initialReason={resubmitTransfer?.reason || ''}
+        initialLocation={resubmitTransfer ? {
+          address_region: resubmitTransfer.address_region,
+          address_province: resubmitTransfer.address_province,
+          address_city: resubmitTransfer.address_city,
+          address_barangay: resubmitTransfer.address_barangay,
+          address_street: resubmitTransfer.address_street,
+          latitude: resubmitTransfer.latitude,
+          longitude: resubmitTransfer.longitude,
+        } : null}
+        showToast={showToast}
+        onClose={() => setTransferFormOpen(false)}
+        onSubmit={submitTransferForm}
+      />
+
+      <BranchTransferProgressModal
+        open={progressOpen}
+        transferId={progressTransferId}
+        showToast={showToast}
+        onClose={() => setProgressOpen(false)}
+        onOpenProfile={(customerId) => {
+          setProgressOpen(false);
+          openExistingProfile(customerId);
+        }}
+        onCorrectLocation={(transfer) => {
+          setResubmitTransfer(transfer);
+          setTransferFormMatch({
+            customer_id: transfer.customer_id,
+            customer_code: transfer.customer_code,
+            first_name: transfer.first_name,
+            last_name: transfer.last_name,
+            branch_name: transfer.source_branch_name,
+          });
+          setTransferFormMode('resubmit');
+          setProgressOpen(false);
+          setTransferFormOpen(true);
+        }}
+      />
     </div>
   );
 }

@@ -101,107 +101,40 @@ export async function decideCustomerIdentityReview(customerId, payload) {
   }
 }
 
-export async function fetchIdentityVerifications(params = {}) {
-  try {
-    const response = await apiClient.get('/customers/identity-verifications', { params });
-    return response.data;
-  } catch (error) {
-    return { success: false, data: [], message: error?.response?.data?.message || error?.message };
-  }
-}
-
-export async function fetchMyIdentityVerifications(params = {}) {
-  try {
-    const response = await apiClient.get('/customers/identity-verifications', {
-      params: { ...params, mine: 1 },
-    });
-    return response.data;
-  } catch (error) {
-    return { success: false, data: [], message: error?.response?.data?.message || error?.message };
-  }
-}
-
-export async function fetchIdentityVerificationById(verificationId) {
-  try {
-    const response = await apiClient.get(`/customers/identity-verifications/${verificationId}`);
-    return response.data;
-  } catch (error) {
-    return {
-      success: false,
-      data: null,
-      message: error?.response?.data?.message || error?.message || 'Failed to load verification.',
-      status: error?.response?.status,
-    };
-  }
-}
-
-export async function requestIdentityVerification(payload) {
-  try {
-    const response = await apiClient.post('/customers/identity-verifications', payload);
-    return response.data;
-  } catch (error) {
-    const body = error?.response?.data || {};
-    return {
-      success: false,
-      message: body.message || error?.message || 'Failed to request verification.',
-      status: error?.response?.status,
-      data: body.data,
-      idempotent: Boolean(body.idempotent),
-    };
-  }
-}
-
-export async function decideIdentityVerification(verificationId, payload) {
-  try {
-    const response = await apiClient.post(`/customers/identity-verifications/${verificationId}/decide`, payload);
-    return response.data;
-  } catch (error) {
-    return {
-      success: false,
-      message: error?.response?.data?.message || error?.message || 'Failed to decide verification.',
-    };
-  }
-}
-
-export async function requestIdentityBranchTransfer(verificationId, payload) {
-  try {
-    const response = await apiClient.post(
-      `/customers/identity-verifications/${verificationId}/request-transfer`,
-      payload
-    );
-    return response.data;
-  } catch (error) {
-    return {
-      success: false,
-      message: error?.response?.data?.message || error?.message || 'Failed to request branch transfer.',
-      status: error?.response?.status,
-      data: error?.response?.data?.data,
-    };
-  }
-}
-
-export async function fetchIdentityCandidateProfile(verificationId, customerId) {
-  try {
-    const response = await apiClient.get(
-      `/customers/identity-verifications/${verificationId}/candidates/${customerId}`
-    );
-    return response.data;
-  } catch (error) {
-    return {
-      success: false,
-      data: null,
-      message: error?.response?.data?.message || error?.message || 'Failed to load candidate profile.',
-      status: error?.response?.status,
-    };
-  }
-}
-
 export async function fetchBranchTransfers(params = {}) {
   try {
     const response = await apiClient.get('/customers/branch-transfers', { params });
     return response.data;
   } catch (error) {
     return { success: false, data: [], message: error?.response?.data?.message || error?.message };
+  }
+}
+
+export async function fetchBranchTransferById(transferId) {
+  try {
+    const response = await apiClient.get(`/customers/branch-transfers/${transferId}`);
+    return response.data;
+  } catch (error) {
+    return {
+      success: false,
+      data: null,
+      message: error?.response?.data?.message || error?.message || 'Failed to load transfer.',
+      status: error?.response?.status,
+    };
+  }
+}
+
+export async function fetchOpenBranchTransferForCustomer(customerId) {
+  try {
+    const response = await apiClient.get(`/customers/${customerId}/open-branch-transfer`);
+    return response.data;
+  } catch (error) {
+    return {
+      success: false,
+      data: null,
+      message: error?.response?.data?.message || error?.message || 'Failed to load open transfer.',
+      status: error?.response?.status,
+    };
   }
 }
 
@@ -214,6 +147,21 @@ export async function requestCustomerBranchTransfer(customerId, payload) {
       success: false,
       message: error?.response?.data?.message || error?.message || 'Failed to request branch transfer.',
       status: error?.response?.status,
+      code: error?.response?.data?.code,
+      data: error?.response?.data?.data,
+    };
+  }
+}
+
+export async function resubmitBranchTransfer(transferId, payload) {
+  try {
+    const response = await apiClient.post(`/customers/branch-transfers/${transferId}/sa-resubmit`, payload);
+    return response.data;
+  } catch (error) {
+    return {
+      success: false,
+      message: error?.response?.data?.message || error?.message || 'Failed to resubmit transfer.',
+      status: error?.response?.status,
       data: error?.response?.data?.data,
     };
   }
@@ -225,6 +173,18 @@ export async function fetchBranchTransferTargetTerritories(transferId) {
     return response.data;
   } catch (error) {
     return { success: false, data: [], message: error?.response?.data?.message || error?.message };
+  }
+}
+
+export async function receivingSubmitBranchTransfer(transferId, payload) {
+  try {
+    const response = await apiClient.post(`/customers/branch-transfers/${transferId}/receiving-submit`, payload);
+    return response.data;
+  } catch (error) {
+    return {
+      success: false,
+      message: error?.response?.data?.message || error?.message || 'Failed to submit receiving review.',
+    };
   }
 }
 

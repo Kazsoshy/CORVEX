@@ -1,13 +1,251 @@
 import { upsertOpenOperationalAlert, resolveAlertsBySourceKey } from './operationalAlerts.js';
 
+export const OPEN_TRANSFER_STATUSES = [
+  'Pending Receiving',
+  'Pending Source',
+  'Pending OM',
+  'Returned to SA',
+  'Needs Revision',
+];
+
+function cleanPart(value, max = 255) {
+  const text = String(value ?? '').trim();
+  if (!text) return null;
+  return text.slice(0, max);
+}
+
+function composeAddress(parts = {}) {
+  return [
+    parts.address_street,
+    parts.address_barangay,
+    parts.address_city,
+    parts.address_province,
+    parts.address_region,
+  ].filter(Boolean).join(', ') || null;
+}
+
+function appendTimeline(snapshot, event) {
+  const base = snapshot && typeof snapshot === 'object' ? snapshot : {};
+  const timeline = Array.isArray(base.timeline) ? [...base.timeline] : [];
+  timeline.push({
+    at: new Date().toISOString(),
+    ...event,
+  });
+  return { ...base, timeline };
+}
+
+function haversineMeters(lat1, lon1, lat2, lon2) {
+  const toRad = (d) => (Number(d) * Math.PI) / 180;
+  const R = 6371000;
+  const dLat = toRad(lat2 - lat1);
+  const dLon = toRad(lon2 - lon1);
+  const a = Math.sin(dLat / 2) ** 2
+    + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) ** 2;
+  return 2 * R * Math.asin(Math.sqrt(a));
+}
+
+/** Suggest a receiving-branch territory from barangay / map pin. */
+export async function suggestReceivingTerritory(client, {
+  branchId,
+  barangay = null,
+  latitude = null,
+  longitude = null,
+  bufferMeters = 250,
+} = {}) {
+  const terr = await client.query(
+    `SELECT territory_id, territory_name, barangay_name,
+            latitude::float AS latitude, longitude::float AS longitude,
+            COALESCE(radius_meters, 800) AS radius_meters
+     FROM territories
+     WHERE branch_id = $1 AND COALESCE(status, 'Active') = 'Active'`,
+    [branchId]
+  );
+  const rows = terr.rows || [];
+  if (!rows.length) {
+    return { proposed_territory_id: null, classification: 'none', matches: [] };
+  }
+
+  const barangayKey = String(barangay || '').trim().toLowerCase();
+  if (barangayKey) {
+    const byBarangay = rows.filter((t) => String(t.barangay_name || '').toLowerCase() === barangayKey);
+    if (byBarangay.length === 1) {
+      return {
+        proposed_territory_id: Number(byBarangay[0].territory_id),
+        classification: 'barangay_exact',
+        matches: byBarangay,
+        confident: true,
+      };
+    }
+    if (byBarangay.length > 1) {
+      return {
+        proposed_territory_id: null,
+        classification: 'barangay_ambiguous',
+        matches: byBarangay,
+        confident: false,
+      };
+    }
+  }
+
+  const lat = Number(latitude);
+  const lng = Number(longitude);
+  if (Number.isFinite(lat) && Number.isFinite(lng)) {
+    const scored = rows
+      .filter((t) => Number.isFinite(Number(t.latitude)) && Number.isFinite(Number(t.longitude)))
+      .map((t) => {
+        const distance = haversineMeters(lat, lng, Number(t.latitude), Number(t.longitude));
+        const radius = Number(t.radius_meters) || 800;
+        return { ...t, distance_meters: Math.round(distance), inside: distance <= radius + bufferMeters };
+      })
+      .sort((a, b) => a.distance_meters - b.distance_meters);
+    const inside = scored.filter((t) => t.inside);
+    if (inside.length === 1) {
+      return {
+        proposed_territory_id: Number(inside[0].territory_id),
+        classification: 'geo_inside',
+        matches: inside,
+        nearest: inside[0],
+        confident: true,
+      };
+    }
+    if (inside.length > 1) {
+      return {
+        proposed_territory_id: null,
+        classification: 'geo_ambiguous',
+        matches: inside,
+        nearest: inside[0],
+        confident: false,
+      };
+    }
+    if (scored[0]) {
+      return {
+        proposed_territory_id: null,
+        classification: 'outside',
+        matches: [],
+        nearest: scored[0],
+        confident: false,
+      };
+    }
+  }
+
+  return { proposed_territory_id: null, classification: 'unknown', matches: [], confident: false };
+}
+
+async function assertTerritoryOnReceivingBranch(client, territoryId, targetBranchId) {
+  if (!territoryId) {
+    const err = new Error('Target territory is required.');
+    err.status = 400;
+    throw err;
+  }
+  const terr = await client.query(
+    `SELECT territory_id, branch_id, COALESCE(status, 'Active') AS status
+     FROM territories WHERE territory_id = $1`,
+    [territoryId]
+  );
+  if (!terr.rows.length || Number(terr.rows[0].branch_id) !== Number(targetBranchId)) {
+    const err = new Error('Territory must belong to the receiving branch.');
+    err.status = 400;
+    throw err;
+  }
+  if (terr.rows[0].status !== 'Active') {
+    const err = new Error('Target territory must be Active.');
+    err.status = 400;
+    throw err;
+  }
+  return terr.rows[0];
+}
+
+export async function getBranchTransferById(db, transferId) {
+  const result = await db.query(
+    `SELECT t.*,
+            c.customer_code, c.first_name, c.last_name, c.contact_phone, c.status AS customer_status,
+            sb.name AS source_branch_name,
+            tb.name AS target_branch_name,
+            tr.territory_name AS target_territory_name,
+            pt.territory_name AS proposed_territory_name,
+            COALESCE(NULLIF(TRIM(req.full_name), ''), TRIM(CONCAT_WS(' ', req.first_name, req.last_name))) AS requester_name
+     FROM customer_branch_transfers t
+     JOIN customers c ON c.customer_id = t.customer_id
+     LEFT JOIN branches sb ON sb.id = t.source_branch_id
+     LEFT JOIN branches tb ON tb.id = t.target_branch_id
+     LEFT JOIN territories tr ON tr.territory_id = t.target_territory_id
+     LEFT JOIN territories pt ON pt.territory_id = t.proposed_territory_id
+     LEFT JOIN users req ON req.id = t.requested_by
+     WHERE t.transfer_id = $1`,
+    [transferId]
+  );
+  return result.rows[0] || null;
+}
+
+export function deriveTransferProgress(transfer) {
+  const status = String(transfer?.status || '');
+  const steps = [
+    { key: 'submitted', label: 'Transfer Request Submitted by SA' },
+    { key: 'receiving', label: 'Receiving BM Location and Territory Validation' },
+    { key: 'source', label: 'Source BM Account Review and Ownership Release' },
+    { key: 'om', label: 'Pending OM Final Approval' },
+    { key: 'processing', label: 'System Processing Transfer' },
+    { key: 'completed', label: 'Transfer Completed' },
+  ];
+  let activeIndex = 0;
+  if (status === 'Pending Receiving' || status === 'Returned to SA' || status === 'Needs Revision') {
+    activeIndex = status === 'Pending Receiving' ? 1 : 0;
+  } else if (status === 'Pending Source') activeIndex = 2;
+  else if (status === 'Pending OM') activeIndex = 3;
+  else if (status === 'Approved') activeIndex = 5;
+  else if (status === 'Rejected' || status === 'Cancelled') activeIndex = -1;
+
+  return {
+    transfer_ref: transfer?.transfer_id != null ? `CBT-${transfer.transfer_id}` : null,
+    steps: steps.map((step, index) => ({
+      ...step,
+      state: status === 'Approved'
+        ? 'done'
+        : (activeIndex < 0
+          ? (index === 0 ? 'done' : 'blocked')
+          : (index < activeIndex ? 'done' : index === activeIndex ? 'active' : 'pending')),
+    })),
+    status,
+    rejection_note: transfer?.rejection_note || null,
+    revision_note: transfer?.revision_note || null,
+  };
+}
+
+export async function findOpenBranchTransferForCustomer(db, customerId) {
+  const id = Number(customerId);
+  if (!Number.isInteger(id) || id <= 0) return null;
+  const open = await db.query(
+    `SELECT *
+     FROM customer_branch_transfers
+     WHERE customer_id = $1
+       AND status = ANY($2::text[])
+     ORDER BY transfer_id DESC
+     LIMIT 1`,
+    [id, OPEN_TRANSFER_STATUSES]
+  );
+  return open.rows[0] || null;
+}
+
+function throwOpenTransferConflict(existing) {
+  const err = new Error('A branch transfer is already in progress for this customer.');
+  err.status = 409;
+  err.code = 'TRANSFER_IN_PROGRESS';
+  err.existingId = existing?.transfer_id || null;
+  err.existingStatus = existing?.status || null;
+  err.canResubmit = ['Returned to SA', 'Needs Revision'].includes(String(existing?.status || ''));
+  throw err;
+}
+
 export async function createBranchTransferRequest(client, {
   customerId,
   targetBranchId,
   requestedBy,
   reason = null,
+  location = {},
+  proposedTerritoryId = null,
 }) {
   const customer = await client.query(
-    `SELECT customer_id, branch_id, territory_id, account_manager_id, assigned_sales_agent_id, status, first_name, last_name
+    `SELECT customer_id, branch_id, territory_id, account_manager_id, assigned_sales_agent_id, status,
+            first_name, last_name, customer_code
      FROM customers WHERE customer_id = $1 FOR UPDATE`,
     [customerId]
   );
@@ -28,17 +266,32 @@ export async function createBranchTransferRequest(client, {
     throw err;
   }
 
-  const open = await client.query(
-    `SELECT transfer_id FROM customer_branch_transfers
-     WHERE customer_id = $1 AND status IN ('Pending Source', 'Pending OM', 'Needs Revision')
-     LIMIT 1`,
-    [customerId]
-  );
-  if (open.rows.length) {
-    const err = new Error('A branch transfer is already in progress for this customer.');
-    err.status = 409;
-    err.existingId = open.rows[0].transfer_id;
+  const reasonText = cleanPart(reason, 2000);
+  if (!reasonText) {
+    const err = new Error('Transfer reason is required.');
+    err.status = 400;
     throw err;
+  }
+
+  const addressParts = {
+    address_region: cleanPart(location.address_region, 100),
+    address_province: cleanPart(location.address_province, 100),
+    address_city: cleanPart(location.address_city, 100),
+    address_barangay: cleanPart(location.address_barangay, 100),
+    address_street: cleanPart(location.address_street, 255),
+  };
+  if (!addressParts.address_province || !addressParts.address_city || !addressParts.address_barangay || !addressParts.address_street) {
+    const err = new Error('Current customer location (province, city, barangay, street) is required.');
+    err.status = 400;
+    throw err;
+  }
+  const address = cleanPart(location.address, 500) || composeAddress(addressParts);
+  const latitude = location.latitude != null && location.latitude !== '' ? Number(location.latitude) : null;
+  const longitude = location.longitude != null && location.longitude !== '' ? Number(location.longitude) : null;
+
+  const openExisting = await findOpenBranchTransferForCustomer(client, customerId);
+  if (openExisting) {
+    throwOpenTransferConflict(openExisting);
   }
 
   const target = await client.query(`SELECT id, name FROM branches WHERE id = $1`, [targetBranchId]);
@@ -48,50 +301,97 @@ export async function createBranchTransferRequest(client, {
     throw err;
   }
 
-  const inserted = await client.query(
-    `INSERT INTO customer_branch_transfers (
-       customer_id, source_branch_id, target_branch_id, status, reason, requested_by, snapshot_json
-     ) VALUES ($1, $2, $3, 'Pending Source', $4, $5, $6::jsonb)
-     RETURNING *`,
-    [
-      customerId,
-      row.branch_id,
-      targetBranchId,
-      reason || null,
-      requestedBy,
-      JSON.stringify({
-        before: {
-          branch_id: row.branch_id,
-          territory_id: row.territory_id,
-          account_manager_id: row.account_manager_id,
-          assigned_sales_agent_id: row.assigned_sales_agent_id,
-          status: row.status,
-        },
-        customer_name: [row.first_name, row.last_name].filter(Boolean).join(' '),
-      }),
-    ]
-  );
+  let proposedId = proposedTerritoryId ? Number(proposedTerritoryId) : null;
+  const suggestion = await suggestReceivingTerritory(client, {
+    branchId: targetBranchId,
+    barangay: addressParts.address_barangay,
+    latitude,
+    longitude,
+  });
+  if (!proposedId && suggestion.confident && suggestion.proposed_territory_id) {
+    proposedId = suggestion.proposed_territory_id;
+  }
+  if (proposedId) {
+    await assertTerritoryOnReceivingBranch(client, proposedId, targetBranchId);
+  }
+
+  const snapshot = appendTimeline({
+    before: {
+      branch_id: row.branch_id,
+      territory_id: row.territory_id,
+      account_manager_id: row.account_manager_id,
+      assigned_sales_agent_id: row.assigned_sales_agent_id,
+      status: row.status,
+    },
+    customer_name: [row.first_name, row.last_name].filter(Boolean).join(' '),
+    customer_code: row.customer_code || null,
+    suggestion,
+  }, {
+    step: 'submitted',
+    actor_id: requestedBy,
+    note: 'SA submitted transfer request with current customer location.',
+  });
+
+  let inserted;
+  try {
+    inserted = await client.query(
+      `INSERT INTO customer_branch_transfers (
+         customer_id, source_branch_id, target_branch_id, status, reason, requested_by, snapshot_json,
+         address_region, address_province, address_city, address_barangay, address_street, address,
+         latitude, longitude, proposed_territory_id
+       ) VALUES (
+         $1, $2, $3, 'Pending Receiving', $4, $5, $6::jsonb,
+         $7, $8, $9, $10, $11, $12,
+         $13, $14, $15
+       )
+       RETURNING *`,
+      [
+        customerId,
+        row.branch_id,
+        targetBranchId,
+        reasonText,
+        requestedBy,
+        JSON.stringify(snapshot),
+        addressParts.address_region,
+        addressParts.address_province,
+        addressParts.address_city,
+        addressParts.address_barangay,
+        addressParts.address_street,
+        address,
+        Number.isFinite(latitude) ? latitude : null,
+        Number.isFinite(longitude) ? longitude : null,
+        proposedId,
+      ]
+    );
+  } catch (insertErr) {
+    // Race / index mismatch: never leak raw unique_violation to the client.
+    if (insertErr?.code === '23505') {
+      const raced = await findOpenBranchTransferForCustomer(client, customerId);
+      throwOpenTransferConflict(raced || { transfer_id: null, status: null });
+    }
+    throw insertErr;
+  }
   const transfer = inserted.rows[0];
 
   await upsertOpenOperationalAlert(client, {
-    branchId: row.branch_id,
+    branchId: targetBranchId,
     alertType: 'Customer Branch Transfer',
     severity: 'Warning',
-    title: `Branch transfer requested: ${[row.first_name, row.last_name].filter(Boolean).join(' ')}`,
-    message: `A transfer to ${target.rows[0].name} needs Source Branch Manager initiation (territory + reason), then OM approval.`,
-    sourceKey: `customer-branch-transfer:${transfer.transfer_id}`,
+    title: `Incoming transfer — validate location: ${[row.first_name, row.last_name].filter(Boolean).join(' ')}`,
+    message: 'Receiving Branch Manager must confirm territory for the customer\'s current location, then Source BM releases ownership.',
+    sourceKey: `customer-branch-transfer-target:${transfer.transfer_id}`,
     entityType: 'customer_branch_transfer',
     entityId: transfer.transfer_id,
     linkPath: `/branch-manager/approval-center?tab=branch-transfers&transferId=${transfer.transfer_id}`,
   });
 
   await upsertOpenOperationalAlert(client, {
-    branchId: targetBranchId,
+    branchId: row.branch_id,
     alertType: 'Customer Branch Transfer',
     severity: 'Info',
-    title: `Incoming transfer request: ${[row.first_name, row.last_name].filter(Boolean).join(' ')}`,
-    message: 'A customer from another branch was requested for transfer into this branch. Waiting on Source BM and OM.',
-    sourceKey: `customer-branch-transfer-target:${transfer.transfer_id}`,
+    title: `Outgoing transfer requested: ${[row.first_name, row.last_name].filter(Boolean).join(' ')}`,
+    message: `Transfer to ${target.rows[0].name} awaiting Receiving BM territory validation, then your ownership release.`,
+    sourceKey: `customer-branch-transfer:${transfer.transfer_id}`,
     entityType: 'customer_branch_transfer',
     entityId: transfer.transfer_id,
     linkPath: `/branch-manager/approval-center?tab=branch-transfers&transferId=${transfer.transfer_id}`,
@@ -100,55 +400,12 @@ export async function createBranchTransferRequest(client, {
   return transfer;
 }
 
-export async function listBranchTransfers(db, {
-  branchId = null,
-  status = null,
-  forOm = false,
-  limit = 100,
-} = {}) {
-  const params = [];
-  const conditions = [];
-  if (status) {
-    params.push(status);
-    conditions.push(`t.status = $${params.length}`);
-  } else if (forOm) {
-    conditions.push(`t.status IN ('Pending OM', 'Needs Revision')`);
-  } else {
-    conditions.push(`t.status IN ('Pending Source', 'Pending OM', 'Needs Revision')`);
-  }
-  if (branchId != null && !forOm) {
-    params.push(Number(branchId));
-    conditions.push(`(t.source_branch_id = $${params.length} OR t.target_branch_id = $${params.length})`);
-  }
-  params.push(Math.min(Number(limit) || 100, 200));
-  const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
-  const result = await db.query(
-    `SELECT t.*,
-            c.customer_code, c.first_name, c.last_name, c.contact_phone, c.status AS customer_status,
-            sb.name AS source_branch_name,
-            tb.name AS target_branch_name,
-            tr.territory_name AS target_territory_name,
-            COALESCE(NULLIF(TRIM(req.full_name), ''), TRIM(CONCAT_WS(' ', req.first_name, req.last_name))) AS requester_name
-     FROM customer_branch_transfers t
-     JOIN customers c ON c.customer_id = t.customer_id
-     LEFT JOIN branches sb ON sb.id = t.source_branch_id
-     LEFT JOIN branches tb ON tb.id = t.target_branch_id
-     LEFT JOIN territories tr ON tr.territory_id = t.target_territory_id
-     LEFT JOIN users req ON req.id = t.requested_by
-     ${where}
-     ORDER BY t.created_at ASC
-     LIMIT $${params.length}`,
-    params
-  );
-  return result.rows;
-}
-
-/** Source BM completes territory + reason and submits to OM. */
-export async function sourceBmSubmitTransfer(client, {
+export async function resubmitBranchTransferBySa(client, {
   transferId,
-  sourceBmId,
-  targetTerritoryId,
-  reason,
+  requestedBy,
+  reason = null,
+  location = {},
+  proposedTerritoryId = null,
 }) {
   const existing = await client.query(
     `SELECT * FROM customer_branch_transfers WHERE transfer_id = $1 FOR UPDATE`,
@@ -160,48 +417,341 @@ export async function sourceBmSubmitTransfer(client, {
     throw err;
   }
   const row = existing.rows[0];
-  if (!['Pending Source', 'Needs Revision'].includes(row.status)) {
-    const err = new Error('Transfer is not awaiting Source Branch Manager action.');
+  if (!['Returned to SA', 'Needs Revision'].includes(row.status)) {
+    const err = new Error('Transfer is not awaiting Sales Agent correction.');
     err.status = 400;
     throw err;
   }
-  if (!targetTerritoryId) {
-    const err = new Error('Target territory is required.');
-    err.status = 400;
+  if (Number(row.requested_by) !== Number(requestedBy)) {
+    const err = new Error('Only the requesting Sales Agent can resubmit this transfer.');
+    err.status = 403;
     throw err;
   }
-  const terr = await client.query(
-    `SELECT territory_id, branch_id, COALESCE(status, 'Active') AS status
-     FROM territories WHERE territory_id = $1`,
-    [targetTerritoryId]
-  );
-  if (!terr.rows.length || Number(terr.rows[0].branch_id) !== Number(row.target_branch_id)) {
-    const err = new Error('Territory must belong to the receiving branch.');
-    err.status = 400;
-    throw err;
-  }
-  if (terr.rows[0].status !== 'Active') {
-    const err = new Error('Target territory must be Active.');
-    err.status = 400;
-    throw err;
-  }
-  if (!String(reason || row.reason || '').trim()) {
+
+  const reasonText = cleanPart(reason, 2000) || cleanPart(row.reason, 2000);
+  if (!reasonText) {
     const err = new Error('Transfer reason is required.');
     err.status = 400;
     throw err;
   }
+  const addressParts = {
+    address_region: cleanPart(location.address_region, 100) || row.address_region,
+    address_province: cleanPart(location.address_province, 100) || row.address_province,
+    address_city: cleanPart(location.address_city, 100) || row.address_city,
+    address_barangay: cleanPart(location.address_barangay, 100) || row.address_barangay,
+    address_street: cleanPart(location.address_street, 255) || row.address_street,
+  };
+  if (!addressParts.address_province || !addressParts.address_city || !addressParts.address_barangay || !addressParts.address_street) {
+    const err = new Error('Current customer location (province, city, barangay, street) is required.');
+    err.status = 400;
+    throw err;
+  }
+  const address = cleanPart(location.address, 500) || composeAddress(addressParts);
+  const latitude = location.latitude != null && location.latitude !== ''
+    ? Number(location.latitude)
+    : (row.latitude != null ? Number(row.latitude) : null);
+  const longitude = location.longitude != null && location.longitude !== ''
+    ? Number(location.longitude)
+    : (row.longitude != null ? Number(row.longitude) : null);
+
+  let proposedId = proposedTerritoryId ? Number(proposedTerritoryId) : null;
+  const suggestion = await suggestReceivingTerritory(client, {
+    branchId: row.target_branch_id,
+    barangay: addressParts.address_barangay,
+    latitude,
+    longitude,
+  });
+  if (!proposedId && suggestion.confident && suggestion.proposed_territory_id) {
+    proposedId = suggestion.proposed_territory_id;
+  }
+
+  const snapshot = appendTimeline(row.snapshot_json, {
+    step: 'sa_resubmit',
+    actor_id: requestedBy,
+    note: 'SA corrected location and resubmitted.',
+  });
+
+  const updated = await client.query(
+    `UPDATE customer_branch_transfers
+     SET status = 'Pending Receiving',
+         reason = $2,
+         revision_note = NULL,
+         address_region = $3,
+         address_province = $4,
+         address_city = $5,
+         address_barangay = $6,
+         address_street = $7,
+         address = $8,
+         latitude = $9,
+         longitude = $10,
+         proposed_territory_id = $11,
+         target_territory_id = NULL,
+         receiving_bm_id = NULL,
+         source_bm_id = NULL,
+         source_release_note = NULL,
+         snapshot_json = $12::jsonb,
+         updated_at = CURRENT_TIMESTAMP
+     WHERE transfer_id = $1
+     RETURNING *`,
+    [
+      transferId,
+      reasonText,
+      addressParts.address_region,
+      addressParts.address_province,
+      addressParts.address_city,
+      addressParts.address_barangay,
+      addressParts.address_street,
+      address,
+      Number.isFinite(latitude) ? latitude : null,
+      Number.isFinite(longitude) ? longitude : null,
+      proposedId,
+      JSON.stringify(snapshot),
+    ]
+  );
+  return updated.rows[0];
+}
+
+export async function listBranchTransfers(db, {
+  branchId = null,
+  status = null,
+  forOm = false,
+  requestedBy = null,
+  limit = 100,
+} = {}) {
+  const params = [];
+  const conditions = [];
+  if (status) {
+    params.push(status);
+    conditions.push(`t.status = $${params.length}`);
+  } else if (forOm) {
+    conditions.push(`t.status IN ('Pending OM', 'Returned to SA', 'Needs Revision')`);
+  } else if (requestedBy != null) {
+    params.push(Number(requestedBy));
+    conditions.push(`t.requested_by = $${params.length}`);
+    conditions.push(`t.status = ANY($${params.length + 1}::text[])`);
+    params.push(OPEN_TRANSFER_STATUSES.concat(['Approved', 'Rejected']));
+  } else {
+    conditions.push(`t.status = ANY($${params.length + 1}::text[])`);
+    params.push(OPEN_TRANSFER_STATUSES);
+  }
+  if (branchId != null && !forOm && requestedBy == null) {
+    params.push(Number(branchId));
+    conditions.push(`(t.source_branch_id = $${params.length} OR t.target_branch_id = $${params.length})`);
+  }
+  params.push(Math.min(Number(limit) || 100, 200));
+  const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
+  const result = await db.query(
+    `SELECT t.*,
+            c.customer_code, c.first_name, c.last_name, c.contact_phone, c.status AS customer_status,
+            sb.name AS source_branch_name,
+            tb.name AS target_branch_name,
+            tr.territory_name AS target_territory_name,
+            pt.territory_name AS proposed_territory_name,
+            COALESCE(NULLIF(TRIM(req.full_name), ''), TRIM(CONCAT_WS(' ', req.first_name, req.last_name))) AS requester_name
+     FROM customer_branch_transfers t
+     JOIN customers c ON c.customer_id = t.customer_id
+     LEFT JOIN branches sb ON sb.id = t.source_branch_id
+     LEFT JOIN branches tb ON tb.id = t.target_branch_id
+     LEFT JOIN territories tr ON tr.territory_id = t.target_territory_id
+     LEFT JOIN territories pt ON pt.territory_id = t.proposed_territory_id
+     LEFT JOIN users req ON req.id = t.requested_by
+     ${where}
+     ORDER BY t.created_at ASC
+     LIMIT $${params.length}`,
+    params
+  );
+  return result.rows;
+}
+
+/** Receiving BM confirms territory or returns location to SA. */
+export async function receivingBmSubmitTransfer(client, {
+  transferId,
+  receivingBmId,
+  decision,
+  targetTerritoryId = null,
+  note = null,
+}) {
+  const existing = await client.query(
+    `SELECT * FROM customer_branch_transfers WHERE transfer_id = $1 FOR UPDATE`,
+    [transferId]
+  );
+  if (!existing.rows.length) {
+    const err = new Error('Transfer request not found.');
+    err.status = 404;
+    throw err;
+  }
+  const row = existing.rows[0];
+  if (row.status !== 'Pending Receiving') {
+    const err = new Error('Transfer is not awaiting Receiving Branch Manager action.');
+    err.status = 400;
+    throw err;
+  }
+
+  const normalized = String(decision || '').trim().toLowerCase();
+  if (normalized === 'return' || normalized === 'needs_revision' || normalized === 'revision') {
+    if (!cleanPart(note, 2000)) {
+      const err = new Error('A return reason is required.');
+      err.status = 400;
+      throw err;
+    }
+    const snapshot = appendTimeline(row.snapshot_json, {
+      step: 'receiving_return',
+      actor_id: receivingBmId,
+      note,
+    });
+    const updated = await client.query(
+      `UPDATE customer_branch_transfers
+       SET status = 'Returned to SA',
+           revision_note = $2,
+           receiving_bm_id = $3,
+           snapshot_json = $4::jsonb,
+           updated_at = CURRENT_TIMESTAMP
+       WHERE transfer_id = $1
+       RETURNING *`,
+      [transferId, cleanPart(note, 2000), receivingBmId, JSON.stringify(snapshot)]
+    );
+    return updated.rows[0];
+  }
+
+  if (normalized !== 'confirm' && normalized !== 'approve' && normalized !== 'submit') {
+    const err = new Error('decision must be confirm or return.');
+    err.status = 400;
+    throw err;
+  }
+
+  const territoryId = Number(targetTerritoryId || row.proposed_territory_id || row.target_territory_id);
+  await assertTerritoryOnReceivingBranch(client, territoryId, row.target_branch_id);
+
+  const snapshot = appendTimeline(row.snapshot_json, {
+    step: 'receiving_confirm',
+    actor_id: receivingBmId,
+    note: note || 'Receiving BM confirmed territory.',
+    territory_id: territoryId,
+  });
 
   const updated = await client.query(
     `UPDATE customer_branch_transfers
      SET target_territory_id = $2,
-         reason = $3,
-         source_bm_id = $4,
-         status = 'Pending OM',
+         proposed_territory_id = COALESCE(proposed_territory_id, $2),
+         receiving_bm_id = $3,
+         status = 'Pending Source',
          revision_note = NULL,
+         snapshot_json = $4::jsonb,
          updated_at = CURRENT_TIMESTAMP
      WHERE transfer_id = $1
      RETURNING *`,
-    [transferId, targetTerritoryId, String(reason || row.reason).trim(), sourceBmId]
+    [transferId, territoryId, receivingBmId, JSON.stringify(snapshot)]
+  );
+  return updated.rows[0];
+}
+
+/** Source BM releases ownership only (no territory selection). */
+export async function sourceBmSubmitTransfer(client, {
+  transferId,
+  sourceBmId,
+  decision = 'release',
+  note = null,
+}) {
+  const existing = await client.query(
+    `SELECT * FROM customer_branch_transfers WHERE transfer_id = $1 FOR UPDATE`,
+    [transferId]
+  );
+  if (!existing.rows.length) {
+    const err = new Error('Transfer request not found.');
+    err.status = 404;
+    throw err;
+  }
+  const row = existing.rows[0];
+  if (row.status !== 'Pending Source') {
+    const err = new Error('Transfer is not awaiting Source Branch Manager action.');
+    err.status = 400;
+    throw err;
+  }
+  if (!row.target_territory_id) {
+    const err = new Error('Receiving BM must confirm territory before ownership release.');
+    err.status = 400;
+    throw err;
+  }
+
+  const normalized = String(decision || 'release').trim().toLowerCase();
+  if (normalized === 'reject' || normalized === 'rejected') {
+    if (!cleanPart(note, 2000)) {
+      const err = new Error('A rejection reason is required.');
+      err.status = 400;
+      throw err;
+    }
+    const snapshot = appendTimeline(row.snapshot_json, {
+      step: 'source_reject',
+      actor_id: sourceBmId,
+      note,
+    });
+    const updated = await client.query(
+      `UPDATE customer_branch_transfers
+       SET status = 'Rejected',
+           rejection_note = $2,
+           source_bm_id = $3,
+           source_release_note = $2,
+           decided_at = CURRENT_TIMESTAMP,
+           snapshot_json = $4::jsonb,
+           updated_at = CURRENT_TIMESTAMP
+       WHERE transfer_id = $1
+       RETURNING *`,
+      [transferId, cleanPart(note, 2000), sourceBmId, JSON.stringify(snapshot)]
+    );
+    await resolveAlertsBySourceKey(client, `customer-branch-transfer:${transferId}`, {
+      resolvedBy: sourceBmId,
+      resolutionNote: note || 'Branch transfer rejected by Source BM.',
+    });
+    await resolveAlertsBySourceKey(client, `customer-branch-transfer-target:${transferId}`, {
+      resolvedBy: sourceBmId,
+      resolutionNote: note || 'Branch transfer rejected by Source BM.',
+    });
+    return updated.rows[0];
+  }
+
+  if (normalized === 'return' || normalized === 'needs_revision' || normalized === 'revision') {
+    if (!cleanPart(note, 2000)) {
+      const err = new Error('A return reason is required.');
+      err.status = 400;
+      throw err;
+    }
+    const snapshot = appendTimeline(row.snapshot_json, {
+      step: 'source_return',
+      actor_id: sourceBmId,
+      note,
+    });
+    const updated = await client.query(
+      `UPDATE customer_branch_transfers
+       SET status = 'Returned to SA',
+           revision_note = $2,
+           source_bm_id = $3,
+           source_release_note = $2,
+           snapshot_json = $4::jsonb,
+           updated_at = CURRENT_TIMESTAMP
+       WHERE transfer_id = $1
+       RETURNING *`,
+      [transferId, cleanPart(note, 2000), sourceBmId, JSON.stringify(snapshot)]
+    );
+    return updated.rows[0];
+  }
+
+  const snapshot = appendTimeline(row.snapshot_json, {
+    step: 'source_release',
+    actor_id: sourceBmId,
+    note: note || 'Source BM released ownership.',
+  });
+
+  const updated = await client.query(
+    `UPDATE customer_branch_transfers
+     SET source_bm_id = $2,
+         source_release_note = $3,
+         status = 'Pending OM',
+         revision_note = NULL,
+         snapshot_json = $4::jsonb,
+         updated_at = CURRENT_TIMESTAMP
+     WHERE transfer_id = $1
+     RETURNING *`,
+    [transferId, sourceBmId, cleanPart(note, 2000), JSON.stringify(snapshot)]
   );
   return updated.rows[0];
 }
@@ -230,32 +780,44 @@ export async function omDecideTransfer(client, {
   }
 
   const normalized = String(decision || '').trim().toLowerCase();
-  if (normalized === 'needs_revision' || normalized === 'revision') {
+  if (normalized === 'needs_revision' || normalized === 'revision' || normalized === 'return') {
+    const snapshot = appendTimeline(row.snapshot_json, {
+      step: 'om_return',
+      actor_id: omUserId,
+      note,
+    });
     const updated = await client.query(
       `UPDATE customer_branch_transfers
-       SET status = 'Needs Revision',
+       SET status = 'Returned to SA',
            revision_note = $2,
            om_decided_by = $3,
            decided_at = CURRENT_TIMESTAMP,
+           snapshot_json = $4::jsonb,
            updated_at = CURRENT_TIMESTAMP
        WHERE transfer_id = $1
        RETURNING *`,
-      [transferId, note || null, omUserId]
+      [transferId, note || null, omUserId, JSON.stringify(snapshot)]
     );
     return { transfer: updated.rows[0], applied: false };
   }
 
   if (normalized === 'reject' || normalized === 'rejected') {
+    const snapshot = appendTimeline(row.snapshot_json, {
+      step: 'om_reject',
+      actor_id: omUserId,
+      note,
+    });
     const updated = await client.query(
       `UPDATE customer_branch_transfers
        SET status = 'Rejected',
            rejection_note = $2,
            om_decided_by = $3,
            decided_at = CURRENT_TIMESTAMP,
+           snapshot_json = $4::jsonb,
            updated_at = CURRENT_TIMESTAMP
        WHERE transfer_id = $1
        RETURNING *`,
-      [transferId, note || null, omUserId]
+      [transferId, note || null, omUserId, JSON.stringify(snapshot)]
     );
     await resolveAlertsBySourceKey(client, `customer-branch-transfer:${transferId}`, {
       resolvedBy: omUserId,
@@ -269,7 +831,7 @@ export async function omDecideTransfer(client, {
   }
 
   if (normalized !== 'approve' && normalized !== 'approved') {
-    const err = new Error('decision must be approve, reject, or needs_revision.');
+    const err = new Error('decision must be approve, reject, or return.');
     err.status = 400;
     throw err;
   }
@@ -290,6 +852,7 @@ export async function omDecideTransfer(client, {
     throw err;
   }
   const before = customer.rows[0];
+  const assignedSa = assignedSalesAgentId || row.requested_by || null;
 
   await client.query(
     `UPDATE customers
@@ -297,17 +860,32 @@ export async function omDecideTransfer(client, {
          territory_id = $3,
          account_manager_id = NULL,
          assigned_sales_agent_id = $4,
+         address_region = COALESCE($5, address_region),
+         address_province = COALESCE($6, address_province),
+         address_city = COALESCE($7, address_city),
+         address_barangay = COALESCE($8, address_barangay),
+         address_street = COALESCE($9, address_street),
+         address = COALESCE($10, address),
+         latitude = COALESCE($11, latitude),
+         longitude = COALESCE($12, longitude),
          updated_at = CURRENT_TIMESTAMP
      WHERE customer_id = $1`,
     [
       row.customer_id,
       row.target_branch_id,
       row.target_territory_id,
-      assignedSalesAgentId || row.requested_by || null,
+      assignedSa,
+      row.address_region,
+      row.address_province,
+      row.address_city,
+      row.address_barangay,
+      row.address_street,
+      row.address,
+      row.latitude,
+      row.longitude,
     ]
   );
 
-  // Portal user branch must update in the same TX — failure rolls back the whole transfer.
   if (before.user_id) {
     await client.query(
       `UPDATE users SET branch_id = $2, updated_at = CURRENT_TIMESTAMP WHERE id = $1`,
@@ -315,31 +893,38 @@ export async function omDecideTransfer(client, {
     );
   }
 
+  const snapshot = appendTimeline(
+    {
+      ...(row.snapshot_json || {}),
+      after: {
+        branch_id: row.target_branch_id,
+        territory_id: row.target_territory_id,
+        assigned_sales_agent_id: assignedSa,
+        account_manager_id: null,
+        outstanding_balances_preserved: true,
+        credit_restrictions_preserved: true,
+        address_updated_from_transfer: true,
+      },
+      approved_note: note || null,
+    },
+    {
+      step: 'om_approve',
+      actor_id: omUserId,
+      note: note || 'OM approved and system applied transfer.',
+    }
+  );
+
   const updated = await client.query(
     `UPDATE customer_branch_transfers
      SET status = 'Approved',
          om_decided_by = $2,
          decided_at = CURRENT_TIMESTAMP,
          applied_at = CURRENT_TIMESTAMP,
-         snapshot_json = snapshot_json || $3::jsonb,
+         snapshot_json = $3::jsonb,
          updated_at = CURRENT_TIMESTAMP
      WHERE transfer_id = $1
      RETURNING *`,
-    [
-      transferId,
-      omUserId,
-      JSON.stringify({
-        after: {
-          branch_id: row.target_branch_id,
-          territory_id: row.target_territory_id,
-          assigned_sales_agent_id: assignedSalesAgentId || row.requested_by || null,
-          account_manager_id: null,
-          outstanding_balances_preserved: true,
-          credit_restrictions_preserved: true,
-        },
-        approved_note: note || null,
-      }),
-    ]
+    [transferId, omUserId, JSON.stringify(snapshot)]
   );
 
   await resolveAlertsBySourceKey(client, `customer-branch-transfer:${transferId}`, {
@@ -375,20 +960,17 @@ export async function omDecideTransfer(client, {
     linkPath: `/branch-manager/approval-center?tab=branch-transfers`,
   });
 
-  // Notify requesting SA's (receiving) branch that transfer completed.
-  if (Number(row.target_branch_id) !== Number(row.source_branch_id)) {
-    await upsertOpenOperationalAlert(client, {
-      branchId: row.target_branch_id,
-      alertType: 'Customer Branch Transfer',
-      severity: 'Info',
-      title: 'Branch transfer completed for Sales Agent',
-      message: `Existing customer #${row.customer_id} is now available under the receiving branch. Do not register again.`,
-      sourceKey: `customer-branch-transfer-sa:${transferId}`,
-      entityType: 'customer',
-      entityId: row.customer_id,
-      linkPath: `/sales/customer-detail/${row.customer_id}?from=customers`,
-    });
-  }
+  await upsertOpenOperationalAlert(client, {
+    branchId: row.target_branch_id,
+    alertType: 'Customer Branch Transfer',
+    severity: 'Info',
+    title: 'Branch transfer completed for Sales Agent',
+    message: `Existing customer #${row.customer_id} is now available under the receiving branch. Do not register again.`,
+    sourceKey: `customer-branch-transfer-sa:${transferId}`,
+    entityType: 'customer',
+    entityId: row.customer_id,
+    linkPath: `/sales/customer-detail/${row.customer_id}?from=customers`,
+  });
 
   return { transfer: updated.rows[0], applied: true, customerId: row.customer_id };
 }

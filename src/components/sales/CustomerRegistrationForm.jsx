@@ -156,9 +156,6 @@ export function CustomerFormPage({ customerId, navigate, showToast }) {
   const [mapExpanded, setMapExpanded] = useState(false);
   const [geoNote, setGeoNote] = useState('');
   const [territoryHint, setTerritoryHint] = useState(null);
-  const [identityClearanceToken, setIdentityClearanceToken] = useState(
-    () => searchParams.get('clearance') || sessionStorage.getItem('corvex_identity_clearance') || ''
-  );
 
   const currentUser = getCurrentUser();
   const branchLabel = getUserAssignedLocation(currentUser) || currentUser?.branch_name || 'Assigned branch';
@@ -382,13 +379,12 @@ export function CustomerFormPage({ customerId, navigate, showToast }) {
     privacy_notice_acknowledged: Boolean(form.privacy_notice_acknowledged),
     privacy_notice_version: PRIVACY_VERSION,
     marketing_opt_in: Boolean(form.marketing_opt_in),
-    identity_clearance_token: !isEdit ? (identityClearanceToken || null) : null,
     registration_profile: {
       cash_registration: !isEdit,
       territory_outside_review: Boolean(form.territory_override_note.trim())
         || territoryHint?.classification === 'outside',
       account_eligibility: 'Cash',
-      find_lookup_summary: identityClearanceToken ? 'possible_cleared' : 'no_match',
+      find_lookup_summary: 'no_match',
     },
   });
 
@@ -415,22 +411,6 @@ export function CustomerFormPage({ customerId, navigate, showToast }) {
       if (!isSalesOfflineEnabled()) {
         setSaving(false);
         showToast?.('You are offline. Enable offline mode in Settings to save locally.', 'error');
-        return;
-      }
-      // Soft-block: possible-match clearance must exist before offline queueing.
-      const clearance = payload?.identity_clearance_token
-        || identityClearanceToken
-        || (() => { try { return sessionStorage.getItem('corvex_identity_clearance'); } catch { return ''; } })();
-      const pendingVerify = (() => {
-        try { return sessionStorage.getItem('corvex_pending_identity_verification'); } catch { return ''; }
-      })();
-      if (pendingVerify && !clearance) {
-        setSaving(false);
-        showToast?.(
-          'Identity verification is still pending. You cannot queue a new customer offline until the Branch Manager decides.',
-          'error'
-        );
-        navigate(`/sales/customers/verification/${pendingVerify}`);
         return;
       }
       const localId = `cust-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -478,7 +458,7 @@ export function CustomerFormPage({ customerId, navigate, showToast }) {
       }
       if (result.code === 'REQUIRES_IDENTITY_VERIFICATION') {
         showToast?.(
-          result.message || 'Possible duplicate — return to Customers and request BM verification first.',
+          result.message || 'Possible matches found — return to Find Existing Customer and review profiles. Registration cannot continue.',
           'error'
         );
         navigate('/sales/customers');
@@ -497,12 +477,14 @@ export function CustomerFormPage({ customerId, navigate, showToast }) {
         sessionStorage.removeItem('corvex_pending_identity_verification');
         sessionStorage.removeItem('corvex_transfer_target_customer_id');
       } catch { /* ignore */ }
-      setIdentityClearanceToken('');
       const id = result.data?.customer_id || customerId;
       successNavigate(id);
     } else {
       if (result.code === 'REQUIRES_IDENTITY_VERIFICATION') {
-        showToast?.(result.message || 'Possible duplicate — return to Customers and request BM verification first.', 'error');
+        showToast?.(
+          result.message || 'Possible matches found — return to Find Existing Customer and review profiles. Registration cannot continue.',
+          'error'
+        );
         navigate('/sales/customers');
         return;
       }
@@ -849,9 +831,7 @@ export function CustomerFormPage({ customerId, navigate, showToast }) {
                     <td>
                       {isEdit
                         ? 'Edit mode'
-                        : (identityClearanceToken
-                          ? 'Possible match — BM cleared flag'
-                          : 'No match (checked before registration)')}
+                        : 'No match (checked before registration)'}
                     </td>
                   </tr>
                   <tr>

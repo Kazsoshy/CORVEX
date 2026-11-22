@@ -110,6 +110,7 @@ const MIGRATIONS = [
   { file: '082_identity_verify_waiting_transfer_link.sql', label: '082_identity_verify_waiting_transfer_link.sql' },
   { file: '083_restock_completed_status.sql', label: '083_restock_completed_status.sql' },
   { file: '084_notification_related_entity.sql', label: '084_notification_related_entity.sql' },
+  { file: '085_branch_transfer_receiving_first.sql', label: '085_branch_transfer_receiving_first.sql' },
 ];
 
 async function ensureMigrationsTable() {

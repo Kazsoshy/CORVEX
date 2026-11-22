@@ -16,6 +16,16 @@ const HUC_PROVINCE_LABELS = {
   308: 'General Santos City (HUC)',
 };
 
+/**
+ * Geographic parent provinces → related HUC province codes.
+ * Users expect City of Davao under Davao del Sur and Gensan under South Cotabato
+ * even though PSGC lists those HUCs as province-level LGUs.
+ */
+const PROVINCE_RELATED_HUC = {
+  '024': '307', // Davao del Sur → City of Davao
+  '063': '308', // South Cotabato → City of General Santos
+};
+
 function sortByName(items, key) {
   return [...items].sort((a, b) => String(a[key] || '').localeCompare(String(b[key] || ''), undefined, { sensitivity: 'base' }));
 }
@@ -86,25 +96,43 @@ export function getRegionForProvince(provCode) {
  * Resolve cities by PSGC province code (preferred) or name.
  * Name lookup uses exact-normalized match first to avoid Davao HUC vs Davao del Sur collisions.
  */
+function citiesForProvinceCode(provCode) {
+  const code = String(provCode || '');
+  if (!code) return [];
+  const own = muncities.filter((row) => row.provCode === code);
+  const relatedHuc = PROVINCE_RELATED_HUC[code];
+  if (!relatedHuc) return own;
+  const extra = muncities.filter((row) => row.provCode === relatedHuc);
+  const seen = new Set(own.map((row) => String(row.munCityCode)));
+  const merged = [...own];
+  for (const row of extra) {
+    const key = String(row.munCityCode);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    merged.push(row);
+  }
+  return merged;
+}
+
 export function getCities(provCode) {
   if (!provCode) return [];
   const byCode = provinces.find((row) => row.provCode === String(provCode));
   if (byCode) {
-    return sortByName(muncities.filter((row) => row.provCode === byCode.provCode), 'munCityName');
+    return sortByName(citiesForProvinceCode(byCode.provCode), 'munCityName');
   }
   // Prefer HUC aliases before loose name match.
   const normalized = normalizeName(provCode);
   if (normalized === 'davaocity' || normalized === 'cityofdavao') {
-    return sortByName(muncities.filter((row) => row.provCode === '307'), 'munCityName');
+    return sortByName(citiesForProvinceCode('307'), 'munCityName');
   }
   if (normalized.includes('generalsantos')) {
-    return sortByName(muncities.filter((row) => row.provCode === '308'), 'munCityName');
+    return sortByName(citiesForProvinceCode('308'), 'munCityName');
   }
   // Exact normalized province name only (no substring) to avoid "Davao" matching HUC.
   const exact = provinces.find((row) => normalizeName(row.provName) === normalized
     || normalizeName(displayProvince(row).provName) === normalized);
   if (exact) {
-    return sortByName(muncities.filter((row) => row.provCode === exact.provCode), 'munCityName');
+    return sortByName(citiesForProvinceCode(exact.provCode), 'munCityName');
   }
   return [];
 }

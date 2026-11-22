@@ -1,5 +1,5 @@
 /**
- * Acceptance matrix for SA Find / identity / branch-transfer revise.
+ * Acceptance matrix for SA Find / possible-block / branch-transfer.
  * Exercises library + SQL paths (not browser UI).
  *
  * Usage: node scripts/test_sa_detection_transfer_matrix.js
@@ -9,16 +9,8 @@ import path from 'path';
 import pkg from 'pg';
 import { findCustomerDuplicates } from '../lib/customerDuplicateLookup.js';
 import {
-  createIdentityVerification,
-  decideIdentityVerification,
-  deriveIdentityNextAction,
-  getIdentityVerificationById,
-  listMyOpenIdentityVerifications,
-  linkBranchTransferToIdentity,
-  consumeClearanceToken,
-} from '../lib/customerIdentityVerification.js';
-import {
   createBranchTransferRequest,
+  receivingBmSubmitTransfer,
   sourceBmSubmitTransfer,
   omDecideTransfer,
 } from '../lib/customerBranchTransfer.js';
@@ -191,8 +183,8 @@ async function main() {
         name: `Different Person${stamp}`,
       }, { actorBranchId: branchA.id });
       check(
-        'Possible Match (same phone different name) → possible / BM required',
-        dup.summary === 'possible' && dup.requires_bm_verification === true,
+        'Possible Match (same phone different name) → possible (registration blocked)',
+        dup.summary === 'possible' && (dup.matches || []).some((m) => m.match_tier === 'possible'),
         `summary=${dup.summary}`
       );
     }
@@ -209,208 +201,26 @@ async function main() {
       );
     }
 
-    // 5) Identity: reject exact-only BM request
+    // 5) Possible matches conceptually block registration (no BM clearance path)
     {
-      await client.query('BEGIN');
-      let rejected = false;
-      try {
-        await createIdentityVerification(client, {
-          branchId: branchA.id,
-          requestedBy: sa.id,
-          searchPayload: { contact_phone: phoneExactSame },
-          proposedRegistration: { contact_phone: phoneExactSame },
-          matches: [{
-            customer_id: sameBranchCust.customer_id,
-            match_tier: 'exact',
-            same_branch: true,
-            branch_id: branchA.id,
-          }],
-        });
-      } catch (err) {
-        rejected = err.status === 400;
-      }
-      await client.query('ROLLBACK');
-      check('Exact match cannot open BM identity ticket', rejected);
+      const dup = await findCustomerDuplicates(pool, {
+        contact_phone: phonePossible,
+        name: `Different Person${stamp}`,
+      }, { actorBranchId: branchA.id });
+      const possibles = (dup.matches || []).filter((m) => m.match_tier === 'possible');
+      check(
+        'Possible matches block create (no clearance bypass)',
+        dup.summary === 'possible' && possibles.length > 0,
+        `count=${possibles.length}`
+      );
+      check(
+        'Possible match cards expose profile fields for View Profile',
+        possibles.every((m) => m.customer_id && (m.customer_code || m.display_name || m.first_name)),
+        'masked lookup cards ready'
+      );
     }
 
-    // 6) BM Same Person same branch → open_profile
-    {
-      await client.query('BEGIN');
-      const ticket = await createIdentityVerification(client, {
-        branchId: branchA.id,
-        requestedBy: sa.id,
-        searchPayload: { contact_phone: phonePossible, name: `Different Person${stamp}` },
-        proposedRegistration: {
-          first_name: 'Different',
-          last_name: `Person${stamp}`,
-          contact_phone: phonePossible,
-        },
-        matches: [{
-          customer_id: possibleCust.customer_id,
-          match_tier: 'possible',
-          same_branch: true,
-          cross_branch: false,
-          branch_id: branchA.id,
-          first_name: possibleCust.first_name,
-          last_name: possibleCust.last_name,
-          customer_code: possibleCust.customer_code,
-        }],
-      });
-      const decided = await decideIdentityVerification(client, {
-        verificationId: ticket.verification_id,
-        decision: 'same_person',
-        note: 'Same person test',
-        decidedBy: bmA.id,
-        matchCustomerId: possibleCust.customer_id,
-      });
-      check(
-        'Possible → BM Same Person → Same Branch → open_profile',
-        decided.next_action === 'open_profile' && decided.same_branch === true,
-        `next_action=${decided.next_action}`
-      );
-      await client.query('ROLLBACK');
-    }
-
-    // 7) Cross-branch must NOT use Same Person; BM links transfer instead
-    {
-      await client.query('BEGIN');
-      const ticket = await createIdentityVerification(client, {
-        branchId: branchA.id,
-        requestedBy: sa.id,
-        searchPayload: { contact_phone: phoneExactCross, name: 'Maybe Cross' },
-        proposedRegistration: { contact_phone: phoneExactCross, first_name: 'Maybe', last_name: 'Cross' },
-        matches: [{
-          customer_id: crossBranchCust.customer_id,
-          match_tier: 'possible',
-          same_branch: false,
-          cross_branch: true,
-          branch_id: branchB.id,
-          first_name: crossBranchCust.first_name,
-          last_name: crossBranchCust.last_name,
-          customer_code: crossBranchCust.customer_code,
-        }],
-      });
-      let blockedSame = false;
-      try {
-        await decideIdentityVerification(client, {
-          verificationId: ticket.verification_id,
-          decision: 'same_person',
-          note: 'Should fail — cross branch',
-          decidedBy: bmA.id,
-          matchCustomerId: crossBranchCust.customer_id,
-        });
-      } catch (err) {
-        blockedSame = err.status === 400;
-      }
-      check('Cross-branch Same Person decision blocked', blockedSame);
-
-      const transfer = await createBranchTransferRequest(client, {
-        customerId: crossBranchCust.customer_id,
-        targetBranchId: branchA.id,
-        requestedBy: bmA.id,
-        reason: 'BM linked from identity review',
-      });
-      const linked = await linkBranchTransferToIdentity(client, {
-        verificationId: ticket.verification_id,
-        matchCustomerId: crossBranchCust.customer_id,
-        transferId: transfer.transfer_id,
-        decidedBy: bmA.id,
-      });
-      const loaded = await getIdentityVerificationById(client, ticket.verification_id);
-      const meta = deriveIdentityNextAction(loaded);
-      check(
-        'Possible → BM cross-branch → Transfer Linked → wait_transfer',
-        linked.status === 'Transfer Linked'
-          && meta.next_action === 'wait_transfer'
-          && Number(loaded.linked_transfer_id) === Number(transfer.transfer_id),
-        `status=${linked.status} next=${meta.next_action}`
-      );
-      await client.query('ROLLBACK');
-    }
-
-    // 7b) Idempotent re-request returns existing open ticket
-    {
-      await client.query('BEGIN');
-      const first = await createIdentityVerification(client, {
-        branchId: branchA.id,
-        requestedBy: sa.id,
-        searchPayload: { contact_phone: phonePossible },
-        proposedRegistration: { contact_phone: phonePossible },
-        matches: [{
-          customer_id: possibleCust.customer_id,
-          match_tier: 'possible',
-          same_branch: true,
-          branch_id: branchA.id,
-        }],
-      });
-      let idempotent = false;
-      let existingId = null;
-      try {
-        await createIdentityVerification(client, {
-          branchId: branchA.id,
-          requestedBy: sa.id,
-          searchPayload: { contact_phone: phonePossible },
-          proposedRegistration: { contact_phone: phonePossible },
-          matches: [{
-            customer_id: possibleCust.customer_id,
-            match_tier: 'possible',
-            same_branch: true,
-            branch_id: branchA.id,
-          }],
-        });
-      } catch (err) {
-        idempotent = err.status === 409;
-        existingId = err.existingId;
-      }
-      check(
-        'Duplicate BM verification request is idempotent (409 existing)',
-        idempotent && Number(existingId) === Number(first.verification_id),
-        `existing=${existingId}`
-      );
-      const mine = await listMyOpenIdentityVerifications(client, { requestedBy: sa.id, limit: 5 });
-      check(
-        'SA mine open verifications restores pending ticket',
-        mine.some((r) => Number(r.verification_id) === Number(first.verification_id)),
-        `count=${mine.length}`
-      );
-      await client.query('ROLLBACK');
-    }
-
-    // 8) BM Different Person → clearance
-    {
-      await client.query('BEGIN');
-      const ticket = await createIdentityVerification(client, {
-        branchId: branchA.id,
-        requestedBy: sa.id,
-        searchPayload: { contact_phone: phonePossible, name: `Other${stamp}` },
-        proposedRegistration: { contact_phone: phonePossible, first_name: 'Other', last_name: stamp },
-        matches: [{
-          customer_id: possibleCust.customer_id,
-          match_tier: 'possible',
-          same_branch: true,
-          branch_id: branchA.id,
-        }],
-      });
-      const decided = await decideIdentityVerification(client, {
-        verificationId: ticket.verification_id,
-        decision: 'different_person',
-        note: 'Different person',
-        decidedBy: bmA.id,
-        matchCustomerId: possibleCust.customer_id,
-      });
-      const consumed = await consumeClearanceToken(client, decided.clearance_token, branchA.id);
-      check(
-        'Possible → BM Different Person → clearance → proceed',
-        decided.status === 'Different Person'
-          && Boolean(decided.clearance_token)
-          && Boolean(consumed?.verification_id)
-          && deriveIdentityNextAction(decided).next_action === 'proceed_registration',
-        `token=${Boolean(decided.clearance_token)}`
-      );
-      await client.query('ROLLBACK');
-    }
-
-    // 9–12) Transfer approve / reject / revision / overdue preserve
+    // 9–12) Transfer Receiving → Source release → OM (overdue preserve)
     {
       await client.query('BEGIN');
       const transfer = await createBranchTransferRequest(client, {
@@ -418,33 +228,62 @@ async function main() {
         targetBranchId: branchA.id,
         requestedBy: sa.id,
         reason: 'Matrix test transfer',
+        location: {
+        address_region: 'Region XI',
+        address_province: 'Davao del Sur',
+        address_city: 'Davao City',
+        address_barangay: 'Poblacion',
+        address_street: '123 Matrix Test St',
+        latitude: 7.07,
+        longitude: 125.61,
+      },
       });
-      check('Transfer request created (Pending Source)', transfer.status === 'Pending Source');
+      check('Transfer request created (Pending Receiving)', transfer.status === 'Pending Receiving');
 
-      const submitted = await sourceBmSubmitTransfer(client, {
+      const receiving = await receivingBmSubmitTransfer(client, {
+        transferId: transfer.transfer_id,
+        receivingBmId: bmA.id,
+        decision: 'confirm',
+        targetTerritoryId: terrA.rows[0].territory_id,
+        note: 'Location covers Gensan? No — receiving branch A territory confirmed',
+      });
+      check('Receiving BM confirm → Pending Source', receiving.status === 'Pending Source');
+
+      const released = await sourceBmSubmitTransfer(client, {
         transferId: transfer.transfer_id,
         sourceBmId: bmB.id,
-        targetTerritoryId: terrA.rows[0].territory_id,
-        reason: 'Customer relocating — matrix test',
+        decision: 'release',
+        note: 'Ownership released — matrix',
       });
-      check('Source BM submit → Pending OM', submitted.status === 'Pending OM');
+      check('Source BM release → Pending OM (no territory select)', released.status === 'Pending OM');
 
-      // Needs revision
-      const revised = await omDecideTransfer(client, {
+      const returned = await omDecideTransfer(client, {
         transferId: transfer.transfer_id,
-        decision: 'needs_revision',
-        note: 'Need clearer territory note',
+        decision: 'return',
+        note: 'Need clearer landmark',
         omUserId: om.id,
       });
-      check('OM return for revision → Needs Revision', revised.transfer.status === 'Needs Revision' && revised.applied === false);
+      check('OM return → Returned to SA', returned.transfer.status === 'Returned to SA' && returned.applied === false);
 
-      const resubmitted = await sourceBmSubmitTransfer(client, {
+      // Re-drive after SA would resubmit: create fresh open path via receiving again
+      await client.query(
+        `UPDATE customer_branch_transfers
+         SET status = 'Pending Receiving', revision_note = NULL, updated_at = CURRENT_TIMESTAMP
+         WHERE transfer_id = $1`,
+        [transfer.transfer_id]
+      );
+      await receivingBmSubmitTransfer(client, {
+        transferId: transfer.transfer_id,
+        receivingBmId: bmA.id,
+        decision: 'confirm',
+        targetTerritoryId: terrA.rows[0].territory_id,
+      });
+      await sourceBmSubmitTransfer(client, {
         transferId: transfer.transfer_id,
         sourceBmId: bmB.id,
-        targetTerritoryId: terrA.rows[0].territory_id,
-        reason: 'Customer relocating — revised',
+        decision: 'release',
+        note: 'Release after return',
       });
-      check('Source BM resubmit after revision → Pending OM', resubmitted.status === 'Pending OM');
 
       const beforeBal = await client.query(
         `SELECT outstanding_balance FROM customer_activity WHERE customer_id = $1`,
@@ -461,7 +300,8 @@ async function main() {
       check('OM approve → applied', approved.applied === true && approved.transfer.status === 'Approved');
 
       const afterCust = await client.query(
-        `SELECT branch_id, territory_id, assigned_sales_agent_id, account_manager_id, customer_id
+        `SELECT branch_id, territory_id, assigned_sales_agent_id, account_manager_id, customer_id,
+                address_street, address_barangay
          FROM customers WHERE customer_id = $1`,
         [crossBranchCust.customer_id]
       );
@@ -473,6 +313,11 @@ async function main() {
           && Number(c.assigned_sales_agent_id) === Number(sa.id)
           && c.account_manager_id == null
           && Number(c.customer_id) === Number(crossBranchCust.customer_id)
+      );
+      check(
+        'Customer ID unchanged and address applied from transfer',
+        Number(c.customer_id) === Number(crossBranchCust.customer_id)
+          && String(c.address_street || '').includes('Matrix Test')
       );
 
       if (beforeBal.rows.length) {
@@ -500,12 +345,27 @@ async function main() {
         targetBranchId: branchA.id,
         requestedBy: sa.id,
         reason: 'Reject path',
+        location: {
+        address_region: 'Region XI',
+        address_province: 'Davao del Sur',
+        address_city: 'Davao City',
+        address_barangay: 'Poblacion',
+        address_street: '123 Matrix Test St',
+        latitude: 7.07,
+        longitude: 125.61,
+      },
+      });
+      await receivingBmSubmitTransfer(client, {
+        transferId: transfer.transfer_id,
+        receivingBmId: bmA.id,
+        decision: 'confirm',
+        targetTerritoryId: terrA.rows[0].territory_id,
       });
       await sourceBmSubmitTransfer(client, {
         transferId: transfer.transfer_id,
         sourceBmId: bmB.id,
-        targetTerritoryId: terrA.rows[0].territory_id,
-        reason: 'Reject path',
+        decision: 'release',
+        note: 'Reject path release',
       });
       const rejected = await omDecideTransfer(client, {
         transferId: transfer.transfer_id,
@@ -522,7 +382,6 @@ async function main() {
       );
       await client.query('ROLLBACK');
     }
-
     // 14) Concurrent create advisory lock serializes (smoke: lock callable)
     {
       await client.query('BEGIN');
@@ -531,37 +390,7 @@ async function main() {
       await client.query('ROLLBACK');
     }
 
-    // 15) GET by id next_action helper
-    {
-      await client.query('BEGIN');
-      const ticket = await createIdentityVerification(client, {
-        branchId: branchA.id,
-        requestedBy: sa.id,
-        searchPayload: { contact_phone: phonePossible },
-        proposedRegistration: { contact_phone: phonePossible },
-        matches: [{
-          customer_id: possibleCust.customer_id,
-          match_tier: 'possible',
-          same_branch: true,
-          branch_id: branchA.id,
-        }],
-      });
-      await decideIdentityVerification(client, {
-        verificationId: ticket.verification_id,
-        decision: 'same_person',
-        decidedBy: bmA.id,
-        matchCustomerId: possibleCust.customer_id,
-      });
-      await client.query('COMMIT');
-      const loaded = await getIdentityVerificationById(pool, ticket.verification_id);
-      const meta = deriveIdentityNextAction(loaded);
-      check(
-        'GET verification derives next_action open_profile',
-        loaded?.status === 'Same Person' && meta.next_action === 'open_profile'
-      );
-      // cleanup ticket
-      await pool.query(`DELETE FROM customer_identity_verifications WHERE verification_id = $1`, [ticket.verification_id]);
-    }
+
 
     // Cleanup seeded customers (best effort)
     await pool.query(

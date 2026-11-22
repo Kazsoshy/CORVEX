@@ -70,3 +70,15 @@ Older SA reset JSON dumps (different SHA256; superseded by newest keepers).
 | Path | Original | Why removed |
 |---|---|---|
 | `python_stub/` | `backend/archive/python_stub/` | Unused Python stub leftover |
+
+### `_archive/src/components/sales/` (Possible Match BM verification removed)
+
+| Path | Original | Why removed |
+|---|---|---|
+| `VerificationWaitingPage.jsx` | `src/components/sales/VerificationWaitingPage.jsx` | SA Possible Match no longer uses BM verification waiting/clearance; registration blocked with View Profile only |
+
+### `_archive/backend/lib/` (Possible Match BM verification removed)
+
+| Path | Original | Why removed |
+|---|---|---|
+| `customerIdentityVerification.js` | `backend/lib/customerIdentityVerification.js` | Ticket/clearance helpers unused after hard-block possibles; DB table left in place (no DROP) |
