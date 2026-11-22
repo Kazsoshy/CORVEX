@@ -1,5 +1,12 @@
 import { useEffect, useMemo, useState } from 'react';
-import { fetchNotifications, markNotificationRead } from '../../api/notificationService';
+import {
+  fetchNotifications,
+  markNotificationRead,
+  resolveNotificationNavForRole,
+  resolveNotificationTargetForRole,
+} from '../../api/notificationService';
+import { useSelectedNotificationFlash } from '../../hooks/useNotificationHighlight.js';
+import { navigateWithHighlight } from '../../utils/notificationHighlight.js';
 import { formatDisplayDate } from '../../utils/formatters';
 import { EmptyState } from './EmptyState';
 import { LoadingState } from './LoadingState';
@@ -15,11 +22,13 @@ export function NotificationsInbox({
   showToast,
   navigate,
   resolveRelatedPath,
+  roleKey = null,
   canManage = true,
 }) {
   const [notifications, setNotifications] = useState([]);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState('All');
+  const [selectedNotificationId, setSelectedNotificationId] = useSelectedNotificationFlash(650);
 
   useEffect(() => {
     let active = true;
@@ -52,6 +61,15 @@ export function NotificationsInbox({
   const pagination = usePagination(filtered, { resetKey: filter });
   const pageItems = pagination.paginatedData;
 
+  const resolvePath = (item) => {
+    if (typeof resolveRelatedPath === 'function') {
+      const custom = resolveRelatedPath(item);
+      if (custom) return custom;
+    }
+    if (roleKey) return resolveNotificationTargetForRole(item, roleKey);
+    return null;
+  };
+
   const markAllRead = async () => {
     const unread = notifications.filter((n) => n.status === 'Unread');
     await Promise.all(unread.map((n) => markNotificationRead(n.notification_id)));
@@ -67,6 +85,32 @@ export function NotificationsInbox({
       )));
       showToast?.('Marked as read.', 'success');
     }
+  };
+
+  const openNotification = async (item) => {
+    if (!item) return;
+    const id = item.notification_id ?? item.id;
+    if (id) setSelectedNotificationId(String(id));
+    const isUnread = item.status === 'Unread' || (item.status !== 'Read' && !item.read);
+    if (isUnread && id && canManage) {
+      setNotifications((items) => items.map((n) => (
+        n.notification_id === id ? { ...n, status: 'Read' } : n
+      )));
+      markNotificationRead(id);
+    }
+    const resolved = roleKey
+      ? resolveNotificationNavForRole(item, roleKey)
+      : { path: resolvePath(item), id: item.related_id || item.relatedId || item.highlightId || null };
+    window.setTimeout(() => {
+      if (resolved?.path && navigate) {
+        navigateWithHighlight(navigate, resolved.path, {
+          id: resolved.id,
+          notificationId: id,
+        });
+      } else {
+        showToast?.('No related record is available for this notification.', 'info');
+      }
+    }, 180);
   };
 
   if (loading) return <LoadingState message="Loading notifications..." />;
@@ -100,11 +144,23 @@ export function NotificationsInbox({
         <div className="notification-list">
           {pageItems.map((item) => {
             const isUnread = item.status === 'Unread';
-            const relatedPath = resolveRelatedPath?.(item);
+            const relatedPath = resolvePath(item);
+            const itemId = item.notification_id ?? item.id;
+            const isSelected = selectedNotificationId != null && String(selectedNotificationId) === String(itemId);
             return (
               <article
                 key={item.notification_id}
-                className={`notification-item${isUnread ? ' unread' : ''}`}
+                className={`notification-item${isUnread ? ' unread' : ''}${relatedPath ? ' is-clickable' : ''}${isSelected ? ' is-selected' : ''}`}
+                role={relatedPath ? 'link' : undefined}
+                tabIndex={relatedPath ? 0 : undefined}
+                onClick={() => openNotification(item)}
+                onKeyDown={(event) => {
+                  if (!relatedPath) return;
+                  if (event.key === 'Enter' || event.key === ' ') {
+                    event.preventDefault();
+                    openNotification(item);
+                  }
+                }}
               >
                 <div>
                   <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center', marginBottom: 6 }}>
@@ -117,7 +173,7 @@ export function NotificationsInbox({
                     {isUnread ? ' · Unread' : ''}
                   </span>
                 </div>
-                <div className="notification-actions">
+                <div className="notification-actions" onClick={(event) => event.stopPropagation()}>
                   {isUnread && canManage ? (
                     <button
                       type="button"
@@ -131,7 +187,7 @@ export function NotificationsInbox({
                     <button
                       type="button"
                       className="button secondary"
-                      onClick={() => navigate(relatedPath)}
+                      onClick={() => openNotification(item)}
                     >
                       Open
                     </button>

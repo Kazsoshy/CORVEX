@@ -31,6 +31,7 @@ export function TransferDocumentForm({
   const [lines, setLines] = useState([]);
   const [errors, setErrors] = useState({});
   const [submitting, setSubmitting] = useState(false);
+  const [confirmOpen, setConfirmOpen] = useState(false);
 
   useEffect(() => {
     async function load() {
@@ -103,7 +104,7 @@ export function TransferDocumentForm({
     setLines((prev) => prev.filter((line) => Number(line.product_id) !== Number(productId)));
   };
 
-  const handleSubmit = async () => {
+  const validateTransfer = () => {
     const nextErrors = {};
     if (!destination) nextErrors.destination = 'Select destination branch.';
     if (!lines.length) nextErrors.lines = 'Add at least one product.';
@@ -124,6 +125,27 @@ export function TransferDocumentForm({
     setErrors(nextErrors);
     if (Object.keys(nextErrors).length) {
       showToast('Please fix the errors.', 'error');
+      return null;
+    }
+    return normalized;
+  };
+
+  const openConfirm = () => {
+    if (submitting) return;
+    if (!validateTransfer()) return;
+    setConfirmOpen(true);
+  };
+
+  const closeConfirm = () => {
+    if (submitting) return;
+    setConfirmOpen(false);
+  };
+
+  const confirmSubmit = async () => {
+    if (submitting) return;
+    const normalized = validateTransfer();
+    if (!normalized) {
+      setConfirmOpen(false);
       return;
     }
 
@@ -138,11 +160,22 @@ export function TransferDocumentForm({
       showToast(result.message || 'Request failed.', 'error');
       return;
     }
+    setConfirmOpen(false);
     showToast(result.message || 'Submitted for manager approval.', 'success');
     const id = result.data?.transfer_id;
     if (id) navigate(`/warehouse/transfers/${id}?from=requests`);
     else navigate('/warehouse/transfers?tab=requests');
   };
+
+  const totalUnits = useMemo(
+    () => lines.reduce((sum, line) => sum + (Number(line.quantity) || 0), 0),
+    [lines]
+  );
+
+  const destinationName = useMemo(
+    () => branches.find((b) => String(b.branch_id) === String(destination))?.branch_name || '—',
+    [branches, destination]
+  );
 
   if (loading) return <LoadingState message="Loading branch stock…" />;
 
@@ -230,13 +263,80 @@ export function TransferDocumentForm({
       </section>
 
       <div className="flex justify-end gap-2 mt-4">
-        <button className="button secondary" type="button" onClick={() => navigate(cancelTo)}>Cancel</button>
-        <button className="button" type="button" onClick={handleSubmit} disabled={submitting || !stockOptions.length}>
+        <button className="button secondary" type="button" onClick={() => navigate(cancelTo)} disabled={submitting}>
+          Cancel
+        </button>
+        <button
+          className="button"
+          type="button"
+          onClick={openConfirm}
+          disabled={submitting || !stockOptions.length || !lines.length}
+        >
           {submitting ? 'Submitting…' : 'Submit transfer request'}
         </button>
       </div>
       {!stockOptions.length ? (
         <p className="form-error">No products with stock at your branch. Restock first.</p>
+      ) : null}
+
+      {confirmOpen ? (
+        <div
+          className="modal-overlay"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="transfer-confirm-title"
+          onClick={(e) => {
+            if (e.target === e.currentTarget) closeConfirm();
+          }}
+        >
+          <div
+            className="modal-content"
+            style={{ maxWidth: 480 }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="modal-header">
+              <h3 id="transfer-confirm-title">Submit transfer request</h3>
+              <button
+                className="icon-action-button"
+                type="button"
+                title="Close"
+                disabled={submitting}
+                onClick={closeConfirm}
+              >
+                <NavIcon name="close" />
+              </button>
+            </div>
+            <p className="muted" style={{ margin: '0 0 12px', fontSize: '0.88rem' }}>
+              Are you sure you want to submit this transfer request? Please review the transfer details before proceeding.
+            </p>
+            <div className="panel" style={{ padding: '10px 12px', marginBottom: 4, boxShadow: 'none' }}>
+              <div style={{ fontWeight: 650 }}>
+                {lines.length} product{lines.length === 1 ? '' : 's'} · +{totalUnits} total units
+              </div>
+              <div className="muted" style={{ fontSize: '0.85rem', marginTop: 4 }}>
+                Destination: {destinationName}
+              </div>
+            </div>
+            <div className="modal-actions">
+              <button
+                className="button secondary"
+                type="button"
+                disabled={submitting}
+                onClick={closeConfirm}
+              >
+                Cancel
+              </button>
+              <button
+                className="button"
+                type="button"
+                disabled={submitting}
+                onClick={confirmSubmit}
+              >
+                {submitting ? 'Submitting…' : 'Confirm submission'}
+              </button>
+            </div>
+          </div>
+        </div>
       ) : null}
     </div>
   );

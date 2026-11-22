@@ -1013,7 +1013,7 @@ function NotificationsPage({
   navigate,
   showToast
 }) {
-  return <NotificationsInbox navigate={navigate} showToast={showToast} />;
+  return <NotificationsInbox navigate={navigate} showToast={showToast} roleKey="admin" />;
 }
 function ProfilePage({
   showToast

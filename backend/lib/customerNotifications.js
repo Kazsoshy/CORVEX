@@ -47,6 +47,8 @@ export async function notifyCustomerProfileUpdated(pool, {
         title,
         message,
         category: 'Customer',
+        relatedEntity: 'customer',
+        relatedId: customerId,
       })
     )
   );

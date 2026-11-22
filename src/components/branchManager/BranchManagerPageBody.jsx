@@ -12,7 +12,9 @@ import {
   mapOperationalAlertRow,
   alertDeepLink,
 } from '../../api/operationalAlertsService.js';
-import { fetchNotifications, markNotificationRead, markAllNotificationsRead, mapNotificationRow } from '../../api/notificationService.js';
+import { fetchNotifications, markNotificationRead, markAllNotificationsRead, mapNotificationRow, resolveNotificationNavForRole } from '../../api/notificationService.js';
+import { useSelectedNotificationFlash } from '../../hooks/useNotificationHighlight.js';
+import { navigateWithHighlight } from '../../utils/notificationHighlight.js';
 import { BranchInventoryViewPage } from '../inventory/BranchInventoryViewPage.jsx';
 import { EmptyState } from '../shared/EmptyState';
 import { LoadingState } from '../shared/LoadingState';
@@ -1743,17 +1745,41 @@ function NotificationsPage({
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState('All');
+  const [selectedNotificationId, setSelectedNotificationId] = useSelectedNotificationFlash(650);
   const load = async () => {
     setLoading(true);
     const res = await fetchNotifications();
     if (res.success) {
-      setItems((res.data || []).map(row => mapNotificationRow(row, { opsBase, orgBase: '/operating-manager' })));
+      setItems((res.data || []).map(row => mapNotificationRow(row, {
+        opsBase,
+        orgBase: '/operating-manager',
+        roleKey: 'branchManager',
+      })));
     }
     setLoading(false);
   };
   useEffect(() => {
     load();
   }, [opsBase]);
+  const openItem = async (item) => {
+    if (!item) return;
+    if (item.id) setSelectedNotificationId(String(item.id));
+    if (!item.read) {
+      markNotificationRead(item.id);
+      setItems((prev) => prev.map((row) => (row.id === item.id ? { ...row, read: true, status: 'Read' } : row)));
+    }
+    const resolved = resolveNotificationNavForRole(item, 'branchManager');
+    window.setTimeout(() => {
+      if (resolved?.path) {
+        navigateWithHighlight(navigate, resolved.path, {
+          id: resolved.id,
+          notificationId: item.id,
+        });
+      } else {
+        showToast?.('No related record is available for this notification.', 'info');
+      }
+    }, 180);
+  };
   const filtered = useMemo(() => {
     if (filter === 'Unread') return items.filter(n => !n.read);
     if (filter === 'All') return items;
@@ -1773,14 +1799,26 @@ function NotificationsPage({
         </div>
       </section>
       {loading && !items.length ? <LoadingState message="Loading notifications..." /> : filtered.length ? <div className="notification-list">
-          {filtered.map(item => <article key={item.id} className={`notification-item${item.read ? '' : ' unread'}`}>
+          {filtered.map(item => <article
+            key={item.id}
+            className={`notification-item${item.read ? '' : ' unread'}${item.relatedTo ? ' is-clickable' : ''}${selectedNotificationId != null && String(selectedNotificationId) === String(item.id) ? ' is-selected' : ''}`}
+            role={item.relatedTo ? 'link' : undefined}
+            tabIndex={item.relatedTo ? 0 : undefined}
+            onClick={() => openItem(item)}
+            onKeyDown={(event) => {
+              if ((event.key === 'Enter' || event.key === ' ') && item.relatedTo) {
+                event.preventDefault();
+                openItem(item);
+              }
+            }}
+          >
               <div><h4>{item.title}</h4><p className="text-ink/70">{item.message}</p><span className="notification-time">{formatDisplayDateTime(item.time)}</span></div>
-              <div className="notification-actions">
+              <div className="notification-actions" onClick={(event) => event.stopPropagation()}>
                 {!item.read && <button className="button ghost" type="button" onClick={async () => {
             const res = await markNotificationRead(item.id);
             if (res.success) load();
           }}>Mark Read</button>}
-                {item.relatedTo ? <button className="button secondary" type="button" onClick={() => navigate(item.relatedTo)}>Open</button> : null}
+                {item.relatedTo ? <button className="button secondary" type="button" onClick={() => openItem(item)}>Open</button> : null}
               </div>
             </article>)}
         </div> : <EmptyState title="No notifications" description="You're all caught up." />}

@@ -718,6 +718,7 @@ router.patch('/transfers/:id', requireAuth, async (req, res) => {
       if (status === 'Approved' || status === 'Rejected') {
         await notifyTransferDecision(pool, {
           submitterId: transferRow.submitted_by,
+          transferId,
           transferRef: transferRow.transfer_ref,
           status,
           rejectionReason: approvalInfo,
@@ -728,6 +729,7 @@ router.patch('/transfers/:id', requireAuth, async (req, res) => {
         const summary = summarizeLines(lines);
         const srcName = await pool.query(`SELECT name FROM branches WHERE id = $1`, [transferRow.source_branch_id]);
         await notifyTransferShipped(pool, {
+          transferId,
           transferRef: transferRow.transfer_ref,
           productName: summary.product_name,
           lineCount: summary.line_count,
@@ -740,6 +742,7 @@ router.patch('/transfers/:id', requireAuth, async (req, res) => {
         if (!lines.length) lines = await loadTransferLines(pool, transferId);
         const summary = summarizeLines(lines);
         await notifyTransferCompleted(pool, {
+          transferId,
           transferRef: transferRow.transfer_ref,
           productName: summary.product_name,
           lineCount: summary.line_count,
@@ -1586,16 +1589,19 @@ router.get('/restocks/:id', requireAuth, async (req, res) => {
               h.branch_id, h.supplier_id, h.recorded_by, h.status,
               h.submitted_by, h.submitted_at, h.approved_by, h.approved_at,
               h.decision_remarks, h.posted_by, h.posted_at,
+              h.completed_by, h.completed_at,
               b.name AS branch_name, s.supplier_name, s.suppliers_id,
               rec.full_name AS recorded_by_name,
               sub.full_name AS submitted_by_name,
-              appr.full_name AS approved_by_name
+              appr.full_name AS approved_by_name,
+              comp.full_name AS completed_by_name
        FROM restock_headers h
        JOIN branches b ON b.id = h.branch_id
        JOIN suppliers s ON s.suppliers_id = h.supplier_id
        LEFT JOIN users rec ON rec.id = h.recorded_by
        LEFT JOIN users sub ON sub.id = h.submitted_by
        LEFT JOIN users appr ON appr.id = h.approved_by
+       LEFT JOIN users comp ON comp.id = h.completed_by
        WHERE h.restock_id = $1${branchSql}`,
       params
     );
@@ -1668,12 +1674,19 @@ router.post('/restocks', requireAuth, requireRole(INVENTORY_WRITER_ROLES), async
         return res.status(400).json({ success: false, message: 'Each line quantity must be a positive number.' });
       }
       const product = await client.query(
-        `SELECT id FROM products WHERE id = $1 AND COALESCE(status, 'Active') = 'Active'`,
+        `SELECT id, supplier_id FROM products WHERE id = $1 AND COALESCE(status, 'Active') = 'Active'`,
         [line.product_id]
       );
       if (!product.rows.length) {
         await client.query('ROLLBACK');
         return res.status(404).json({ success: false, message: `Product ${line.product_id} not found or inactive.` });
+      }
+      if (Number(product.rows[0].supplier_id) !== supplierId) {
+        await client.query('ROLLBACK');
+        return res.status(400).json({
+          success: false,
+          message: `Product ${line.product_id} does not belong to the selected supplier.`,
+        });
       }
     }
 
@@ -1690,7 +1703,7 @@ router.post('/restocks', requireAuth, requireRole(INVENTORY_WRITER_ROLES), async
          status, submitted_by, submitted_at
        ) VALUES (
          $1, $2, $3, $4, $5::date, $6, $7,
-         $8, $9, CASE WHEN $8 = 'Pending Approval' THEN CURRENT_TIMESTAMP ELSE NULL END
+         $8::varchar, $9, $10
        )
        RETURNING restock_id, restock_ref, delivery_ref, status`,
       [
@@ -1703,6 +1716,7 @@ router.post('/restocks', requireAuth, requireRole(INVENTORY_WRITER_ROLES), async
         combinedNotes,
         status,
         submitNow ? user.id : null,
+        submitNow ? new Date() : null,
       ]
     );
     const restockId = header.rows[0].restock_id;
@@ -1725,6 +1739,7 @@ router.post('/restocks', requireAuth, requireRole(INVENTORY_WRITER_ROLES), async
       );
       await notifyRestockSubmitted(pool, {
         branchId,
+        restockId,
         restockRef,
         deliveryRef,
         lineCount: summary.line_count,
@@ -1753,9 +1768,13 @@ router.post('/restocks', requireAuth, requireRole(INVENTORY_WRITER_ROLES), async
       },
     });
   } catch (err) {
-    await client.query('ROLLBACK');
-    console.error('[Inventory] POST /restocks error:', err.message);
-    return res.status(500).json({ success: false, message: 'Failed to save restock.' });
+    try { await client.query('ROLLBACK'); } catch { /* transaction may already be closed */ }
+    console.error('[Inventory] POST /restocks error:', err.message, err.code, err.detail || '');
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to save restock.',
+      error: process.env.NODE_ENV === 'production' ? undefined : err.message,
+    });
   } finally {
     client.release();
   }
@@ -1814,6 +1833,7 @@ router.post('/restocks/:id/submit', requireAuth, requireRole(INVENTORY_WRITER_RO
     );
     await notifyRestockSubmitted(pool, {
       branchId: row.branch_id,
+      restockId,
       restockRef: row.restock_ref,
       deliveryRef: row.delivery_ref,
       lineCount: summary.line_count,
@@ -1831,6 +1851,74 @@ router.post('/restocks/:id/submit', requireAuth, requireRole(INVENTORY_WRITER_RO
     await client.query('ROLLBACK');
     console.error('[Inventory] POST /restocks/:id/submit error:', err.message);
     return res.status(500).json({ success: false, message: 'Failed to submit restock.' });
+  } finally {
+    client.release();
+  }
+});
+
+// POST /api/inventory/restocks/:id/complete — Posted → Completed (warehouse verification)
+router.post('/restocks/:id/complete', requireAuth, requireRole(INVENTORY_WRITER_ROLES), async (req, res) => {
+  const pool = req.app.locals.pool;
+  const user = req.currentUser;
+  const restockId = Number(req.params.id);
+  if (!Number.isFinite(restockId)) {
+    return res.status(400).json({ success: false, message: 'Invalid restock ID.' });
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const existing = await client.query(
+      `SELECT * FROM restock_headers WHERE restock_id = $1 FOR UPDATE`,
+      [restockId]
+    );
+    if (!existing.rows.length) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ success: false, message: 'Restock not found.' });
+    }
+    const row = existing.rows[0];
+    if (!isUnscoped(user) && Number(row.branch_id) !== Number(user.branchId)) {
+      await client.query('ROLLBACK');
+      return res.status(403).json({ success: false, message: 'Restock is outside your branch.' });
+    }
+    if (row.status !== 'Posted') {
+      await client.query('ROLLBACK');
+      return res.status(400).json({
+        success: false,
+        message: `Only Posted restocks can be marked as completed. Current status: ${row.status}.`,
+      });
+    }
+    if (row.completed_by) {
+      await client.query('ROLLBACK');
+      return res.status(409).json({ success: false, message: 'Restock is already completed.' });
+    }
+
+    const updated = await client.query(
+      `UPDATE restock_headers
+       SET status = 'Completed',
+           completed_by = $1,
+           completed_at = CURRENT_TIMESTAMP,
+           updated_at = CURRENT_TIMESTAMP
+       WHERE restock_id = $2
+       RETURNING *`,
+      [user.id, restockId]
+    );
+    await client.query('COMMIT');
+
+    await logWarehouseAudit(pool, user.id, 'Restock completed', row.restock_ref, req.ip, {
+      branchId: row.branch_id,
+      affectedRecord: `restock:${restockId}`,
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: `Restock ${row.restock_ref} marked as completed. Receipt verified.`,
+      data: updated.rows[0],
+    });
+  } catch (err) {
+    try { await client.query('ROLLBACK'); } catch { /* ignore */ }
+    console.error('[Inventory] POST /restocks/:id/complete error:', err.message);
+    return res.status(500).json({ success: false, message: 'Failed to complete restock.' });
   } finally {
     client.release();
   }
@@ -2082,6 +2170,7 @@ router.post('/stock-counts', requireAuth, requireRole(INVENTORY_WRITER_ROLES), a
       const submitterName = submitterMeta.rows[0]?.display_name || 'Warehouse staff';
       await notifyStockCountSubmitted(pool, {
         branchId,
+        countId,
         countRef,
         discrepancyCount,
         submitterName,
@@ -2212,6 +2301,7 @@ router.post('/transfers', requireAuth, requireRole(INVENTORY_WRITER_ROLES), asyn
 
     await notifyTransferSubmitted(pool, {
       sourceBranchId: branchId,
+      transferId,
       transferRef,
       productName: summary.product_name,
       quantity: summary.total_quantity,

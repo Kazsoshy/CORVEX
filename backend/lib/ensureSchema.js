@@ -28,6 +28,8 @@ export async function ensureSchema(client) {
     ALTER TABLE products ADD COLUMN IF NOT EXISTS supplier_id INT;
 
     ALTER TABLE notifications ADD COLUMN IF NOT EXISTS category VARCHAR(50);
+    ALTER TABLE notifications ADD COLUMN IF NOT EXISTS related_entity VARCHAR(50);
+    ALTER TABLE notifications ADD COLUMN IF NOT EXISTS related_id VARCHAR(100);
 
     ALTER TABLE permissions ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP;
     ALTER TABLE permissions ADD COLUMN IF NOT EXISTS status VARCHAR(20) NOT NULL DEFAULT 'Active';

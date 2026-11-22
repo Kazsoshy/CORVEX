@@ -217,83 +217,71 @@ export function BranchInventoryViewPage({
 
   return (
     <div className="page">
-      <section className="panel content-panel relative overflow-hidden">
-        <div className="list-section-header">
-          <div className="flex flex-wrap gap-2 items-center">
-            {isOversight ? <StatusBadge status="View only" /> : null}
-            {isOversight && navigate ? (
-              <>
-                <button
-                  className="button secondary"
-                  type="button"
-                  onClick={() => navigate(`${opsBase}/approval-center?tab=transfers`)}
-                >
-                  Transfer Approvals
-                </button>
-                <button
-                  className="button"
-                  type="button"
-                  onClick={() => navigate(`${opsBase}/approval-center?tab=restocks`)}
-                >
-                  Restock Approvals
-                </button>
-                <button
-                  className="button ghost"
-                  type="button"
-                  onClick={() => navigate(`${opsBase}/approval-center?tab=stock-counts`)}
-                >
-                  Stock Count Approvals
-                </button>
-              </>
-            ) : null}
+      {isOversight ? (
+        <section className="panel content-panel relative overflow-hidden">
+          <div className="list-section-header">
+            <div className="flex flex-wrap gap-2 items-center">
+              <StatusBadge status="View only" />
+              {navigate ? (
+                <>
+                  <button
+                    className="button secondary"
+                    type="button"
+                    onClick={() => navigate(`${opsBase}/approval-center?tab=transfers`)}
+                  >
+                    Transfer Approvals
+                  </button>
+                  <button
+                    className="button"
+                    type="button"
+                    onClick={() => navigate(`${opsBase}/approval-center?tab=restocks`)}
+                  >
+                    Restock Approvals
+                  </button>
+                  <button
+                    className="button ghost"
+                    type="button"
+                    onClick={() => navigate(`${opsBase}/approval-center?tab=stock-counts`)}
+                  >
+                    Stock Count Approvals
+                  </button>
+                </>
+              ) : null}
+            </div>
           </div>
-        </div>
 
-        <div className="pos-chips" role="group" aria-label="Stock triage" style={{ marginTop: 12 }}>
-          <button
-            type="button"
-            className={statusFilter === 'All' ? 'pos-chip active' : 'pos-chip'}
-            onClick={() => setStatusFilter('All')}
-          >
-            All tracked · {summary.all}
-          </button>
-          <button
-            type="button"
-            className={statusFilter === 'Attention' ? 'pos-chip active' : 'pos-chip'}
-            onClick={() => setStatusFilter('Attention')}
-          >
-            Needs attention · {summary.attention}
-          </button>
-          <button
-            type="button"
-            className={statusFilter === 'Out of Stock' ? 'pos-chip active' : 'pos-chip'}
-            onClick={() => setStatusFilter('Out of Stock')}
-          >
-            Out · {summary.out}
-          </button>
-          <button
-            type="button"
-            className={statusFilter === 'Pending' ? 'pos-chip active' : 'pos-chip'}
-            onClick={() => setStatusFilter('Pending')}
-          >
-            Pending outbound · {summary.pendingRows}
-          </button>
-          {isWarehouse ? (
+          <div className="pos-chips" role="group" aria-label="Stock triage" style={{ marginTop: 12 }}>
             <button
               type="button"
-              className={statusFilter === 'Never Stocked' ? 'pos-chip active' : 'pos-chip'}
-              onClick={() => {
-                setIncludeNeverStocked(true);
-                setStatusFilter('Never Stocked');
-              }}
-              disabled={!summary.never}
-              title={summary.never ? 'Catalog SKUs not yet stocked at this branch' : 'No unstocked catalog products'}
+              className={statusFilter === 'All' ? 'pos-chip active' : 'pos-chip'}
+              onClick={() => setStatusFilter('All')}
             >
-              Never stocked · {summary.never}
+              All tracked · {summary.all}
             </button>
-          ) : null}
-        </div>
-      </section>
+            <button
+              type="button"
+              className={statusFilter === 'Attention' ? 'pos-chip active' : 'pos-chip'}
+              onClick={() => setStatusFilter('Attention')}
+            >
+              Needs attention · {summary.attention}
+            </button>
+            <button
+              type="button"
+              className={statusFilter === 'Out of Stock' ? 'pos-chip active' : 'pos-chip'}
+              onClick={() => setStatusFilter('Out of Stock')}
+            >
+              Out · {summary.out}
+            </button>
+            <button
+              type="button"
+              className={statusFilter === 'Pending' ? 'pos-chip active' : 'pos-chip'}
+              onClick={() => setStatusFilter('Pending')}
+            >
+              Pending outbound · {summary.pendingRows}
+            </button>
+          </div>
+        </section>
+      ) : null}
 
       <section className="panel content-panel relative overflow-hidden">
         <div className="list-section-toolbar branch-stock-toolbar">

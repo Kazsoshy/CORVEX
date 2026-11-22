@@ -8,8 +8,10 @@ import {
   fetchNotifications,
   markAllNotificationsRead,
   markNotificationRead,
-  resolveNotificationTargetForRole,
+  resolveNotificationNavForRole,
 } from '../../api/notificationService.js';
+import { useSelectedNotificationFlash } from '../../hooks/useNotificationHighlight.js';
+import { navigateWithHighlight } from '../../utils/notificationHighlight.js';
 import { AccountMenuPopover } from './AccountMenuPopover.jsx';
 import { NotificationsPopover } from './NotificationsPopover.jsx';
 import { initialsFrom } from './profileParts.jsx';
@@ -38,6 +40,7 @@ export function TopNavbar({
   const [notificationsOpen, setNotificationsOpen] = useState(false);
   const [notifications, setNotifications] = useState([]);
   const [loadingNotifications, setLoadingNotifications] = useState(false);
+  const [selectedNotificationId, setSelectedNotificationId] = useSelectedNotificationFlash(650);
 
   const profileAnchorRef = useRef(null);
   const bellAnchorRef = useRef(null);
@@ -126,6 +129,7 @@ export function TopNavbar({
   const handleSelectNotification = useCallback(async (item) => {
     if (!item) return;
     const id = item.notification_id ?? item.id;
+    if (id) setSelectedNotificationId(String(id));
     const isUnread = item.status !== 'Read' && !item.read;
     if (isUnread && id) {
       setNotifications((prev) =>
@@ -133,12 +137,19 @@ export function TopNavbar({
       );
       markNotificationRead(id);
     }
-    setNotificationsOpen(false);
-    const target = resolveNotificationTargetForRole(item, currentRole?.key) || notificationsPath;
-    if (target && navigate) {
-      navigate(target);
-    }
-  }, [currentRole?.key, navigate, notificationsPath]);
+    const resolved = resolveNotificationNavForRole(item, currentRole?.key);
+    window.setTimeout(() => {
+      setNotificationsOpen(false);
+      if (resolved?.path && navigate) {
+        navigateWithHighlight(navigate, resolved.path, {
+          id: resolved.id,
+          notificationId: id,
+        });
+        return;
+      }
+      showToast?.('No related record is available for this notification.', 'info');
+    }, 180);
+  }, [currentRole?.key, navigate, setSelectedNotificationId, showToast]);
 
   const handleViewAllNotifications = useCallback(() => {
     setNotificationsOpen(false);
@@ -181,7 +192,6 @@ export function TopNavbar({
             </nav>
           ) : (
             <div className="top-navbar__meta">
-              <span className="top-navbar__role">{userRole}</span>
               {userAssignedLocation && userAssignedLocation !== 'No Branch Assigned' ? (
                 <>
                   <span className="top-navbar__meta-dot" aria-hidden="true">·</span>
@@ -242,6 +252,7 @@ export function TopNavbar({
         notifications={notifications}
         loading={loadingNotifications}
         unreadCount={unreadCount}
+        selectedNotificationId={selectedNotificationId}
         onMarkRead={handleMarkRead}
         onMarkAllRead={handleMarkAllRead}
         onSelectNotification={handleSelectNotification}

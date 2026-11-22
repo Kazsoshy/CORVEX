@@ -20,7 +20,7 @@ import {
   DigitalReceiptPage,
   ReceiptsRedirectPage,
 } from './CollectorHistory';
-import { fetchNotifications } from '../../api/notificationService.js';
+import { fetchNotifications, resolveNotificationTargetForRole } from '../../api/notificationService.js';
 import { getCurrentUser } from '../../api/authService.js';
 import { isBrowserOnline } from '../../offline/connection.js';
 import { saveOfflineRecord } from '../../offline/db.js';
@@ -90,12 +90,8 @@ function collectorOpenMap(account, navigate, parentContext = 'accounts') {
   if (path) navigate(path);
 }
 
-function resolveCollectorNotificationPath(category) {
-  const c = String(category || '').toLowerCase();
-  if (c.includes('schedule') || c.includes('route') || c.includes('visit')) return '/collector/route';
-  if (c.includes('receipt') || c.includes('collection')) return '/collector/history';
-  if (c.includes('ci') || c.includes('credit')) return '/collector/accounts';
-  return '/collector/notifications';
+function resolveCollectorNotificationPath(item) {
+  return resolveNotificationTargetForRole(item, 'collector');
 }
 
 function greetingForNow() {
@@ -1422,7 +1418,8 @@ function NotificationsPage({
     <NotificationsInbox
       showToast={showToast}
       navigate={navigate}
-      resolveRelatedPath={(n) => resolveCollectorNotificationPath(n.category)}
+      roleKey="collector"
+      resolveRelatedPath={(n) => resolveCollectorNotificationPath(n)}
     />
   );
 }

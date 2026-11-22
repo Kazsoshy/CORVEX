@@ -1,8 +1,27 @@
-export async function insertUserNotification(pool, { userId, title, message, category = 'General', status = 'Unread' }) {
+export async function insertUserNotification(pool, {
+  userId,
+  title,
+  message,
+  category = 'General',
+  status = 'Unread',
+  relatedEntity = null,
+  relatedId = null,
+}) {
+  const entity = relatedEntity ? String(relatedEntity).trim().toLowerCase() : null;
+  const related = relatedId == null || relatedId === '' ? null : String(relatedId).trim();
   await pool.query(
-    `INSERT INTO notifications (user_id, title, message, status, category, created_at)
-     VALUES ($1, $2, $3, $4, $5, CURRENT_TIMESTAMP)`,
-    [userId, title, message, status, category]
+    `INSERT INTO notifications (
+       user_id, title, message, status, category, related_entity, related_id, created_at
+     ) VALUES ($1, $2, $3, $4, $5, $6, $7, CURRENT_TIMESTAMP)`,
+    [
+      userId,
+      title,
+      message,
+      status,
+      category,
+      entity || null,
+      related || null,
+    ]
   );
 }
 
@@ -23,7 +42,14 @@ export async function notifyCreditInvestigationSubmitted(pool, { branchId, ciId,
 
   await Promise.all(
     approvers.rows.map((row) =>
-      insertUserNotification(pool, { userId: row.id, title, message, category: 'CI' })
+      insertUserNotification(pool, {
+        userId: row.id,
+        title,
+        message,
+        category: 'CI',
+        relatedEntity: 'ci',
+        relatedId: ciId,
+      })
     )
   );
 }
@@ -57,5 +83,7 @@ export async function notifyCreditInvestigationDecision(pool, {
     title,
     message,
     category: 'CI',
+    relatedEntity: 'ci',
+    relatedId: ciId,
   });
 }

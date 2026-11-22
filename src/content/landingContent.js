@@ -4,12 +4,16 @@
  * Product notes describe the photographs already in the project. Replace them
  * when official product information is available.
  */
-import ariaSectional from '../assets/products-image/aria-sectional.jpg';
-import boardroomTable from '../assets/products-image/boardroom-table.jpg';
-import auraWardrobe from '../assets/products-image/aura-wardrobe.png';
-import cedarRecliner from '../assets/products-image/cedar-recliner.jpg';
-import breezewayPatio from '../assets/products-image/breezeway-patio-set.jpg';
-import baristaStool from '../assets/products-image/barista-stool.jpg';
+import boundPocketMattress from '../assets/product-images/Bound-pocket-mattress.png';
+import ceramicGingerJar from '../assets/product-images/Ceramic-ginger-jar.png';
+import foldingMattress from '../assets/product-images/Folding-mattress.png';
+import monoblockChair from '../assets/product-images/Monoblock-Chair.png';
+import squareTable from '../assets/product-images/Square-Table.png';
+import uratexClassicMattress from '../assets/product-images/Uratex-Classic-Mattress.png';
+import uratexKateChair from '../assets/product-images/Uratex-Monoblock-kate-chair.png';
+import uratexZoePlasticWare from '../assets/product-images/Uratex-Zoe-plastic-ware.png';
+import zooeyDishCabinet from '../assets/product-images/Zooey-Master-Deluxe-Dish-Cabinet.png';
+import zooeyRattanSalaSet from '../assets/product-images/Zooey-rattan-sala-set.png';
 
 export const landingContent = {
   brand: 'CORVEX',
@@ -27,8 +31,8 @@ export const landingContent = {
 
   hero: {
     kicker: 'CORVEX Furniture',
-    titleLead: 'Furniture for',
-    titleEmphasis: 'daily life.',
+    titleLead: 'Make Every Space',
+    titleEmphasis: 'Feel Like Home.',
     lede: 'A collection for living, sleeping, dining, work, and the outdoors — kept in view across every BH Marketing branch.',
     primaryCta: { label: 'Our Products', href: '#products' },
     secondaryCta: { label: 'Get in Touch', href: '#contact' },
@@ -80,64 +84,104 @@ export const landingContent = {
 
   products: [
     {
-      id: 'aria-sectional',
-      name: 'Aria Sectional',
+      id: 'zooey-rattan-sala-set',
+      name: 'Zooey Rattan Sala Set',
       category: 'Living Room',
-      summary: 'Chaise sectional with upholstered seating and a dark wood frame.',
-      note: 'Three seat cushions, loose back cushions, and a chaise on a low wood base.',
-      image: ariaSectional,
+      summary: 'Complete living room suite featuring woven armchairs, sofa, and a matching coffee table.',
+      note: 'Durable weather-resistant woven rattan finish with ergonomic seating.',
+      image: zooeyRattanSalaSet,
       fit: 'contain',
-      stage: '#f4f4f4',
+      stage: '#f8fafc',
     },
     {
-      id: 'boardroom-table',
-      name: 'Boardroom Table',
-      category: 'Office',
-      summary: 'A wood meeting table shown with a surrounding set of chairs.',
-      note: 'A long wood top with a dark center inlay, set on a metal frame.',
-      image: boardroomTable,
-      fit: 'contain',
-      stage: '#f7f7f7',
-    },
-    {
-      id: 'aura-wardrobe',
-      name: 'Aura Wardrobe',
+      id: 'uratex-classic-mattress',
+      name: 'Uratex Classic Mattress',
       category: 'Bedroom',
-      summary: 'A fitted wardrobe with hanging space, shelves, and drawers.',
-      note: 'White cabinetry arranged as hanging rods, open shelves, and a bank of drawers.',
-      image: auraWardrobe,
-      fit: 'cover',
-      stage: '#ece7e1',
-    },
-    {
-      id: 'cedar-recliner',
-      name: 'Cedar Recliner',
-      category: 'Living Room',
-      summary: 'A tan recliner shown with the footrest extended.',
-      note: 'Upholstered chair with a high back, wide arms, and a visible recline mechanism.',
-      image: cedarRecliner,
+      summary: 'High-density foam mattress providing reliable comfort and medium-firm body support.',
+      note: 'Long-lasting polyurethane foam core with premium jacquard fabric upholstery.',
+      image: uratexClassicMattress,
       fit: 'contain',
-      stage: '#f3f3f3',
+      stage: '#f8fafc',
     },
     {
-      id: 'breezeway-patio-set',
-      name: 'Breezeway Patio Set',
-      category: 'Outdoor',
-      summary: 'Four outdoor armchairs arranged around a round table.',
-      note: 'Dark woven chairs with wood legs and cushions, gathered around a circular top.',
-      image: breezewayPatio,
-      fit: 'contain',
-      stage: '#f7f7f7',
-    },
-    {
-      id: 'barista-stool',
-      name: 'Barista Stool',
+      id: 'square-table',
+      name: 'Square Dining Table',
       category: 'Dining',
-      summary: 'Wood bar stools with a curved back and an upholstered seat.',
-      note: 'A wood frame with a footrest and a light fabric seat.',
-      image: baristaStool,
+      summary: 'Sturdy four-legged utility dining table with a smooth, easy-to-clean surface.',
+      note: 'Reinforced polymer structure designed for versatile indoor and outdoor use.',
+      image: squareTable,
       fit: 'contain',
-      stage: '#d7d7d7',
+      stage: '#f8fafc',
+    },
+    {
+      id: 'zooey-dish-cabinet',
+      name: 'Zooey Master Deluxe Dish Cabinet',
+      category: 'Kitchen & Dining',
+      summary: 'Multi-tier enclosed kitchen storage with clear doors and ventilated compartments.',
+      note: 'Includes integrated plate organizers, glass racks, and pull-out drawers.',
+      image: zooeyDishCabinet,
+      fit: 'contain',
+      stage: '#f8fafc',
+    },
+    {
+      id: 'uratex-kate-chair',
+      name: 'Uratex Kate Monoblock Armchair',
+      category: 'Living & Dining',
+      summary: 'Ergonomic molded armchair with curved back support and integrated armrests.',
+      note: 'Heavy-duty resin construction with a sleek matte finish, easily stackable.',
+      image: uratexKateChair,
+      fit: 'contain',
+      stage: '#f8fafc',
+    },
+    {
+      id: 'bound-pocket-mattress',
+      name: 'Bound Pocket Spring Mattress',
+      category: 'Bedroom',
+      summary: 'Individual pocket springs designed to isolate motion and provide targeted pressure relief.',
+      note: 'Multi-layer construction with a quilted breathable fabric top layer.',
+      image: boundPocketMattress,
+      fit: 'contain',
+      stage: '#f8fafc',
+    },
+    {
+      id: 'folding-mattress',
+      name: 'Fold-A-Mattress',
+      category: 'Bedroom',
+      summary: 'Space-saving tri-fold portable mattress ideal for compact living and guests.',
+      note: 'High-density flexible foam that folds neatly for storage and transport.',
+      image: foldingMattress,
+      fit: 'contain',
+      stage: '#f8fafc',
+    },
+    {
+      id: 'monoblock-chair',
+      name: 'Classic Monoblock Chair',
+      category: 'Dining & Outdoor',
+      summary: 'All-weather, lightweight molded chair built for daily residential and commercial use.',
+      note: 'UV-resistant polymer with reinforced ribbing for durable daily use.',
+      image: monoblockChair,
+      fit: 'contain',
+      stage: '#f8fafc',
+    },
+    {
+      id: 'uratex-zoe-plastic-ware',
+      name: 'Zoe Storage Chest',
+      category: 'Storage',
+      summary: 'Multi-layer organizer chest with spacious smooth-glide drawers.',
+      note: 'Durable modular storage solution for clothing, linens, and household essentials.',
+      image: uratexZoePlasticWare,
+      fit: 'contain',
+      stage: '#f8fafc',
+    },
+    {
+      id: 'ceramic-ginger-jar',
+      name: 'Ceramic Ginger Jar',
+      category: 'Home Decor',
+      summary: 'Handcrafted decorative ceramic accent piece with delicate glaze detailing.',
+      note: 'Classic urn silhouette with a fitted lid, ideal for tabletop display.',
+      image: ceramicGingerJar,
+      fit: 'contain',
+      stage: '#f8fafc',
     },
   ],
 

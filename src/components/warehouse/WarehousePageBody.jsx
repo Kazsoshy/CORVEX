@@ -1,6 +1,8 @@
 import { Pagination } from '../shared/Pagination';
 import { StatsGrid, Stats } from '../shared/StatsGrid';
 import { usePagination } from '../../hooks/usePagination';
+import { useNotificationHighlight } from '../../hooks/useNotificationHighlight.js';
+import { idsMatch, readHighlightId, recordKey } from '../../utils/notificationHighlight.js';
 import { useEffect, useMemo, useState } from 'react';
 import {
   createInventoryTransfer,
@@ -22,6 +24,7 @@ import {
   fetchWarehouseDashboard,
   patchInventoryTransfer,
   submitRestock,
+  completeRestock,
 } from '../../api/inventoryService';
 import { getCurrentUser } from '../../api/authService.js';
 import { AccountProfilePanel } from '../shared/AccountProfilePanel';
@@ -1217,6 +1220,8 @@ function StockCountHistoryPage({ navigate }) {
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);
   const [reloadTick, setReloadTick] = useState(0);
+  const [highlightReady, setHighlightReady] = useState(false);
+  useNotificationHighlight('stock_count', { enabled: !loading, ready: highlightReady });
 
   useEffect(() => {
     let cancelled = false;
@@ -1237,6 +1242,28 @@ function StockCountHistoryPage({ navigate }) {
     window.addEventListener('focus', onFocus);
     return () => window.removeEventListener('focus', onFocus);
   }, []);
+
+  useEffect(() => {
+    if (loading) {
+      setHighlightReady(false);
+      return undefined;
+    }
+    const focusId = readHighlightId(window.location.search);
+    if (!focusId) {
+      setHighlightReady(true);
+      return undefined;
+    }
+    const match = rows.find((row) => idsMatch(row.count_id, focusId) || idsMatch(row.count_ref, focusId));
+    if (match?.count_id) {
+      navigate(
+        `/warehouse/stock-counts/${match.count_id}?highlight=${encodeURIComponent(match.count_id)}`,
+        { replace: true }
+      );
+      return undefined;
+    }
+    const timer = window.setTimeout(() => setHighlightReady(true), 40);
+    return () => window.clearTimeout(timer);
+  }, [loading, rows, navigate]);
 
   const pagination = usePagination(rows, { pageSize: PAGE_SIZE });
 
@@ -1279,6 +1306,8 @@ function StockCountHistoryPage({ navigate }) {
                     <tr
                       key={row.count_id}
                       className="clickable-row"
+                      data-record-key={recordKey('stock_count', row.count_id)}
+                      data-highlight-alt={row.count_ref || undefined}
                       onClick={() => navigate(`/warehouse/stock-counts/${row.count_id}`)}
                     >
                       <td><span className="mono-cell">{formatDocumentRef(row.count_ref)}</span></td>
@@ -1326,6 +1355,7 @@ function StockCountDetailPage({ countId, navigate }) {
   const [detail, setDetail] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  useNotificationHighlight('stock_count', { enabled: Boolean(countId) });
 
   useEffect(() => {
     let cancelled = false;
@@ -1362,7 +1392,10 @@ function StockCountDetailPage({ countId, navigate }) {
 
   return (
     <div className="page">
-      <section className="panel content-panel relative overflow-hidden">
+      <section
+        className="panel content-panel relative overflow-hidden"
+        data-record-key={recordKey('stock_count', detail.count_id || countId)}
+      >
         <div className="list-section-header">
           <div>
             <h3 style={{ margin: 0 }}>{detail.count_ref ? formatDocumentRef(detail.count_ref) : `Count #${detail.count_id}`}</h3>
@@ -2052,6 +2085,8 @@ function TransfersPage({
   const [transfers, setTransfers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [reloadTick, setReloadTick] = useState(0);
+  const [highlightReady, setHighlightReady] = useState(false);
+  useNotificationHighlight('transfer', { enabled: !loading, ready: highlightReady });
 
   useEffect(() => {
     let cancelled = false;
@@ -2076,6 +2111,28 @@ function TransfersPage({
     window.addEventListener('focus', onFocus);
     return () => window.removeEventListener('focus', onFocus);
   }, []);
+
+  useEffect(() => {
+    if (loading) {
+      setHighlightReady(false);
+      return undefined;
+    }
+    const focusId = readHighlightId(window.location.search);
+    if (!focusId) {
+      setHighlightReady(true);
+      return undefined;
+    }
+    const match = transfers.find((t) => idsMatch(t.transfer_id, focusId) || idsMatch(t.transfer_ref, focusId));
+    if (match?.transfer_id) {
+      navigate(
+        `/warehouse/transfers/${match.transfer_id}?highlight=${encodeURIComponent(match.transfer_id)}&from=${mainTab === 'history' ? 'history' : 'requests'}`,
+        { replace: true }
+      );
+      return undefined;
+    }
+    const timer = window.setTimeout(() => setHighlightReady(true), 40);
+    return () => window.clearTimeout(timer);
+  }, [loading, transfers, navigate, mainTab]);
 
   const setMainTab = (tab) => {
     if (tab === 'history') {
@@ -2312,6 +2369,8 @@ function TransfersPage({
                       <tr
                         key={t.transfer_id}
                         className="clickable-row"
+                        data-record-key={recordKey('transfer', t.transfer_id)}
+                        data-highlight-alt={t.transfer_ref || undefined}
                         onClick={() => openDetail(t.transfer_id)}
                       >
                         <td>
@@ -2376,6 +2435,7 @@ function TransferDetailPage({
   const [transfer, setTransfer] = useState(null);
   const [loading, setLoading] = useState(true);
   const [completing, setCompleting] = useState(false);
+  useNotificationHighlight('transfer', { enabled: Boolean(transferId) });
 
   const reload = async () => {
     setLoading(true);
@@ -2459,7 +2519,10 @@ function TransferDetailPage({
 
   return (
     <div className="page">
-      <section className="panel content-panel relative overflow-hidden">
+      <section
+        className="panel content-panel relative overflow-hidden"
+        data-record-key={recordKey('transfer', transfer.transfer_id || transferId)}
+      >
         <div className="flex flex-col md:flex-row justify-between gap-3 items-start md:items-center mb-3">
           <div>
             <h3 style={{ margin: 0 }}>
@@ -2639,11 +2702,43 @@ function RestockHistoryPage({ navigate }) {
   const [restocks, setRestocks] = useState([]);
   const [loading, setLoading] = useState(true);
   const [reloadTick, setReloadTick] = useState(0);
+  const [highlightReady, setHighlightReady] = useState(false);
+  useNotificationHighlight('restock', { enabled: !loading, ready: highlightReady });
 
   useEffect(() => {
     const timer = setTimeout(() => setSearch(searchInput.trim()), 300);
     return () => clearTimeout(timer);
   }, [searchInput]);
+
+  useEffect(() => {
+    if (loading) {
+      setHighlightReady(false);
+      return undefined;
+    }
+    const focusId = readHighlightId(window.location.search);
+    if (!focusId) {
+      setHighlightReady(true);
+      return undefined;
+    }
+    const match = restocks.find((r) => (
+      idsMatch(r.restock_id, focusId)
+      || idsMatch(r.restock_ref, focusId)
+      || idsMatch(r.delivery_ref, focusId)
+    ));
+    if (match?.restock_id) {
+      // Clear search filters that could hide the target, then open detail.
+      setSearchInput('');
+      setSearch('');
+      setSupplier('All');
+      navigate(
+        `/warehouse/restock-history/${match.restock_id}?highlight=${encodeURIComponent(match.restock_id)}`,
+        { replace: true }
+      );
+      return undefined;
+    }
+    const timer = window.setTimeout(() => setHighlightReady(true), 40);
+    return () => window.clearTimeout(timer);
+  }, [loading, restocks, navigate]);
 
   useEffect(() => {
     let cancelled = false;
@@ -2759,6 +2854,8 @@ function RestockHistoryPage({ navigate }) {
                       <tr
                         key={r.restock_id}
                         className="clickable-row"
+                        data-record-key={recordKey('restock', r.restock_id)}
+                        data-highlight-alt={r.restock_ref || r.delivery_ref || undefined}
                         onClick={() => navigate(`/warehouse/restock-history/${r.restock_id}`)}
                       >
                         <td>
@@ -2840,6 +2937,7 @@ function RestockDetailPage({ restockId, navigate, showToast }) {
   const [restock, setRestock] = useState(null);
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
+  useNotificationHighlight('restock', { enabled: Boolean(restockId) });
   const reload = async () => {
     setLoading(true);
     const res = await fetchRestockById(restockId);
@@ -2866,6 +2964,8 @@ function RestockDetailPage({ restockId, navigate, showToast }) {
   const movementSearch = restock.restock_ref || restock.delivery_ref || '';
   const canSubmitDraft = restock.status === 'Draft';
   const isPosted = restock.status === 'Posted';
+  const isCompleted = restock.status === 'Completed';
+  const canComplete = isPosted;
 
   const handleSubmitDraft = async () => {
     setSubmitting(true);
@@ -2879,9 +2979,24 @@ function RestockDetailPage({ restockId, navigate, showToast }) {
     }
   };
 
+  const handleComplete = async () => {
+    setSubmitting(true);
+    const result = await completeRestock(restockId);
+    setSubmitting(false);
+    if (result.success) {
+      showToast?.(result.message || 'Restock marked as completed.', 'success');
+      reload();
+    } else {
+      showToast?.(result.message || 'Failed to complete restock.', 'error');
+    }
+  };
+
   return (
     <div className="page">
-      <section className="panel content-panel relative overflow-hidden">
+      <section
+        className="panel content-panel relative overflow-hidden"
+        data-record-key={recordKey('restock', restock.restock_id || restockId)}
+      >
         <div className="flex flex-col md:flex-row justify-between gap-3 items-start md:items-center mb-3">
           <div>
             <h3 style={{ margin: 0 }}>
@@ -2905,6 +3020,16 @@ function RestockDetailPage({ restockId, navigate, showToast }) {
             Waiting for Branch Manager approval. On-hand stock is unchanged until posted.
           </p>
         ) : null}
+        {restock.status === 'Posted' ? (
+          <p className="muted" style={{ marginBottom: 12 }}>
+            Stock has been posted to branch inventory. Mark as completed after verifying receipt.
+          </p>
+        ) : null}
+        {isCompleted ? (
+          <p className="muted" style={{ marginBottom: 12, color: '#2A9B6A' }}>
+            Receipt verified and completed by {restock.completed_by_name || 'warehouse staff'}.
+          </p>
+        ) : null}
         {restock.status === 'Rejected' && restock.decision_remarks ? (
           <p className="muted" style={{ marginBottom: 12, color: '#dc2626' }}>
             Rejected: {restock.decision_remarks}
@@ -2916,6 +3041,8 @@ function RestockDetailPage({ restockId, navigate, showToast }) {
           { label: 'Recorded by', value: restock.recorded_by_name || '—' },
           ...(restock.submitted_by_name ? [{ label: 'Submitted by', value: restock.submitted_by_name }] : []),
           ...(restock.approved_by_name ? [{ label: 'Approved by', value: restock.approved_by_name }] : []),
+          ...(restock.completed_by_name ? [{ label: 'Completed by', value: restock.completed_by_name }] : []),
+          ...(restock.completed_at ? [{ label: 'Completed at', value: formatDisplayDate(restock.completed_at) }] : []),
           ...(restock.notes ? [{ label: 'Notes', value: restock.notes }] : []),
         ]} />
       </section>
@@ -2967,7 +3094,7 @@ function RestockDetailPage({ restockId, navigate, showToast }) {
         <button className="button ghost" type="button" onClick={() => navigate('/warehouse/restock-history')}>
           Back to Restock
         </button>
-        {isPosted && movementSearch ? (
+        {(isPosted || isCompleted) && movementSearch ? (
           <button
             className="button secondary"
             type="button"
@@ -2979,6 +3106,11 @@ function RestockDetailPage({ restockId, navigate, showToast }) {
         {canSubmitDraft ? (
           <button className="button" type="button" disabled={submitting} onClick={handleSubmitDraft}>
             {submitting ? 'Submitting…' : 'Submit for approval'}
+          </button>
+        ) : null}
+        {canComplete ? (
+          <button className="button" type="button" disabled={submitting} onClick={handleComplete}>
+            {submitting ? 'Completing…' : 'Mark as Completed'}
           </button>
         ) : null}
       </div>
@@ -2993,22 +3125,7 @@ function NotificationsPage({
     <NotificationsInbox
       navigate={navigate}
       showToast={showToast}
-      resolveRelatedPath={(item) => {
-        const category = String(item.category || '').toLowerCase();
-        if (category.includes('inventory') || category.includes('stock')) {
-          return '/warehouse/branch-stock';
-        }
-        if (category.includes('restock')) {
-          return '/warehouse/restock-history';
-        }
-        if (category.includes('stock count') || category.includes('stock-count')) {
-          return '/warehouse/stock-counts';
-        }
-        if (category.includes('transfer')) {
-          return '/warehouse/transfers';
-        }
-        return null;
-      }}
+      roleKey="warehouse"
     />
   );
 }

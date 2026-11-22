@@ -4458,9 +4458,57 @@ input[type="search"]::-webkit-search-results-decoration {
   transition: background-color 0.15s ease !important;
 }
 
+.notification-item.is-clickable {
+  cursor: pointer !important;
+}
+
+.notification-item.is-clickable:hover {
+  background: #F0F7FA !important;
+}
+
+.notification-item.is-selected,
+.notifications-popover__item.is-selected {
+  box-shadow: inset 3px 0 0 #1D6A8A !important;
+  background: #E8F3F8 !important;
+}
+
 .notification-item.unread {
   border-left-color: #153450 !important;
   background: #F5FAFC !important;
+}
+
+/* Temporary destination highlight from notification deep-links */
+@keyframes corvex-record-highlight-pulse {
+  0% {
+    background-color: rgba(29, 106, 138, 0.22);
+    box-shadow: inset 3px 0 0 #1D6A8A, 0 0 0 0 rgba(29, 106, 138, 0.35);
+  }
+  35% {
+    background-color: rgba(29, 106, 138, 0.14);
+    box-shadow: inset 3px 0 0 #1D6A8A, 0 0 0 3px rgba(29, 106, 138, 0.18);
+  }
+  100% {
+    background-color: transparent;
+    box-shadow: inset 3px 0 0 transparent, 0 0 0 0 transparent;
+  }
+}
+
+.corvex-record-highlight {
+  animation: corvex-record-highlight-pulse 4.2s ease-out 1 !important;
+  border-radius: 2px;
+  position: relative;
+  z-index: 1;
+}
+
+tr.corvex-record-highlight > td {
+  background-color: rgba(29, 106, 138, 0.12) !important;
+}
+
+.panel.corvex-record-highlight,
+.card.corvex-record-highlight,
+.notification-item.corvex-record-highlight {
+  outline: 2px solid rgba(29, 106, 138, 0.45);
+  outline-offset: 1px;
 }
 
 .notification-item strong {

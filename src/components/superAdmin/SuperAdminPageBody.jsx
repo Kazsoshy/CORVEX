@@ -2129,6 +2129,7 @@ export function SuperAdminPageBody({
         <NotificationsInbox
           navigate={navigate}
           showToast={showToast}
+          roleKey="superAdmin"
           canManage={can('notifications.manage')}
         />
       );

@@ -1095,6 +1095,7 @@ router.post('/invoices', async (req, res) => {
     await notifyOverdueAccounts(pool);
     await notifyInvoicePendingReview(pool, {
       branchId: user.branchId,
+      invoiceId: applied.invoiceId,
       invoiceNumber,
       customerId,
       agentId: user.id,

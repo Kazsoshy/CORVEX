@@ -195,6 +195,8 @@ export const notifyStockThreshold = guard('stock threshold', async (pool, {
     title,
     message,
     category: 'Stock',
+    relatedEntity: 'product',
+    relatedId: productId,
   })));
 });
 
@@ -265,6 +267,8 @@ export const notifyLowStockDigest = guard('stock digest', async (pool) => {
       title,
       message,
       category: 'Stock',
+      relatedEntity: 'stock',
+      relatedId: branchId,
     })));
   }
 });
@@ -316,6 +320,8 @@ export const notifyOverdueAccounts = guard('overdue', async (pool) => {
       title,
       message,
       category: 'Overdue',
+      relatedEntity: 'customer',
+      relatedId: row.customer_id,
     })));
   }
 
@@ -335,6 +341,8 @@ export const notifyOverdueAccounts = guard('overdue', async (pool) => {
       title: 'Daily overdue accounts summary',
       message,
       category: 'Overdue',
+      relatedEntity: 'overdue',
+      relatedId: today,
     })));
   }
 });
@@ -349,6 +357,7 @@ export const clearOverdueDedup = guard('overdue clear', async (pool, customerId)
 
 export const notifyInvoicePendingReview = guard('invoice review', async (pool, {
   branchId,
+  invoiceId = null,
   invoiceNumber,
   customerId,
   agentId,
@@ -391,11 +400,14 @@ export const notifyInvoicePendingReview = guard('invoice review', async (pool, {
     title: 'Sale waiting for review',
     message: `${agentName} logged invoice ${invoiceNumber} for ${customerName}. Open the Approval Center to confirm or reject it.`,
     category: 'Approval',
+    relatedEntity: 'invoice',
+    relatedId: invoiceId || invoiceNumber,
   })));
 });
 
 export const notifyInvoiceReviewDecision = guard('invoice decision', async (pool, {
   salesAgentId,
+  invoiceId = null,
   invoiceNumber,
   status,
   reviewNote,
@@ -412,6 +424,8 @@ export const notifyInvoiceReviewDecision = guard('invoice decision', async (pool
       ? `Your branch manager confirmed invoice ${invoiceNumber}.`
       : `Your branch manager rejected invoice ${invoiceNumber}.${reason} Stock was returned.${reopen}`,
     category: 'Invoice',
+    relatedEntity: 'invoice',
+    relatedId: invoiceNumber || invoiceId,
   });
 });
 

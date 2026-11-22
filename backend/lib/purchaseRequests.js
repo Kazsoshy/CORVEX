@@ -187,5 +187,7 @@ export async function notifyPurchaseRequestCustomer(pool, { customerId, requestI
     title: titles[status] || 'Purchase request update',
     message: message.trim(),
     category: 'Purchase',
+    relatedEntity: 'purchase_request',
+    relatedId: requestId,
   });
 }

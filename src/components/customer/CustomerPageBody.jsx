@@ -844,12 +844,7 @@ function NotificationsPage({
   navigate,
   showToast
 }) {
-  return <NotificationsInbox navigate={navigate} showToast={showToast} resolveRelatedPath={(item) => {
-    const category = String(item.category || '').toLowerCase();
-    if (category.includes('receipt')) return '/customer/receipts';
-    if (category.includes('payment')) return '/customer/payment-history';
-    return null;
-  }} />;
+  return <NotificationsInbox navigate={navigate} showToast={showToast} roleKey="customer" />;
 }
 function ProfilePage({
   showToast

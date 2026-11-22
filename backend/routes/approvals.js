@@ -545,6 +545,7 @@ router.patch('/sales-invoices/:id', async (req, res) => {
     await publishStockAlerts(pool, stockAlerts);
     await notifyInvoiceReviewDecision(pool, {
       salesAgentId: invoice.sales_agent_id,
+      invoiceId,
       invoiceNumber: invoice.invoice_number,
       status,
       reviewNote,
@@ -952,12 +953,16 @@ router.get('/restocks/:id', async (req, res) => {
     const header = await pool.query(
       `SELECT h.*, b.name AS branch_name, s.supplier_name,
               rec.full_name AS recorded_by_name,
-              sub.full_name AS submitted_by_name
+              sub.full_name AS submitted_by_name,
+              appr.full_name AS approved_by_name,
+              comp.full_name AS completed_by_name
        FROM restock_headers h
        JOIN branches b ON b.id = h.branch_id
        JOIN suppliers s ON s.suppliers_id = h.supplier_id
        LEFT JOIN users rec ON rec.id = h.recorded_by
        LEFT JOIN users sub ON sub.id = COALESCE(h.submitted_by, h.recorded_by)
+       LEFT JOIN users appr ON appr.id = h.approved_by
+       LEFT JOIN users comp ON comp.id = h.completed_by
        WHERE h.restock_id = $1${branchSql}`,
       params
     );
@@ -1043,6 +1048,7 @@ router.patch('/restocks/:id', async (req, res) => {
       await client.query('COMMIT');
       await notifyRestockDecision(pool, {
         submitterId,
+        restockId,
         restockRef: row.restock_ref,
         status: 'Rejected',
         rejectionReason: reason,
@@ -1102,11 +1108,13 @@ router.patch('/restocks/:id', async (req, res) => {
     const summary = summarizeLines(lines);
     await notifyRestockDecision(pool, {
       submitterId,
+      restockId,
       restockRef: row.restock_ref,
       status: 'Posted',
     });
     await notifyRestockRecorded(pool, {
       userId: submitterId,
+      restockId,
       restockRef: row.restock_ref,
       deliveryRef: row.delivery_ref,
       lineCount: summary.line_count,
@@ -1295,6 +1303,7 @@ router.patch('/stock-counts/:id', async (req, res) => {
       await client.query('COMMIT');
       await notifyStockCountDecision(pool, {
         submitterId: row.counted_by,
+        countId,
         countRef: row.count_ref,
         status: 'Rejected',
         rejectionReason: reason,
@@ -1351,6 +1360,7 @@ router.patch('/stock-counts/:id', async (req, res) => {
 
     await notifyStockCountDecision(pool, {
       submitterId: row.counted_by,
+      countId,
       countRef: row.count_ref,
       status: 'Completed',
     });

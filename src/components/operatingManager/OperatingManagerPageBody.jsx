@@ -10,7 +10,9 @@ import { BranchManagerPageBody } from '../branchManager/BranchManagerPageBody';
 import { OrgLeafletPage } from './OrgLeafletPage';
 import { SawResultsPage } from './SawResultsPage';
 import { fetchOperationalAlerts, patchOperationalAlert, mapOperationalAlertRow } from '../../api/operationalAlertsService.js';
-import { fetchNotifications, markNotificationRead, markAllNotificationsRead, mapNotificationRow, countUnreadNotifications } from '../../api/notificationService.js';
+import { fetchNotifications, markNotificationRead, markAllNotificationsRead, mapNotificationRow, countUnreadNotifications, resolveNotificationNavForRole } from '../../api/notificationService.js';
+import { useSelectedNotificationFlash } from '../../hooks/useNotificationHighlight.js';
+import { navigateWithHighlight } from '../../utils/notificationHighlight.js';
 import { AccountProfilePanel } from '../shared/AccountProfilePanel';
 import { formatCurrency, formatDisplayDate, formatDisplayDateTime, formatPhone } from '../../utils/formatters.js';
 import { getPresetDateRange } from '../../utils/analyticsDateRange.js';
@@ -119,8 +121,9 @@ function DashboardPage({
       }
       if (notifRes.success) {
         const mapped = (notifRes.data || []).map((row) => mapNotificationRow(row, {
-          opsBase: '/operating-manager',
+          opsBase: '/operating-manager/operations',
           orgBase: '/operating-manager',
+          roleKey: 'operatingManager',
         }));
         setUnreadCount(countUnreadNotifications(mapped));
         setRecentNotifications(mapped.slice(0, 6));
@@ -217,13 +220,27 @@ function DashboardPage({
         {recentNotifications.length ? (
           <ul className="notification-list" style={{ margin: 0 }}>
             {recentNotifications.map((n) => (
-              <li key={n.id} className={`notification-item${n.read ? '' : ' unread'}`}>
+              <li
+                key={n.id}
+                className={`notification-item${n.read ? '' : ' unread'}${n.relatedTo ? ' is-clickable' : ''}`}
+                role={n.relatedTo ? 'link' : undefined}
+                tabIndex={n.relatedTo ? 0 : undefined}
+                onClick={() => {
+                  if (n.relatedTo) navigate(n.relatedTo);
+                }}
+                onKeyDown={(event) => {
+                  if ((event.key === 'Enter' || event.key === ' ') && n.relatedTo) {
+                    event.preventDefault();
+                    navigate(n.relatedTo);
+                  }
+                }}
+              >
                 <div>
                   <strong>{n.title || n.category}</strong>
                   <p className="muted">{n.message}</p>
                   <span className="notification-time">{formatDisplayDateTime(n.time)}</span>
                 </div>
-                <div className="notification-actions">
+                <div className="notification-actions" onClick={(event) => event.stopPropagation()}>
                   {n.relatedTo ? (
                     <button className="button ghost" type="button" onClick={() => navigate(n.relatedTo)}>Open</button>
                   ) : null}
@@ -1159,12 +1176,17 @@ function NotificationsPage({
 }) {
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [selectedNotificationId, setSelectedNotificationId] = useSelectedNotificationFlash(650);
   const opsBase = '/operating-manager/operations';
   const load = async () => {
     setLoading(true);
     const res = await fetchNotifications();
     if (res.success) {
-      setItems((res.data || []).map(row => mapNotificationRow(row, { opsBase, orgBase: '/operating-manager' })));
+      setItems((res.data || []).map(row => mapNotificationRow(row, {
+        opsBase,
+        orgBase: '/operating-manager',
+        roleKey: 'operatingManager',
+      })));
     }
     setLoading(false);
   };
@@ -1182,6 +1204,25 @@ function NotificationsPage({
       load();
     }
   };
+  const openItem = async (n) => {
+    if (!n) return;
+    if (n.id) setSelectedNotificationId(String(n.id));
+    if (!n.read) {
+      markNotificationRead(n.id);
+      setItems((prev) => prev.map((row) => (row.id === n.id ? { ...row, read: true, status: 'Read' } : row)));
+    }
+    const resolved = resolveNotificationNavForRole(n, 'operatingManager');
+    window.setTimeout(() => {
+      if (resolved?.path) {
+        navigateWithHighlight(navigate, resolved.path, {
+          id: resolved.id,
+          notificationId: n.id,
+        });
+      } else {
+        showToast?.('No related record is available for this notification.', 'info');
+      }
+    }, 180);
+  };
   if (loading && !items.length) return <LoadingState message="Loading notifications..." />;
   return <div className="page">
       <PageToolbar actions={[{
@@ -1189,11 +1230,23 @@ function NotificationsPage({
       variant: 'secondary'
     }]} onAction={markAllRead} />
       {items.length === 0 ? <EmptyState title="No notifications" description="You're all caught up." /> : <ul className="notification-list">
-          {items.map(n => <li key={n.id} className={`notification-item${n.read ? '' : ' unread'}`}>
+          {items.map(n => <li
+            key={n.id}
+            className={`notification-item${n.read ? '' : ' unread'}${n.relatedTo ? ' is-clickable' : ''}${selectedNotificationId != null && String(selectedNotificationId) === String(n.id) ? ' is-selected' : ''}`}
+            role={n.relatedTo ? 'link' : undefined}
+            tabIndex={n.relatedTo ? 0 : undefined}
+            onClick={() => openItem(n)}
+            onKeyDown={(event) => {
+              if ((event.key === 'Enter' || event.key === ' ') && n.relatedTo) {
+                event.preventDefault();
+                openItem(n);
+              }
+            }}
+          >
               <div><strong>{n.title || n.category}</strong><p className="muted">{n.message}</p><span className="notification-time">{formatDisplayDateTime(n.time)}</span></div>
-              <div className="notification-actions">
+              <div className="notification-actions" onClick={(event) => event.stopPropagation()}>
                 {!n.read ? <button className="button ghost" type="button" onClick={() => markRead(n.id)}>Mark Read</button> : null}
-                {n.relatedTo ? <button className="button ghost" type="button" onClick={() => navigate(n.relatedTo)}>Open Record</button> : null}
+                {n.relatedTo ? <button className="button ghost" type="button" onClick={() => openItem(n)}>Open Record</button> : null}
               </div>
             </li>)}
         </ul>}
@@ -1945,7 +1998,6 @@ function LiveOperationsDashboardPage({
             deltaType: 'label',
             cardClass: performanceClass,
             description: 'Composite performance score calculated from the defined weights and measures for route compliance, inventory health, collection efficiency, and operational execution.',
-            methodology: 'Weights: Route Compliance 25%, Sales Visit Completion 15%, Inventory Health 20%, Overdue Penalty Score 20%, Stock Alert Penalty Score 20%. Overdue penalty = max(0, 100 − min(100, overdue accounts × 5)); stock-alert penalty = max(0, 100 − min(100, stock alerts × 2)). Classification: ≥80 Excellent · 60–79 Good · <60 Needs Attention.'
           }].map(card => <div key={card.key} className={`pop-card ${card.cardClass}`} title={card.methodology || undefined}>
                 <div className="pop-card-header">
                   <div className="pop-card-label">

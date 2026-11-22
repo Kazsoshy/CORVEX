@@ -31,6 +31,7 @@ export function StockCountDocumentForm({
   const [notes, setNotes] = useState('');
   const [errors, setErrors] = useState({});
   const [submitting, setSubmitting] = useState(false);
+  const [confirmOpen, setConfirmOpen] = useState(false);
   const [reviewOpen, setReviewOpen] = useState(false);
 
   useEffect(() => {
@@ -117,15 +118,38 @@ export function StockCountDocumentForm({
     return Object.keys(nextErrors).length === 0;
   };
 
-  const openReview = () => {
+  const openConfirm = () => {
+    if (submitting) return;
     if (!validate()) {
       showToast('Please fix the errors.', 'error');
       return;
     }
+    setConfirmOpen(true);
+  };
+
+  const closeConfirm = () => {
+    if (submitting) return;
+    setConfirmOpen(false);
+  };
+
+  const proceedToReview = () => {
+    if (submitting) return;
+    if (!validate()) {
+      showToast('Please fix the errors.', 'error');
+      setConfirmOpen(false);
+      return;
+    }
+    setConfirmOpen(false);
     setReviewOpen(true);
   };
 
+  const closeReview = () => {
+    if (submitting) return;
+    setReviewOpen(false);
+  };
+
   const handleConfirmSubmit = async () => {
+    if (submitting) return;
     if (!validate()) {
       showToast('Please fix the errors.', 'error');
       setReviewOpen(false);
@@ -279,33 +303,115 @@ export function StockCountDocumentForm({
       </section>
 
       <div className="flex justify-end gap-2 mt-4">
-        <button className="button secondary" type="button" onClick={() => navigate(cancelTo)}>
+        <button className="button secondary" type="button" onClick={() => navigate(cancelTo)} disabled={submitting}>
           Cancel
         </button>
         <button
           className="button"
           type="button"
-          onClick={openReview}
-          disabled={submitting || !branchStock.length}
+          onClick={openConfirm}
+          disabled={submitting || !branchStock.length || !lines.length}
         >
           Review &amp; submit
         </button>
       </div>
 
+      {confirmOpen ? (
+        <div
+          className="modal-overlay"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="stock-count-confirm-title"
+          onClick={(e) => {
+            if (e.target === e.currentTarget) closeConfirm();
+          }}
+        >
+          <div
+            className="modal-content"
+            style={{ maxWidth: 480 }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="modal-header">
+              <h3 id="stock-count-confirm-title">Review &amp; submit</h3>
+              <button
+                className="icon-action-button"
+                type="button"
+                title="Close"
+                disabled={submitting}
+                onClick={closeConfirm}
+              >
+                <NavIcon name="close" />
+              </button>
+            </div>
+            <p className="muted" style={{ margin: '0 0 12px', fontSize: '0.88rem' }}>
+              Are you sure you want to proceed with reviewing and requesting this stock count? Please verify the entered stock count details before continuing.
+            </p>
+            <div className="panel" style={{ padding: '10px 12px', marginBottom: 4, boxShadow: 'none' }}>
+              <div style={{ fontWeight: 650 }}>
+                {lineSummaries.length} product{lineSummaries.length === 1 ? '' : 's'}
+                {' · '}
+                {discrepancyLines.length} with variance
+                {' · '}
+                {matchedCount} matched
+              </div>
+              <div className="muted" style={{ fontSize: '0.85rem', marginTop: 4 }}>
+                {discrepancyLines.length
+                  ? 'Variances require Branch Manager approval before stock changes.'
+                  : 'Matched counts complete without stock adjustments.'}
+              </div>
+            </div>
+            <div className="modal-actions">
+              <button
+                className="button secondary"
+                type="button"
+                disabled={submitting}
+                onClick={closeConfirm}
+              >
+                Cancel
+              </button>
+              <button
+                className="button"
+                type="button"
+                disabled={submitting}
+                onClick={proceedToReview}
+              >
+                Confirm
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
       {reviewOpen ? (
-        <div className="modal-overlay" onClick={() => !submitting && setReviewOpen(false)}>
+        <div
+          className="modal-overlay"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="stock-count-review-title"
+          onClick={(e) => {
+            if (e.target === e.currentTarget) closeReview();
+          }}
+        >
           <div
             className="modal-content"
             style={{ maxWidth: 560 }}
             onClick={(e) => e.stopPropagation()}
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="stock-count-review-title"
           >
-            <h3 id="stock-count-review-title" style={{ marginTop: 0 }}>
-              {discrepancyLines.length ? 'Review inventory discrepancies' : 'Confirm stock count'}
-            </h3>
-            <p className="text-ink/70" style={{ marginTop: 0, fontSize: '0.9rem' }}>
+            <div className="modal-header">
+              <h3 id="stock-count-review-title">
+                {discrepancyLines.length ? 'Review inventory discrepancies' : 'Confirm stock count'}
+              </h3>
+              <button
+                className="icon-action-button"
+                type="button"
+                title="Close"
+                disabled={submitting}
+                onClick={closeReview}
+              >
+                <NavIcon name="close" />
+              </button>
+            </div>
+            <p className="muted" style={{ margin: '0 0 12px', fontSize: '0.88rem' }}>
               {discrepancyLines.length
                 ? `Confirming will adjust recorded inventory for ${discrepancyLines.length} product${discrepancyLines.length === 1 ? '' : 's'}. Matched counts are recorded without changing stock.`
                 : 'All counted products match system quantity. No inventory adjustments will be applied.'}
@@ -326,7 +432,7 @@ export function StockCountDocumentForm({
                     <tr key={line.product_id}>
                       <td>
                         <strong>{line.product_name}</strong>
-                        <span className="text-ink/70" style={{ display: 'block', fontSize: '0.75rem' }}>
+                        <span className="muted" style={{ display: 'block', fontSize: '0.75rem' }}>
                           {line.sku || '—'}
                         </span>
                       </td>
@@ -346,14 +452,14 @@ export function StockCountDocumentForm({
               </table>
             </div>
 
-            <p className="text-ink/70" style={{ fontSize: '0.85rem', marginBottom: 0 }}>
+            <p className="muted" style={{ fontSize: '0.85rem', marginBottom: 0 }}>
               Total counted: {lineSummaries.length}
               {' · '}With variance: {discrepancyLines.length}
               {' · '}Matched: {matchedCount}
             </p>
 
-            <div className="modal-actions" style={{ marginTop: 16 }}>
-              <button className="button secondary" type="button" disabled={submitting} onClick={() => setReviewOpen(false)}>
+            <div className="modal-actions">
+              <button className="button secondary" type="button" disabled={submitting} onClick={closeReview}>
                 Cancel
               </button>
               <button className="button" type="button" disabled={submitting} onClick={handleConfirmSubmit}>

@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Pagination } from '../shared/Pagination';
 import { usePagination } from '../../hooks/usePagination';
+import { useNotificationHighlight } from '../../hooks/useNotificationHighlight.js';
+import { idsMatch, recordKey } from '../../utils/notificationHighlight.js';
 import { EmptyState } from '../shared/EmptyState';
 import { LoadingState } from '../shared/LoadingState';
 import { RowActionMenu } from '../shared/RowActionMenu';
@@ -262,6 +264,8 @@ function TransferDetailModal({
   busy,
 }) {
   if (!loading && !detail) return null;
+  const detailId = detail?.transfer_id || detail?.id;
+  const detailRef = detail?.transfer_ref || detail?.ref;
   return (
     <div
       className="modal-overlay"
@@ -270,7 +274,13 @@ function TransferDetailModal({
       aria-labelledby="transfer-detail-title"
       onClick={onClose}
     >
-      <div className="modal-content" style={{ maxWidth: 720 }} onClick={(e) => e.stopPropagation()}>
+      <div
+        className="modal-content"
+        style={{ maxWidth: 720 }}
+        data-record-key={detailId ? recordKey('transfer', detailId) : undefined}
+        data-highlight-alt={detailRef || undefined}
+        onClick={(e) => e.stopPropagation()}
+      >
         {loading || !detail ? (
           <LoadingState message="Loading transfer lines…" />
         ) : (
@@ -342,11 +352,20 @@ function InventoryDocModal({
   onReject,
   busy,
   loadingMessage,
+  recordEntity = null,
+  recordId = null,
+  recordAlt = null,
 }) {
   if (!loading && !heading) return null;
   return (
     <div className="modal-overlay" role="dialog" aria-modal="true" aria-labelledby={titleId} onClick={onClose}>
-      <div className="modal-content" style={{ maxWidth: 720 }} onClick={(e) => e.stopPropagation()}>
+      <div
+        className="modal-content"
+        style={{ maxWidth: 720 }}
+        data-record-key={recordEntity && recordId ? recordKey(recordEntity, recordId) : undefined}
+        data-highlight-alt={recordAlt || heading || undefined}
+        onClick={(e) => e.stopPropagation()}
+      >
         {loading || !heading ? (
           <LoadingState message={loadingMessage || 'Loading…'} />
         ) : (
@@ -428,6 +447,8 @@ export function ApprovalCenterPage({
 
   const [reasonDialog, setReasonDialog] = useState(null);
   const [reasonText, setReasonText] = useState('');
+  const [pendingFocus, setPendingFocus] = useState(null);
+  const [highlightReady, setHighlightReady] = useState(false);
 
   const reload = async () => {
     setLoading(true);
@@ -491,10 +512,19 @@ export function ApprovalCenterPage({
       : [];
     setIdentityTicketList(nextTickets);
     try {
-      const focusVerificationId = Number(new URLSearchParams(window.location.search).get('verificationId'));
+      const params = new URLSearchParams(window.location.search);
+      const focusVerificationId = Number(params.get('verificationId'));
       if (Number.isInteger(focusVerificationId) && focusVerificationId > 0
         && nextTickets.some((t) => Number(t.verification_id) === focusVerificationId)) {
         setSelectedIdentityTicketId(focusVerificationId);
+      }
+      const focusId = String(params.get('highlight') || params.get('id') || '').trim();
+      const focusTab = tabFromSearch();
+      if (focusId && focusTab === 'ci') {
+        const match = nextCi.find((c) => idsMatch(c.ciId || c.id, focusId));
+        setSelectedCiId(match ? (match.ciId || match.id) : focusId);
+      } else if (focusId && ['transfers', 'restocks', 'stock-counts'].includes(focusTab)) {
+        setPendingFocus({ tab: focusTab, id: focusId });
       }
     } catch { /* ignore */ }
     const nextXfers = xferRes.success
@@ -569,6 +599,91 @@ export function ApprovalCenterPage({
   const paginationRestocks = usePagination(restockList);
   const paginationStockCounts = usePagination(stockCountList);
   const paginationCi = usePagination(ciList);
+
+  const highlightEntityByTab = {
+    collections: 'collection',
+    invoices: 'invoice',
+    transfers: 'transfer',
+    restocks: 'restock',
+    'stock-counts': 'stock_count',
+    ci: 'ci',
+    'customer-changes': 'customer_change',
+    identity: 'identity',
+    'branch-transfers': 'branch_transfer',
+  };
+  const highlightEntity = highlightEntityByTab[tab] || null;
+
+  useEffect(() => {
+    setHighlightReady(false);
+    if (loading) return undefined;
+
+    let focusId = '';
+    try {
+      const params = new URLSearchParams(window.location.search);
+      focusId = String(params.get('highlight') || params.get('id') || params.get('verificationId') || '').trim();
+    } catch {
+      focusId = '';
+    }
+    if (!focusId || !highlightEntity) {
+      setHighlightReady(true);
+      return undefined;
+    }
+
+    const pageSize = 10;
+    const goToMatch = (rows, matchFn, goToPage) => {
+      const index = rows.findIndex(matchFn);
+      if (index < 0) return false;
+      goToPage(Math.floor(index / pageSize) + 1);
+      return true;
+    };
+
+    if (tab === 'collections') {
+      goToMatch(
+        collectionList,
+        (row) => idsMatch(row.collectionpayment_id, focusId) || idsMatch(row.receipt_number, focusId),
+        paginationCollections.goToPage
+      );
+    } else if (tab === 'invoices') {
+      goToMatch(
+        invoiceList,
+        (row) => idsMatch(row.sales_invoices_id, focusId) || idsMatch(row.invoice_number, focusId),
+        paginationInvoices.goToPage
+      );
+    } else if (tab === 'transfers') {
+      goToMatch(
+        transferList,
+        (row) => idsMatch(row.id, focusId) || idsMatch(row.transfer_id, focusId) || idsMatch(row.ref, focusId) || idsMatch(row.transfer_ref, focusId),
+        paginationTransfers.goToPage
+      );
+    } else if (tab === 'restocks') {
+      goToMatch(
+        restockList,
+        (row) => idsMatch(row.restock_id, focusId) || idsMatch(row.restock_ref, focusId) || idsMatch(row.delivery_ref, focusId),
+        paginationRestocks.goToPage
+      );
+    } else if (tab === 'stock-counts') {
+      goToMatch(
+        stockCountList,
+        (row) => idsMatch(row.count_id, focusId) || idsMatch(row.count_ref, focusId),
+        paginationStockCounts.goToPage
+      );
+    } else if (tab === 'ci') {
+      goToMatch(
+        ciList,
+        (row) => idsMatch(row.ciId || row.id, focusId),
+        paginationCi.goToPage
+      );
+    }
+
+    const timer = window.setTimeout(() => setHighlightReady(true), 60);
+    return () => window.clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loading, tab, collectionList, invoiceList, transferList, restockList, stockCountList, ciList]);
+
+  useNotificationHighlight(highlightEntity, {
+    enabled: !loading && Boolean(highlightEntity),
+    ready: highlightReady,
+  });
 
   const openReasonDialog = (config) => {
     setReasonText('');
@@ -694,6 +809,38 @@ export function ApprovalCenterPage({
     else showToast?.(result.message || 'Could not load stock count.', 'error');
     setStockCountDetailLoading(false);
   };
+
+  useEffect(() => {
+    if (!pendingFocus?.id || !pendingFocus?.tab || loading) return undefined;
+    const { tab: focusTab, id } = pendingFocus;
+    setPendingFocus(null);
+
+    if (focusTab === 'transfers') {
+      const match = transferList.find((row) => (
+        idsMatch(row.id, id) || idsMatch(row.transfer_id, id) || idsMatch(row.ref, id) || idsMatch(row.transfer_ref, id)
+      ));
+      const numericId = match?.id || match?.transfer_id || ( /^\d+$/.test(String(id)) ? id : null);
+      if (numericId) openTransferDetail(numericId);
+      else showToast?.('Transfer record is not in the current approval queue.', 'info');
+    } else if (focusTab === 'restocks') {
+      const match = restockList.find((row) => (
+        idsMatch(row.restock_id, id) || idsMatch(row.restock_ref, id) || idsMatch(row.delivery_ref, id)
+      ));
+      const numericId = match?.restock_id || (/^\d+$/.test(String(id)) ? id : null);
+      if (numericId) openRestockDetail(numericId);
+      else showToast?.('Restock record is not in the current approval queue.', 'info');
+    } else if (focusTab === 'stock-counts') {
+      const match = stockCountList.find((row) => (
+        idsMatch(row.count_id, id) || idsMatch(row.count_ref, id)
+      ));
+      const numericId = match?.count_id || (/^\d+$/.test(String(id)) ? id : null);
+      if (numericId) openStockCountDetail(numericId);
+      else showToast?.('Stock count record is not in the current approval queue.', 'info');
+    }
+    return undefined;
+    // Intentionally run when load completes with a deep-link focus target.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pendingFocus, loading, transferList, restockList, stockCountList]);
 
   const approveStockCount = async (countId) => {
     setBusyKey(`count-approve-${countId}`);
@@ -1112,7 +1259,11 @@ export function ApprovalCenterPage({
                   </thead>
                   <tbody>
                     {paginationCollections.paginatedData.map((payment) => (
-                      <tr key={payment.collectionpayment_id}>
+                      <tr
+                        key={payment.collectionpayment_id}
+                        data-record-key={recordKey('collection', payment.collectionpayment_id)}
+                        data-highlight-alt={payment.receipt_number || undefined}
+                      >
                         <td><strong>{payment.receipt_number}</strong></td>
                         <td>{payment.customer_name}</td>
                         <td>{payment.collector_name}</td>
@@ -1204,7 +1355,11 @@ export function ApprovalCenterPage({
                   </thead>
                   <tbody>
                     {paginationInvoices.paginatedData.map((inv) => (
-                      <tr key={inv.sales_invoices_id}>
+                      <tr
+                        key={inv.sales_invoices_id}
+                        data-record-key={recordKey('invoice', inv.sales_invoices_id || inv.invoice_number)}
+                        data-highlight-alt={inv.invoice_number || undefined}
+                      >
                         <td><strong>{inv.invoice_number}</strong></td>
                         <td>{inv.customer_name}</td>
                         <td>{inv.sales_agent_name}</td>
@@ -1300,7 +1455,11 @@ export function ApprovalCenterPage({
                   </thead>
                   <tbody>
                     {paginationTransfers.paginatedData.map((t) => (
-                      <tr key={t.id}>
+                      <tr
+                        key={t.id}
+                        data-record-key={recordKey('transfer', t.id || t.transfer_id)}
+                        data-highlight-alt={t.ref || t.transfer_ref || undefined}
+                      >
                         <td><strong>{t.ref || t.id}</strong></td>
                         <td>{String(t.from || '').replace(' Branch', '')}</td>
                         <td>{String(t.to || '').replace(' Branch', '')}</td>
@@ -1366,7 +1525,11 @@ export function ApprovalCenterPage({
                   </thead>
                   <tbody>
                     {paginationRestocks.paginatedData.map((row) => (
-                      <tr key={row.restock_id}>
+                      <tr
+                        key={row.restock_id}
+                        data-record-key={recordKey('restock', row.restock_id)}
+                        data-highlight-alt={row.restock_ref || row.delivery_ref || undefined}
+                      >
                         <td><strong>{row.restock_ref}</strong></td>
                         <td>{row.supplier_name}</td>
                         <td>{row.submitted_by_name || row.recorded_by_name || '—'}</td>
@@ -1432,7 +1595,11 @@ export function ApprovalCenterPage({
                   </thead>
                   <tbody>
                     {paginationStockCounts.paginatedData.map((row) => (
-                      <tr key={row.count_id}>
+                      <tr
+                        key={row.count_id}
+                        data-record-key={recordKey('stock_count', row.count_id)}
+                        data-highlight-alt={row.count_ref || undefined}
+                      >
                         <td><strong>{row.count_ref}</strong></td>
                         <td>{row.counted_by_name || '—'}</td>
                         <td>{row.line_count || 0}</td>
@@ -1539,6 +1706,7 @@ export function ApprovalCenterPage({
                       <tr
                         key={ci.id}
                         className="clickable-row"
+                        data-record-key={recordKey('ci', ci.ciId || ci.id)}
                         onClick={() => setSelectedCiId(ci.ciId || ci.id)}
                       >
                         <td>
@@ -1616,7 +1784,10 @@ export function ApprovalCenterPage({
                 </thead>
                 <tbody>
                   {customerChangeList.map((request) => (
-                    <tr key={request.request_id}>
+                    <tr
+                      key={request.request_id}
+                      data-record-key={recordKey('customer_change', request.request_id)}
+                    >
                       <td><strong>{request.customer_name || request.customer_code || `#${request.customer_id}`}</strong></td>
                       <td>{request.requester_name || '—'}</td>
                       <td>{request.change_type}</td>
@@ -1798,7 +1969,10 @@ export function ApprovalCenterPage({
                         const search = ticket.search_payload_json || {};
                         const candidateCount = (ticket.match_candidates_json || []).length;
                         return (
-                          <tr key={ticket.verification_id}>
+                          <tr
+                            key={ticket.verification_id}
+                            data-record-key={recordKey('identity', ticket.verification_id)}
+                          >
                             <td><strong>#{ticket.verification_id}</strong></td>
                             <td>{ticket.requester_name || '—'}</td>
                             <td>
@@ -2127,6 +2301,9 @@ export function ApprovalCenterPage({
         lineKey={(l) => l.line_id || l.product_id}
         loading={restockDetailLoading}
         loadingMessage="Loading restock lines…"
+        recordEntity="restock"
+        recordId={restockDetail?.restock_id}
+        recordAlt={restockDetail?.restock_ref || restockDetail?.delivery_ref}
         onClose={() => { if (!busyKey) setRestockDetail(null); }}
         onApprove={() => approveRestock(restockDetail.restock_id)}
         onReject={() => rejectRestock(restockDetail.restock_id)}
@@ -2159,6 +2336,9 @@ export function ApprovalCenterPage({
         lineKey={(l) => l.line_id || l.product_id}
         loading={stockCountDetailLoading}
         loadingMessage="Loading stock count lines…"
+        recordEntity="stock_count"
+        recordId={stockCountDetail?.count_id}
+        recordAlt={stockCountDetail?.count_ref}
         onClose={() => { if (!busyKey) setStockCountDetail(null); }}
         onApprove={() => approveStockCount(stockCountDetail.count_id)}
         onReject={() => rejectStockCount(stockCountDetail.count_id)}

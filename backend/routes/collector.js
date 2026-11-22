@@ -1020,6 +1020,8 @@ router.post('/receipts/:id/send', async (req, res) => {
       title: `Receipt ${receipt.receipt_number}`,
       message: `Your collector sent receipt ${receipt.receipt_number} for PHP ${Number(receipt.amount).toFixed(2)}. Open Digital Receipts to view it.`,
       category: 'Receipt',
+      relatedEntity: 'receipt',
+      relatedId: receipt.collectionpayment_id || receipt.receipt_number,
     });
     return res.status(200).json({
       success: true,
@@ -1382,6 +1384,8 @@ router.post('/credit-review-flags', async (req, res) => {
           title: 'Collector credit-review flag',
           message: `${customerName}: ${String(reason).trim()}. Open Credit Investigation → Recommended Customers.`,
           category: 'CI',
+          relatedEntity: 'customer',
+          relatedId: customerId,
         });
       }
       const salesAgent = await req.app.locals.pool.query(
@@ -1395,6 +1399,8 @@ router.post('/credit-review-flags', async (req, res) => {
           title: 'Collector flagged customer for credit review',
           message: `${customerName}: ${String(reason).trim()}. Review under Credit Reviews → Recommended.`,
           category: 'CI',
+          relatedEntity: 'customer',
+          relatedId: customerId,
         });
       }
     } catch (notifyErr) {

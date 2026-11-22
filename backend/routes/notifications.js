@@ -34,6 +34,8 @@ router.get('/', requireSaNotificationPermission('notifications.view', 'notificat
          n.message,
          n.status,
          n.category,
+         n.related_entity,
+         n.related_id,
          n.created_at
        FROM notifications n
        WHERE n.user_id = $1
@@ -87,7 +89,15 @@ router.patch('/:id/read', requireSaNotificationPermission('notifications.manage'
       `UPDATE notifications
        SET status = 'Read'
        WHERE id = $1 AND user_id = $2
-       RETURNING id AS notification_id, title, message, status, category, created_at`,
+       RETURNING
+         id AS notification_id,
+         title,
+         message,
+         status,
+         category,
+         related_entity,
+         related_id,
+         created_at`,
       [id, userId]
     );
 

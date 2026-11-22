@@ -128,7 +128,7 @@ export function ProductSearchSelect({
             </li>
           )) : (
             <li className="product-search-select-empty" role="presentation">
-              {options.length ? emptyLabel : 'No products available'}
+              {emptyLabel || 'No products available'}
             </li>
           )}
         </ul>

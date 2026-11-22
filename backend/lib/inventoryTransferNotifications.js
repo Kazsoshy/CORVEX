@@ -1,6 +1,13 @@
 import { insertUserNotification } from './creditInvestigationNotifications.js';
 
-async function notifyApprovers(pool, { sourceBranchId, title, message }) {
+async function notifyApprovers(pool, {
+  sourceBranchId,
+  title,
+  message,
+  category = 'Transfer',
+  relatedEntity = null,
+  relatedId = null,
+}) {
   const approvers = await pool.query(
     `SELECT DISTINCT u.id
      FROM users u
@@ -12,7 +19,14 @@ async function notifyApprovers(pool, { sourceBranchId, title, message }) {
   );
   await Promise.all(
     approvers.rows.map((row) =>
-      insertUserNotification(pool, { userId: row.id, title, message, category: 'Transfer' })
+      insertUserNotification(pool, {
+        userId: row.id,
+        title,
+        message,
+        category,
+        relatedEntity,
+        relatedId,
+      })
     )
   );
 }
@@ -20,6 +34,7 @@ async function notifyApprovers(pool, { sourceBranchId, title, message }) {
 /** Notify branch managers (source branch) and operating managers when a transfer is submitted. */
 export async function notifyTransferSubmitted(pool, {
   sourceBranchId,
+  transferId,
   transferRef,
   productName,
   quantity,
@@ -29,11 +44,18 @@ export async function notifyTransferSubmitted(pool, {
   const title = 'Transfer approval required';
   const linesLabel = Number(lineCount) > 1 ? `${lineCount} products` : productName;
   const message = `${submitterName} requested transfer ${transferRef} (${linesLabel}, ${quantity} units). Review in Approval Center.`;
-  await notifyApprovers(pool, { sourceBranchId, title, message });
+  await notifyApprovers(pool, {
+    sourceBranchId,
+    title,
+    message,
+    relatedEntity: 'transfer',
+    relatedId: transferId,
+  });
 }
 
 export async function notifyTransferDecision(pool, {
   submitterId,
+  transferId,
   transferRef,
   status,
   rejectionReason,
@@ -50,12 +72,15 @@ export async function notifyTransferDecision(pool, {
     title,
     message,
     category: 'Transfer',
+    relatedEntity: 'transfer',
+    relatedId: transferId,
   });
 }
 
 /** Confirmation for the warehouse user who recorded a restock (not an approval ping). */
 export async function notifyRestockRecorded(pool, {
   userId,
+  restockId,
   restockRef,
   deliveryRef,
   lineCount = 1,
@@ -68,11 +93,14 @@ export async function notifyRestockRecorded(pool, {
     title: 'Restock posted',
     message: `${restockRef} (${deliveryRef}): ${linesLabel}, +${totalQuantity} units posted to your branch stock.`,
     category: 'Restock',
+    relatedEntity: 'restock',
+    relatedId: restockId,
   });
 }
 
 export async function notifyRestockSubmitted(pool, {
   branchId,
+  restockId,
   restockRef,
   deliveryRef,
   lineCount = 1,
@@ -82,11 +110,19 @@ export async function notifyRestockSubmitted(pool, {
   const title = 'Restock approval required';
   const linesLabel = Number(lineCount) > 1 ? `${lineCount} products` : '1 product';
   const message = `${submitterName || 'Warehouse'} submitted ${restockRef} (${deliveryRef}): ${linesLabel}, +${totalQuantity} units. Review in Approval Center.`;
-  await notifyApprovers(pool, { sourceBranchId: branchId, title, message });
+  await notifyApprovers(pool, {
+    sourceBranchId: branchId,
+    title,
+    message,
+    category: 'Restock',
+    relatedEntity: 'restock',
+    relatedId: restockId,
+  });
 }
 
 export async function notifyRestockDecision(pool, {
   submitterId,
+  restockId,
   restockRef,
   status,
   rejectionReason,
@@ -103,22 +139,33 @@ export async function notifyRestockDecision(pool, {
     title,
     message,
     category: 'Restock',
+    relatedEntity: 'restock',
+    relatedId: restockId,
   });
 }
 
 export async function notifyStockCountSubmitted(pool, {
   branchId,
+  countId,
   countRef,
   discrepancyCount,
   submitterName,
 }) {
   const title = 'Stock count approval required';
   const message = `${submitterName || 'Warehouse'} submitted ${countRef} with ${discrepancyCount} variance line(s). Review in Approval Center.`;
-  await notifyApprovers(pool, { sourceBranchId: branchId, title, message });
+  await notifyApprovers(pool, {
+    sourceBranchId: branchId,
+    title,
+    message,
+    category: 'Stock Count',
+    relatedEntity: 'stock_count',
+    relatedId: countId,
+  });
 }
 
 export async function notifyStockCountDecision(pool, {
   submitterId,
+  countId,
   countRef,
   status,
   rejectionReason,
@@ -135,10 +182,13 @@ export async function notifyStockCountDecision(pool, {
     title,
     message,
     category: 'Stock Count',
+    relatedEntity: 'stock_count',
+    relatedId: countId,
   });
 }
 
 export async function notifyTransferShipped(pool, {
+  transferId,
   transferRef,
   productName,
   lineCount = 1,
@@ -165,12 +215,15 @@ export async function notifyTransferShipped(pool, {
         title: 'Transfer ready to receive',
         message,
         category: 'Transfer',
+        relatedEntity: 'transfer',
+        relatedId: transferId,
       })
     )
   );
 }
 
 export async function notifyTransferCompleted(pool, {
+  transferId,
   transferRef,
   productName,
   lineCount = 1,
@@ -181,19 +234,23 @@ export async function notifyTransferCompleted(pool, {
     `SELECT DISTINCT u.id FROM users u
      JOIN roles r ON r.role_id = u.role_id
      WHERE u.status = 'Active'
-       AND (
-         (r.slug IN ('branch_manager', 'inventory_staff') AND u.branch_id = $1)
-         OR r.slug = 'operating_manager'
-       )`,
+       AND r.slug IN ('inventory_staff', 'branch_manager')
+       AND u.branch_id = $1`,
     [destinationBranchId]
   );
-  const title = 'Transfer received';
   const linesLabel = Number(lineCount) > 1 ? `${lineCount} products` : productName;
   const qtyLabel = totalQuantity != null ? `, ${totalQuantity} units` : '';
-  const message = `Transfer ${transferRef} (${linesLabel}${qtyLabel}) was received. Destination stock updated.`;
+  const message = `Transfer ${transferRef} (${linesLabel}${qtyLabel}) was received and destination stock was updated.`;
   await Promise.all(
     recipients.rows.map((row) =>
-      insertUserNotification(pool, { userId: row.id, title, message, category: 'Transfer' })
+      insertUserNotification(pool, {
+        userId: row.id,
+        title: 'Transfer completed',
+        message,
+        category: 'Transfer',
+        relatedEntity: 'transfer',
+        relatedId: transferId,
+      })
     )
   );
 }

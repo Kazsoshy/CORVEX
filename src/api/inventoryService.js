@@ -236,6 +236,15 @@ export async function submitRestock(id) {
   }
 }
 
+export async function completeRestock(id) {
+  try {
+    const response = await apiClient.post(`/inventory/restocks/${id}/complete`);
+    return response.data;
+  } catch (err) {
+    return { success: false, message: err.response?.data?.message || 'Failed to complete restock.' };
+  }
+}
+
 export async function fetchStockCounts(params = {}) {
   try {
     const response = await apiClient.get('/inventory/stock-counts', { params });

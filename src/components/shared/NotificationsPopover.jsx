@@ -44,6 +44,7 @@ export function NotificationsPopover({
   notifications = [],
   loading = false,
   unreadCount = 0,
+  selectedNotificationId = null,
   onMarkRead,
   onMarkAllRead,
   onSelectNotification,
@@ -173,13 +174,19 @@ export function NotificationsPopover({
             {visibleItems.map((item) => {
               const id = item.notification_id ?? item.id;
               const isUnread = item.status !== 'Read' && !item.read;
+              const isSelected = selectedNotificationId != null && String(selectedNotificationId) === String(id);
               const timestamp = formatDisplayDateTime(item.created_at || item.time);
               const iconName = iconForCategory(item.category);
+              const itemClass = [
+                'notifications-popover__item',
+                isUnread ? 'is-unread' : '',
+                isSelected ? 'is-selected' : '',
+              ].filter(Boolean).join(' ');
 
               return (
                 <li
                   key={id}
-                  className={isUnread ? 'notifications-popover__item is-unread' : 'notifications-popover__item'}
+                  className={itemClass}
                 >
                   <button
                     type="button"
