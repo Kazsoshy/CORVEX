@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Link } from 'react-router-dom';
 import { ChevronDown } from 'lucide-react';
 import { NavIcon } from '../../navIcons.jsx';
 import {
@@ -158,8 +157,6 @@ export function TopNavbar({
     }
   }, [navigate, notificationsPath]);
 
-  const showBreadcrumbs = Array.isArray(breadcrumbs) && breadcrumbs.length > 1;
-
   return (
     <header className="top-navbar" role="banner">
       <div className="top-navbar__start">
@@ -175,31 +172,6 @@ export function TopNavbar({
         </button>
 
         <div className="top-navbar__context">
-          {showBreadcrumbs ? (
-            <nav className="top-navbar__breadcrumbs" aria-label="Breadcrumb">
-              {breadcrumbs.slice(0, -1).map((crumb, idx) => (
-                <span key={`${crumb.to || crumb.label}-${idx}`} className="top-navbar__crumb-item">
-                  {crumb.to ? (
-                    <Link to={crumb.to} className="top-navbar__crumb-link">
-                      {crumb.label}
-                    </Link>
-                  ) : (
-                    <span>{crumb.label}</span>
-                  )}
-                  <span className="top-navbar__crumb-sep" aria-hidden="true">/</span>
-                </span>
-              ))}
-            </nav>
-          ) : (
-            <div className="top-navbar__meta">
-              {userAssignedLocation && userAssignedLocation !== 'No Branch Assigned' ? (
-                <>
-                  <span className="top-navbar__meta-dot" aria-hidden="true">·</span>
-                  <span className="top-navbar__location">{userAssignedLocation}</span>
-                </>
-              ) : null}
-            </div>
-          )}
           <h1 className="top-navbar__title">{pageTitle || userRole || 'CORVEX'}</h1>
         </div>
       </div>

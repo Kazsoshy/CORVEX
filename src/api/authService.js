@@ -100,7 +100,7 @@ export function getCurrentUser() {
 export function getUserAssignedLocation(user) {
   if (!user) return 'No Branch Assigned';
 
-  const primaryName = String(user.branch?.name || user.branchName || '').trim();
+  const primaryName = String(user.branch?.name || user.branchName || user.branch_name || '').trim();
   if (primaryName) return primaryName;
 
   const extra = Array.isArray(user.branches)

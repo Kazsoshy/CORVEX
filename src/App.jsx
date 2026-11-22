@@ -155,6 +155,16 @@ function PrototypeShell() {
   const currentUser = getCurrentUser();
   const avatarSrc = useMyAvatar(Boolean(currentUser));
   const userAssignedLocation = getUserAssignedLocation(currentUser);
+  const displayedBranch = useMemo(() => {
+    if (userAssignedLocation && userAssignedLocation !== 'No Branch Assigned') {
+      return userAssignedLocation;
+    }
+    const roleKey = currentRole?.key || '';
+    if (roleKey === 'operatingManager' || roleKey === 'superAdmin') {
+      return 'All Branches';
+    }
+    return userAssignedLocation || 'No Branch Assigned';
+  }, [userAssignedLocation, currentRole]);
   const isRoleModule = isCollector || isSales || isWarehouse || isOperatingManager || isBranchManager || isCustomer || isSuperAdmin;
   const isCustomerLogin = isCustomerAuthPath(location.pathname);
   const fullPath = location.pathname + location.search;
@@ -566,6 +576,17 @@ function PrototypeShell() {
             </nav>
           )}
         </div>
+        {currentRole && !isAuthPath(location.pathname) && !isCustomerLogin && (
+          <div className="sidebar-footer">
+            <div
+              className="sidebar-branch-card"
+              data-tooltip={`Branch: ${displayedBranch}`}
+              title={displayedBranch}
+            >
+               <div className="sidebar-branch-name">{displayedBranch}</div>
+            </div>
+          </div>
+        )}
       </aside>
 
       {showTopNavbar ? (
