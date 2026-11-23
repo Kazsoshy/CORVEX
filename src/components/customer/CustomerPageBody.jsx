@@ -7,7 +7,6 @@ import { login as apiLogin, getEntryPathForRole, requestLogout } from '../../api
 import {
   fetchCustomerPortalMe,
   fetchCustomerPortalPayments,
-  fetchCustomerPortalProducts,
   fetchCustomerPortalReceiptById,
   fetchCustomerPortalReceipts,
   fetchCustomerStatementSummary,
@@ -23,6 +22,7 @@ import { StatusBadge } from '../StatusBadge';
 import { NavIcon } from '../../navIcons';
 import { UserSettingsPanel } from '../shared/UserSettingsPanel';
 import { CustomerProfilePanel } from '../shared/CustomerProfilePanel';
+import { CustomerProductAdsPanel } from './CustomerProductAdsPanel.jsx';
 function portalStatusLabel(status) {
   switch (String(status || '').toLowerCase()) {
     case 'invited':
@@ -118,219 +118,6 @@ function monthStartKey(monthStart) {
   return String(monthStart).slice(0, 10);
 }
 
-const CAROUSEL_MAX_SLIDES = 10;
-const CAROUSEL_SWIPE_THRESHOLD = 48;
-
-const PRODUCT_IMAGE_MODULES = import.meta.glob(
-  '../../assets/products-image/*.{jpg,jpeg,png,webp,avif}',
-  { eager: true, import: 'default' }
-);
-
-const PRODUCT_IMAGES_BY_SLUG = Object.entries(PRODUCT_IMAGE_MODULES).reduce(
-  (acc, [path, url]) => {
-    const file = path.split('/').pop() || '';
-    const slug = file.replace(/\.[^.]+$/, '').toLowerCase();
-    if (slug && url) acc[slug] = url;
-    return acc;
-  },
-  {}
-);
-
-const PRODUCT_IMAGE_LIST = Object.values(PRODUCT_IMAGES_BY_SLUG);
-
-function resolveCarouselProductImage(product, index = 0) {
-  if (product?.image_url) return product.image_url;
-  const slug = String(product?.product_name || product?.name || '')
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-|-$/g, '');
-  if (slug && PRODUCT_IMAGES_BY_SLUG[slug]) return PRODUCT_IMAGES_BY_SLUG[slug];
-  if (slug) {
-    const matchKey = Object.keys(PRODUCT_IMAGES_BY_SLUG).find(
-      (k) => slug.includes(k) || k.includes(slug)
-    );
-    if (matchKey) return PRODUCT_IMAGES_BY_SLUG[matchKey];
-  }
-  if (PRODUCT_IMAGE_LIST.length) {
-    return PRODUCT_IMAGE_LIST[index % PRODUCT_IMAGE_LIST.length];
-  }
-  return '';
-}
-
-function CustomerProductCarousel() {
-  const [products, setProducts] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [activeIndex, setActiveIndex] = useState(0);
-  const dragStartX = useRef(null);
-  const dragDeltaX = useRef(0);
-  const isPointerDown = useRef(false);
-
-  useEffect(() => {
-    let cancelled = false;
-    async function load() {
-      const res = await fetchCustomerPortalProducts();
-      if (!cancelled) {
-        if (res.success) {
-          setProducts((res.data || []).slice(0, CAROUSEL_MAX_SLIDES));
-        }
-        setLoading(false);
-      }
-    }
-    load();
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  const slideCount = products.length;
-
-  const goTo = (index) => {
-    if (!slideCount) return;
-    const next = ((index % slideCount) + slideCount) % slideCount;
-    setActiveIndex(next);
-  };
-
-  const goPrev = () => goTo(activeIndex - 1);
-  const goNext = () => goTo(activeIndex + 1);
-
-  const beginDrag = (clientX) => {
-    if (clientX == null || Number.isNaN(Number(clientX))) return;
-    dragStartX.current = clientX;
-    dragDeltaX.current = 0;
-    isPointerDown.current = true;
-  };
-
-  const moveDrag = (clientX) => {
-    if (!isPointerDown.current || dragStartX.current == null || clientX == null) return;
-    dragDeltaX.current = clientX - dragStartX.current;
-  };
-
-  const endDrag = () => {
-    if (!isPointerDown.current) return;
-    const delta = dragDeltaX.current;
-    dragStartX.current = null;
-    dragDeltaX.current = 0;
-    isPointerDown.current = false;
-    if (Math.abs(delta) < CAROUSEL_SWIPE_THRESHOLD) return;
-    if (delta < 0) goNext();
-    else goPrev();
-  };
-
-  if (loading || !slideCount) return null;
-
-  return (
-    <section className="customer-product-carousel" aria-roledescription="carousel" aria-label="Featured products">
-      <div
-        className="customer-product-carousel__stage"
-        onTouchStart={(e) => beginDrag(e.touches?.[0]?.clientX)}
-        onTouchMove={(e) => moveDrag(e.touches?.[0]?.clientX)}
-        onTouchEnd={endDrag}
-        onTouchCancel={endDrag}
-        onPointerDown={(e) => {
-          if (e.pointerType === 'touch') return;
-          if (e.target.closest('button')) return;
-          e.currentTarget.setPointerCapture?.(e.pointerId);
-          beginDrag(e.clientX);
-        }}
-        onPointerMove={(e) => {
-          if (e.pointerType === 'touch') return;
-          moveDrag(e.clientX);
-        }}
-        onPointerUp={(e) => {
-          if (e.pointerType === 'touch') return;
-          endDrag();
-        }}
-        onPointerCancel={(e) => {
-          if (e.pointerType === 'touch') return;
-          endDrag();
-        }}
-      >
-        <div className="customer-product-carousel__viewport">
-          <div
-            className="customer-product-carousel__track"
-            style={{ transform: `translate3d(-${activeIndex * 100}%, 0, 0)` }}
-          >
-            {products.map((product, index) => {
-              const name = product.product_name || 'Product';
-              const isActive = index === activeIndex;
-              const imgSrc = resolveCarouselProductImage(product, index);
-              return (
-                <article
-                  key={product.product_id}
-                  className={`customer-product-carousel__slide${isActive ? ' is-active' : ''}`}
-                  aria-hidden={!isActive}
-                  aria-label={`${index + 1} of ${slideCount}: ${name}`}
-                >
-                  <div className="customer-product-carousel__card">
-                    {imgSrc ? (
-                      <img
-                        className="customer-product-carousel__image"
-                        src={imgSrc}
-                        alt={name}
-                        draggable={false}
-                      />
-                    ) : (
-                      <div className="customer-product-carousel__fallback" aria-hidden="true">
-                        <span>{String(name).slice(0, 1).toUpperCase()}</span>
-                      </div>
-                    )}
-                    <div className="customer-product-carousel__caption">
-                      <p className="customer-product-carousel__name">{name}</p>
-                      <p className="customer-product-carousel__price">
-                        {formatCurrency(Number(product.unit_price || 0))}
-                      </p>
-                    </div>
-                  </div>
-                </article>
-              );
-            })}
-          </div>
-          {slideCount > 1 ? (
-            <div className="customer-product-carousel__dots" role="tablist" aria-label="Product slides">
-              {products.map((product, index) => (
-                <button
-                  key={product.product_id}
-                  type="button"
-                  role="tab"
-                  className={`customer-product-carousel__dot${index === activeIndex ? ' is-active' : ''}`}
-                  aria-label={`${index + 1} of ${slideCount}: ${product.product_name || 'Product'}`}
-                  aria-selected={index === activeIndex}
-                  onClick={() => goTo(index)}
-                />
-              ))}
-            </div>
-          ) : null}
-        </div>
-
-        {slideCount > 1 ? (
-          <>
-            <button
-              type="button"
-              className="customer-product-carousel__arrow customer-product-carousel__arrow--prev"
-              aria-label="Previous product"
-              onClick={goPrev}
-            >
-              <svg className="customer-product-carousel__arrow-icon" viewBox="0 0 36 44" aria-hidden="true">
-                <path d="M36 0 L0 22 L36 44 L26 22 Z" fill="currentColor" />
-              </svg>
-            </button>
-            <button
-              type="button"
-              className="customer-product-carousel__arrow customer-product-carousel__arrow--next"
-              aria-label="Next product"
-              onClick={goNext}
-            >
-              <svg className="customer-product-carousel__arrow-icon" viewBox="0 0 36 44" aria-hidden="true">
-                <path d="M0 0 L36 22 L0 44 L10 22 Z" fill="currentColor" />
-              </svg>
-            </button>
-          </>
-        ) : null}
-      </div>
-    </section>
-  );
-}
-
 function HomePage() {
   const [account, setAccount] = useState(null);
   const [recentPayments, setRecentPayments] = useState([]);
@@ -365,77 +152,81 @@ function HomePage() {
   const accountNumber = account?.customer_code || '—';
   if (loading) return <LoadingState message="Loading your account…" />;
   return <div className="page customer-page">
-      <section className="panel dashboard-greeting customer-greeting">
-        <div className="flex flex-col gap-1">
-          <p className="text-[0.82rem] font-bold tracking-widest uppercase text-navy/60 m-0">Welcome back</p>
-          <h2>{customerName}</h2>
-          <p className="text-ink/70">Account {accountNumber}</p>
-        </div>
-      </section>
-
-      <StatsGrid stats={[{
-      label: 'Outstanding Balance',
-      value: formatCurrency(outstanding)
-    }, {
-      label: 'Branch',
-      value: account?.branch_name || '—'
-    }, {
-      label: 'Account Status',
-      value: <StatusBadge status={account?.status || '—'} />
-    }]} />
-
-      <CustomerProductCarousel />
-
-      <div className="dashboard-widgets grid two-up">
-        <section className="panel content-panel relative overflow-hidden">
-          <div className="flex flex-col md:flex-row justify-between gap-4 items-start md:items-center mb-4"><h3>Recent Payments</h3></div>
-          {recentPayments.length ? (
-            <div className="corvex-table-wrapper">
-              <table className="corvex-table">
-                <thead>
-                  <tr>
-                    <th>Payment Date</th>
-                    <th>Amount</th>
-                    <th>Receipt #</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {recentPayments.map((p) => (
-                    <tr key={p.collectionpayment_id}>
-                      <td>{formatDisplayDate(p.payment_date)}</td>
-                      <td>{formatCurrency(Number(p.amount))}</td>
-                      <td>{p.receipt_number || '—'}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+      <div className="customer-home-layout">
+        <div className="customer-home-main">
+          <section className="panel dashboard-greeting customer-greeting">
+            <div className="flex flex-col gap-1">
+              <p className="text-[0.82rem] font-bold tracking-widest uppercase text-navy/60 m-0">Welcome back</p>
+              <h2>{customerName}</h2>
+              <p className="text-ink/70">Account {accountNumber}</p>
             </div>
-          ) : (
-            <EmptyState title="No payments yet" description="Your payment history will appear here after collections are recorded." />
-          )}
-        </section>
-        <section className="panel content-panel relative overflow-hidden">
-          <div className="flex flex-col md:flex-row justify-between gap-4 items-start md:items-center mb-4"><h3>Account Activity</h3></div>
-          <DetailRowsTable
-            fieldHeader="Activity"
-            detailsHeader="Date and Time"
-            rows={[
-              { label: 'Last collection', value: account?.last_collection_date ? formatDisplayDate(account.last_collection_date) : '—' },
-              { label: 'Last sales visit', value: account?.last_sales_visit ? formatDisplayDate(account.last_sales_visit) : '—' },
-            ]}
-          />
-        </section>
-      </div>
+          </section>
 
-      <section className="panel content-panel relative overflow-hidden">
-        <div className="flex flex-col md:flex-row justify-between gap-4 items-start md:items-center mb-4"><h3>Payment Progress</h3></div>
-        <div className="progress-bar" role="progressbar" aria-valuenow={progressPct} aria-valuemin={0} aria-valuemax={100}>
-          <div className="progress-fill" style={{
-          width: `${progressPct}%`
-        }} />
+          <StatsGrid stats={[{
+          label: 'Outstanding Balance',
+          value: formatCurrency(outstanding)
+        }, {
+          label: 'Branch',
+          value: account?.branch_name || '—'
+        }, {
+          label: 'Account Status',
+          value: <StatusBadge status={account?.status || '—'} />
+        }]} />
+
+          <div className="dashboard-widgets grid two-up">
+            <section className="panel content-panel relative overflow-hidden">
+              <div className="flex flex-col md:flex-row justify-between gap-4 items-start md:items-center mb-4"><h3>Recent Payments</h3></div>
+              {recentPayments.length ? (
+                <div className="corvex-table-wrapper">
+                  <table className="corvex-table">
+                    <thead>
+                      <tr>
+                        <th>Payment Date</th>
+                        <th>Amount</th>
+                        <th>Receipt #</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {recentPayments.map((p) => (
+                        <tr key={p.collectionpayment_id}>
+                          <td>{formatDisplayDate(p.payment_date)}</td>
+                          <td>{formatCurrency(Number(p.amount))}</td>
+                          <td>{p.receipt_number || '—'}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              ) : (
+                <EmptyState title="No payments yet" description="Your payment history will appear here after collections are recorded." />
+              )}
+            </section>
+            <section className="panel content-panel relative overflow-hidden">
+              <div className="flex flex-col md:flex-row justify-between gap-4 items-start md:items-center mb-4"><h3>Account Activity</h3></div>
+              <DetailRowsTable
+                fieldHeader="Activity"
+                detailsHeader="Date and Time"
+                rows={[
+                  { label: 'Last collection', value: account?.last_collection_date ? formatDisplayDate(account.last_collection_date) : '—' },
+                  { label: 'Last sales visit', value: account?.last_sales_visit ? formatDisplayDate(account.last_sales_visit) : '—' },
+                ]}
+              />
+            </section>
+          </div>
+
+          <section className="panel content-panel relative overflow-hidden">
+            <div className="flex flex-col md:flex-row justify-between gap-4 items-start md:items-center mb-4"><h3>Payment Progress</h3></div>
+            <div className="progress-bar" role="progressbar" aria-valuenow={progressPct} aria-valuemin={0} aria-valuemax={100}>
+              <div className="progress-fill" style={{
+              width: `${progressPct}%`
+            }} />
+            </div>
+            <p className="text-ink/70">{progressPct}% of recent obligations paid</p>
+          </section>
         </div>
-        <p className="text-ink/70">{progressPct}% of recent obligations paid</p>
-      </section>
+
+        <CustomerProductAdsPanel />
+      </div>
     </div>;
 }
 function AccountDetailsPage() {
