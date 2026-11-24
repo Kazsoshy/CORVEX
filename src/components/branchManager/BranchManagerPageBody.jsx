@@ -54,6 +54,7 @@ import { CreditInvestigationQueuePage, CreditInvestigationDetailPage } from './C
 import { formatMiddleNameDisplay } from '../../utils/customerDisplay.js';
 import { downloadPdf, exportRows } from '../../utils/dataExport.js';
 import { UserSettingsPanel } from '../shared/UserSettingsPanel';
+import { BranchPaymentSettingsPanel } from './BranchPaymentSettingsPanel.jsx';
 import { chartSeries } from '../../theme/palette.js';
 import { ChartDrilldownModal } from '../shared/ChartDrilldownModal.jsx';
 import { useChartDrilldown } from '../../hooks/useChartDrilldown.js';
@@ -2150,15 +2151,20 @@ function SettingsPage({
     return <OmPoliciesPage showToast={showToast} />;
   }
   return (
-    <UserSettingsPanel embedded={embedded} role="branch">
-      <p className="muted">Profile, approvals, audit history, and notifications for this branch.</p>
-      <div className="settings-link-row">
-        <button className="button" type="button" onClick={() => navigate(`${opsBase}/profile`)}>Profile</button>
-        <button className="button secondary" type="button" onClick={() => navigate(`${opsBase}/approval-center`)}>Approval Center</button>
-        <button className="button secondary" type="button" onClick={() => navigate(`${opsBase}/audit-log`)}>Audit Log</button>
-        <button className="button ghost" type="button" onClick={() => navigate(`${opsBase}/notifications`)}>Notifications</button>
-      </div>
-    </UserSettingsPanel>
+    <>
+      <UserSettingsPanel embedded={embedded} role="branch">
+        <p className="muted">Profile, approvals, audit history, and notifications for this branch.</p>
+        <div className="settings-link-row">
+          <button className="button" type="button" onClick={() => navigate(`${opsBase}/profile`)}>Profile</button>
+          <button className="button secondary" type="button" onClick={() => navigate(`${opsBase}/approval-center`)}>Approval Center</button>
+          <button className="button secondary" type="button" onClick={() => navigate(`${opsBase}/audit-log`)}>Audit Log</button>
+          <button className="button ghost" type="button" onClick={() => navigate(`${opsBase}/notifications`)}>Notifications</button>
+        </div>
+      </UserSettingsPanel>
+      {currentUser?.role?.slug === 'branch_manager' || currentUser?.branch ? (
+        <BranchPaymentSettingsPanel showToast={showToast} />
+      ) : null}
+    </>
   );
 }
 

@@ -4,6 +4,10 @@ import {
   createCustomer,
   updateCustomer,
   fetchCustomerById,
+  sendCustomerEmailOtp,
+  verifyCustomerEmailOtp,
+  submitCustomerChangeRequest,
+  resubmitCustomerIdentityReview,
 } from '../../api/salesService';
 import { fetchTerritories, reverseGeocodeLocation, suggestTerritoryForLocation } from '../../api/territoriesService';
 import { composeCustomerAddress } from '../../utils/customerDisplay';
@@ -38,6 +42,38 @@ const EDIT_STEPS = [
 ];
 
 const EMPTY_GEO_CODES = { regCode: '', provCode: '', munCityCode: '' };
+
+function formatMeters(meters) {
+  const n = Number(meters);
+  if (!Number.isFinite(n)) return '';
+  if (n >= 1000) return `${(n / 1000).toFixed(n >= 10000 ? 0 : 1)} km`;
+  return `${Math.round(n)} m`;
+}
+
+function territoryClassificationLabel(hint) {
+  if (!hint?.classification) return '';
+  const nearestName = hint.nearest?.territory_name || hint.suggested_territory_name || 'a territory';
+  const dist = formatMeters(hint.nearest?.distance_meters);
+  switch (hint.classification) {
+    case 'inside':
+      return `Inside ${nearestName}${dist ? ` (~${dist} from center)` : ''}.`;
+    case 'near':
+      return `Near ${nearestName}${dist ? ` (~${dist} from center)` : ''} — within the coverage buffer.`;
+    case 'outside':
+      return `Outside nearest territory (${nearestName}${dist ? `, ~${dist}` : ''}). Add an audit note if you still assign a territory.`;
+    case 'barangay_match':
+      return `Matched by barangay to ${hint.barangay_match?.territory_name || nearestName}. Set a map pin to confirm coverage.`;
+    default:
+      return `Location check: ${hint.classification}.`;
+  }
+}
+
+function territoryBarangayConflict(hint) {
+  const geoId = hint?.nearest?.territory_id ?? hint?.suggested_territory_id;
+  const brgyId = hint?.barangay_match?.territory_id;
+  if (!geoId || !brgyId || String(geoId) === String(brgyId)) return null;
+  return `Barangay matches ${hint.barangay_match.territory_name}, but the map pin is nearest to ${hint.nearest?.territory_name || 'another territory'}. Prefer the pin when placing the customer.`;
+}
 
 function emptyForm() {
   return {
@@ -139,6 +175,18 @@ function MapPinPicker({ latitude, longitude, onChange, warning, onPinSettled }) 
   );
 }
 
+const SA_PROTECTED_EDIT_FIELDS = [
+  'first_name', 'middle_name', 'last_name', 'contact_phone',
+  'address_region', 'address_province', 'address_city', 'address_barangay',
+  'address_street', 'address_zip', 'latitude', 'longitude', 'territory_id',
+];
+const SA_SOFT_EDIT_FIELDS = ['portal_email'];
+
+function normEditValue(value) {
+  if (value == null) return '';
+  return String(value).trim();
+}
+
 export function CustomerFormPage({ customerId, navigate, showToast }) {
   const isEdit = Boolean(customerId);
   const steps = isEdit ? EDIT_STEPS : CREATE_STEPS;
@@ -146,8 +194,12 @@ export function CustomerFormPage({ customerId, navigate, showToast }) {
   const returnTo = searchParams.get('returnTo') || searchParams.get('return_to') || '';
   const [step, setStep] = useState(0);
   const [form, setForm] = useState(emptyForm);
+  const [baseline, setBaseline] = useState(null);
+  const [recordStatus, setRecordStatus] = useState(null);
+  const [changeReason, setChangeReason] = useState('');
   const [errors, setErrors] = useState({});
   const [loading, setLoading] = useState(isEdit);
+  const isRejectedResubmit = isEdit && String(recordStatus || '') === 'Rejected';
   const [saving, setSaving] = useState(false);
   const [territories, setTerritories] = useState([]);
   const [geoCodes, setGeoCodes] = useState(EMPTY_GEO_CODES);
@@ -156,8 +208,19 @@ export function CustomerFormPage({ customerId, navigate, showToast }) {
   const [mapExpanded, setMapExpanded] = useState(false);
   const [geoNote, setGeoNote] = useState('');
   const [territoryHint, setTerritoryHint] = useState(null);
+  const [emailOtpCode, setEmailOtpCode] = useState('');
+  const [emailVerified, setEmailVerified] = useState(false);
+  const [emailVerificationToken, setEmailVerificationToken] = useState('');
+  const [emailOtpSending, setEmailOtpSending] = useState(false);
+  const [emailOtpVerifying, setEmailOtpVerifying] = useState(false);
 
   const currentUser = getCurrentUser();
+  const isSalesAgent = [
+    currentUser?.roleSlug,
+    currentUser?.role,
+    currentUser?.role?.slug,
+    currentUser?.role?.name,
+  ].some((value) => ['sales_staff', 'Sales Agent'].includes(String(value || '')));
   const branchLabel = getUserAssignedLocation(currentUser) || currentUser?.branch_name || 'Assigned branch';
 
   const scheduleTerritoryId = !isEdit
@@ -169,12 +232,44 @@ export function CustomerFormPage({ customerId, navigate, showToast }) {
     try { return sessionStorage.getItem('corvex_find_done') === '1'; } catch { return false; }
   })();
 
+  const lockedFromFind = useMemo(() => {
+    if (isEdit || !fromFind) {
+      return {
+        first_name: false,
+        middle_name: false,
+        last_name: false,
+        contact_phone: false,
+        portal_email: false,
+      };
+    }
+    return {
+      first_name: Boolean(String(searchParams.get('firstName') || '').trim()),
+      middle_name: Boolean(String(searchParams.get('middleName') || '').trim()),
+      last_name: Boolean(String(searchParams.get('lastName') || '').trim()),
+      contact_phone: Boolean(String(searchParams.get('phone') || '').trim()),
+      portal_email: Boolean(String(searchParams.get('email') || '').trim()),
+    };
+  }, [isEdit, fromFind, searchParams]);
+
   const provinceOptions = useMemo(() => getAllProvinces(), []);
   const cityOptions = useMemo(() => getCities(geoCodes.provCode) || [], [geoCodes.provCode]);
 
+  const clearEmailVerification = () => {
+    setEmailVerified(false);
+    setEmailVerificationToken('');
+    setEmailOtpCode('');
+  };
+
   const updateField = (key, value) => {
+    if (lockedFromFind[key]) return;
     setForm((prev) => ({ ...prev, [key]: value }));
-    setErrors((prev) => ({ ...prev, [key]: undefined }));
+    setErrors((prev) => {
+      if (!Object.prototype.hasOwnProperty.call(prev, key)) return prev;
+      const next = { ...prev };
+      delete next[key];
+      return next;
+    });
+    if (key === 'portal_email') clearEmailVerification();
   };
 
   useEffect(() => {
@@ -196,6 +291,7 @@ export function CustomerFormPage({ customerId, navigate, showToast }) {
         middle_name: searchParams.get('middleName') || prev.middle_name,
         last_name: searchParams.get('lastName') || prev.last_name,
         contact_phone: searchParams.get('phone') || prev.contact_phone,
+        portal_email: searchParams.get('email') || prev.portal_email,
       }));
     }
   }, [searchParams, isEdit]);
@@ -219,7 +315,7 @@ export function CustomerFormPage({ customerId, navigate, showToast }) {
             address_barangay: c.address_barangay,
           });
           if (cancelled) return;
-          setForm({
+          const loaded = {
             ...emptyForm(),
             first_name: c.first_name || '',
             middle_name: c.middle_name || '',
@@ -227,6 +323,7 @@ export function CustomerFormPage({ customerId, navigate, showToast }) {
             name_suffix: c.name_suffix || '',
             contact_phone: c.contact_phone || '',
             phone_verification_status: c.phone_verification_status || 'Unverified',
+            email_verification_status: c.email_verification_status || 'Unverified',
             portal_email: c.portal_email || '',
             address_region: resolved.regionName || c.address_region || '',
             address_province: resolved.provinceName || c.address_province || '',
@@ -240,7 +337,11 @@ export function CustomerFormPage({ customerId, navigate, showToast }) {
             territory_override_note: c.territory_override_note || '',
             marketing_opt_in: Boolean(c.marketing_opt_in),
             privacy_notice_acknowledged: Boolean(c.privacy_notice_acknowledged_at),
-          });
+          };
+          setForm(loaded);
+          setBaseline(loaded);
+          setRecordStatus(c.status || null);
+          setChangeReason('');
           setGeoCodes({
             regCode: resolved.regCode || '',
             provCode: resolved.provCode || '',
@@ -286,7 +387,12 @@ export function CustomerFormPage({ customerId, navigate, showToast }) {
       address_city: '',
       address_barangay: '',
     }));
-    setErrors((prev) => ({ ...prev, address_province: undefined, address_region: undefined }));
+    setErrors((prev) => {
+      const next = { ...prev };
+      delete next.address_province;
+      delete next.address_region;
+      return next;
+    });
   };
 
   const onSelectCity = (munCityCode) => {
@@ -297,7 +403,11 @@ export function CustomerFormPage({ customerId, navigate, showToast }) {
       address_city: city?.munCityName || '',
       address_barangay: '',
     }));
-    setErrors((prev) => ({ ...prev, address_city: undefined }));
+    setErrors((prev) => {
+      const next = { ...prev };
+      delete next.address_city;
+      return next;
+    });
   };
 
   const composedAddress = useMemo(() => composeCustomerAddress({
@@ -319,6 +429,10 @@ export function CustomerFormPage({ customerId, navigate, showToast }) {
       if (!String(form.first_name || '').trim()) next.first_name = 'Required';
       if (!String(form.last_name || '').trim()) next.last_name = 'Required';
       if (!String(form.contact_phone || '').trim()) next.contact_phone = 'Required';
+      const emailValue = String(form.portal_email || '').trim();
+      if (emailValue && !isEdit && !emailVerified) {
+        next.portal_email = 'Verify this email with the code we send before continuing.';
+      }
     }
     if (index === addressStepIndex) {
       if (!geoCodes.provCode && !String(form.address_province || '').trim()) next.address_province = 'Required';
@@ -364,6 +478,9 @@ export function CustomerFormPage({ customerId, navigate, showToast }) {
     contact_phone: form.contact_phone.trim(),
     phone_verification_status: form.phone_verification_status === 'Verified' ? 'Verified' : 'Unverified',
     portal_email: form.portal_email.trim() || null,
+    email_verification_token: form.portal_email.trim() && !isEdit
+      ? (emailVerificationToken || null)
+      : undefined,
     address_region: form.address_region,
     address_province: form.address_province,
     address_city: form.address_city,
@@ -383,6 +500,10 @@ export function CustomerFormPage({ customerId, navigate, showToast }) {
       cash_registration: !isEdit,
       territory_outside_review: Boolean(form.territory_override_note.trim())
         || territoryHint?.classification === 'outside',
+      hold_reason: (
+        Boolean(form.territory_override_note.trim())
+        || territoryHint?.classification === 'outside'
+      ) ? 'territory_exception' : undefined,
       account_eligibility: 'Cash',
       find_lookup_summary: 'no_match',
     },
@@ -405,6 +526,31 @@ export function CustomerFormPage({ customerId, navigate, showToast }) {
     navigate(id ? `/sales/customer-detail/${id}?from=customers` : '/sales/customers');
   };
 
+  const buildSaEditPatches = () => {
+    const softPatch = {};
+    const protectedPatch = {};
+    if (!baseline) return { softPatch, protectedPatch };
+    for (const key of SA_SOFT_EDIT_FIELDS) {
+      const next = key === 'portal_email' ? (form[key].trim() || null) : form[key];
+      const prev = key === 'portal_email' ? (baseline[key].trim() || null) : baseline[key];
+      if (normEditValue(next) !== normEditValue(prev)) softPatch[key] = next;
+    }
+    for (const key of SA_PROTECTED_EDIT_FIELDS) {
+      if (normEditValue(form[key]) !== normEditValue(baseline[key])) {
+        protectedPatch[key] = form[key] === '' ? null : form[key];
+      }
+    }
+    if (protectedPatch.territory_id != null && protectedPatch.territory_id !== '') {
+      protectedPatch.territory_id = Number(protectedPatch.territory_id);
+    }
+    return { softPatch, protectedPatch };
+  };
+  const saEditPatches = isEdit && isSalesAgent && baseline
+    ? buildSaEditPatches()
+    : { softPatch: {}, protectedPatch: {} };
+  const hasSaSoftChanges = Object.keys(saEditPatches.softPatch).length > 0;
+  const hasSaProtectedChanges = Object.keys(saEditPatches.protectedPatch).length > 0;
+
   const submitPayload = async (payload) => {
     setSaving(true);
     if (!isBrowserOnline()) {
@@ -425,9 +571,71 @@ export function CustomerFormPage({ customerId, navigate, showToast }) {
       return;
     }
 
-    const result = isEdit
-      ? await updateCustomer(customerId, payload)
-      : await createCustomer(payload);
+    let result;
+    if (isEdit && isSalesAgent && isRejectedResubmit) {
+      result = await resubmitCustomerIdentityReview(customerId, {
+        territory_id: form.territory_id ? Number(form.territory_id) : null,
+        territory_override_note: form.territory_override_note.trim() || null,
+        territory_outside_review: Boolean(form.territory_override_note.trim())
+          || territoryHint?.classification === 'outside',
+        address_region: form.address_region,
+        address_province: form.address_province,
+        address_city: form.address_city,
+        address_barangay: form.address_barangay,
+        address_street: form.address_street.trim() || null,
+        address_zip: form.address_zip.trim() || null,
+        address: composedAddress,
+        latitude: form.latitude || null,
+        longitude: form.longitude || null,
+      });
+    } else if (isEdit && isSalesAgent) {
+      const { softPatch, protectedPatch } = buildSaEditPatches();
+      if (!Object.keys(softPatch).length && !Object.keys(protectedPatch).length) {
+        setSaving(false);
+        showToast?.('No changes to save.', 'error');
+        return;
+      }
+      if (Object.keys(protectedPatch).length && !String(changeReason || '').trim()) {
+        setSaving(false);
+        setErrors((prev) => ({ ...prev, change_reason: 'Required for identity, phone, address, or territory changes.' }));
+        showToast?.('Add a reason for Branch Manager approval of protected field changes.', 'error');
+        return;
+      }
+      if (Object.keys(softPatch).length) {
+        result = await updateCustomer(customerId, softPatch);
+        if (!result.success) {
+          setSaving(false);
+          showToast?.(result.message || 'Failed to save soft fields.', 'error');
+          return;
+        }
+      }
+      if (Object.keys(protectedPatch).length) {
+        result = await submitCustomerChangeRequest(customerId, {
+          ...protectedPatch,
+          reason: String(changeReason).trim(),
+        });
+        if (!result.success) {
+          setSaving(false);
+          showToast?.(result.message || 'Failed to submit change request.', 'error');
+          return;
+        }
+        result = {
+          ...result,
+          pending: true,
+          message: result.message
+            || 'Protected changes submitted for Branch Manager approval.',
+        };
+      } else if (result?.success) {
+        result = {
+          ...result,
+          message: result.message || 'Customer soft fields updated.',
+        };
+      }
+    } else {
+      result = isEdit
+        ? await updateCustomer(customerId, payload)
+        : await createCustomer(payload);
+    }
     setSaving(false);
 
     if (!isEdit && result.status === 409) {
@@ -470,7 +678,15 @@ export function CustomerFormPage({ customerId, navigate, showToast }) {
     }
 
     if (result.success) {
-      showToast?.(result.message || 'Customer saved.', 'success');
+      showToast?.(
+        result.message
+          || (result.pending
+            ? 'Change request submitted for Branch Manager approval.'
+            : (result.territory_hold
+              ? 'Submitted for Branch Manager territory review.'
+              : 'Customer saved.')),
+        'success'
+      );
       try {
         sessionStorage.removeItem('corvex_identity_clearance');
         sessionStorage.removeItem('corvex_find_done');
@@ -492,6 +708,60 @@ export function CustomerFormPage({ customerId, navigate, showToast }) {
     }
   };
 
+  const handleSendEmailOtp = async () => {
+    const email = String(form.portal_email || '').trim();
+    if (!email) {
+      setErrors((prev) => ({ ...prev, portal_email: 'Enter an email first.' }));
+      return;
+    }
+    setEmailOtpSending(true);
+    const res = await sendCustomerEmailOtp(email);
+    setEmailOtpSending(false);
+    if (res.success) {
+      setEmailVerified(false);
+      setEmailVerificationToken('');
+      setEmailOtpCode('');
+      setErrors((prev) => {
+        const next = { ...prev };
+        delete next.portal_email;
+        return next;
+      });
+      showToast?.(res.message || 'Verification code sent.', 'success');
+      return;
+    }
+    showToast?.(res.message || 'Failed to send verification code.', 'error');
+  };
+
+  const handleVerifyEmailOtp = async () => {
+    const email = String(form.portal_email || '').trim();
+    const code = String(emailOtpCode || '').trim();
+    if (!email) {
+      setErrors((prev) => ({ ...prev, portal_email: 'Enter an email first.' }));
+      return;
+    }
+    if (!/^\d{6}$/.test(code)) {
+      setErrors((prev) => ({ ...prev, portal_email: 'Enter the 6-digit code from the email.' }));
+      return;
+    }
+    setEmailOtpVerifying(true);
+    const res = await verifyCustomerEmailOtp(email, code);
+    setEmailOtpVerifying(false);
+    if (res.success && res.data?.email_verification_token) {
+      setEmailVerified(true);
+      setEmailVerificationToken(res.data.email_verification_token);
+      setErrors((prev) => {
+        const next = { ...prev };
+        delete next.portal_email;
+        return next;
+      });
+      showToast?.(res.message || 'Email verified.', 'success');
+      return;
+    }
+    setEmailVerified(false);
+    setEmailVerificationToken('');
+    showToast?.(res.message || 'Failed to verify email code.', 'error');
+  };
+
   const handleSubmit = async () => {
     const failStep = validateThrough(steps.length);
     if (failStep >= 0) {
@@ -500,6 +770,58 @@ export function CustomerFormPage({ customerId, navigate, showToast }) {
       return;
     }
     await submitPayload(buildPayload());
+  };
+
+  const hasMapPin = Number.isFinite(Number(form.latitude)) && Number.isFinite(Number(form.longitude));
+
+  const refreshTerritoryHint = async ({
+    lat = form.latitude,
+    lng = form.longitude,
+    barangay = form.address_barangay,
+    autoApply = false,
+  } = {}) => {
+    const latN = Number(lat);
+    const lngN = Number(lng);
+    const hasCoords = Number.isFinite(latN) && Number.isFinite(lngN);
+    const barangayName = String(barangay || '').trim();
+    if (!hasCoords && !barangayName) {
+      setTerritoryHint(null);
+      return null;
+    }
+    const suggest = await suggestTerritoryForLocation({
+      lat: hasCoords ? latN : undefined,
+      lng: hasCoords ? lngN : undefined,
+      barangay: barangayName || undefined,
+    });
+    if (!suggest.success || !suggest.data) return null;
+    setTerritoryHint(suggest.data);
+    const suggestedId = suggest.data.suggested_territory_id;
+    const canAuto = autoApply
+      && suggestedId
+      && !territoryLocked
+      && ['inside', 'near', 'barangay_match'].includes(suggest.data.classification);
+    if (canAuto) {
+      setForm((prev) => {
+        if (String(prev.territory_id || '').trim()) return prev;
+        return { ...prev, territory_id: String(suggestedId) };
+      });
+      setErrors((prev) => {
+        const next = { ...prev };
+        delete next.territory_id;
+        return next;
+      });
+    }
+    return suggest.data;
+  };
+
+  const applySuggestedTerritory = () => {
+    const id = territoryHint?.suggested_territory_id || territoryHint?.nearest?.territory_id;
+    if (!id || territoryLocked) return;
+    updateField('territory_id', String(id));
+    showToast?.(
+      `Territory set to ${territoryHint.suggested_territory_name || territoryHint.nearest?.territory_name || id}.`,
+      'success'
+    );
   };
 
   const onPinSettled = async ({ lat, lng }) => {
@@ -534,14 +856,12 @@ export function CustomerFormPage({ customerId, navigate, showToast }) {
       setGeoNote('Could not reverse-geocode reliably. Enter address manually.');
     }
 
-    const suggest = await suggestTerritoryForLocation({
+    await refreshTerritoryHint({
       lat,
       lng,
-      barangay: resolvedBarangay || undefined,
+      barangay: resolvedBarangay,
+      autoApply: true,
     });
-    if (suggest.success && suggest.data) {
-      setTerritoryHint(suggest.data);
-    }
   };
 
   if (loading) return <LoadingState message="Loading customer form..." />;
@@ -550,17 +870,26 @@ export function CustomerFormPage({ customerId, navigate, showToast }) {
     ? (territories.find((t) => String(t.territory_id) === String(form.territory_id))?.territory_name
       || `#${form.territory_id}`)
     : '—';
+  const territoryHintLabel = territoryClassificationLabel(territoryHint);
+  const barangayConflictMsg = territoryBarangayConflict(territoryHint);
+  const suggestedTerritoryId = territoryHint?.suggested_territory_id || territoryHint?.nearest?.territory_id;
+  const suggestedTerritoryName = territoryHint?.suggested_territory_name || territoryHint?.nearest?.territory_name;
 
   return (
     <div className="page">
       <section className="panel form-panel content-panel">
         <div className="panel-section-header">
-          <h3>{isEdit ? 'Edit Customer' : 'Register Customer'}</h3>
-          <p className="muted">
-            {isEdit
-              ? 'Update customer details for cash-eligible accounts.'
-              : 'Register a cash-eligible natural person. Duplicate search already ran before this form. Credit stays a separate request after Active registration.'}
-          </p>
+          <h3>
+            {isRejectedResubmit
+              ? 'Fix & resubmit registration'
+              : (isEdit ? 'Edit Customer' : 'Register Customer')}
+          </h3>
+          {isRejectedResubmit ? (
+            <p className="muted" style={{ marginTop: 4 }}>
+              This registration was declined (Rejected). Correct address/territory, then resubmit for Branch Manager
+              review. Do not create a new customer.
+            </p>
+          ) : null}
         </div>
 
         <div className="segmented-control" style={{ marginBottom: 16 }}>
@@ -593,16 +922,34 @@ export function CustomerFormPage({ customerId, navigate, showToast }) {
             <div className="account-detail-grid two-up">
               <div className="form-group">
                 <label>First Name *</label>
-                <input value={form.first_name} onChange={(e) => updateField('first_name', e.target.value)} />
+                <input
+                  value={form.first_name}
+                  readOnly={lockedFromFind.first_name}
+                  disabled={lockedFromFind.first_name}
+                  onChange={(e) => updateField('first_name', e.target.value)}
+                />
+                {lockedFromFind.first_name ? <p className="muted">Locked from Find Existing search.</p> : null}
                 {errors.first_name ? <p className="form-error">{errors.first_name}</p> : null}
               </div>
               <div className="form-group">
                 <label>Middle Name</label>
-                <input value={form.middle_name} onChange={(e) => updateField('middle_name', e.target.value)} />
+                <input
+                  value={form.middle_name}
+                  readOnly={lockedFromFind.middle_name}
+                  disabled={lockedFromFind.middle_name}
+                  onChange={(e) => updateField('middle_name', e.target.value)}
+                />
+                {lockedFromFind.middle_name ? <p className="muted">Locked from Find Existing search.</p> : null}
               </div>
               <div className="form-group">
                 <label>Last Name *</label>
-                <input value={form.last_name} onChange={(e) => updateField('last_name', e.target.value)} />
+                <input
+                  value={form.last_name}
+                  readOnly={lockedFromFind.last_name}
+                  disabled={lockedFromFind.last_name}
+                  onChange={(e) => updateField('last_name', e.target.value)}
+                />
+                {lockedFromFind.last_name ? <p className="muted">Locked from Find Existing search.</p> : null}
                 {errors.last_name ? <p className="form-error">{errors.last_name}</p> : null}
               </div>
               <div className="form-group">
@@ -618,6 +965,8 @@ export function CustomerFormPage({ customerId, navigate, showToast }) {
                   <input
                     style={{ flex: 1, minWidth: 180 }}
                     value={form.contact_phone}
+                    readOnly={lockedFromFind.contact_phone}
+                    disabled={lockedFromFind.contact_phone}
                     onChange={(e) => updateField('contact_phone', e.target.value)}
                   />
                   <button
@@ -632,13 +981,66 @@ export function CustomerFormPage({ customerId, navigate, showToast }) {
                   </button>
                 </div>
                 <p className="muted">
-                  UI attestation only this release — status: {form.phone_verification_status}.
+                  Sales agent attestation that this mobile was confirmed with the customer. SMS OTP is not available in this release.
+                  {' '}Status: {form.phone_verification_status}.
                 </p>
+                {lockedFromFind.contact_phone ? <p className="muted">Locked from Find Existing search.</p> : null}
                 {errors.contact_phone ? <p className="form-error">{errors.contact_phone}</p> : null}
               </div>
               <div className="form-group">
                 <label>Email (optional)</label>
-                <input value={form.portal_email} onChange={(e) => updateField('portal_email', e.target.value)} />
+                <div className="flex flex-wrap gap-2">
+                  <input
+                    style={{ flex: 1, minWidth: 180 }}
+                    type="email"
+                    value={form.portal_email}
+                    readOnly={lockedFromFind.portal_email}
+                    disabled={lockedFromFind.portal_email}
+                    onChange={(e) => updateField('portal_email', e.target.value)}
+                  />
+                  {!isEdit ? (
+                    <button
+                      className="button secondary"
+                      type="button"
+                      disabled={emailOtpSending || !String(form.portal_email || '').trim()}
+                      onClick={handleSendEmailOtp}
+                    >
+                      {emailOtpSending ? 'Sending…' : 'Send code'}
+                    </button>
+                  ) : null}
+                </div>
+                {!isEdit && String(form.portal_email || '').trim() ? (
+                  <div className="flex flex-wrap gap-2" style={{ marginTop: 8 }}>
+                    <input
+                      style={{ flex: 1, minWidth: 140, maxWidth: 180 }}
+                      inputMode="numeric"
+                      autoComplete="one-time-code"
+                      placeholder="6-digit code"
+                      value={emailOtpCode}
+                      onChange={(e) => {
+                        setEmailOtpCode(e.target.value.replace(/\D/g, '').slice(0, 6));
+                        if (emailVerified) clearEmailVerification();
+                      }}
+                    />
+                    <button
+                      className="button secondary"
+                      type="button"
+                      disabled={emailOtpVerifying || emailVerified}
+                      onClick={handleVerifyEmailOtp}
+                    >
+                      {emailVerified ? 'Verified' : (emailOtpVerifying ? 'Verifying…' : 'Confirm code')}
+                    </button>
+                  </div>
+                ) : null}
+                <p className="muted">
+                  {isEdit
+                    ? 'Portal needs an email. Soft field — Sales Agents can update this directly, then invite from customer detail.'
+                    : emailVerified
+                      ? 'Email verified. After register (or BM territory approve), an activation invite is emailed for the customer portal.'
+                      : 'Optional — needed only for customer portal. Leave blank for cash-only; add email later to invite. If filled, confirm the verification code before register.'}
+                </p>
+                {lockedFromFind.portal_email ? <p className="muted">Locked from Find Existing search.</p> : null}
+                {errors.portal_email ? <p className="form-error">{errors.portal_email}</p> : null}
               </div>
             </div>
           </>
@@ -649,7 +1051,7 @@ export function CustomerFormPage({ customerId, navigate, showToast }) {
             <h4 className="subsection-title">Address & Territory</h4>
             <div className="account-detail-grid two-up">
               <div className="form-group">
-                <label>Province *</label>
+                <label>Province / HUC *</label>
                 <select
                   className="filter-select"
                   value={geoCodes.provCode}
@@ -684,7 +1086,14 @@ export function CustomerFormPage({ customerId, navigate, showToast }) {
                   className="filter-select"
                   value={form.address_barangay}
                   disabled={!geoCodes.munCityCode || barangaysLoading}
-                  onChange={(e) => updateField('address_barangay', e.target.value)}
+                  onChange={(e) => {
+                    const nextBarangay = e.target.value;
+                    updateField('address_barangay', nextBarangay);
+                    refreshTerritoryHint({
+                      barangay: nextBarangay,
+                      autoApply: !String(form.territory_id || '').trim() && !territoryLocked,
+                    });
+                  }}
                 >
                   <option value="">{barangaysLoading ? 'Loading…' : 'Select'}</option>
                   {barangayOptions.map((b) => {
@@ -713,8 +1122,18 @@ export function CustomerFormPage({ customerId, navigate, showToast }) {
                 type="button"
                 onClick={() => setMapExpanded((v) => !v)}
               >
-                {mapExpanded ? 'Hide Map' : 'Set Location on Map'}
+                {mapExpanded ? 'Hide Map' : (hasMapPin ? 'Show Map Location' : 'Set Location on Map')}
               </button>
+              {!hasMapPin ? (
+                <p className="muted" style={{ marginTop: 8 }}>
+                  Recommended: drop a map pin so CORVEX can fill address fields and suggest the right territory.
+                  Without a pin, coverage checks are weaker.
+                </p>
+              ) : (
+                <p className="muted" style={{ marginTop: 8 }}>
+                  Map pin set ({Number(form.latitude).toFixed(5)}, {Number(form.longitude).toFixed(5)}).
+                </p>
+              )}
             </div>
             {mapExpanded ? (
               <MapPinPicker
@@ -741,7 +1160,10 @@ export function CustomerFormPage({ customerId, navigate, showToast }) {
                   className="filter-select"
                   value={form.territory_id}
                   disabled={territoryLocked}
-                  onChange={(e) => updateField('territory_id', e.target.value)}
+                  onChange={(e) => {
+                    updateField('territory_id', e.target.value);
+                    refreshTerritoryHint({ autoApply: false });
+                  }}
                 >
                   <option value="">Select territory</option>
                   {territories.map((t) => (
@@ -759,12 +1181,35 @@ export function CustomerFormPage({ customerId, navigate, showToast }) {
                 ) : null}
                 {errors.territory_id ? <p className="form-error">{errors.territory_id}</p> : null}
                 {territoryHint ? (
-                  <p className="muted">
-                    Location check: {territoryHint.classification}
-                    {territoryHint.nearest
-                      ? ` · nearest ${territoryHint.nearest.territory_name} (~${territoryHint.nearest.distance_meters} m)`
-                      : ''}
-                  </p>
+                  <div style={{ marginTop: 8 }}>
+                    <p className="muted">{territoryHintLabel}</p>
+                    {barangayConflictMsg ? (
+                      <p className="muted" style={{ marginTop: 4 }}>
+                        {barangayConflictMsg}
+                      </p>
+                    ) : null}
+                    {!territoryLocked
+                      && suggestedTerritoryId
+                      && String(form.territory_id || '') !== String(suggestedTerritoryId) ? (
+                        <button
+                          className="button secondary"
+                          type="button"
+                          style={{ marginTop: 8 }}
+                          onClick={applySuggestedTerritory}
+                        >
+                          Use suggested territory
+                          {suggestedTerritoryName ? `: ${suggestedTerritoryName}` : ''}
+                        </button>
+                      ) : null}
+                    {form.territory_id
+                      && territoryHint.nearest?.territory_id
+                      && String(form.territory_id) !== String(territoryHint.nearest.territory_id)
+                      && territoryHint.classification === 'inside' ? (
+                        <p className="muted" style={{ marginTop: 4 }}>
+                          Pin is inside {territoryHint.nearest.territory_name}, but a different territory is selected.
+                        </p>
+                      ) : null}
+                  </div>
                 ) : null}
               </div>
             </div>
@@ -776,7 +1221,12 @@ export function CustomerFormPage({ customerId, navigate, showToast }) {
                   rows={2}
                   value={form.territory_override_note}
                   onChange={(e) => updateField('territory_override_note', e.target.value)}
+                  placeholder="Why assign this territory outside coverage?"
                 />
+                <p className="muted">
+                  Required for outside coverage. Registration will wait for Branch Manager approve/reject
+                  before the account can be used for cash sales.
+                </p>
                 {errors.territory_override_note ? <p className="form-error">{errors.territory_override_note}</p> : null}
               </div>
             ) : null}
@@ -786,7 +1236,7 @@ export function CustomerFormPage({ customerId, navigate, showToast }) {
         {step === reviewStepIndex ? (
           <>
             <h4 className="subsection-title">Review & Register</h4>
-            {Object.keys(errors).length ? (
+            {Object.values(errors).some(Boolean) ? (
               <p className="form-error" style={{ marginBottom: 12 }}>
                 Some required fields are still missing. Use Back or the step tabs to complete them.
               </p>
@@ -812,7 +1262,21 @@ export function CustomerFormPage({ customerId, navigate, showToast }) {
                   </tr>
                   <tr>
                     <th>Email</th>
-                    <td>{form.portal_email || '—'}</td>
+                    <td>
+                      {form.portal_email || '—'}
+                      {form.portal_email ? (
+                        <>
+                          {' · '}
+                          <StatusBadge
+                            status={
+                              isEdit
+                                ? (form.email_verification_status || 'Unverified')
+                                : (emailVerified ? 'Verified' : 'Unverified')
+                            }
+                          />
+                        </>
+                      ) : null}
+                    </td>
                   </tr>
                   <tr>
                     <th>Address</th>
@@ -824,31 +1288,85 @@ export function CustomerFormPage({ customerId, navigate, showToast }) {
                   </tr>
                   <tr>
                     <th>Territory</th>
-                    <td>{territoryName}</td>
-                  </tr>
-                  <tr>
-                    <th>Duplicate check</th>
                     <td>
-                      {isEdit
-                        ? 'Edit mode'
-                        : 'No match (checked before registration)'}
+                      {territoryName}
+                      {territoryHintLabel ? (
+                        <span className="muted">
+                          {' · '}
+                          {territoryHintLabel}
+                        </span>
+                      ) : null}
+                    </td>
+                  </tr>
+                  {String(form.territory_override_note || '').trim() ? (
+                    <tr>
+                      <th>Territory exception</th>
+                      <td>
+                        {String(form.territory_override_note).trim()}
+                        <span className="muted"> · BM will review before activation</span>
+                      </td>
+                    </tr>
+                  ) : null}
+                  <tr>
+                    <th>Account Eligibility</th>
+                    <td>
+                      Cash / Spot Cash
+                      <span className="muted"> · credit is a separate Apply for Credit request after Active</span>
                     </td>
                   </tr>
                   <tr>
-                    <th>Account Eligibility</th>
-                    <td>Cash / Spot Cash</td>
-                  </tr>
-                  <tr>
-                    <th>Credit Application</th>
-                    <td>Not applied</td>
+                    <th>Portal</th>
+                    <td>
+                      {form.portal_email.trim()
+                        ? (emailVerified || isEdit
+                          ? `Invite will use ${form.portal_email.trim()} after the account is Active`
+                          : 'Email entered — verify the code before register')
+                        : 'No email — cash account only (portal invite later when email is available)'}
+                    </td>
                   </tr>
                 </tbody>
               </table>
             </div>
 
+            {isEdit && isSalesAgent ? (
+              <div className="form-group" style={{ marginTop: 16 }}>
+                <div className="muted" style={{ marginBottom: 8 }}>
+                  <strong>Change action:</strong>{' '}
+                  {hasSaProtectedChanges
+                    ? 'Submit protected changes for BM approval'
+                    : hasSaSoftChanges
+                      ? 'Save soft changes immediately'
+                      : 'No changes detected'}
+                </div>
+                <label htmlFor="sa-change-reason">Reason for protected changes</label>
+                <textarea
+                  id="sa-change-reason"
+                  className="filter-input"
+                  rows={2}
+                  required={hasSaProtectedChanges}
+                  disabled={!hasSaProtectedChanges}
+                  value={changeReason}
+                  onChange={(e) => {
+                    setChangeReason(e.target.value);
+                    setErrors((prev) => {
+                      const next = { ...prev };
+                      delete next.change_reason;
+                      return next;
+                    });
+                  }}
+                  placeholder="Required when changing name, mobile, address, or territory"
+                />
+                <p className="muted">
+                  <strong>Soft / immediate:</strong> portal email only.
+                  {' '}<strong>BM approval required:</strong> name, mobile, address, coordinates, and territory.
+                </p>
+                {errors.change_reason ? <p className="form-error">{errors.change_reason}</p> : null}
+              </div>
+            ) : null}
+
             {!isEdit ? (
-              <div style={{ marginTop: 16 }}>
-                <label className="flex gap-2 items-start" style={{ marginBottom: 12 }}>
+              <div className="registration-consent" style={{ marginTop: 16 }}>
+                <label className="registration-consent-row">
                   <input
                     type="checkbox"
                     checked={form.privacy_notice_acknowledged}
@@ -861,7 +1379,7 @@ export function CustomerFormPage({ customerId, navigate, showToast }) {
                       : null}
                   </span>
                 </label>
-                <label className="flex gap-2 items-start">
+                <label className="registration-consent-row">
                   <input
                     type="checkbox"
                     checked={form.marketing_opt_in}
@@ -902,6 +1420,12 @@ export function CustomerFormPage({ customerId, navigate, showToast }) {
                     showToast?.('Fix the required fields on this step before continuing.', 'error');
                     return;
                   }
+                  if (step === addressStepIndex && !hasMapPin && !isEdit) {
+                    showToast?.(
+                      'No map pin yet — territory coverage check is limited. You can still continue.',
+                      'error'
+                    );
+                  }
                   setStep((s) => s + 1);
                 }}
               >
@@ -909,7 +1433,19 @@ export function CustomerFormPage({ customerId, navigate, showToast }) {
               </button>
             ) : (
               <button className="button" type="button" disabled={saving} onClick={handleSubmit}>
-                {saving ? 'Saving…' : 'Register Customer'}
+                {saving
+                  ? 'Saving…'
+                  : (isRejectedResubmit
+                    ? 'Save & resubmit for BM'
+                    : (isEdit
+                        ? (isSalesAgent
+                          ? (hasSaProtectedChanges
+                            ? (hasSaSoftChanges
+                              ? 'Save Soft Fields + Submit for BM'
+                              : 'Submit for BM Approval')
+                            : 'Save')
+                          : 'Save Customer')
+                    : 'Register Customer'))}
               </button>
             )}
           </div>

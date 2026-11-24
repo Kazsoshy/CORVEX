@@ -55,24 +55,38 @@ async function main() {
       throw new Error('Need Active territories on both branches.');
     }
 
+    // Ensure staffing columns exist for local DBs that have not migrated yet.
+    await pool.query(`
+      ALTER TABLE customer_branch_transfers
+        ADD COLUMN IF NOT EXISTS proposed_assigned_sales_agent_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+        ADD COLUMN IF NOT EXISTS proposed_account_manager_id INTEGER REFERENCES users(id) ON DELETE SET NULL
+    `);
+
     const users = await pool.query(
       `SELECT u.id, r.slug AS role_slug, u.branch_id
        FROM users u
        JOIN roles r ON r.role_id = u.role_id
-       WHERE r.slug IN ('sales_staff', 'sales_agent', 'branch_manager', 'operating_manager')
+       WHERE r.slug IN ('sales_staff', 'sales_agent', 'branch_manager', 'operating_manager', 'collector')
          AND u.status = 'Active'
        ORDER BY u.id ASC`
     );
     const isSa = (u) => u.role_slug === 'sales_staff' || u.role_slug === 'sales_agent';
     const sa = users.rows.find((u) => isSa(u) && Number(u.branch_id) === Number(branchA.id))
       || users.rows.find((u) => isSa(u));
+    const collectorA = users.rows.find((u) => u.role_slug === 'collector' && Number(u.branch_id) === Number(branchA.id))
+      || users.rows.find((u) => u.role_slug === 'collector');
     const bmA = users.rows.find((u) => u.role_slug === 'branch_manager' && Number(u.branch_id) === Number(branchA.id))
       || users.rows.find((u) => u.role_slug === 'branch_manager');
     const bmB = users.rows.find((u) => u.role_slug === 'branch_manager' && Number(u.branch_id) === Number(branchB.id))
       || bmA;
     const om = users.rows.find((u) => u.role_slug === 'operating_manager') || bmA;
-    if (!sa || !bmA || !om) {
-      throw new Error('Need SA, BM, and OM users for tests.');
+    if (!sa || !bmA || !om || !collectorA) {
+      throw new Error('Need SA, Collector, BM, and OM users for tests.');
+    }
+    if (Number(collectorA.branch_id) !== Number(branchA.id)) {
+      // Align collector to receiving branch for role validation in transfer confirm.
+      await pool.query(`UPDATE users SET branch_id = $2 WHERE id = $1`, [collectorA.id, branchA.id]);
+      collectorA.branch_id = branchA.id;
     }
 
     const stamp = Date.now().toString().slice(-6);
@@ -245,9 +259,16 @@ async function main() {
         receivingBmId: bmA.id,
         decision: 'confirm',
         targetTerritoryId: terrA.rows[0].territory_id,
-        note: 'Location covers Gensan? No — receiving branch A territory confirmed',
+        assignedSalesAgentId: sa.id,
+        accountManagerId: collectorA.id,
+        note: 'Location covers Gensan? No — receiving branch A territory + staffing confirmed',
       });
-      check('Receiving BM confirm → Pending Source', receiving.status === 'Pending Source');
+      check(
+        'Receiving BM confirm → Pending Source with staffing',
+        receiving.status === 'Pending Source'
+          && Number(receiving.proposed_assigned_sales_agent_id) === Number(sa.id)
+          && Number(receiving.proposed_account_manager_id) === Number(collectorA.id)
+      );
 
       const released = await sourceBmSubmitTransfer(client, {
         transferId: transfer.transfer_id,
@@ -257,33 +278,18 @@ async function main() {
       });
       check('Source BM release → Pending OM (no territory select)', released.status === 'Pending OM');
 
-      const returned = await omDecideTransfer(client, {
-        transferId: transfer.transfer_id,
-        decision: 'return',
-        note: 'Need clearer landmark',
-        omUserId: om.id,
-      });
-      check('OM return → Returned to SA', returned.transfer.status === 'Returned to SA' && returned.applied === false);
-
-      // Re-drive after SA would resubmit: create fresh open path via receiving again
-      await client.query(
-        `UPDATE customer_branch_transfers
-         SET status = 'Pending Receiving', revision_note = NULL, updated_at = CURRENT_TIMESTAMP
-         WHERE transfer_id = $1`,
-        [transfer.transfer_id]
-      );
-      await receivingBmSubmitTransfer(client, {
-        transferId: transfer.transfer_id,
-        receivingBmId: bmA.id,
-        decision: 'confirm',
-        targetTerritoryId: terrA.rows[0].territory_id,
-      });
-      await sourceBmSubmitTransfer(client, {
-        transferId: transfer.transfer_id,
-        sourceBmId: bmB.id,
-        decision: 'release',
-        note: 'Release after return',
-      });
+      let omReturnBlocked = false;
+      try {
+        await omDecideTransfer(client, {
+          transferId: transfer.transfer_id,
+          decision: 'return',
+          note: 'Need clearer landmark',
+          omUserId: om.id,
+        });
+      } catch (err) {
+        omReturnBlocked = Number(err.status) === 400;
+      }
+      check('OM return to SA blocked (Receiving BM owns location returns)', omReturnBlocked);
 
       const beforeBal = await client.query(
         `SELECT outstanding_balance FROM customer_activity WHERE customer_id = $1`,
@@ -295,7 +301,6 @@ async function main() {
         decision: 'approve',
         note: 'Approved matrix transfer',
         omUserId: om.id,
-        assignedSalesAgentId: sa.id,
       });
       check('OM approve → applied', approved.applied === true && approved.transfer.status === 'Approved');
 
@@ -307,11 +312,11 @@ async function main() {
       );
       const c = afterCust.rows[0];
       check(
-        'Transfer updates branch/territory/SA and clears collector',
+        'Transfer updates branch/territory/SA and collector',
         Number(c.branch_id) === Number(branchA.id)
           && Number(c.territory_id) === Number(terrA.rows[0].territory_id)
           && Number(c.assigned_sales_agent_id) === Number(sa.id)
-          && c.account_manager_id == null
+          && Number(c.account_manager_id) === Number(collectorA.id)
           && Number(c.customer_id) === Number(crossBranchCust.customer_id)
       );
       check(
@@ -360,6 +365,8 @@ async function main() {
         receivingBmId: bmA.id,
         decision: 'confirm',
         targetTerritoryId: terrA.rows[0].territory_id,
+        assignedSalesAgentId: sa.id,
+        accountManagerId: collectorA.id,
       });
       await sourceBmSubmitTransfer(client, {
         transferId: transfer.transfer_id,

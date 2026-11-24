@@ -60,6 +60,19 @@ export async function fetchPendingSalesInvoices() {
   }
 }
 
+export async function fetchPendingSalesInvoiceById(id) {
+  try {
+    const response = await apiClient.get(`/approvals/sales-invoices/${id}`);
+    return response.data;
+  } catch (error) {
+    return {
+      success: false,
+      data: null,
+      message: error.response?.data?.message || 'Failed to load invoice detail.',
+    };
+  }
+}
+
 export async function patchSalesInvoiceReview(id, body) {
   try {
     const response = await apiClient.patch(`/approvals/sales-invoices/${id}`, body);

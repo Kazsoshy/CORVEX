@@ -19,7 +19,13 @@ assert.ok(reports.includes("router.get('/credit-history/:id'"), 'direct detail e
 assert.ok(reports.includes('assigned_sales_agent_id'), 'sales portfolio scope present');
 assert.ok(reports.includes('cp.branch_id = c.branch_id'), 'payment/customer branch consistency');
 assert.ok(!reports.includes('LIMIT 1000`;\n      params\n    );\n\n    const found'), 'no fetch-all detail search');
-assert.ok(auth.includes("creditHistory: ['super_admin', 'operating_manager', 'branch_manager', 'sales_staff']"), 'inventory_staff removed from creditHistory');
+assert.ok(auth.includes('creditHistory:'), 'creditHistory role set present');
+assert.ok(auth.includes("creditHistory: ['super_admin', 'operating_manager', 'branch_manager'"), 'BM retained on creditHistory');
+assert.ok(!auth.includes("creditHistory: ['super_admin', 'operating_manager', 'branch_manager', 'inventory_staff']"), 'inventory_staff not on creditHistory');
 assert.ok(reports.includes('isCreditHistoryPath'), 'detail path authorized via creditHistory roles');
+assert.ok(reports.includes('CREDIT_HISTORY_DETAIL_SELECT'), 'detail select includes proof payload');
+assert.ok(reports.includes('Viewed payment proof'), 'proof views are audited');
+assert.ok(reports.includes("router.post('/credit-history/:id/proof-access'"), 'proof download audit route');
+assert.ok(reports.includes('req.query.received_by'), 'received_by name filter supported');
 
 console.log('PASS payment history scope/security checks');

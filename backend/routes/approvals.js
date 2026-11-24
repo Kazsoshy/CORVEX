@@ -104,6 +104,7 @@ router.get('/credit-investigations', async (req, res) => {
     const search = String(req.query.search || '').trim();
     const riskLevel = String(req.query.risk_level || '').trim();
     const salesAgentId = req.query.sales_agent_id ? Number(req.query.sales_agent_id) : null;
+    const customerId = req.query.customer_id ? Number(req.query.customer_id) : null;
     const sort = String(req.query.sort || 'newest').trim().toLowerCase();
     const page = Math.max(1, Number(req.query.page) || 1);
     const limit = Math.min(100, Math.max(1, Number(req.query.limit) || 25));
@@ -115,9 +116,14 @@ router.get('/credit-investigations', async (req, res) => {
     let idx = params.length + 1;
     let statusSql = '';
     if (status && status !== 'All') {
-      if (status === 'Needs BM' || status === 'Pending' || status === 'needs_bm' || status === 'Needs Decision') {
+      // Open bucket (legacy Needs BM + Needs Decision): both Pending and Revision Requested
+      if (status === 'Needs BM' || status === 'needs_bm' || status === 'Needs Decision') {
         statusSql = ` AND ci.status IN ('Pending', 'Revision Requested')`;
-      } else if (status === 'Revision Requested') {
+      } else if (status === 'Completed' || status === 'Investigation History') {
+        statusSql = ` AND ci.status IN ('Approved', 'Rejected')`;
+      } else if (status === 'Pending') {
+        statusSql = ` AND ci.status = 'Pending'`;
+      } else if (status === 'Revision Requested' || status === 'Needs More Info') {
         statusSql = ` AND ci.status = 'Revision Requested'`;
       } else {
         statusSql = ` AND ci.status = $${idx++}`;
@@ -142,6 +148,10 @@ router.get('/credit-investigations', async (req, res) => {
     if (Number.isFinite(salesAgentId) && salesAgentId > 0) {
       statusSql += ` AND c.assigned_sales_agent_id = $${idx++}`;
       params.push(salesAgentId);
+    }
+    if (Number.isFinite(customerId) && customerId > 0) {
+      statusSql += ` AND ci.customer_id = $${idx++}`;
+      params.push(customerId);
     }
 
     let orderSql = 'ci.created_at DESC';
@@ -185,23 +195,27 @@ router.get('/credit-investigations', async (req, res) => {
              WHERE ci.status = 'Approved'
                AND COALESCE(ci.decided_at, ci.updated_at)::date >= $${monthParam}::date
            )::int AS approved_this_month,
-           COALESCE(
-             AVG(
-               EXTRACT(EPOCH FROM (ci.decided_at - ci.created_at)) / 3600.0
-             ) FILTER (WHERE ci.decided_at IS NOT NULL AND ci.status IN ('Approved', 'Rejected')),
-             0
-           )::float AS avg_decision_hours
+           COUNT(*) FILTER (
+             WHERE ci.decided_at IS NOT NULL AND ci.status IN ('Approved', 'Rejected')
+           )::int AS decided_count,
+           AVG(
+             EXTRACT(EPOCH FROM (ci.decided_at - ci.created_at)) / 3600.0
+           ) FILTER (WHERE ci.decided_at IS NOT NULL AND ci.status IN ('Approved', 'Rejected'))
+             ::float AS avg_decision_hours
          FROM credit_investigations ci
          WHERE ${statsScope.sql}`,
         [...statsScope.params, monthStart]
       );
       const row = statsResult.rows[0] || {};
+      const decidedCount = Number(row.decided_count) || 0;
       stats = {
         pending: Number(row.pending) || 0,
         revisionRequested: Number(row.revision_requested) || 0,
         highRiskOpen: Number(row.high_risk_open) || 0,
         approvedThisMonth: Number(row.approved_this_month) || 0,
-        averageDecisionHours: Math.round((Number(row.avg_decision_hours) || 0) * 10) / 10,
+        averageDecisionHours: decidedCount > 0 && row.avg_decision_hours != null
+          ? Math.round(Number(row.avg_decision_hours) * 10) / 10
+          : null,
       };
     }
 
@@ -406,26 +420,50 @@ router.get('/sales-invoices', async (req, res) => {
          si.sales_agent_id,
          si.branch_id,
          si.total_amount,
+         si.original_total_amount,
+         si.discount_rate,
+         si.discount_amount,
+         si.final_obligation,
          si.status,
          si.pay_type,
+         si.payment_arrangement,
+         si.spot_cash_settlement,
          si.term_months,
+         si.monthly_amount,
+         si.down_payment,
+         si.first_due_date::text AS first_due_date,
+         si.original_maturity_date::text AS original_maturity_date,
+         si.purchase_bracket,
          si.invoices_date::text AS invoices_date,
          si.due_date::text AS due_date,
          si.notes,
          si.created_at,
          COALESCE(NULLIF(TRIM(CONCAT_WS(' ', c.first_name, c.last_name)), ''), 'Customer') AS customer_name,
          c.customer_code,
+         c.contact_phone,
          COALESCE(NULLIF(TRIM(CONCAT_WS(' ', agent.first_name, agent.last_name)), ''), 'Sales Agent') AS sales_agent_name,
          b.name AS branch_name,
          pm.method_name AS payment_method,
+         pay.reference_number AS gcash_reference,
+         pay.receipt_number AS payment_receipt_number,
+         pay.amount::float AS payment_amount,
+         CASE
+           WHEN pay.payment_proof_image IS NOT NULL AND BTRIM(pay.payment_proof_image) <> '' THEN TRUE
+           ELSE FALSE
+         END AS has_payment_proof,
+         COALESCE(cci.credit_limit, 0)::float AS credit_limit,
+         COALESCE(ca.outstanding_balance, 0)::float AS outstanding_balance,
          COALESCE(
            json_agg(
              json_build_object(
+               'product_id', p.id,
                'product_name', p.name,
+               'sku', p.sku,
                'quantity', sii.quantity,
+               'unit_price', sii.unit_price,
                'line_total', sii.line_total
              )
-             ORDER BY p.name
+             ORDER BY sii.sales_invoices_items_id
            ) FILTER (WHERE sii.sales_invoices_items_id IS NOT NULL),
            '[]'::json
          ) AS items
@@ -436,10 +474,25 @@ router.get('/sales-invoices', async (req, res) => {
        LEFT JOIN payment_methods pm ON pm.payment_method_id = si.payment_method_id
        LEFT JOIN sales_invoice_items sii ON sii.invoices_id = si.sales_invoices_id
        LEFT JOIN products p ON p.id = sii.product_id
+       LEFT JOIN customer_credit_info cci ON cci.customer_id = si.customer_id
+       LEFT JOIN customer_activity ca ON ca.customer_id = si.customer_id
+       LEFT JOIN LATERAL (
+         SELECT cp.reference_number, cp.receipt_number, cp.amount, cp.payment_proof_image
+         FROM credit_history ch
+         JOIN collection_payment cp ON cp.collectionpayment_id = ch.collection_id
+         WHERE ch.sales_id = si.sales_invoices_id
+           AND cp.status <> 'Cancelled'
+         ORDER BY ch.credit_id DESC
+         LIMIT 1
+       ) pay ON TRUE
        WHERE si.status = 'Pending Review' AND ${scope.sql}
-       GROUP BY si.sales_invoices_id, c.first_name, c.last_name, c.customer_code,
+       GROUP BY si.sales_invoices_id, c.first_name, c.last_name, c.customer_code, c.contact_phone,
                 agent.first_name, agent.last_name, b.name, pm.method_name,
-                si.pay_type, si.term_months
+                si.pay_type, si.term_months, si.payment_arrangement, si.spot_cash_settlement,
+                si.original_total_amount, si.discount_rate, si.discount_amount, si.final_obligation,
+                si.monthly_amount, si.down_payment, si.first_due_date, si.original_maturity_date,
+                si.purchase_bracket, pay.reference_number, pay.receipt_number, pay.amount,
+                pay.payment_proof_image, cci.credit_limit, ca.outstanding_balance
        ORDER BY si.created_at ASC`,
       scope.params
     );
@@ -447,6 +500,126 @@ router.get('/sales-invoices', async (req, res) => {
   } catch (err) {
     console.error('[Approvals] GET /sales-invoices error:', err.message);
     return res.status(500).json({ success: false, message: 'Failed to load sales invoices for review.' });
+  }
+});
+
+router.get('/sales-invoices/:id', async (req, res) => {
+  try {
+    const pool = req.app.locals.pool;
+    const user = req.currentUser;
+    const invoiceId = Number(req.params.id);
+    if (!Number.isInteger(invoiceId) || invoiceId <= 0) {
+      return res.status(400).json({ success: false, message: 'Invalid invoice id.' });
+    }
+    const scope = branchFilter(user, 'si');
+    const params = [...scope.params, invoiceId];
+    const idParam = `$${params.length}`;
+    const result = await pool.query(
+      `SELECT
+         si.sales_invoices_id,
+         si.invoice_number,
+         si.customer_id,
+         si.sales_agent_id,
+         si.branch_id,
+         si.total_amount,
+         si.original_total_amount,
+         si.discount_rate,
+         si.discount_amount,
+         si.final_obligation,
+         si.status,
+         si.pay_type,
+         si.payment_arrangement,
+         si.spot_cash_settlement,
+         si.term_months,
+         si.monthly_amount,
+         si.down_payment,
+         si.first_due_date::text AS first_due_date,
+         si.original_maturity_date::text AS original_maturity_date,
+         si.purchase_bracket,
+         si.invoices_date::text AS invoices_date,
+         si.due_date::text AS due_date,
+         si.notes,
+         si.created_at,
+         COALESCE(NULLIF(TRIM(CONCAT_WS(' ', c.first_name, c.last_name)), ''), 'Customer') AS customer_name,
+         c.customer_code,
+         c.contact_phone,
+         COALESCE(NULLIF(TRIM(CONCAT_WS(' ', agent.first_name, agent.last_name)), ''), 'Sales Agent') AS sales_agent_name,
+         b.name AS branch_name,
+         pm.method_name AS payment_method,
+         pay.reference_number AS gcash_reference,
+         pay.receipt_number AS payment_receipt_number,
+         pay.amount::float AS payment_amount,
+         pay.payment_proof_image,
+         pay.notes AS payment_notes,
+         pay.payment_date::text AS payment_date,
+         pay.payment_time::text AS payment_time,
+         COALESCE(cci.credit_limit, 0)::float AS credit_limit,
+         COALESCE(ca.outstanding_balance, 0)::float AS outstanding_balance,
+         COALESCE(
+           (
+             SELECT json_agg(
+               json_build_object(
+                 'installment_number', inst.installment_number,
+                 'due_date', inst.due_date::text,
+                 'scheduled_amount', inst.scheduled_amount
+               )
+               ORDER BY inst.installment_number
+             )
+             FROM sales_invoice_installments inst
+             WHERE inst.invoice_id = si.sales_invoices_id
+           ),
+           '[]'::json
+         ) AS installment_schedule,
+         COALESCE(
+           json_agg(
+             json_build_object(
+               'product_id', p.id,
+               'product_name', p.name,
+               'sku', p.sku,
+               'quantity', sii.quantity,
+               'unit_price', sii.unit_price,
+               'line_total', sii.line_total
+             )
+             ORDER BY sii.sales_invoices_items_id
+           ) FILTER (WHERE sii.sales_invoices_items_id IS NOT NULL),
+           '[]'::json
+         ) AS items
+       FROM sales_invoices si
+       LEFT JOIN customers c ON c.customer_id = si.customer_id
+       LEFT JOIN users agent ON agent.id = si.sales_agent_id
+       LEFT JOIN branches b ON b.id = si.branch_id
+       LEFT JOIN payment_methods pm ON pm.payment_method_id = si.payment_method_id
+       LEFT JOIN sales_invoice_items sii ON sii.invoices_id = si.sales_invoices_id
+       LEFT JOIN products p ON p.id = sii.product_id
+       LEFT JOIN customer_credit_info cci ON cci.customer_id = si.customer_id
+       LEFT JOIN customer_activity ca ON ca.customer_id = si.customer_id
+       LEFT JOIN LATERAL (
+         SELECT cp.reference_number, cp.receipt_number, cp.amount, cp.payment_proof_image,
+                cp.notes, cp.payment_date, cp.payment_time
+         FROM credit_history ch
+         JOIN collection_payment cp ON cp.collectionpayment_id = ch.collection_id
+         WHERE ch.sales_id = si.sales_invoices_id
+           AND cp.status <> 'Cancelled'
+         ORDER BY ch.credit_id DESC
+         LIMIT 1
+       ) pay ON TRUE
+       WHERE si.sales_invoices_id = ${idParam}
+         AND si.status = 'Pending Review'
+         AND ${scope.sql}
+       GROUP BY si.sales_invoices_id, c.first_name, c.last_name, c.customer_code, c.contact_phone,
+                agent.first_name, agent.last_name, b.name, pm.method_name,
+                pay.reference_number, pay.receipt_number, pay.amount, pay.payment_proof_image,
+                pay.notes, pay.payment_date, pay.payment_time,
+                cci.credit_limit, ca.outstanding_balance`,
+      params
+    );
+    if (!result.rows.length) {
+      return res.status(404).json({ success: false, message: 'Invoice not found or not pending review in your branch.' });
+    }
+    return res.status(200).json({ success: true, data: result.rows[0] });
+  } catch (err) {
+    console.error('[Approvals] GET /sales-invoices/:id error:', err.message);
+    return res.status(500).json({ success: false, message: 'Failed to load sales invoice detail.' });
   }
 });
 
@@ -808,7 +981,7 @@ router.get('/center-summary', async (req, res) => {
     const scopePay = branchFilter(user, 'cp');
     const branchParams = isUnscoped(user) ? [] : [user.branchId];
 
-    const [ciPending, transfersPending, invoicesPending, collectionsPending, restocksPending, countsPending, customerChangesPending] =
+    const [ciPending, transfersPending, invoicesPending, collectionsPending, restocksPending, countsPending, customerChangesPending, identityPending] =
       await Promise.all([
         pool.query(
           `SELECT COUNT(*)::int AS count
@@ -851,6 +1024,12 @@ router.get('/center-summary', async (req, res) => {
            WHERE r.status = 'Pending' AND ${branchFilter(user, 'r').sql}`,
           branchFilter(user, 'r').params
         ),
+        pool.query(
+          `SELECT COUNT(*)::int AS count FROM customers c
+           WHERE c.status = 'Pending Identity Review'
+           ${isUnscoped(user) ? '' : 'AND c.branch_id = $1'}`,
+          branchParams
+        ),
       ]);
 
     const ci_pending = ciPending.rows[0]?.count || 0;
@@ -860,6 +1039,7 @@ router.get('/center-summary', async (req, res) => {
     const restocks_pending = restocksPending.rows[0]?.count || 0;
     const stock_counts_pending = countsPending.rows[0]?.count || 0;
     const customer_changes_pending = customerChangesPending.rows[0]?.count || 0;
+    const identity_pending = identityPending.rows[0]?.count || 0;
 
     return res.status(200).json({
       success: true,
@@ -870,6 +1050,7 @@ router.get('/center-summary', async (req, res) => {
         restocks_pending,
         stock_counts_pending,
         customer_changes_pending,
+        identity_pending,
         ci_pending,
         needs_action:
           collections_pending
@@ -878,6 +1059,7 @@ router.get('/center-summary', async (req, res) => {
           + restocks_pending
           + stock_counts_pending
           + customer_changes_pending
+          + identity_pending
           + ci_pending,
       },
     });
@@ -1502,6 +1684,9 @@ router.post('/credit-recommendations/:id/convert', async (req, res) => {
     const user = req.currentUser;
     const recommendationId = Number(req.params.id);
     await client.query('BEGIN');
+    const creditProfile = req.body?.credit_profile && typeof req.body.credit_profile === 'object'
+      ? req.body.credit_profile
+      : null;
     const converted = await convertRecommendationToCi(client, {
       recommendationId,
       branchId: isUnscoped(user) ? null : user.branchId,
@@ -1509,6 +1694,7 @@ router.post('/credit-recommendations/:id/convert', async (req, res) => {
       requestReason: req.body?.request_reason || null,
       requestedCreditLimit: req.body?.requested_credit_limit,
       requestRemarks: req.body?.request_remarks || null,
+      creditProfile,
     });
     await client.query('COMMIT');
 

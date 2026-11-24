@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { fetchBranchTransferById } from '../../api/salesService';
 import { formatDisplayDateTime } from '../../utils/formatters.js';
+import { formatCustomerDisplayId } from '../../utils/customerDisplay.js';
 import { StatusBadge } from '../StatusBadge';
 import { LoadingState } from '../shared/LoadingState';
 
@@ -108,7 +109,7 @@ export function BranchTransferProgressModal({
             <dl className="account-detail-grid two-up" style={{ marginTop: 16 }}>
               <div>
                 <dt className="muted">Existing Customer ID</dt>
-                <dd style={{ margin: 0 }}>{transfer?.customer_id || '—'}</dd>
+                <dd style={{ margin: 0 }}>{formatCustomerDisplayId(transfer)}</dd>
               </div>
               <div>
                 <dt className="muted">Transfer Request Reference</dt>
@@ -164,7 +165,16 @@ export function BranchTransferProgressModal({
               <button className="button ghost" type="button" onClick={() => { reload(); }}>
                 Refresh Status
               </button>
-              <button className="button ghost" type="button" onClick={onClose}>Close</button>
+              <button
+                className="button ghost"
+                type="button"
+                onClick={() => {
+                  persistOpenTransferId(null);
+                  onClose?.();
+                }}
+              >
+                Close
+              </button>
               {['Returned to SA', 'Needs Revision'].includes(transfer?.status) ? (
                 <button className="button" type="button" onClick={() => onCorrectLocation?.(transfer)}>
                   Correct Location

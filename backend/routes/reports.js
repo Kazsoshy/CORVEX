@@ -14,6 +14,7 @@ import {
   overdueCustomerAsOfSql,
 } from '../lib/customerStanding.js';
 import { requireIsoDate, optionalBranchClause } from '../lib/sqlSafety.js';
+import { AUDIT_STATUS, writeAuditFromReq } from '../lib/auditLog.js';
 
 /** Branch roles are always scoped; only OM / super_admin may see all branches. */
 function branchScope(user, queryBranchId) {
@@ -55,20 +56,53 @@ const CREDIT_HISTORY_SELECT = `
   ch.customer_id,
   COALESCE(NULLIF(TRIM(CONCAT_WS(' ', c.first_name, c.middle_name, c.last_name)), ''), 'Customer') AS customer_name,
   c.customer_code,
+  c.contact_phone,
   c.assigned_sales_agent_id,
   b.name AS branch_name,
   c.branch_id,
   ch.sales_id,
   si.invoice_number,
   si.total_amount AS invoice_amount,
+  si.original_total_amount,
+  si.discount_rate,
+  si.discount_amount,
+  si.final_obligation,
+  si.pay_type,
+  si.payment_arrangement,
+  si.spot_cash_settlement,
+  si.term_months,
+  si.monthly_amount,
+  si.first_due_date::text AS first_due_date,
   si.due_date AS invoice_due_date,
+  si.invoices_date::text AS invoices_date,
   ch.collection_id,
   cp.receipt_number,
   cp.notes AS collection_notes,
   cp.status AS collection_status,
   cp.branch_id AS payment_branch_id,
+  cp.reference_number,
+  cp.payment_date::text AS payment_date,
+  cp.payment_time::text AS payment_time,
+  cp.collector_id AS received_by_id,
   pm.method_name AS payment_method,
   COALESCE(NULLIF(TRIM(collector.full_name), ''), collector.email) AS collector_name,
+  COALESCE(NULLIF(TRIM(collector.full_name), ''), collector.email) AS received_by_name,
+  receiver_role.slug AS received_by_role_slug,
+  receiver_role.role_name AS received_by_role_name,
+  CASE
+    WHEN COALESCE(si.spot_cash_settlement, '') IN ('gcash_recorded', 'awaiting_pickup', 'collected')
+      OR (si.pay_type = 'full' AND COALESCE(cp.notes, '') ILIKE '%Spot Cash%')
+      THEN 'Spot Cash (at sale)'
+    WHEN si.pay_type = 'installment'
+      THEN 'Installment collection'
+    ELSE 'Field collection'
+  END AS payment_source,
+  CASE
+    WHEN receiver_role.slug = 'sales_staff' THEN 'Sales Agent'
+    WHEN receiver_role.slug = 'collector' THEN 'Collector'
+    WHEN receiver_role.role_name IS NOT NULL THEN receiver_role.role_name
+    ELSE NULL
+  END AS received_by_role_label,
   ch.previous_balance,
   ch.payment_amount,
   ch.remaining_balance,
@@ -80,9 +114,25 @@ const CREDIT_HISTORY_SELECT = `
     THEN 'Overdue'
     WHEN ch.remaining_balance <= 0 THEN 'Paid'
     WHEN ch.payment_status = 'Paid' AND ch.remaining_balance > 0 THEN 'Partial'
+    WHEN cp.status = 'Cancelled' THEN 'Void'
+    WHEN cp.status = 'Pending' THEN 'Pending'
     ELSE ch.payment_status
   END AS display_status,
-  ch.transaction_date
+  CASE
+    WHEN ch.remaining_balance > 0
+      AND si.due_date IS NOT NULL
+      AND si.due_date < CURRENT_DATE
+    THEN (CURRENT_DATE - si.due_date)::int
+    ELSE NULL
+  END AS days_overdue,
+  ch.transaction_date,
+  CASE WHEN cp.payment_proof_image IS NOT NULL AND BTRIM(cp.payment_proof_image) <> '' THEN TRUE ELSE FALSE END AS has_payment_proof
+`;
+
+/** Detail-only: include proof image payload (can be large). */
+const CREDIT_HISTORY_DETAIL_SELECT = `
+  ${CREDIT_HISTORY_SELECT},
+  cp.payment_proof_image
 `;
 
 const CREDIT_HISTORY_FROM = `
@@ -93,6 +143,7 @@ const CREDIT_HISTORY_FROM = `
   LEFT JOIN collection_payment cp ON cp.collectionpayment_id = ch.collection_id
   LEFT JOIN payment_methods pm ON pm.payment_method_id = cp.payment_method_id
   LEFT JOIN users collector ON collector.id = cp.collector_id
+  LEFT JOIN roles receiver_role ON receiver_role.role_id = collector.role_id
 `;
 
 /**
@@ -2194,6 +2245,38 @@ router.get('/credit-history', requireAuth, async (req, res) => {
       conditions.push(`ch.transaction_date <= $${pIdx++}`);
       params.push(req.query.date_to);
     }
+    if (req.query.payment_method) {
+      conditions.push(`LOWER(COALESCE(pm.method_name, '')) = LOWER($${pIdx++})`);
+      params.push(String(req.query.payment_method).trim());
+    }
+    if (req.query.received_by_id) {
+      conditions.push(`cp.collector_id = $${pIdx++}`);
+      params.push(Number(req.query.received_by_id));
+    }
+    if (req.query.received_by) {
+      const receiver = String(req.query.received_by).trim();
+      if (receiver) {
+        conditions.push(`COALESCE(NULLIF(TRIM(collector.full_name), ''), collector.email, '') ILIKE $${pIdx++}`);
+        params.push(`%${receiver}%`);
+      }
+    }
+    if (req.query.payment_source) {
+      const source = String(req.query.payment_source).trim().toLowerCase();
+      if (source === 'spot_cash' || source === 'spot cash (at sale)') {
+        conditions.push(`(
+          COALESCE(si.spot_cash_settlement, '') IN ('gcash_recorded', 'awaiting_pickup', 'collected')
+          OR (si.pay_type = 'full' AND COALESCE(cp.notes, '') ILIKE '%Spot Cash%')
+        )`);
+      } else if (source === 'installment' || source === 'installment collection') {
+        conditions.push(`si.pay_type = 'installment'`);
+      } else if (source === 'field' || source === 'field collection') {
+        conditions.push(`(
+          COALESCE(si.pay_type, '') IS DISTINCT FROM 'installment'
+          AND COALESCE(si.spot_cash_settlement, '') NOT IN ('gcash_recorded', 'awaiting_pickup', 'collected')
+          AND COALESCE(cp.notes, '') NOT ILIKE '%Spot Cash%'
+        )`);
+      }
+    }
     if (req.query.q || req.query.search) {
       const q = String(req.query.q || req.query.search).trim();
       if (q) {
@@ -2202,6 +2285,7 @@ router.get('/credit-history', requireAuth, async (req, res) => {
           OR COALESCE(c.customer_code, '') ILIKE $${pIdx}
           OR COALESCE(si.invoice_number, '') ILIKE $${pIdx}
           OR COALESCE(cp.receipt_number, '') ILIKE $${pIdx}
+          OR COALESCE(cp.reference_number, '') ILIKE $${pIdx}
           OR COALESCE(NULLIF(TRIM(collector.full_name), ''), collector.email, '') ILIKE $${pIdx}
         )`);
         params.push(`%${q}%`);
@@ -2214,17 +2298,41 @@ router.get('/credit-history', requireAuth, async (req, res) => {
     const page = Math.max(1, Number(req.query.page) || 1);
     const offset = (page - 1) * limit;
 
+    const sortKey = String(req.query.sort || 'date').toLowerCase();
+    const sortDir = String(req.query.sort_dir || 'desc').toLowerCase() === 'asc' ? 'ASC' : 'DESC';
+    const sortMap = {
+      date: `ch.transaction_date ${sortDir}, ch.credit_id ${sortDir}`,
+      paid: `ch.payment_amount ${sortDir}, ch.credit_id ${sortDir}`,
+      remaining: `ch.remaining_balance ${sortDir}, ch.credit_id ${sortDir}`,
+      status: `display_status ${sortDir}, ch.credit_id ${sortDir}`,
+    };
+    const orderBy = sortMap[sortKey] || sortMap.date;
+
     const countResult = await pool.query(
-      `SELECT COUNT(*)::int AS total ${CREDIT_HISTORY_FROM} ${where}`,
+      `SELECT COUNT(*)::int AS total,
+              COALESCE(SUM(ch.payment_amount), 0)::float AS total_collected,
+              COALESCE(SUM(CASE WHEN ch.remaining_balance > 0 THEN ch.remaining_balance ELSE 0 END), 0)::float AS total_outstanding,
+              COUNT(*) FILTER (
+                WHERE ch.remaining_balance > 0
+                  AND si.due_date IS NOT NULL
+                  AND si.due_date < CURRENT_DATE
+              )::int AS overdue_count
+       ${CREDIT_HISTORY_FROM} ${where}`,
       params
     );
     const total = Number(countResult.rows[0]?.total) || 0;
+    const summary = {
+      total_collected: Number(countResult.rows[0]?.total_collected) || 0,
+      total_outstanding: Number(countResult.rows[0]?.total_outstanding) || 0,
+      overdue_count: Number(countResult.rows[0]?.overdue_count) || 0,
+      filtered_count: total,
+    };
 
     const result = await pool.query(
       `SELECT ${CREDIT_HISTORY_SELECT}
        ${CREDIT_HISTORY_FROM}
        ${where}
-       ORDER BY ch.transaction_date DESC, ch.credit_id DESC
+       ORDER BY ${orderBy}
        LIMIT $${pIdx++} OFFSET $${pIdx++}`,
       [...params, limit, offset]
     );
@@ -2233,6 +2341,7 @@ router.get('/credit-history', requireAuth, async (req, res) => {
       success: true,
       data: result.rows,
       count: result.rows.length,
+      summary,
       pagination: {
         total,
         page,
@@ -2261,7 +2370,7 @@ router.get('/credit-history/:id', requireAuth, async (req, res) => {
     const where = `WHERE ${conditions.join(' AND ')}`;
 
     const result = await pool.query(
-      `SELECT ${CREDIT_HISTORY_SELECT}
+      `SELECT ${CREDIT_HISTORY_DETAIL_SELECT}
        ${CREDIT_HISTORY_FROM}
        ${where}
        LIMIT 1`,
@@ -2272,10 +2381,118 @@ router.get('/credit-history/:id', requireAuth, async (req, res) => {
       return res.status(404).json({ success: false, message: 'Payment record not found.' });
     }
 
-    return res.status(200).json({ success: true, data: result.rows[0] });
+    const row = result.rows[0];
+    // Branch-scoped proof: only return image when payment belongs to caller's branch (already enforced by scope).
+    if (row.payment_proof_image) {
+      try {
+        await writeAuditFromReq(pool, req, {
+          module: 'Payment History',
+          activity: 'Viewed payment proof',
+          action: 'Viewed payment proof',
+          status: AUDIT_STATUS.SUCCESS,
+          description: `Viewed proof for credit_id=${creditId}, receipt=${row.receipt_number || '—'}`,
+          affectedRecord: `credit_history:${creditId}`,
+          branchId: row.payment_branch_id || row.branch_id || user.branchId,
+        });
+      } catch (auditErr) {
+        console.warn('[Reports] proof view audit failed:', auditErr.message);
+      }
+    }
+    return res.status(200).json({ success: true, data: row });
   } catch (err) {
     console.error('[Reports] GET /credit-history/:id error:', err.message);
     return res.status(500).json({ success: false, message: 'Failed to fetch payment record.' });
+  }
+});
+
+router.post('/credit-history/:id/proof-access', requireAuth, async (req, res) => {
+  try {
+    const pool = req.app.locals.pool;
+    const user = req.currentUser;
+    const creditId = Number(req.params.id);
+    if (!Number.isFinite(creditId) || creditId <= 0) {
+      return res.status(400).json({ success: false, message: 'Invalid payment record id.' });
+    }
+    const scope = creditHistoryScope(user, { queryBranchId: req.query.branch_id });
+    const conditions = [...scope.conditions, `ch.credit_id = $${scope.pIdx}`];
+    const params = [...scope.params, creditId];
+    const where = `WHERE ${conditions.join(' AND ')}`;
+    const result = await pool.query(
+      `SELECT ch.credit_id, cp.receipt_number, cp.branch_id AS payment_branch_id, c.branch_id,
+              CASE WHEN cp.payment_proof_image IS NOT NULL AND BTRIM(cp.payment_proof_image) <> '' THEN TRUE ELSE FALSE END AS has_proof
+       ${CREDIT_HISTORY_FROM}
+       ${where}
+       LIMIT 1`,
+      params
+    );
+    if (!result.rows.length) {
+      return res.status(404).json({ success: false, message: 'Payment record not found.' });
+    }
+    const row = result.rows[0];
+    if (!row.has_proof) {
+      return res.status(404).json({ success: false, message: 'No proof on this payment.' });
+    }
+    const action = String(req.body?.action || 'download').toLowerCase() === 'view' ? 'view' : 'download';
+    await writeAuditFromReq(pool, req, {
+      module: 'Payment History',
+      activity: action === 'view' ? 'Viewed payment proof' : 'Downloaded payment proof',
+      action: action === 'view' ? 'Viewed payment proof' : 'Downloaded payment proof',
+      status: AUDIT_STATUS.SUCCESS,
+      description: `${action} proof for credit_id=${creditId}, receipt=${row.receipt_number || '—'}`,
+      affectedRecord: `credit_history:${creditId}`,
+      branchId: row.payment_branch_id || row.branch_id || user.branchId,
+    });
+    return res.status(200).json({ success: true });
+  } catch (err) {
+    console.error('[Reports] POST /credit-history/:id/proof-access error:', err.message);
+    return res.status(500).json({ success: false, message: 'Failed to log proof access.' });
+  }
+});
+
+router.post('/credit-history/:id/void-request', requireAuth, async (req, res) => {
+  try {
+    const pool = req.app.locals.pool;
+    const user = req.currentUser;
+    const creditId = Number(req.params.id);
+    const reason = String(req.body?.reason || '').trim();
+    if (!Number.isFinite(creditId) || creditId <= 0) {
+      return res.status(400).json({ success: false, message: 'Invalid payment record id.' });
+    }
+    if (reason.length < 8) {
+      return res.status(400).json({ success: false, message: 'A reason of at least 8 characters is required.' });
+    }
+    const scope = creditHistoryScope(user, { queryBranchId: req.query.branch_id });
+    const conditions = [...scope.conditions, `ch.credit_id = $${scope.pIdx}`];
+    const params = [...scope.params, creditId];
+    const where = `WHERE ${conditions.join(' AND ')}`;
+    const result = await pool.query(
+      `SELECT ch.credit_id, cp.receipt_number, cp.status AS collection_status,
+              cp.branch_id AS payment_branch_id, c.branch_id
+       ${CREDIT_HISTORY_FROM}
+       ${where}
+       LIMIT 1`,
+      params
+    );
+    if (!result.rows.length) {
+      return res.status(404).json({ success: false, message: 'Payment record not found.' });
+    }
+    const row = result.rows[0];
+    await writeAuditFromReq(pool, req, {
+      module: 'Payment History',
+      activity: 'Requested void/correction',
+      action: 'Requested void/correction',
+      status: AUDIT_STATUS.UPDATED,
+      description: `Void/correction requested for credit_id=${creditId}, receipt=${row.receipt_number || '—'}. Reason: ${reason}`,
+      affectedRecord: `credit_history:${creditId}`,
+      branchId: row.payment_branch_id || row.branch_id || user.branchId,
+    });
+    return res.status(200).json({
+      success: true,
+      message: 'Void/correction request recorded. Payment was not changed.',
+    });
+  } catch (err) {
+    console.error('[Reports] POST /credit-history/:id/void-request error:', err.message);
+    return res.status(500).json({ success: false, message: 'Failed to record void/correction request.' });
   }
 });
 

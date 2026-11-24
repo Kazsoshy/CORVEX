@@ -22,6 +22,18 @@ test('calculates Spot Cash from the original product total', () => {
   assert.equal(result.finalObligation, 7000);
 });
 
+test('Spot Cash 30% on 15999 yields 11199.30 (not 11899.30)', () => {
+  const result = calculateSalesPricing({ total: 15999, arrangement: 'full' });
+  assert.equal(result.discountAmount, 4799.7);
+  assert.equal(result.finalObligation, 11199.3);
+});
+
+test('Spot Cash on 16999 yields 11899.30 (documents alternate list price)', () => {
+  const result = calculateSalesPricing({ total: 16999, arrangement: 'full' });
+  assert.equal(result.discountAmount, 5099.7);
+  assert.equal(result.finalObligation, 11899.3);
+});
+
 test('reconciles installment schedule cents to original total', () => {
   const result = calculateSalesPricing({
     total: 6000,
@@ -32,6 +44,20 @@ test('reconciles installment schedule cents to original total', () => {
   assert.equal(result.termMonths, 6);
   assert.equal(result.schedule.reduce((sum, item) => sum + item.amount, 0), 6000);
   assert.equal(result.maturityDate, '2026-07-28');
+  assert.equal(result.monthlyAmount, result.schedule[0].amount);
+});
+
+test('monthlyAmount is pesos not centavos (no x100 bug)', () => {
+  const result = calculateSalesPricing({
+    total: 15999,
+    arrangement: 'installment',
+    firstDueDate: '2026-03-01',
+  });
+  assert.equal(result.termMonths, 7);
+  assert.equal(result.monthlyAmount, 2285.57);
+  assert.equal(result.schedule[0].amount, 2285.57);
+  const scheduleSum = result.schedule.reduce((sum, item) => sum + item.amount, 0);
+  assert.ok(Math.abs(scheduleSum - 15999) < 0.01);
 });
 
 test('returns the complete six-month settlement matrix', () => {

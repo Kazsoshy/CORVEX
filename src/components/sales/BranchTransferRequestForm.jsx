@@ -11,6 +11,7 @@ import {
 import { resolveBranchTerritoryGeo } from '../../utils/branchTerritoryGeo.js';
 import { suggestTerritoryForLocation, reverseGeocodeLocation } from '../../api/territoriesService.js';
 import LeafletMap from '../common/LeafletMap';
+import { formatCustomerDisplayId } from '../../utils/customerDisplay.js';
 
 /** Same map UX as CustomerRegistrationForm (Use My Location, Clear Pin, draggable pin). */
 function MapPinPicker({ latitude, longitude, onChange, warning, onPinSettled, defaultCenter }) {
@@ -129,6 +130,7 @@ export function BranchTransferRequestForm({
   const [geoNote, setGeoNote] = useState('');
   const [suggestedTerritory, setSuggestedTerritory] = useState(null);
   const [suggestBusy, setSuggestBusy] = useState(false);
+  const [pendingPayload, setPendingPayload] = useState(null);
 
   const region = geoCodes.provCode ? getRegionForProvince(geoCodes.provCode) : null;
   const cityOptions = useMemo(
@@ -143,6 +145,7 @@ export function BranchTransferRequestForm({
 
   useEffect(() => {
     if (!open) return;
+    setPendingPayload(null);
     setReason(initialReason || '');
     setGeoNote('');
     setMapExpanded(false);
@@ -157,8 +160,11 @@ export function BranchTransferRequestForm({
     const provinceHint = loc.address_province || '';
     const cityHint = String(loc.address_city || '').toLowerCase();
 
+    // Prefill only from a saved/resubmit location — never force receiving-branch HUC.
+    // Branch geo is used for map center only; SA enters where the customer is now.
     if (cityHint.includes('davao city') || cityHint.includes('city of davao')
-      || normalizeLoose(provinceHint) === 'davaocity') {
+      || normalizeLoose(provinceHint) === 'davaocity'
+      || normalizeLoose(provinceHint).includes('davaocity')) {
       provCode = '307';
       munCityCode = '30700';
     } else if (cityHint.includes('general santos') || normalizeLoose(provinceHint).includes('generalsantos')) {
@@ -170,14 +176,8 @@ export function BranchTransferRequestForm({
       provCode = prov?.provCode ? String(prov.provCode) : '';
     }
 
-    // No saved location yet — seed from receiving branch service area (Davao City / Gensan / Oriental).
-    if (!provCode && branchGeo?.provCode) {
-      provCode = String(branchGeo.provCode);
-      if (branchGeo.munCityCode) munCityCode = String(branchGeo.munCityCode);
-    }
-
     setGeoCodes({ provCode, munCityCode });
-  }, [open, initialLocation, initialReason, provinceOptions, branchGeo]);
+  }, [open, initialLocation, initialReason, provinceOptions]);
 
   useEffect(() => {
     if (!geoCodes.provCode || !initialLocation?.address_city || geoCodes.munCityCode) return;
@@ -292,6 +292,11 @@ export function BranchTransferRequestForm({
   };
 
   const submit = async () => {
+    if (pendingPayload) {
+      await onSubmit?.(pendingPayload);
+      setPendingPayload(null);
+      return;
+    }
     if (!selectedProvince || !selectedCity || !barangayName.trim() || !street.trim() || !reason.trim()) {
       showToast?.('Province, city, barangay, street, and reason are required.', 'error');
       return;
@@ -305,7 +310,7 @@ export function BranchTransferRequestForm({
       || suggestedTerritory?.proposed_territory_id
       || suggestedTerritory?.nearest?.territory_id
       || null;
-    await onSubmit?.({
+    setPendingPayload({
       target_branch_id: Number(receivingBranchId),
       reason: reason.trim(),
       address_region: region?.regionName || '',
@@ -333,14 +338,14 @@ export function BranchTransferRequestForm({
           {mode === 'resubmit' ? 'Correct Transfer Location' : 'Request Branch Transfer'}
         </h3>
         <p className="muted">
-          Provide the customer&apos;s current location. Do not create another customer record.
+          Enter the customer&apos;s current physical address (where they are now), not the receiving branch default.
+          Territory coverage is suggested after barangay/map pin; Receiving BM confirms. Do not create another customer record.
         </p>
 
         <div className="panel" style={{ padding: 12, marginBottom: 12 }}>
           <strong>{customerName}</strong>
           <div className="muted" style={{ fontSize: '0.85rem' }}>
-            Customer ID: {match?.customer_id || '—'}
-            {match?.customer_code ? ` · ${match.customer_code}` : ''}
+            Customer ID: {formatCustomerDisplayId(match)}
           </div>
           <div className="muted" style={{ fontSize: '0.85rem' }}>
             Existing home branch: {match?.branch_name || '—'}
@@ -352,7 +357,7 @@ export function BranchTransferRequestForm({
 
         <div className="account-detail-grid two-up">
           <div className="form-group">
-            <label>Province *</label>
+            <label>Province / HUC *</label>
             <select
               className="filter-select"
               value={geoCodes.provCode}
@@ -363,11 +368,18 @@ export function BranchTransferRequestForm({
                 <option key={p.provCode} value={p.provCode}>{p.provName}</option>
               ))}
             </select>
+            <p className="muted" style={{ fontSize: '0.75rem' }}>
+              Davao City and General Santos are listed as HUCs (same as Territories).
+              City of Davao also appears under Davao del Sur if you search there first.
+              {branchGeo?.label
+                ? ` Receiving branch covers ${branchGeo.label} — pick that only if the customer is there now.`
+                : ''}
+            </p>
           </div>
           <div className="form-group">
             <label>Region</label>
             <input value={region?.regionName || '—'} readOnly disabled />
-            <p className="muted">Derived from the selected province.</p>
+            <p className="muted">Derived from the selected province / HUC.</p>
           </div>
           <div className="form-group">
             <label>City / Municipality *</label>
@@ -453,11 +465,60 @@ export function BranchTransferRequestForm({
               : 'No automatic territory match — Receiving BM will assign.')}
         </p>
 
+        {pendingPayload ? (
+          <div className="panel" style={{ padding: 12, marginTop: 12, border: '1px solid var(--border-color, #ddd)' }}>
+            <strong>
+              {mode === 'resubmit' ? 'Confirm location correction?' : 'Confirm transfer request?'}
+            </strong>
+            <p className="muted" style={{ marginBottom: 8 }}>
+              This starts Receiving BM territory validation for {customerName}. Do not create a second customer record.
+            </p>
+            <dl className="account-detail-grid two-up" style={{ margin: 0 }}>
+              <div>
+                <dt className="muted">Receiving branch</dt>
+                <dd style={{ margin: 0 }}>{receivingBranchLabel || pendingPayload.target_branch_id}</dd>
+              </div>
+              <div>
+                <dt className="muted">Customer ID</dt>
+                <dd style={{ margin: 0 }}>{formatCustomerDisplayId(match)}</dd>
+              </div>
+              <div style={{ gridColumn: '1 / -1' }}>
+                <dt className="muted">Location</dt>
+                <dd style={{ margin: 0 }}>{pendingPayload.address || '—'}</dd>
+              </div>
+              <div style={{ gridColumn: '1 / -1' }}>
+                <dt className="muted">Reason</dt>
+                <dd style={{ margin: 0 }}>{pendingPayload.reason}</dd>
+              </div>
+            </dl>
+          </div>
+        ) : null}
+
         <div className="modal-actions" style={{ marginTop: 16 }}>
-          <button className="button ghost" type="button" onClick={onClose} disabled={busy}>Cancel</button>
-          <button className="button" type="button" onClick={submit} disabled={busy}>
-            {busy ? 'Submitting…' : (mode === 'resubmit' ? 'Resubmit Transfer' : 'Submit Transfer Request')}
-          </button>
+          {pendingPayload ? (
+            <>
+              <button
+                className="button ghost"
+                type="button"
+                onClick={() => setPendingPayload(null)}
+                disabled={busy}
+              >
+                Back
+              </button>
+              <button className="button" type="button" onClick={submit} disabled={busy}>
+                {busy
+                  ? 'Submitting…'
+                  : (mode === 'resubmit' ? 'Confirm Resubmit' : 'Confirm Submit')}
+              </button>
+            </>
+          ) : (
+            <>
+              <button className="button ghost" type="button" onClick={onClose} disabled={busy}>Cancel</button>
+              <button className="button" type="button" onClick={submit} disabled={busy}>
+                {mode === 'resubmit' ? 'Review & Resubmit' : 'Review & Submit'}
+              </button>
+            </>
+          )}
         </div>
       </div>
     </div>

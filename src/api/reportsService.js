@@ -156,6 +156,30 @@ export async function getCreditHistoryById(id) {
   }
 }
 
+export async function logPaymentProofAccess(id, action = 'download') {
+  try {
+    const response = await apiClient.post(`/reports/credit-history/${id}/proof-access`, { action });
+    return response.data;
+  } catch (error) {
+    return {
+      success: false,
+      message: error?.response?.data?.message || 'Failed to log proof access.',
+    };
+  }
+}
+
+export async function requestPaymentVoidCorrection(id, reason) {
+  try {
+    const response = await apiClient.post(`/reports/credit-history/${id}/void-request`, { reason });
+    return response.data;
+  } catch (error) {
+    return {
+      success: false,
+      message: error?.response?.data?.message || 'Failed to submit void/correction request.',
+    };
+  }
+}
+
 /** Underlying records for a clicked chart slice (Sales / BM / OM). */
 export async function fetchChartDetails(params = {}) {
   try {

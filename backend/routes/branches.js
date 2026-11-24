@@ -168,7 +168,118 @@ function normalizeBranchPayload(body, partial = false) {
   return { data: out };
 }
 
-// ── Policies (must be registered before /:id) ─────────────────────────────────
+const PAYMENT_SETTINGS_SELECT = `
+  b.id AS branch_id,
+  b.name AS branch_name,
+  b.gcash_account_name,
+  b.gcash_mobile,
+  b.gcash_qr_image
+`;
+
+function normalizePaymentSettingsPayload(body = {}) {
+  const out = {};
+  if (body.gcash_account_name !== undefined) {
+    const name = String(body.gcash_account_name || '').trim();
+    if (name.length > 120) return { error: 'GCash account name must be 120 characters or fewer.' };
+    out.gcash_account_name = name || null;
+  }
+  if (body.gcash_mobile !== undefined) {
+    const mobile = String(body.gcash_mobile || '').trim();
+    if (mobile.length > 30) return { error: 'GCash mobile must be 30 characters or fewer.' };
+    out.gcash_mobile = mobile || null;
+  }
+  if (body.gcash_qr_image !== undefined) {
+    const image = String(body.gcash_qr_image || '').trim();
+    if (image && !image.startsWith('data:image/') && !/^https?:\/\//i.test(image)) {
+      return { error: 'GCash QR must be an uploaded image (data URL) or image URL.' };
+    }
+    if (image.length > 6_000_000) return { error: 'GCash QR image is too large.' };
+    out.gcash_qr_image = image || null;
+  }
+  return { data: out };
+}
+
+// ── Policies / payment settings (must be registered before /:id) ───────────────
+
+router.get('/me/payment-settings', requireAuth, async (req, res) => {
+  try {
+    const pool = req.app.locals.pool;
+    const user = req.currentUser;
+    const branchId = user.branchId;
+    if (branchId == null) {
+      return res.status(400).json({ success: false, message: 'No branch assigned.' });
+    }
+    const result = await pool.query(
+      `SELECT ${PAYMENT_SETTINGS_SELECT} FROM branches b WHERE b.id = $1`,
+      [branchId]
+    );
+    if (!result.rows.length) {
+      return res.status(404).json({ success: false, message: 'Branch not found.' });
+    }
+    return res.status(200).json({ success: true, data: result.rows[0] });
+  } catch (err) {
+    console.error('[Branches] GET /me/payment-settings error:', err.message);
+    return res.status(500).json({ success: false, message: 'Failed to load payment settings.' });
+  }
+});
+
+router.patch('/me/payment-settings', requireAuth, async (req, res) => {
+  try {
+    const pool = req.app.locals.pool;
+    const user = req.currentUser;
+    if (!['branch_manager', 'operating_manager', 'super_admin'].includes(user.roleSlug)) {
+      return res.status(403).json({ success: false, message: 'Only Branch Managers can update payment settings.' });
+    }
+    const branchId = user.branchId;
+    if (branchId == null) {
+      return res.status(400).json({ success: false, message: 'No branch assigned.' });
+    }
+    const normalized = normalizePaymentSettingsPayload(req.body);
+    if (normalized.error) {
+      return res.status(400).json({ success: false, message: normalized.error });
+    }
+    const d = normalized.data;
+    const fields = [];
+    const params = [];
+    let idx = 1;
+    for (const key of ['gcash_account_name', 'gcash_mobile', 'gcash_qr_image']) {
+      if (d[key] !== undefined) {
+        fields.push(`${key} = $${idx++}`);
+        params.push(d[key]);
+      }
+    }
+    if (!fields.length) {
+      return res.status(400).json({ success: false, message: 'No payment settings to update.' });
+    }
+    fields.push('updated_at = CURRENT_TIMESTAMP');
+    params.push(branchId);
+    await pool.query(
+      `UPDATE branches SET ${fields.join(', ')} WHERE id = $${idx}`,
+      params
+    );
+    const refreshed = await pool.query(
+      `SELECT ${PAYMENT_SETTINGS_SELECT} FROM branches b WHERE b.id = $1`,
+      [branchId]
+    );
+    await writeAuditFromReq(pool, req, {
+      module: 'Branch Management',
+      activity: 'Update Branch Payment Settings',
+      action: 'Update Branch Payment Settings',
+      description: 'Updated branch GCash QR / account settings for Spot Cash.',
+      status: AUDIT_STATUS.UPDATED,
+      affectedRecord: `branch:${branchId}`,
+      branchId,
+    });
+    return res.status(200).json({
+      success: true,
+      message: 'Branch payment settings saved.',
+      data: refreshed.rows[0],
+    });
+  } catch (err) {
+    console.error('[Branches] PATCH /me/payment-settings error:', err.message);
+    return res.status(500).json({ success: false, message: 'Failed to save payment settings.' });
+  }
+});
 
 router.get('/policies', requireAuth, requireOrgScope, async (req, res) => {
   try {

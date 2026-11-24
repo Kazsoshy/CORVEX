@@ -8202,3 +8202,219 @@ table td.table-actions > .button:not(:first-child) {
     padding-bottom: 8px;
   }
 }
+
+/* Credit Investigation case desk */
+.ci-case-title {
+  font-size: 1.35rem;
+  font-weight: 700;
+  color: #153450;
+  letter-spacing: -0.01em;
+}
+.ci-case-ref {
+  font-size: 0.95rem;
+  color: #153450;
+}
+.ci-summary-strip {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: 10px 14px;
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid rgba(21, 52, 80, 0.08);
+}
+.ci-summary-item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.ci-summary-item .muted {
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+}
+.ci-summary-item strong {
+  font-size: 0.98rem;
+  color: #153450;
+}
+.ci-findings {
+  margin-top: 12px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: rgba(217, 119, 6, 0.08);
+  border: 1px solid rgba(217, 119, 6, 0.25);
+}
+.ci-findings-list {
+  margin: 6px 0 0;
+  padding-left: 18px;
+}
+.ci-findings-list li + li {
+  margin-top: 4px;
+}
+.ci-case-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 340px;
+  gap: 16px;
+  align-items: start;
+}
+.ci-decision-sticky {
+  position: sticky;
+  top: 88px;
+}
+.ci-decision-panel .ci-decision-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.ci-decision-btn {
+  width: 100%;
+  justify-content: center;
+  min-height: 40px;
+}
+.ci-decision-mobile {
+  display: none;
+}
+.ci-ac-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 12px;
+}
+.ci-ac-summary-grid--compact {
+  grid-template-columns: repeat(2, minmax(140px, 220px));
+  max-width: 480px;
+}
+.ci-ac-summary-card {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 12px 14px;
+  border-radius: 8px;
+  background: rgba(21, 52, 80, 0.04);
+  border: 1px solid rgba(21, 52, 80, 0.08);
+}
+.ci-ac-summary-card strong {
+  font-size: 1.25rem;
+  color: #153450;
+}
+.ci-queue-table th,
+.ci-queue-table td {
+  vertical-align: top;
+}
+.ci-queue-table .ci-id-cell {
+  white-space: nowrap;
+}
+.ci-queue-row:hover {
+  background: rgba(21, 52, 80, 0.035);
+}
+.ci-search-field {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  min-width: min(100%, 280px);
+}
+.ci-search-field__icon {
+  position: absolute;
+  left: 10px;
+  color: #5a6b7d;
+  font-size: 0.95rem;
+  pointer-events: none;
+  line-height: 1;
+}
+.ci-search-field .filter-input {
+  padding-left: 30px;
+  width: 100%;
+}
+.ci-label-with-hint {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.info-hint {
+  position: relative;
+  display: inline-flex;
+  vertical-align: middle;
+  flex-shrink: 0;
+}
+.info-hint__trigger {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  border: 1px solid rgba(21, 52, 80, 0.35);
+  background: #fff;
+  color: #153450;
+  font-size: 0.7rem;
+  font-weight: 700;
+  line-height: 1;
+  padding: 0;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.info-hint__trigger:hover,
+.info-hint__trigger:focus-visible {
+  background: rgba(21, 52, 80, 0.08);
+  outline: none;
+}
+.info-hint__popover {
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: #153450;
+  color: #fff;
+  font-size: 0.78rem;
+  font-weight: 400;
+  line-height: 1.45;
+  box-shadow: 0 8px 24px rgba(15, 30, 45, 0.25);
+  white-space: normal;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+}
+.info-hint__popover--portal {
+  position: fixed;
+  z-index: 1200;
+  max-width: min(280px, calc(100vw - 16px));
+  pointer-events: auto;
+}
+.info-hint__list {
+  margin: 0;
+  padding-left: 1.1rem;
+}
+.info-hint__list li + li {
+  margin-top: 4px;
+}
+.ci-id-photo-preview {
+  margin-top: 12px;
+  max-width: 280px;
+}
+.ci-id-photo-preview img {
+  display: block;
+  width: 100%;
+  height: auto;
+  border-radius: 8px;
+  border: 1px solid rgba(21, 52, 80, 0.12);
+}
+.ci-id-photo-link {
+  color: #153450;
+  text-decoration: underline;
+}
+@media (max-width: 960px) {
+  .ci-case-layout {
+    grid-template-columns: 1fr;
+  }
+  .ci-case-aside {
+    display: none;
+  }
+  .ci-decision-mobile {
+    display: block;
+    margin-top: 12px;
+  }
+  .ci-decision-mobile .ci-decision-actions {
+    position: sticky;
+    bottom: 12px;
+    padding: 8px 0;
+    background: linear-gradient(to top, #fff 70%, rgba(255, 255, 255, 0));
+  }
+  .ci-ac-summary-grid--compact {
+    grid-template-columns: 1fr 1fr;
+    max-width: none;
+  }
+}

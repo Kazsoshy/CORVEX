@@ -154,15 +154,49 @@ async function assertTerritoryOnReceivingBranch(client, territoryId, targetBranc
   return terr.rows[0];
 }
 
-export async function getBranchTransferById(db, transferId) {
-  const result = await db.query(
-    `SELECT t.*,
+/** Receiving-branch Active user with expected role slug (sales_staff | collector). */
+async function assertStaffOnReceivingBranch(client, userId, targetBranchId, roleSlug, label) {
+  const id = Number(userId);
+  if (!Number.isInteger(id) || id <= 0) {
+    const err = new Error(`${label} is required.`);
+    err.status = 400;
+    throw err;
+  }
+  const result = await client.query(
+    `SELECT u.id, u.branch_id, u.status, r.slug
+     FROM users u
+     JOIN roles r ON r.role_id = u.role_id
+     WHERE u.id = $1`,
+    [id]
+  );
+  const row = result.rows[0];
+  if (!row || row.status !== 'Active') {
+    const err = new Error(`${label} must be an Active user.`);
+    err.status = 400;
+    throw err;
+  }
+  if (Number(row.branch_id) !== Number(targetBranchId)) {
+    const err = new Error(`${label} must belong to the receiving branch.`);
+    err.status = 400;
+    throw err;
+  }
+  if (String(row.slug) !== String(roleSlug)) {
+    const err = new Error(`${label} must have role ${roleSlug}.`);
+    err.status = 400;
+    throw err;
+  }
+  return row;
+}
+
+const TRANSFER_SELECT = `SELECT t.*,
             c.customer_code, c.first_name, c.last_name, c.contact_phone, c.status AS customer_status,
             sb.name AS source_branch_name,
             tb.name AS target_branch_name,
             tr.territory_name AS target_territory_name,
             pt.territory_name AS proposed_territory_name,
-            COALESCE(NULLIF(TRIM(req.full_name), ''), TRIM(CONCAT_WS(' ', req.first_name, req.last_name))) AS requester_name
+            COALESCE(NULLIF(TRIM(req.full_name), ''), TRIM(CONCAT_WS(' ', req.first_name, req.last_name))) AS requester_name,
+            COALESCE(NULLIF(TRIM(psa.full_name), ''), TRIM(CONCAT_WS(' ', psa.first_name, psa.last_name))) AS proposed_sales_agent_name,
+            COALESCE(NULLIF(TRIM(pam.full_name), ''), TRIM(CONCAT_WS(' ', pam.first_name, pam.last_name))) AS proposed_account_manager_name
      FROM customer_branch_transfers t
      JOIN customers c ON c.customer_id = t.customer_id
      LEFT JOIN branches sb ON sb.id = t.source_branch_id
@@ -170,6 +204,12 @@ export async function getBranchTransferById(db, transferId) {
      LEFT JOIN territories tr ON tr.territory_id = t.target_territory_id
      LEFT JOIN territories pt ON pt.territory_id = t.proposed_territory_id
      LEFT JOIN users req ON req.id = t.requested_by
+     LEFT JOIN users psa ON psa.id = t.proposed_assigned_sales_agent_id
+     LEFT JOIN users pam ON pam.id = t.proposed_account_manager_id`;
+
+export async function getBranchTransferById(db, transferId) {
+  const result = await db.query(
+    `${TRANSFER_SELECT}
      WHERE t.transfer_id = $1`,
     [transferId]
   );
@@ -180,7 +220,7 @@ export function deriveTransferProgress(transfer) {
   const status = String(transfer?.status || '');
   const steps = [
     { key: 'submitted', label: 'Transfer Request Submitted by SA' },
-    { key: 'receiving', label: 'Receiving BM Location and Territory Validation' },
+    { key: 'receiving', label: 'Receiving BM Territory and Staffing Confirmation' },
     { key: 'source', label: 'Source BM Account Review and Ownership Release' },
     { key: 'om', label: 'Pending OM Final Approval' },
     { key: 'processing', label: 'System Processing Transfer' },
@@ -377,8 +417,8 @@ export async function createBranchTransferRequest(client, {
     branchId: targetBranchId,
     alertType: 'Customer Branch Transfer',
     severity: 'Warning',
-    title: `Incoming transfer — validate location: ${[row.first_name, row.last_name].filter(Boolean).join(' ')}`,
-    message: 'Receiving Branch Manager must confirm territory for the customer\'s current location, then Source BM releases ownership.',
+    title: `Incoming transfer — confirm territory & staffing: ${[row.first_name, row.last_name].filter(Boolean).join(' ')}`,
+    message: 'Receiving Branch Manager must confirm territory and assign Sales Agent + Collector, then Source BM releases ownership.',
     sourceKey: `customer-branch-transfer-target:${transfer.transfer_id}`,
     entityType: 'customer_branch_transfer',
     entityId: transfer.transfer_id,
@@ -388,9 +428,9 @@ export async function createBranchTransferRequest(client, {
   await upsertOpenOperationalAlert(client, {
     branchId: row.branch_id,
     alertType: 'Customer Branch Transfer',
-    severity: 'Info',
+    severity: 'Informational',
     title: `Outgoing transfer requested: ${[row.first_name, row.last_name].filter(Boolean).join(' ')}`,
-    message: `Transfer to ${target.rows[0].name} awaiting Receiving BM territory validation, then your ownership release.`,
+    message: `Transfer to ${target.rows[0].name} awaiting Receiving BM territory/staffing, then your ownership release.`,
     sourceKey: `customer-branch-transfer:${transfer.transfer_id}`,
     entityType: 'customer_branch_transfer',
     entityId: transfer.transfer_id,
@@ -489,6 +529,8 @@ export async function resubmitBranchTransferBySa(client, {
          receiving_bm_id = NULL,
          source_bm_id = NULL,
          source_release_note = NULL,
+         proposed_assigned_sales_agent_id = NULL,
+         proposed_account_manager_id = NULL,
          snapshot_json = $12::jsonb,
          updated_at = CURRENT_TIMESTAMP
      WHERE transfer_id = $1
@@ -508,6 +550,19 @@ export async function resubmitBranchTransferBySa(client, {
       JSON.stringify(snapshot),
     ]
   );
+
+  await upsertOpenOperationalAlert(client, {
+    branchId: row.target_branch_id,
+    alertType: 'Customer Branch Transfer',
+    severity: 'Warning',
+    title: `Incoming transfer resubmitted — confirm territory & staffing`,
+    message: 'Sales Agent corrected location. Receiving BM must re-confirm territory and assign Sales Agent + Collector.',
+    sourceKey: `customer-branch-transfer-target:${transferId}`,
+    entityType: 'customer_branch_transfer',
+    entityId: transferId,
+    linkPath: `/branch-manager/approval-center?tab=branch-transfers&transferId=${transferId}`,
+  });
+
   return updated.rows[0];
 }
 
@@ -541,20 +596,7 @@ export async function listBranchTransfers(db, {
   params.push(Math.min(Number(limit) || 100, 200));
   const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
   const result = await db.query(
-    `SELECT t.*,
-            c.customer_code, c.first_name, c.last_name, c.contact_phone, c.status AS customer_status,
-            sb.name AS source_branch_name,
-            tb.name AS target_branch_name,
-            tr.territory_name AS target_territory_name,
-            pt.territory_name AS proposed_territory_name,
-            COALESCE(NULLIF(TRIM(req.full_name), ''), TRIM(CONCAT_WS(' ', req.first_name, req.last_name))) AS requester_name
-     FROM customer_branch_transfers t
-     JOIN customers c ON c.customer_id = t.customer_id
-     LEFT JOIN branches sb ON sb.id = t.source_branch_id
-     LEFT JOIN branches tb ON tb.id = t.target_branch_id
-     LEFT JOIN territories tr ON tr.territory_id = t.target_territory_id
-     LEFT JOIN territories pt ON pt.territory_id = t.proposed_territory_id
-     LEFT JOIN users req ON req.id = t.requested_by
+    `${TRANSFER_SELECT}
      ${where}
      ORDER BY t.created_at ASC
      LIMIT $${params.length}`,
@@ -563,12 +605,14 @@ export async function listBranchTransfers(db, {
   return result.rows;
 }
 
-/** Receiving BM confirms territory or returns location to SA. */
+/** Receiving BM confirms territory + staffing, or returns location to SA. */
 export async function receivingBmSubmitTransfer(client, {
   transferId,
   receivingBmId,
   decision,
   targetTerritoryId = null,
+  assignedSalesAgentId = null,
+  accountManagerId = null,
   note = null,
 }) {
   const existing = await client.query(
@@ -604,12 +648,19 @@ export async function receivingBmSubmitTransfer(client, {
        SET status = 'Returned to SA',
            revision_note = $2,
            receiving_bm_id = $3,
+           proposed_assigned_sales_agent_id = NULL,
+           proposed_account_manager_id = NULL,
+           target_territory_id = NULL,
            snapshot_json = $4::jsonb,
            updated_at = CURRENT_TIMESTAMP
        WHERE transfer_id = $1
        RETURNING *`,
       [transferId, cleanPart(note, 2000), receivingBmId, JSON.stringify(snapshot)]
     );
+    await resolveAlertsBySourceKey(client, `customer-branch-transfer-target:${transferId}`, {
+      resolvedBy: receivingBmId,
+      resolutionNote: note || 'Returned to SA for location correction.',
+    });
     return updated.rows[0];
   }
 
@@ -622,11 +673,32 @@ export async function receivingBmSubmitTransfer(client, {
   const territoryId = Number(targetTerritoryId || row.proposed_territory_id || row.target_territory_id);
   await assertTerritoryOnReceivingBranch(client, territoryId, row.target_branch_id);
 
+  const salesAgentId = Number(
+    assignedSalesAgentId || row.proposed_assigned_sales_agent_id || row.requested_by
+  );
+  const collectorId = Number(accountManagerId || row.proposed_account_manager_id);
+  await assertStaffOnReceivingBranch(
+    client,
+    salesAgentId,
+    row.target_branch_id,
+    'sales_staff',
+    'Receiving Sales Agent'
+  );
+  await assertStaffOnReceivingBranch(
+    client,
+    collectorId,
+    row.target_branch_id,
+    'collector',
+    'Receiving Collector'
+  );
+
   const snapshot = appendTimeline(row.snapshot_json, {
     step: 'receiving_confirm',
     actor_id: receivingBmId,
-    note: note || 'Receiving BM confirmed territory.',
+    note: note || 'Receiving BM confirmed territory and staffing.',
     territory_id: territoryId,
+    assigned_sales_agent_id: salesAgentId,
+    account_manager_id: collectorId,
   });
 
   const updated = await client.query(
@@ -634,14 +706,33 @@ export async function receivingBmSubmitTransfer(client, {
      SET target_territory_id = $2,
          proposed_territory_id = COALESCE(proposed_territory_id, $2),
          receiving_bm_id = $3,
+         proposed_assigned_sales_agent_id = $4,
+         proposed_account_manager_id = $5,
          status = 'Pending Source',
          revision_note = NULL,
-         snapshot_json = $4::jsonb,
+         snapshot_json = $6::jsonb,
          updated_at = CURRENT_TIMESTAMP
      WHERE transfer_id = $1
      RETURNING *`,
-    [transferId, territoryId, receivingBmId, JSON.stringify(snapshot)]
+    [transferId, territoryId, receivingBmId, salesAgentId, collectorId, JSON.stringify(snapshot)]
   );
+
+  await resolveAlertsBySourceKey(client, `customer-branch-transfer-target:${transferId}`, {
+    resolvedBy: receivingBmId,
+    resolutionNote: 'Receiving BM confirmed territory and staffing.',
+  });
+  await upsertOpenOperationalAlert(client, {
+    branchId: row.source_branch_id,
+    alertType: 'Customer Branch Transfer',
+    severity: 'Warning',
+    title: 'Release ownership — branch transfer ready',
+    message: 'Receiving BM confirmed territory and staffing. Source BM must release ownership or reject.',
+    sourceKey: `customer-branch-transfer:${transferId}`,
+    entityType: 'customer_branch_transfer',
+    entityId: transferId,
+    linkPath: `/branch-manager/approval-center?tab=branch-transfers&transferId=${transferId}`,
+  });
+
   return updated.rows[0];
 }
 
@@ -706,33 +797,19 @@ export async function sourceBmSubmitTransfer(client, {
       resolvedBy: sourceBmId,
       resolutionNote: note || 'Branch transfer rejected by Source BM.',
     });
+    await resolveAlertsBySourceKey(client, `customer-branch-transfer-om:${transferId}`, {
+      resolvedBy: sourceBmId,
+      resolutionNote: note || 'Branch transfer rejected by Source BM.',
+    });
     return updated.rows[0];
   }
 
   if (normalized === 'return' || normalized === 'needs_revision' || normalized === 'revision') {
-    if (!cleanPart(note, 2000)) {
-      const err = new Error('A return reason is required.');
-      err.status = 400;
-      throw err;
-    }
-    const snapshot = appendTimeline(row.snapshot_json, {
-      step: 'source_return',
-      actor_id: sourceBmId,
-      note,
-    });
-    const updated = await client.query(
-      `UPDATE customer_branch_transfers
-       SET status = 'Returned to SA',
-           revision_note = $2,
-           source_bm_id = $3,
-           source_release_note = $2,
-           snapshot_json = $4::jsonb,
-           updated_at = CURRENT_TIMESTAMP
-       WHERE transfer_id = $1
-       RETURNING *`,
-      [transferId, cleanPart(note, 2000), sourceBmId, JSON.stringify(snapshot)]
+    const err = new Error(
+      'Source Branch Manager cannot return to SA. Location revisions are handled by Receiving BM before ownership release.'
     );
-    return updated.rows[0];
+    err.status = 400;
+    throw err;
   }
 
   const snapshot = appendTimeline(row.snapshot_json, {
@@ -753,6 +830,27 @@ export async function sourceBmSubmitTransfer(client, {
      RETURNING *`,
     [transferId, sourceBmId, cleanPart(note, 2000), JSON.stringify(snapshot)]
   );
+
+  await resolveAlertsBySourceKey(client, `customer-branch-transfer:${transferId}`, {
+    resolvedBy: sourceBmId,
+    resolutionNote: note || 'Source BM released ownership.',
+  });
+  await resolveAlertsBySourceKey(client, `customer-branch-transfer-target:${transferId}`, {
+    resolvedBy: sourceBmId,
+    resolutionNote: note || 'Source BM released ownership.',
+  });
+  await upsertOpenOperationalAlert(client, {
+    branchId: row.target_branch_id,
+    alertType: 'Customer Branch Transfer',
+    severity: 'Informational',
+    title: 'Branch transfer awaiting OM approval',
+    message: 'Source BM released ownership. Operating Manager must approve or reject.',
+    sourceKey: `customer-branch-transfer-om:${transferId}`,
+    entityType: 'customer_branch_transfer',
+    entityId: transferId,
+    linkPath: `/operating-manager/operations/approval-center?tab=branch-transfers&transferId=${transferId}`,
+  });
+
   return updated.rows[0];
 }
 
@@ -762,6 +860,7 @@ export async function omDecideTransfer(client, {
   note,
   omUserId,
   assignedSalesAgentId = null,
+  accountManagerId = null,
 }) {
   const existing = await client.query(
     `SELECT * FROM customer_branch_transfers WHERE transfer_id = $1 FOR UPDATE`,
@@ -781,24 +880,11 @@ export async function omDecideTransfer(client, {
 
   const normalized = String(decision || '').trim().toLowerCase();
   if (normalized === 'needs_revision' || normalized === 'revision' || normalized === 'return') {
-    const snapshot = appendTimeline(row.snapshot_json, {
-      step: 'om_return',
-      actor_id: omUserId,
-      note,
-    });
-    const updated = await client.query(
-      `UPDATE customer_branch_transfers
-       SET status = 'Returned to SA',
-           revision_note = $2,
-           om_decided_by = $3,
-           decided_at = CURRENT_TIMESTAMP,
-           snapshot_json = $4::jsonb,
-           updated_at = CURRENT_TIMESTAMP
-       WHERE transfer_id = $1
-       RETURNING *`,
-      [transferId, note || null, omUserId, JSON.stringify(snapshot)]
+    const err = new Error(
+      'Operating Manager cannot return to SA. Location revisions are handled by Receiving BM before ownership release. Use Reject to stop the transfer.'
     );
-    return { transfer: updated.rows[0], applied: false };
+    err.status = 400;
+    throw err;
   }
 
   if (normalized === 'reject' || normalized === 'rejected') {
@@ -827,11 +913,15 @@ export async function omDecideTransfer(client, {
       resolvedBy: omUserId,
       resolutionNote: note || 'Branch transfer rejected.',
     });
+    await resolveAlertsBySourceKey(client, `customer-branch-transfer-om:${transferId}`, {
+      resolvedBy: omUserId,
+      resolutionNote: note || 'Branch transfer rejected.',
+    });
     return { transfer: updated.rows[0], applied: false };
   }
 
   if (normalized !== 'approve' && normalized !== 'approved') {
-    const err = new Error('decision must be approve, reject, or return.');
+    const err = new Error('decision must be approve or reject.');
     err.status = 400;
     throw err;
   }
@@ -841,6 +931,27 @@ export async function omDecideTransfer(client, {
     err.status = 400;
     throw err;
   }
+
+  const assignedSa = Number(
+    assignedSalesAgentId || row.proposed_assigned_sales_agent_id || row.requested_by
+  );
+  const assignedCollector = Number(
+    accountManagerId || row.proposed_account_manager_id
+  );
+  await assertStaffOnReceivingBranch(
+    client,
+    assignedSa,
+    row.target_branch_id,
+    'sales_staff',
+    'Receiving Sales Agent'
+  );
+  await assertStaffOnReceivingBranch(
+    client,
+    assignedCollector,
+    row.target_branch_id,
+    'collector',
+    'Receiving Collector'
+  );
 
   const customer = await client.query(
     `SELECT * FROM customers WHERE customer_id = $1 FOR UPDATE`,
@@ -852,28 +963,28 @@ export async function omDecideTransfer(client, {
     throw err;
   }
   const before = customer.rows[0];
-  const assignedSa = assignedSalesAgentId || row.requested_by || null;
 
   await client.query(
     `UPDATE customers
      SET branch_id = $2,
          territory_id = $3,
-         account_manager_id = NULL,
-         assigned_sales_agent_id = $4,
-         address_region = COALESCE($5, address_region),
-         address_province = COALESCE($6, address_province),
-         address_city = COALESCE($7, address_city),
-         address_barangay = COALESCE($8, address_barangay),
-         address_street = COALESCE($9, address_street),
-         address = COALESCE($10, address),
-         latitude = COALESCE($11, latitude),
-         longitude = COALESCE($12, longitude),
+         account_manager_id = $4,
+         assigned_sales_agent_id = $5,
+         address_region = COALESCE($6, address_region),
+         address_province = COALESCE($7, address_province),
+         address_city = COALESCE($8, address_city),
+         address_barangay = COALESCE($9, address_barangay),
+         address_street = COALESCE($10, address_street),
+         address = COALESCE($11, address),
+         latitude = COALESCE($12, latitude),
+         longitude = COALESCE($13, longitude),
          updated_at = CURRENT_TIMESTAMP
      WHERE customer_id = $1`,
     [
       row.customer_id,
       row.target_branch_id,
       row.target_territory_id,
+      assignedCollector,
       assignedSa,
       row.address_region,
       row.address_province,
@@ -900,7 +1011,7 @@ export async function omDecideTransfer(client, {
         branch_id: row.target_branch_id,
         territory_id: row.target_territory_id,
         assigned_sales_agent_id: assignedSa,
-        account_manager_id: null,
+        account_manager_id: assignedCollector,
         outstanding_balances_preserved: true,
         credit_restrictions_preserved: true,
         address_updated_from_transfer: true,
@@ -935,13 +1046,17 @@ export async function omDecideTransfer(client, {
     resolvedBy: omUserId,
     resolutionNote: note || 'Branch transfer approved and applied.',
   });
+  await resolveAlertsBySourceKey(client, `customer-branch-transfer-om:${transferId}`, {
+    resolvedBy: omUserId,
+    resolutionNote: note || 'Branch transfer approved and applied.',
+  });
 
   await upsertOpenOperationalAlert(client, {
     branchId: row.target_branch_id,
     alertType: 'Customer Branch Transfer',
-    severity: 'Info',
+    severity: 'Informational',
     title: 'Customer transferred into branch',
-    message: `Customer #${row.customer_id} is now in this branch. Credit/overdue restrictions remain on the existing record.`,
+    message: `Customer #${row.customer_id} is now in this branch with assigned SA and collector. Credit/overdue restrictions remain on the existing record.`,
     sourceKey: `customer-branch-transfer-done:${transferId}`,
     entityType: 'customer',
     entityId: row.customer_id,
@@ -951,7 +1066,7 @@ export async function omDecideTransfer(client, {
   await upsertOpenOperationalAlert(client, {
     branchId: row.source_branch_id,
     alertType: 'Customer Branch Transfer',
-    severity: 'Info',
+    severity: 'Informational',
     title: 'Customer transferred out of branch',
     message: `Customer #${row.customer_id} was transferred to another branch. Historical invoices remain linked to this customer ID.`,
     sourceKey: `customer-branch-transfer-source-done:${transferId}`,
@@ -963,7 +1078,7 @@ export async function omDecideTransfer(client, {
   await upsertOpenOperationalAlert(client, {
     branchId: row.target_branch_id,
     alertType: 'Customer Branch Transfer',
-    severity: 'Info',
+    severity: 'Informational',
     title: 'Branch transfer completed for Sales Agent',
     message: `Existing customer #${row.customer_id} is now available under the receiving branch. Do not register again.`,
     sourceKey: `customer-branch-transfer-sa:${transferId}`,

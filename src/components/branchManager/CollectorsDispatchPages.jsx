@@ -18,6 +18,7 @@ import {
   getCollectorRouteHistory,
   getCollectorRouteDetail,
 } from '../../api/branchManagerService.js';
+import { SpotCashPickupsPanel } from './SpotCashPickupsPanel.jsx';
 
 function manilaDateInputValue() {
   return new Intl.DateTimeFormat('en-CA', {
@@ -264,6 +265,13 @@ export function CollectorsDispatchRoster({ navigate, opsBase, showToast }) {
 
   return (
     <div className="page">
+      {!orgScope ? (
+        <SpotCashPickupsPanel
+          showToast={showToast}
+          navigate={navigate}
+          opsBase={opsBase}
+        />
+      ) : null}
       <section className="panel content-panel relative overflow-hidden">
         <div className="list-section-header" style={{ alignItems: 'flex-start' }}>
           <div>

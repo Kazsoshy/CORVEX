@@ -89,7 +89,8 @@ export function calculateSalesPricing({ total, arrangement, invoiceDate, firstDu
     discountAmount: 0,
     finalObligation: originalTotal,
     termMonths,
-    monthlyAmount: pesos(baseCents),
+    // baseCents is integer centavos — convert with fromCents (not pesos).
+    monthlyAmount: fromCents(baseCents),
     schedule,
     maturityDate: schedule.at(-1)?.dueDate || null,
     settlementOptions: earlySettlementOptions(termMonths).map((option) => ({

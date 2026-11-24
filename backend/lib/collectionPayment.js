@@ -1,5 +1,6 @@
 import { ApplyError, SyncConflict } from './syncErrors.js';
 import { AUDIT_STATUS, writeAuditLog } from './auditLog.js';
+import { markSpotCashCollectedForCustomer } from './spotCashPayment.js';
 
 function money(value) {
   return Math.round(Number(value) * 100) / 100;
@@ -458,6 +459,11 @@ async function applyConfirmedCollection(client, payment) {
          AND status <> 'Completed'`,
       [payment.collector_id, payment.customer_id]
     );
+  }
+  try {
+    await markSpotCashCollectedForCustomer(client, payment.customer_id, payment.payment_date);
+  } catch (spotErr) {
+    console.warn('[collectionPayment] spot cash collected mark skipped:', spotErr.message);
   }
   return { previousBalance, remainingBalance };
 }

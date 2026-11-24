@@ -40,7 +40,7 @@ export const CREDIT_INVESTIGATION_SELECT = `
   COALESCE(NULLIF(TRIM(sa.full_name), ''), TRIM(CONCAT_WS(' ', sa.first_name, sa.last_name))) AS assigned_sales_agent_name,
   COALESCE(NULLIF(TRIM(am.full_name), ''), TRIM(CONCAT_WS(' ', am.first_name, am.last_name))) AS account_manager_name,
   COALESCE(ca.outstanding_balance, 0)::float AS outstanding_balance,
-  COALESCE(cci.credit_limit, 0)::float AS live_credit_limit
+  cci.credit_limit::float AS live_credit_limit
 `;
 
 export const CREDIT_INVESTIGATION_FROM = `

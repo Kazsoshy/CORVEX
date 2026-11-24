@@ -11,6 +11,8 @@ export function RowActionMenu({ items, label = 'Actions' }) {
   const buttonRef = useRef(null);
   const menuRef = useRef(null);
 
+  const visible = (items || []).filter(Boolean);
+
   useEffect(() => {
     if (!open) return undefined;
     const update = () => {
@@ -26,17 +28,46 @@ export function RowActionMenu({ items, label = 'Actions' }) {
       if (buttonRef.current?.contains(event.target) || menuRef.current?.contains(event.target)) return;
       setOpen(false);
     };
+    const onKey = (event) => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        setOpen(false);
+        buttonRef.current?.focus();
+        return;
+      }
+      if (!menuRef.current) return;
+      const buttons = [...menuRef.current.querySelectorAll('[role="menuitem"]:not(:disabled)')];
+      if (!buttons.length) return;
+      const idx = buttons.indexOf(document.activeElement);
+      if (event.key === 'ArrowDown') {
+        event.preventDefault();
+        buttons[(idx + 1 + buttons.length) % buttons.length]?.focus();
+      } else if (event.key === 'ArrowUp') {
+        event.preventDefault();
+        buttons[(idx - 1 + buttons.length) % buttons.length]?.focus();
+      } else if (event.key === 'Home') {
+        event.preventDefault();
+        buttons[0]?.focus();
+      } else if (event.key === 'End') {
+        event.preventDefault();
+        buttons[buttons.length - 1]?.focus();
+      }
+    };
     window.addEventListener('resize', update);
     window.addEventListener('scroll', update, true);
     document.addEventListener('mousedown', onDoc);
+    document.addEventListener('keydown', onKey);
+    queueMicrotask(() => {
+      menuRef.current?.querySelector('[role="menuitem"]:not(:disabled)')?.focus();
+    });
     return () => {
       window.removeEventListener('resize', update);
       window.removeEventListener('scroll', update, true);
       document.removeEventListener('mousedown', onDoc);
+      document.removeEventListener('keydown', onKey);
     };
   }, [open]);
 
-  const visible = (items || []).filter(Boolean);
   return (
     <>
       <button
@@ -47,6 +78,13 @@ export function RowActionMenu({ items, label = 'Actions' }) {
         aria-expanded={open}
         aria-label={label}
         onClick={(event) => { event.stopPropagation(); setOpen((v) => !v); }}
+        onKeyDown={(event) => {
+          if (event.key === 'ArrowDown' || event.key === 'Enter' || event.key === ' ') {
+            event.preventDefault();
+            event.stopPropagation();
+            setOpen(true);
+          }
+        }}
       >
         ⋮
       </button>

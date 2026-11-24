@@ -11,13 +11,14 @@ import { formatCurrency, formatDisplayDate, formatDisplayDateTime } from '../../
 import { usePagination } from '../../hooks/usePagination';
 import {
   CREDIT_REVIEW_FILTERS,
-  formatMoneyOrNA,
+  formatCreditAmount,
   mapCreditReviewRow,
 } from '../../utils/creditReview';
 import { EmptyState } from '../shared/EmptyState';
 import { LoadingState } from '../shared/LoadingState';
 import { DetailRowsTable } from '../shared/DetailRowsTable';
 import { Pagination } from '../shared/Pagination';
+import { ConfirmModal } from '../shared/ConfirmModal';
 import { StatusBadge } from '../StatusBadge';
 import { NavIcon } from '../../navIcons';
 import { CreditReviewRequestModal } from '../shared/CreditReviewRequestModal';
@@ -27,11 +28,17 @@ function limitCell(review) {
   const current = review.currentLimit;
   const requested = review.requestedLimit;
   const parts = [];
-  if (requested != null) parts.push(`Req ${formatCurrency(requested)}`);
-  if (current != null && current > 0) parts.push(`Cur ${formatCurrency(current)}`);
-  else if (suggested != null) parts.push(`Sug ${formatCurrency(suggested)}`);
-  else if (!parts.length) parts.push('Not available');
+  if (requested != null) parts.push(`Req ${formatCreditAmount(requested)}`);
+  if (current != null && Number(current) > 0) parts.push(`Cur ${formatCreditAmount(current)}`);
+  else if (suggested != null) parts.push(`Sug ${formatCreditAmount(suggested)}`);
+  else if (!parts.length) parts.push(formatCreditAmount(null));
   return parts.join(' · ');
+}
+
+function activityLabel(event) {
+  if (event === 'bm_decision') return 'Branch Manager decision';
+  if (event === 'sales_resubmit') return 'Sales resubmit';
+  return event || 'Update';
 }
 
 function SnapshotSections({ review }) {
@@ -43,7 +50,9 @@ function SnapshotSections({ review }) {
   const payments = (live?.financial?.payment_history || financial.payment_history || review.paymentHistory || []).slice(0, 5);
   const openInvoices = financial.open_invoices || [];
   const overdue = financial.overdue_invoices || [];
-  const previous = snap.previous_decisions || [];
+  const previous = snap.previous_decisions || live?.previous_decisions || [];
+  const revisionHistory = review.revisionHistory || [];
+  const showDecisionHistory = ['Approved', 'Rejected', 'Revision Requested'].includes(review.status);
 
   return (
     <>
@@ -71,14 +80,14 @@ function SnapshotSections({ review }) {
         </div>
         <DetailRowsTable
           rows={[
-            { label: 'Outstanding Balance', value: formatMoneyOrNA(financial.outstanding_balance) },
-            { label: 'Approved Credit Limit', value: formatMoneyOrNA(financial.credit_limit) },
-            { label: 'Remaining Credit', value: formatMoneyOrNA(financial.remaining_credit) },
+            { label: 'Outstanding Balance', value: formatCreditAmount(financial.outstanding_balance, { emptyLabel: 'No records available' }) },
+            { label: 'Approved Credit Limit', value: formatCreditAmount(financial.credit_limit) },
+            { label: 'Remaining Credit', value: formatCreditAmount(financial.remaining_credit) },
             {
               label: 'Utilization',
-              value: financial.utilization_pct != null ? `${financial.utilization_pct}%` : 'Not available',
+              value: financial.utilization_pct != null ? `${financial.utilization_pct}%` : 'Not on file',
             },
-            { label: 'Requested Limit', value: formatMoneyOrNA(review.requestedLimit) },
+            { label: 'Requested Limit', value: formatCreditAmount(review.requestedLimit, { emptyLabel: 'Not provided' }) },
           ]}
         />
         {liveFinancial && (review.status === 'Pending' || review.status === 'Revision Requested') ? (
@@ -87,13 +96,13 @@ function SnapshotSections({ review }) {
             <p className="muted">Newer payments or balance changes while this review waits for BM.</p>
             <DetailRowsTable
               rows={[
-                { label: 'Live Outstanding', value: formatMoneyOrNA(liveFinancial.outstanding_balance) },
-                { label: 'Live Limit', value: formatMoneyOrNA(liveFinancial.credit_limit) },
-                { label: 'Live Remaining', value: formatMoneyOrNA(liveFinancial.remaining_credit) },
+                { label: 'Live Outstanding', value: formatCreditAmount(liveFinancial.outstanding_balance, { emptyLabel: 'No records available' }) },
+                { label: 'Live Limit', value: formatCreditAmount(liveFinancial.credit_limit) },
+                { label: 'Live Remaining', value: formatCreditAmount(liveFinancial.remaining_credit) },
                 {
                   label: 'Live Overdue',
                   value: liveFinancial.overdue_count
-                    ? `${liveFinancial.overdue_count} · ${formatMoneyOrNA(liveFinancial.overdue_amount)}`
+                    ? `${liveFinancial.overdue_count} · ${formatCreditAmount(liveFinancial.overdue_amount)}`
                     : 'None',
                 },
               ]}
@@ -152,7 +161,7 @@ function SnapshotSections({ review }) {
             {
               label: 'Overdue',
               value: overdue.length
-                ? `${overdue.length} · ${formatMoneyOrNA(financial.overdue_amount)}`
+                ? `${overdue.length} · ${formatCreditAmount(financial.overdue_amount)}`
                 : 'None detected',
             },
           ]}
@@ -226,10 +235,10 @@ function SnapshotSections({ review }) {
                 {previous.map((decision) => (
                   <tr key={decision.ci_id}>
                     <td>{formatDisplayDate(decision.decided_at || decision.created_at)}</td>
-                    <td>{decision.reason || '—'}</td>
+                    <td>{decision.reason || decision.request_reason || '—'}</td>
                     <td>{decision.risk_level || '—'}</td>
                     <td><StatusBadge status={decision.status} /></td>
-                    <td>{formatMoneyOrNA(decision.approved_credit_limit || decision.requested_credit_limit)}</td>
+                    <td>{formatCreditAmount(decision.approved_credit_limit ?? decision.requested_credit_limit)}</td>
                   </tr>
                 ))}
               </tbody>
@@ -238,20 +247,69 @@ function SnapshotSections({ review }) {
         </section>
       ) : null}
 
-      <section className="panel content-panel">
-        <div className="panel-section-header">
-          <h3>Branch Manager Decision</h3>
-        </div>
-        <DetailRowsTable
-          rows={[
-            { label: 'Status', value: <StatusBadge status={review.displayStatus} /> },
-            { label: 'Decided By', value: review.approvedBy || '—' },
-            { label: 'Decided At', value: review.decidedAt ? formatDisplayDateTime(review.decidedAt) : '—' },
-            { label: 'Approved Limit', value: formatMoneyOrNA(review.approvedLimit) },
-            { label: 'Decision Remarks', value: review.decisionRemarks || review.rejectionReason || '—' },
-          ]}
-        />
-      </section>
+      {showDecisionHistory ? (
+        <>
+          <section className="panel content-panel">
+            <div className="panel-section-header">
+              <h3>Branch Manager Decision</h3>
+            </div>
+            <DetailRowsTable
+              rows={[
+                { label: 'Status', value: <StatusBadge status={review.displayStatus} /> },
+                { label: 'Decided By', value: review.approvedBy || '—' },
+                { label: 'Decided At', value: review.decidedAt ? formatDisplayDateTime(review.decidedAt) : '—' },
+                { label: 'Approved Limit', value: formatCreditAmount(review.approvedLimit) },
+                {
+                  label: review.status === 'Rejected' ? 'Rejection Reason' : 'Decision Remarks',
+                  value: review.decisionRemarks || review.rejectionReason || '—',
+                },
+              ]}
+            />
+          </section>
+
+          <section className="panel content-panel">
+            <div className="panel-section-header">
+              <h3>Investigation Activity</h3>
+              <p className="muted">Decision and resubmit trail for this credit investigation.</p>
+            </div>
+            {revisionHistory.length ? (
+              <ul style={{ margin: 0, paddingLeft: 18 }}>
+                {revisionHistory.slice().reverse().map((event, index) => (
+                  <li key={`${event.at}-${index}`} style={{ marginBottom: 8 }}>
+                    <strong>{activityLabel(event.event)}</strong>
+                    {' · '}
+                    {event.previous_status || '—'}
+                    {event.new_status ? ` → ${event.new_status}` : ''}
+                    {' · '}
+                    {event.at ? formatDisplayDateTime(event.at) : '—'}
+                    {event.remarks ? ` · ${event.remarks}` : ''}
+                    {event.approved_credit_limit != null
+                      ? ` · Limit ${formatCreditAmount(event.approved_credit_limit)}`
+                      : ''}
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="muted">No investigation activity recorded yet.</p>
+            )}
+          </section>
+        </>
+      ) : (
+        <section className="panel content-panel">
+          <div className="panel-section-header">
+            <h3>Branch Manager Decision</h3>
+          </div>
+          <DetailRowsTable
+            rows={[
+              { label: 'Status', value: <StatusBadge status={review.displayStatus} /> },
+              { label: 'Decided By', value: review.approvedBy || '—' },
+              { label: 'Decided At', value: review.decidedAt ? formatDisplayDateTime(review.decidedAt) : '—' },
+              { label: 'Approved Limit', value: formatCreditAmount(review.approvedLimit) },
+              { label: 'Decision Remarks', value: review.decisionRemarks || review.rejectionReason || '—' },
+            ]}
+          />
+        </section>
+      )}
     </>
   );
 }
@@ -266,6 +324,19 @@ const REC_REASON_MAP = {
   'Collector Flag': 'Other',
 };
 
+function recommendationNeedsFirstCreditProfile(row) {
+  if (!row) return false;
+  if (['First Limit', 'Initial CI'].includes(row.recommendation_type)) return true;
+  return !(Number(row.credit_limit) > 0);
+}
+
+function resolveSalesListApiStatus(filter) {
+  if (filter === 'All') return undefined;
+  if (filter === 'Needs BM') return 'Pending';
+  if (filter === 'Needs More Info') return 'Revision Requested';
+  return filter;
+}
+
 export function SalesCreditReviewsPage({ navigate, showToast }) {
   const location = useLocation();
   const initialFilter = (() => {
@@ -277,34 +348,62 @@ export function SalesCreditReviewsPage({ navigate, showToast }) {
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
   const [recommendations, setRecommendations] = useState([]);
-  const [recLoading, setRecLoading] = useState(true);
+  const [recLoading, setRecLoading] = useState(false);
+  const [recsPanelOpen, setRecsPanelOpen] = useState(false);
   const [requestCustomer, setRequestCustomer] = useState(null);
   const [requestReason, setRequestReason] = useState('');
   const [convertingId, setConvertingId] = useState(null);
+  const [confirmConvert, setConfirmConvert] = useState(null);
 
   useEffect(() => {
-    const raw = new URLSearchParams(location.search || '').get('filter');
+    const params = new URLSearchParams(location.search || '');
+    const raw = params.get('filter');
     if (!raw) return;
     const decoded = decodeURIComponent(raw).replace(/\+/g, ' ').trim();
     if (CREDIT_REVIEW_FILTERS.includes(decoded)) setFilter(decoded);
   }, [location.search]);
 
+  // Apply for Credit from customers list: /sales/credit-investigations?customerId=
+  useEffect(() => {
+    const params = new URLSearchParams(location.search || '');
+    const rawId = params.get('customerId');
+    if (!rawId) return;
+    const customerId = Number(rawId);
+    if (!Number.isFinite(customerId)) return;
+
+    let cancelled = false;
+    (async () => {
+      const customerRes = await fetchCustomerById(customerId);
+      if (cancelled) return;
+      if (!customerRes.success || !customerRes.data) {
+        showToast?.(customerRes.message || 'Customer not found for credit application.', 'error');
+        return;
+      }
+      const limit = Number(
+        customerRes.data.creditInfo?.credit_limit
+        ?? customerRes.data.credit_info?.credit_limit
+        ?? customerRes.data.credit_limit
+        ?? 0
+      );
+      setRequestReason(limit > 0 ? 'Need higher limit' : 'First installment');
+      setRequestCustomer(customerRes.data);
+      params.delete('customerId');
+      const next = params.toString();
+      navigate(
+        next ? `/sales/credit-investigations?${next}` : '/sales/credit-investigations',
+        { replace: true }
+      );
+    })();
+
+    return () => { cancelled = true; };
+  }, [location.search, navigate, showToast]);
+
   const reload = async () => {
     setLoading(true);
-    // API stores Pending/Revision Requested; UI label is "Needs BM"
-    const apiStatus = filter === 'All'
-      ? undefined
-      : filter === 'Needs BM'
-        ? 'Pending'
-        : filter;
+    const apiStatus = resolveSalesListApiStatus(filter);
     const res = await fetchSalesCreditInvestigations({ status: apiStatus });
     if (res.success) {
-      const mapped = (res.data || []).map(mapCreditReviewRow);
-      setItems(
-        filter === 'Needs BM'
-          ? mapped.filter((row) => row.status === 'Pending' || row.status === 'Revision Requested')
-          : mapped
-      );
+      setItems((res.data || []).map(mapCreditReviewRow));
     } else {
       showToast?.(res.message || 'Failed to load credit reviews.', 'error');
     }
@@ -324,6 +423,7 @@ export function SalesCreditReviewsPage({ navigate, showToast }) {
   }, [filter]);
 
   useEffect(() => {
+    // Prefetch count for the toggle badge without forcing the panel open.
     reloadRecommendations();
   }, []);
 
@@ -347,13 +447,23 @@ export function SalesCreditReviewsPage({ navigate, showToast }) {
   }
 
   async function convertRecommendationDirect(row) {
-    if (!window.confirm(`Submit a formal credit review for ${row.customer_name}?`)) return;
+    if (recommendationNeedsFirstCreditProfile(row)) {
+      await openRequestFromRecommendation(row);
+      return;
+    }
+    setConfirmConvert(row);
+  }
+
+  async function confirmConvertRecommendation() {
+    const row = confirmConvert;
+    if (!row) return;
     setConvertingId(row.recommendation_id);
     const res = await convertSalesCreditRecommendation(row.recommendation_id, {
       request_reason: REC_REASON_MAP[row.recommendation_type] || 'Other',
       request_remarks: row.trigger_reason || undefined,
     });
     setConvertingId(null);
+    setConfirmConvert(null);
     if (!res.success) {
       showToast?.(res.message || 'Conversion failed.', 'error');
       if (res.data?.ci_id) navigate(`/sales/credit-investigations/${res.data.ci_id}`);
@@ -368,82 +478,113 @@ export function SalesCreditReviewsPage({ navigate, showToast }) {
   return (
     <div className="page">
       <section className="panel content-panel">
-        <div className="list-section-header">
-          <h3>Recommended for Credit Review</h3>
-          <p className="muted">
-            System and collector flags for your assigned customers. These are not formal applications until you submit a credit review.
-          </p>
-        </div>
-        {recLoading ? (
-          <LoadingState message="Loading recommendations…" />
-        ) : recommendations.length ? (
-          <div className="corvex-table-wrapper">
-            <table className="corvex-table">
-              <thead>
-                <tr>
-                  <th>Customer</th>
-                  <th>Recommendation</th>
-                  <th>Trigger</th>
-                  <th>Credit Limit</th>
-                  <th>Outstanding</th>
-                  <th>Suggested Action</th>
-                  <th>Status</th>
-                  <th>Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {recommendations.map((row) => (
-                  <tr key={row.recommendation_id}>
-                    <td>
-                      <strong>{row.customer_name}</strong>
-                      {row.customer_code ? <div className="muted" style={{ fontSize: '0.78rem' }}>{row.customer_code}</div> : null}
-                    </td>
-                    <td>{row.recommendation_type}</td>
-                    <td>{row.trigger_reason || '—'}</td>
-                    <td>{formatMoneyOrNA(row.credit_limit)}</td>
-                    <td>{formatCurrency(row.outstanding_balance || 0)}</td>
-                    <td>{row.suggested_action || '—'}</td>
-                    <td><StatusBadge status={row.status} /></td>
-                    <td className="table-actions">
-                      <button
-                        className="button ghost"
-                        type="button"
-                        disabled={convertingId === row.recommendation_id}
-                        onClick={() => openRequestFromRecommendation(row)}
-                      >
-                        View / Prefill
-                      </button>
-                      <button
-                        className="button secondary"
-                        type="button"
-                        disabled={convertingId === row.recommendation_id}
-                        onClick={() => convertRecommendationDirect(row)}
-                      >
-                        Request Credit Review
-                      </button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+        <div className="list-section-header" style={{ alignItems: 'flex-start' }}>
+          <div>
+            <h3>Credit Reviews</h3>
+            <p className="muted" style={{ marginTop: 4, marginBottom: 0 }}>
+              Status of credit checks for your customers — prepared using payment and account information, with Branch Manager decisions when needed.
+            </p>
           </div>
-        ) : (
-          <EmptyState
-            title="No recommendations"
-            description="When utilization, delinquency, KYC, or collector flags apply to your customers, they appear here."
-          />
-        )}
-      </section>
-
-      <section className="panel content-panel">
-        <div className="list-section-header">
-          <h3>Credit Reviews</h3>
-          <p className="muted">
-            Status of credit checks for your customers — prepared using payment and account information, with Branch Manager decisions when needed.
-          </p>
+          <button
+            className="button secondary"
+            type="button"
+            disabled={recLoading}
+            onClick={async () => {
+              const next = !recsPanelOpen;
+              setRecsPanelOpen(next);
+              if (next) await reloadRecommendations();
+            }}
+            title="Show or hide credit recommendations for your customers"
+          >
+            {recLoading && !recsPanelOpen
+              ? 'Loading recommendations…'
+              : recsPanelOpen
+                ? 'Hide recommendations'
+                : `My credit recommendations${recommendations.length ? ` (${recommendations.length})` : ''}`}
+          </button>
         </div>
-        <div className="list-section-toolbar" style={{ marginBottom: 12 }}>
-          <div className="segmented-control">
+
+        {recsPanelOpen ? (
+          <div className="panel" style={{ margin: '12px 0 0', padding: 12 }}>
+            <div className="flex flex-wrap justify-between gap-2 items-center" style={{ marginBottom: 8 }}>
+              <strong>Recommended for Credit Review</strong>
+              <button
+                className="button ghost"
+                type="button"
+                style={{ padding: '2px 8px' }}
+                onClick={reloadRecommendations}
+                disabled={recLoading}
+              >
+                Refresh
+              </button>
+            </div>
+            <p className="muted" style={{ fontSize: '0.85rem', marginTop: 0 }}>
+              System and collector flags for your assigned customers. These are not formal applications until you submit a credit review.
+            </p>
+            {recLoading ? (
+              <LoadingState message="Loading recommendations…" />
+            ) : recommendations.length ? (
+              <div className="corvex-table-wrapper">
+                <table className="corvex-table">
+                  <thead>
+                    <tr>
+                      <th>Customer</th>
+                      <th>Recommendation</th>
+                      <th>Trigger</th>
+                      <th>Credit Limit</th>
+                      <th>Outstanding</th>
+                      <th>Suggested Action</th>
+                      <th>Status</th>
+                      <th>Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {recommendations.map((row) => (
+                      <tr key={row.recommendation_id}>
+                        <td>
+                          <strong>{row.customer_name}</strong>
+                          {row.customer_code ? <div className="muted" style={{ fontSize: '0.78rem' }}>{row.customer_code}</div> : null}
+                        </td>
+                        <td>{row.recommendation_type}</td>
+                        <td>{row.trigger_reason || '—'}</td>
+                        <td>{formatCreditAmount(row.credit_limit)}</td>
+                        <td>{formatCreditAmount(row.outstanding_balance, { emptyLabel: 'No records available' })}</td>
+                        <td>{row.suggested_action || '—'}</td>
+                        <td><StatusBadge status={row.status} /></td>
+                        <td className="table-actions">
+                          <button
+                            className="button ghost"
+                            type="button"
+                            disabled={convertingId === row.recommendation_id}
+                            onClick={() => openRequestFromRecommendation(row)}
+                          >
+                            View / Prefill
+                          </button>
+                          <button
+                            className="button secondary"
+                            type="button"
+                            disabled={convertingId === row.recommendation_id}
+                            onClick={() => convertRecommendationDirect(row)}
+                          >
+                            Request Credit Review
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            ) : (
+              <EmptyState
+                title="No recommendations"
+                description="When utilization, delinquency, KYC, or collector flags apply to your customers, they appear here."
+              />
+            )}
+          </div>
+        ) : null}
+
+        <div className="list-section-toolbar" style={{ marginTop: 16, marginBottom: 12 }}>
+          <div className="segmented-control" style={{ flexWrap: 'wrap' }}>
             {CREDIT_REVIEW_FILTERS.map((option) => (
               <button
                 key={option}
@@ -498,6 +639,15 @@ export function SalesCreditReviewsPage({ navigate, showToast }) {
                         >
                           <NavIcon name="view" />
                         </button>
+                        {review.status === 'Revision Requested' ? (
+                          <button
+                            className="button secondary"
+                            type="button"
+                            onClick={() => navigate(`/sales/credit-investigations/${review.ciId}?revise=1`)}
+                          >
+                            Revise
+                          </button>
+                        ) : null}
                       </td>
                     </tr>
                   ))}
@@ -519,6 +669,10 @@ export function SalesCreditReviewsPage({ navigate, showToast }) {
       <CreditReviewRequestModal
         customer={requestCustomer}
         open={Boolean(requestCustomer)}
+        isFirstCredit={
+          !requestCustomer?.creditInfo
+          || Number(requestCustomer?.creditInfo?.credit_limit || 0) <= 0
+        }
         defaultReason={requestReason}
         recommendationId={requestCustomer?._recommendationId || null}
         showToast={showToast}
@@ -530,28 +684,89 @@ export function SalesCreditReviewsPage({ navigate, showToast }) {
           if (ciId) navigate(`/sales/credit-investigations/${ciId}`);
         }}
       />
+
+      <ConfirmModal
+        open={Boolean(confirmConvert)}
+        title="Submit credit review?"
+        description={confirmConvert
+          ? `Submit a formal credit review for ${confirmConvert.customer_name}?`
+          : ''}
+        details={confirmConvert ? [
+          { label: 'Customer', value: confirmConvert.customer_name },
+          { label: 'Recommendation', value: confirmConvert.recommendation_type },
+          { label: 'Trigger', value: confirmConvert.trigger_reason || '—', fullWidth: true },
+        ] : []}
+        confirmLabel="Submit review"
+        cancelLabel="Cancel"
+        busy={Boolean(convertingId)}
+        onCancel={() => { if (!convertingId) setConfirmConvert(null); }}
+        onConfirm={confirmConvertRecommendation}
+      />
     </div>
   );
 }
 
 export function SalesCreditReviewDetailPage({ ciId, navigate, showToast }) {
+  const location = useLocation();
   const [review, setReview] = useState(null);
   const [loading, setLoading] = useState(true);
   const [requestOpen, setRequestOpen] = useState(false);
+  const [modalCustomer, setModalCustomer] = useState(null);
+  const [openingRequest, setOpeningRequest] = useState(false);
+
+  async function loadReview() {
+    const res = await fetchSalesCreditInvestigationById(ciId);
+    if (res.success && res.data) {
+      const mapped = mapCreditReviewRow(res.data);
+      setReview({
+        ...mapped,
+        revisionHistory: res.data.revision_history || [],
+        live: res.data.live || mapped.live || null,
+      });
+      return mapped;
+    }
+    setReview(null);
+    showToast?.(res.message || 'Credit review not found.', 'error');
+    return null;
+  }
 
   useEffect(() => {
+    let cancelled = false;
     async function load() {
       setLoading(true);
-      const res = await fetchSalesCreditInvestigationById(ciId);
-      if (res.success && res.data) setReview(mapCreditReviewRow(res.data));
-      else {
-        setReview(null);
-        showToast?.(res.message || 'Credit review not found.', 'error');
-      }
-      setLoading(false);
+      await loadReview();
+      if (!cancelled) setLoading(false);
     }
     load();
+    return () => { cancelled = true; };
   }, [ciId, showToast]);
+
+  useEffect(() => {
+    const params = new URLSearchParams(location.search || '');
+    if (params.get('revise') !== '1') return;
+    if (!review || review.status !== 'Revision Requested') return;
+    openRequestModal();
+    params.delete('revise');
+    const next = params.toString();
+    navigate(
+      next ? `/sales/credit-investigations/${ciId}?${next}` : `/sales/credit-investigations/${ciId}`,
+      { replace: true }
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [location.search, review?.status, ciId]);
+
+  async function openRequestModal() {
+    if (!review?.customerId) return;
+    setOpeningRequest(true);
+    const customerRes = await fetchCustomerById(review.customerId);
+    setOpeningRequest(false);
+    if (!customerRes.success || !customerRes.data) {
+      showToast?.(customerRes.message || 'Could not load customer for revision.', 'error');
+      return;
+    }
+    setModalCustomer(customerRes.data);
+    setRequestOpen(true);
+  }
 
   if (loading) return <LoadingState message="Loading credit review…" />;
   if (!review) {
@@ -566,6 +781,9 @@ export function SalesCreditReviewDetailPage({ ciId, navigate, showToast }) {
   }
 
   const canRerequest = review.status === 'Rejected' || review.status === 'Revision Requested';
+  const isRevision = review.status === 'Revision Requested';
+  const firstCredit = !(Number(review.currentLimit) > 0)
+    && !(Number(modalCustomer?.creditInfo?.credit_limit || modalCustomer?.credit_limit) > 0);
 
   return (
     <div className="page">
@@ -580,7 +798,7 @@ export function SalesCreditReviewDetailPage({ ciId, navigate, showToast }) {
           rows={[
             { label: 'Status', value: <StatusBadge status={review.displayStatus} /> },
             { label: 'Risk', value: <StatusBadge status={review.riskLevel || '—'} /> },
-            { label: 'Requested Limit', value: formatMoneyOrNA(review.requestedLimit) },
+            { label: 'Requested Limit', value: formatCreditAmount(review.requestedLimit, { emptyLabel: 'Not provided' }) },
             { label: 'Remarks', value: review.requestRemarks || '—' },
             ...(review.status === 'Revision Requested' ? [{
               label: 'BM Revision Instructions',
@@ -626,27 +844,41 @@ export function SalesCreditReviewDetailPage({ ciId, navigate, showToast }) {
           </>
         ) : null}
         {canRerequest && review.customerId ? (
-          <button className="button" type="button" onClick={() => setRequestOpen(true)}>
-            Request Again
+          <button
+            className="button"
+            type="button"
+            disabled={openingRequest}
+            onClick={openRequestModal}
+          >
+            {openingRequest
+              ? 'Loading…'
+              : (isRevision ? 'Revise and Resubmit' : 'Reapply for Credit')}
           </button>
         ) : null}
       </div>
 
       <CreditReviewRequestModal
         open={requestOpen}
-        customer={{
-          customer_id: review.customerId,
-          first_name: review.customerName,
-          customer_code: review.customerCode,
+        customer={modalCustomer}
+        isFirstCredit={firstCredit}
+        onClose={() => {
+          setRequestOpen(false);
+          setModalCustomer(null);
         }}
-        onClose={() => setRequestOpen(false)}
         showToast={showToast}
         defaultReason={review.reason || ''}
-        resubmitCiId={review.status === 'Revision Requested' ? review.ciId : null}
-        onSubmitted={(newId) => {
+        defaultRequestedLimit={review.requestedLimit != null ? review.requestedLimit : ''}
+        defaultRemarks={review.requestRemarks || ''}
+        resubmitCiId={isRevision ? review.ciId : null}
+        onSubmitted={async (newId) => {
           setRequestOpen(false);
-          if (newId) navigate(`/sales/credit-investigations/${newId}`);
-          else navigate('/sales/credit-investigations');
+          setModalCustomer(null);
+          if (newId) {
+            navigate(`/sales/credit-investigations/${newId}`);
+            if (String(newId) === String(ciId)) await loadReview();
+          } else {
+            navigate('/sales/credit-investigations');
+          }
         }}
       />
     </div>
@@ -687,7 +919,7 @@ export function SalesCreditReviewRequestPage({
           </p>
         </div>
         <p className="muted">
-          You do not need to re-enter payment history, income, or references already on the customer record.
+          You do not need to re-enter payment history already on the customer record.
         </p>
         <div className="flex flex-wrap gap-2" style={{ marginTop: 12 }}>
           <button
@@ -705,6 +937,15 @@ export function SalesCreditReviewRequestPage({
       <CreditReviewRequestModal
         open={open}
         customer={customer}
+        isFirstCredit={
+          !customer?.creditInfo
+          || Number(customer?.creditInfo?.credit_limit || 0) <= 0
+        }
+        defaultReason={
+          !customer?.creditInfo || Number(customer?.creditInfo?.credit_limit || 0) <= 0
+            ? 'First installment'
+            : 'Need higher limit'
+        }
         onClose={() => {
           setOpen(false);
           navigate(`/sales/customer-detail/${customerId}?from=${parentContext || 'customers'}`);
