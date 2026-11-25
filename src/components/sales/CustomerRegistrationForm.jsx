@@ -131,7 +131,7 @@ function MapPinPicker({ latitude, longitude, onChange, warning, onPinSettled }) 
           position: center,
           draggable: true,
           onDragEnd: setPin,
-          color: '#0B2133',
+          color: 'var(--text)',
           popup: 'Customer location',
         }] : []}
       />

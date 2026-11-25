@@ -135,13 +135,37 @@ html[data-theme="dark"] {
   --bg: #0e1224;
   --surface: #171c33;
   --border: #3c4462;
+  --border-strong: #4a5374;
   --text: #f3f5f8;
   --text-secondary: #b7bdcc;
   --text-muted: #a3a9ba;
   --warning: #f5b042;
   --danger: #f07171;
   --accent-green: #3dce9a;
+  --success: #3dce9a;
+  --green: #3dce9a;
+  --amber: #f5b042;
+  --red: #f07171;
   --sidebar-bg: #090c18;
+  --palette-white: #171c33;
+  --palette-soft-white: #0e1224;
+  --palette-mint: #171c33;
+  --palette-icy: #242b46;
+  --palette-cyan: #3c4462;
+  --palette-powder: #3c4462;
+  --palette-navy: #e8eaf2;
+  --palette-deep-navy: #d5d8e6;
+  --palette-midnight: #f3f5f8;
+  --support-mint: #171c33;
+  --support-powder: #3c4462;
+  --accent-icy: #242b46;
+  --sky: #3c4462;
+  --cyan: #8eb8dc;
+  --blue-light: #8eb8dc;
+  --cyan-28: rgba(126, 176, 216, 0.28);
+  --cyan-18: rgba(126, 176, 216, 0.18);
+  --cyan-10: rgba(126, 176, 216, 0.1);
+  --cyan-08: rgba(126, 176, 216, 0.08);
   --surface-glass: rgba(23, 28, 51, 0.94);
   --primary-glass: rgba(126, 176, 216, 0.08);
   --primary-glass-strong: rgba(126, 176, 216, 0.16);
@@ -841,7 +865,7 @@ html[data-contrast="high"] .reading-guide {
   width: 20px;
   height: 20px;
   border-radius: 50%;
-  background: #fff;
+  background: var(--surface);
   box-shadow: 0 1px 2px rgba(12, 16, 49, 0.25);
   transition: transform var(--transition);
 }
@@ -1967,5 +1991,209 @@ html[data-theme="dark"] .account-menu-popover {
   border-color: var(--border);
   color: var(--text);
   box-shadow: 0 14px 36px rgba(0, 0, 0, 0.45);
+}
+
+/* Dark mode safety net — surfaces that still hardcode light colors */
+html[data-theme="dark"] body,
+html[data-theme="dark"] #root,
+html[data-theme="dark"] .app-shell,
+html[data-theme="dark"] .page,
+html[data-theme="dark"] .main-content,
+html[data-theme="dark"] .content-area,
+html[data-theme="dark"] .workspace {
+  background: var(--bg);
+  color: var(--text);
+}
+
+html[data-theme="dark"] .panel,
+html[data-theme="dark"] .card,
+html[data-theme="dark"] .content-panel,
+html[data-theme="dark"] .form-panel,
+html[data-theme="dark"] .dashboard-panel,
+html[data-theme="dark"] .hero-card,
+html[data-theme="dark"] .role-home-card,
+html[data-theme="dark"] .stat-card,
+html[data-theme="dark"] .dashboard-greeting,
+html[data-theme="dark"] .modal-content,
+html[data-theme="dark"] .modal-dialog,
+html[data-theme="dark"] .dialog-panel,
+html[data-theme="dark"] .empty-state,
+html[data-theme="dark"] .loading-state,
+html[data-theme="dark"] .toast,
+html[data-theme="dark"] .pagination,
+html[data-theme="dark"] .pagination-bar,
+html[data-theme="dark"] .filter-bar,
+html[data-theme="dark"] .list-section-toolbar,
+html[data-theme="dark"] .list-section-controls,
+html[data-theme="dark"] .table-filters,
+html[data-theme="dark"] .settings-card,
+html[data-theme="dark"] .settings-panel,
+html[data-theme="dark"] .settings-section,
+html[data-theme="dark"] .customer-ads-panel,
+html[data-theme="dark"] .customer-sponsored-card,
+html[data-theme="dark"] .customer-featured-carousel,
+html[data-theme="dark"] .customer-ad-overlay__card {
+  background: var(--surface);
+  border-color: var(--border);
+  color: var(--text);
+}
+
+html[data-theme="dark"] .customer-sponsored-card,
+html[data-theme="dark"] .customer-featured-carousel,
+html[data-theme="dark"] .customer-ad-overlay__pricing,
+html[data-theme="dark"] .customer-ad-overlay__media,
+html[data-theme="dark"] .stat-icon,
+html[data-theme="dark"] .stat-card-icon,
+html[data-theme="dark"] .segmented-control,
+html[data-theme="dark"] .settings-choice-segment {
+  background: var(--surface-2);
+  border-color: var(--border);
+  color: var(--text);
+}
+
+html[data-theme="dark"] .muted,
+html[data-theme="dark"] .text-ink\/70,
+html[data-theme="dark"] .topbar-subtitle,
+html[data-theme="dark"] .stat-title,
+html[data-theme="dark"] .stat-label,
+html[data-theme="dark"] .customer-ad-disclaimer,
+html[data-theme="dark"] .customer-ad-overlay__note,
+html[data-theme="dark"] .customer-ad-overlay__category {
+  color: var(--text-secondary);
+}
+
+html[data-theme="dark"] h1,
+html[data-theme="dark"] h2,
+html[data-theme="dark"] h3,
+html[data-theme="dark"] h4,
+html[data-theme="dark"] .topbar h1,
+html[data-theme="dark"] .stat-value,
+html[data-theme="dark"] .customer-ad-price,
+html[data-theme="dark"] .customer-sponsored-card__body h4,
+html[data-theme="dark"] .customer-ads-panel__header h3 {
+  color: var(--text);
+}
+
+html[data-theme="dark"] input,
+html[data-theme="dark"] select,
+html[data-theme="dark"] textarea,
+html[data-theme="dark"] .filter-input,
+html[data-theme="dark"] .filter-select,
+html[data-theme="dark"] .search-input,
+html[data-theme="dark"] .search-bar,
+html[data-theme="dark"] .form-group input,
+html[data-theme="dark"] .form-group select,
+html[data-theme="dark"] .form-group textarea {
+  background-color: var(--surface);
+  color: var(--text);
+  border-color: var(--border-strong, var(--border));
+}
+
+html[data-theme="dark"] input::placeholder,
+html[data-theme="dark"] textarea::placeholder,
+html[data-theme="dark"] .filter-input::placeholder,
+html[data-theme="dark"] .search-input::placeholder {
+  color: var(--text-muted);
+}
+
+html[data-theme="dark"] .corvex-table-wrap,
+html[data-theme="dark"] .corvex-table-wrapper,
+html[data-theme="dark"] .table-wrap,
+html[data-theme="dark"] .table-shell,
+html[data-theme="dark"] .data-table-wrap,
+html[data-theme="dark"] .dashboard-table-wrap {
+  background: var(--surface);
+  border-color: var(--border);
+}
+
+html[data-theme="dark"] .corvex-table th,
+html[data-theme="dark"] .data-table th,
+html[data-theme="dark"] .admin-table th,
+html[data-theme="dark"] .inventory-table th {
+  background: var(--surface-2) !important;
+  color: var(--brand) !important;
+  border-bottom-color: var(--border) !important;
+}
+
+html[data-theme="dark"] .corvex-table td,
+html[data-theme="dark"] .data-table td,
+html[data-theme="dark"] .admin-table td,
+html[data-theme="dark"] .inventory-table td {
+  color: var(--text) !important;
+  border-bottom-color: var(--border) !important;
+}
+
+html[data-theme="dark"] .corvex-table tbody tr:hover,
+html[data-theme="dark"] .data-table tbody tr:hover,
+html[data-theme="dark"] .admin-table tbody tr:hover,
+html[data-theme="dark"] .inventory-table tbody tr:hover {
+  background: var(--surface-2) !important;
+}
+
+html[data-theme="dark"] .button.secondary,
+html[data-theme="dark"] .button.outline,
+html[data-theme="dark"] .customer-carousel-arrow {
+  background: var(--surface);
+  color: var(--brand);
+  border-color: var(--border);
+}
+
+html[data-theme="dark"] .button.ghost:hover:not(:disabled),
+html[data-theme="dark"] .button.secondary:hover:not(:disabled),
+html[data-theme="dark"] .button.outline:hover:not(:disabled),
+html[data-theme="dark"] .customer-carousel-arrow:hover {
+  background: var(--surface-2);
+  color: var(--text);
+}
+
+html[data-theme="dark"] .sidebar-toggle-btn {
+  background: var(--surface);
+  color: var(--text);
+  border-color: var(--border);
+}
+
+html[data-theme="dark"] .recharts-cartesian-grid-horizontal line,
+html[data-theme="dark"] .recharts-cartesian-grid-vertical line {
+  stroke: var(--border);
+}
+
+html[data-theme="dark"] .recharts-text,
+html[data-theme="dark"] .recharts-legend-item-text {
+  fill: var(--text-secondary) !important;
+  color: var(--text-secondary) !important;
+}
+
+html[data-theme="dark"] .leaflet-map-control-btn,
+html[data-theme="dark"] .leaflet-map-fullscreen-btn,
+html[data-theme="dark"] .org-leaflet-chip {
+  background: var(--surface) !important;
+  color: var(--text) !important;
+  border-color: var(--border) !important;
+}
+
+html[data-theme="dark"] .autocomplete-menu,
+html[data-theme="dark"] .suggestions-list,
+html[data-theme="dark"] .dropdown-menu,
+html[data-theme="dark"] .menu-popover,
+html[data-theme="dark"] .row-action-menu,
+html[data-theme="dark"] .account-menu-popover,
+html[data-theme="dark"] .notifications-popover {
+  background: var(--surface);
+  color: var(--text);
+  border-color: var(--border);
+}
+
+html[data-theme="dark"] .login-field input {
+  background: var(--surface-2);
+  color: var(--text);
+  border-color: var(--border);
+}
+
+html[data-theme="dark"] .login-field input:-webkit-autofill,
+html[data-theme="dark"] .login-field input:-webkit-autofill:hover,
+html[data-theme="dark"] .login-field input:-webkit-autofill:focus {
+  -webkit-text-fill-color: var(--text);
+  box-shadow: 0 0 0 30px var(--surface-2) inset;
+  transition: background-color 99999s ease-in-out 0s;
 }
 

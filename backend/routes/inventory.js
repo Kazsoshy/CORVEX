@@ -2,16 +2,11 @@ import express from 'express';
 import { requireAuth, requireRole, requireAssignedBranch, isUnscoped, ROLE_SETS } from '../middleware/auth.js';
 import {
   alignCentralInventory,
-  deriveStockStatus,
-  insertStockMovement,
   logWarehouseAudit,
   upsertBranchInventoryStock,
 } from '../lib/branchInventoryStock.js';
 import {
-  notifyRestockDecision,
-  notifyRestockRecorded,
   notifyRestockSubmitted,
-  notifyStockCountDecision,
   notifyStockCountSubmitted,
   notifyTransferCompleted,
   notifyTransferDecision,
@@ -28,8 +23,6 @@ import {
   nextStockCountRef,
   nextTransferRef,
   parseDocumentLines,
-  postRestockStock,
-  postStockCountAdjustments,
   receiveTransferStock,
   shipTransferStock,
   summarizeLines,

@@ -1,5 +1,4 @@
-import { createPortal } from 'react-dom';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
   fetchSalesAreaAssignmentById,
   fetchSalesAreaAssignmentCustomers,
@@ -15,6 +14,7 @@ import { DetailRowsTable } from '../shared/DetailRowsTable';
 import { EmptyState } from '../shared/EmptyState';
 import { LoadingState } from '../shared/LoadingState';
 import { Pagination } from '../shared/Pagination';
+import { RowActionMenu } from '../shared/RowActionMenu';
 import { StatusBadge } from '../StatusBadge';
 import { FindExistingCustomerModal } from './FindExistingCustomerModal';
 
@@ -124,83 +124,6 @@ function readDeviceStartCoords() {
       { enableHighAccuracy: true, timeout: 8000, maximumAge: 60_000 }
     );
   });
-}
-
-function RowActionMenu({ items, label = 'Actions' }) {
-  const [open, setOpen] = useState(false);
-  const [pos, setPos] = useState(null);
-  const buttonRef = useRef(null);
-  const menuRef = useRef(null);
-
-  useEffect(() => {
-    if (!open) return undefined;
-    const update = () => {
-      const rect = buttonRef.current?.getBoundingClientRect();
-      if (!rect) return;
-      setPos({
-        top: rect.bottom + 4,
-        right: Math.max(8, window.innerWidth - rect.right),
-      });
-    };
-    update();
-    const onDoc = (event) => {
-      if (buttonRef.current?.contains(event.target) || menuRef.current?.contains(event.target)) return;
-      setOpen(false);
-    };
-    window.addEventListener('resize', update);
-    window.addEventListener('scroll', update, true);
-    document.addEventListener('mousedown', onDoc);
-    return () => {
-      window.removeEventListener('resize', update);
-      window.removeEventListener('scroll', update, true);
-      document.removeEventListener('mousedown', onDoc);
-    };
-  }, [open]);
-
-  const visible = items.filter(Boolean);
-  return (
-    <>
-      <button
-        ref={buttonRef}
-        type="button"
-        className="button ghost user-row-menu-trigger"
-        aria-haspopup="menu"
-        aria-expanded={open}
-        aria-label={label}
-        onClick={(event) => { event.stopPropagation(); setOpen((v) => !v); }}
-      >
-        ⋮
-      </button>
-      {open ? createPortal(
-        <div
-          ref={menuRef}
-          role="menu"
-          className="panel user-row-menu"
-          style={{ top: pos?.top ?? -9999, right: pos?.right ?? 0 }}
-          onClick={(event) => event.stopPropagation()}
-        >
-          {visible.map((item) => (
-            <button
-              key={item.key}
-              type="button"
-              role="menuitem"
-              className="button ghost user-row-menu-item"
-              disabled={item.disabled}
-              title={item.title}
-              onClick={() => {
-                if (item.disabled) return;
-                setOpen(false);
-                item.onSelect();
-              }}
-            >
-              {item.label}
-            </button>
-          ))}
-        </div>,
-        document.body
-      ) : null}
-    </>
-  );
 }
 
 const SCOPE_OPTIONS = [
@@ -634,7 +557,7 @@ export function AreaAssignmentDetailPage({ assignmentId, navigate, showToast }) 
     };
   });
   const routePolylines = routePreview?.polyline?.length
-    ? [{ id: 'visit-route', positions: routePreview.polyline, color: '#0B2133' }]
+    ? [{ id: 'visit-route', positions: routePreview.polyline, color: 'var(--text)' }]
     : [];
   const routeFit = [
     ...areaLayers.fitBounds,

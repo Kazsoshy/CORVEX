@@ -1,5 +1,4 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Link } from 'react-router-dom';
 import {
   AreaChart, Area, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
 } from 'recharts';
@@ -7,7 +6,6 @@ import { formatCurrency } from '../../utils/formatters.js';
 import { EmptyState } from '../shared/EmptyState';
 import { LoadingState } from '../shared/LoadingState';
 import { StatusBadge } from '../StatusBadge';
-import { NavIcon } from '../../navIcons';
 import { getCurrentUser } from '../../api/authService.js';
 import { getBranchAnalytics, getBranchAlerts } from '../../api/branchManagerService.js';
 import { getReportCollection, getReportSales } from '../../api/reportsService.js';
@@ -15,11 +13,10 @@ import { fetchNotifications } from '../../api/notificationService.js';
 import { fetchApprovalCenterSummary } from '../../api/approvalsService.js';
 import { ChartDrilldownModal } from '../shared/ChartDrilldownModal.jsx';
 import { useChartDrilldown } from '../../hooks/useChartDrilldown.js';
-import { formatCurrency as formatMoney } from '../../utils/formatters.js';
 import { buildBranchPulseInsights } from '../../utils/branchManagerPulse.js';
 
 function money(value) {
-  return formatMoney(Number(value) || 0);
+  return formatCurrency(Number(value) || 0);
 }
 
 function pct(value) {

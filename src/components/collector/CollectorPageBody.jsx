@@ -1,8 +1,7 @@
 import { Pagination } from '../shared/Pagination';
-import { StatsGrid, Stats } from '../shared/StatsGrid';
-import { usePagination, DEFAULT_PAGE_SIZE } from '../../hooks/usePagination';
+import { StatsGrid } from '../shared/StatsGrid';
+import { usePagination } from '../../hooks/usePagination';
 import { useEffect, useMemo, useState } from 'react';
-import { Link } from 'react-router-dom';
 import { formatCurrency, formatDisplayDate, formatDisplayDateTime, formatPaymentTimestamp, formatPhone } from '../../utils/formatters.js';
 import {
   fetchAccountById,
@@ -11,7 +10,6 @@ import {
   fetchCollectorDashboard,
   fetchCollectorPaymentMethods,
   submitCollectionPayment,
-  submitFieldVisitOutcome,
 } from '../../api/collectorService';
 import { AccountsPage, AccountDetailPage } from './CollectorCustomers';
 import {
@@ -31,8 +29,6 @@ import { UserSettingsPanel } from '../shared/UserSettingsPanel';
 import {
   collectorMapPath,
   hasCallablePhone,
-  openExternalNavigation,
-  openNavigateBackToCollector,
   openPhoneCall,
 } from '../../utils/mapsNavigation';
 import { NotificationsInbox } from '../shared/NotificationsInbox';
@@ -835,12 +831,12 @@ function CustomerMapPage({
     id: account.id,
     position: center,
     label: isRouteNav ? '1' : (account.customerName || 'CU').substring(0, 2).toUpperCase(),
-    color: '#0B2133',
+    color: 'var(--text)',
     popup: `<strong>${account.customerName}</strong><br/>${account.address || ''}`,
   });
   const fitBounds = markers.map((m) => m.position);
   const polylines = roadLeg?.positions?.length
-    ? [{ id: 'nav-leg', positions: roadLeg.positions, color: '#0B2133', weight: 4 }]
+    ? [{ id: 'nav-leg', positions: roadLeg.positions, color: 'var(--text)', weight: 4 }]
     : [];
 
   return <div className="page">

@@ -34,7 +34,17 @@ function limitCell(review) {
   return parts.join(' · ');
 }
 
-function SnapshotSections({ review }) {
+const CREDIT_REVIEW_DETAIL_TABS = [
+  { id: 'review', label: 'Credit Review' },
+  { id: 'profile', label: 'Customer Profile' },
+  { id: 'snapshot', label: 'Credit Snapshot' },
+  { id: 'payments', label: 'Payment History' },
+  { id: 'invoices', label: 'Open Invoices & Overdue' },
+  { id: 'risk', label: 'Risk Assessment' },
+  { id: 'decision', label: 'Branch Manager Decision' },
+];
+
+function CreditReviewDetailTabPanel({ review, activeTab }) {
   const snap = review.snapshot || {};
   const live = review.live;
   const customer = snap.customer || {};
@@ -45,11 +55,35 @@ function SnapshotSections({ review }) {
   const overdue = financial.overdue_invoices || [];
   const previous = snap.previous_decisions || [];
 
-  return (
-    <>
-      <section className="panel content-panel">
+  if (activeTab === 'review') {
+    return (
+      <>
         <div className="panel-section-header">
-          <h3>Customer Profile</h3>
+        </div>
+        <DetailRowsTable
+          rows={[
+            { label: 'Status', value: <StatusBadge status={review.displayStatus} /> },
+            { label: 'Risk', value: <StatusBadge status={review.riskLevel || '—'} /> },
+            { label: 'Requested Limit', value: formatMoneyOrNA(review.requestedLimit) },
+            { label: 'Remarks', value: review.requestRemarks || '—' },
+            ...(review.status === 'Revision Requested' ? [{
+              label: 'BM Revision Instructions',
+              value: review.decisionRemarks || review.rejectionReason || '—',
+            }] : []),
+            ...(review.status === 'Rejected' ? [{
+              label: 'Rejection Reason',
+              value: review.rejectionReason || review.decisionRemarks || '—',
+            }] : []),
+          ]}
+        />
+      </>
+    );
+  }
+
+  if (activeTab === 'profile') {
+    return (
+      <>
+        <div className="panel-section-header">
         </div>
         <DetailRowsTable
           rows={[
@@ -60,15 +94,18 @@ function SnapshotSections({ review }) {
             { label: 'Credit Status', value: customer.credit_status || '—' },
           ]}
         />
-      </section>
+      </>
+    );
+  }
 
-      <section className="panel content-panel">
+  if (activeTab === 'snapshot') {
+    return (
+      <>
         <div className="panel-section-header">
-          <h3>Credit Snapshot</h3>
-          <p className="muted">
-            Frozen at request{snap.captured_at ? ` · ${formatDisplayDateTime(snap.captured_at)}` : ''}
-          </p>
-        </div>
+            <p className="muted" style={{ marginTop: 4 }}>
+              Frozen at request{snap.captured_at ? ` · ${formatDisplayDateTime(snap.captured_at)}` : ''}
+            </p>
+          </div>
         <DetailRowsTable
           rows={[
             { label: 'Outstanding Balance', value: formatMoneyOrNA(financial.outstanding_balance) },
@@ -100,13 +137,13 @@ function SnapshotSections({ review }) {
             />
           </div>
         ) : null}
-      </section>
+      </>
+    );
+  }
 
-      <section className="panel content-panel">
-        <div className="panel-section-header">
-          <h3>Payment History</h3>
-          <p className="muted">Last five records from the shared payment ledger — not manually re-entered.</p>
-        </div>
+  if (activeTab === 'payments') {
+    return (
+      <>
         {payments.length ? (
           <div className="table-shell">
             <table className="corvex-table">
@@ -140,12 +177,13 @@ function SnapshotSections({ review }) {
         ) : (
           <EmptyState title="No payment history" description="No confirmed payments were on file when this review was prepared." />
         )}
-      </section>
+      </>
+    );
+  }
 
-      <section className="panel content-panel">
-        <div className="panel-section-header">
-          <h3>Open Invoices &amp; Overdue</h3>
-        </div>
+  if (activeTab === 'invoices') {
+    return (
+      <>
         <DetailRowsTable
           rows={[
             { label: 'Open Invoices', value: String(openInvoices.length) },
@@ -181,12 +219,17 @@ function SnapshotSections({ review }) {
             </table>
           </div>
         ) : null}
-      </section>
+      </>
+    );
+  }
 
-      <section className="panel content-panel">
+  if (activeTab === 'risk') {
+    return (
+      <>
         <div className="panel-section-header">
-          <h3>Risk Assessment</h3>
-          <p className="muted">Rule-based from account evidence — not entered by Sales.</p>
+          <p className="muted" style={{ marginTop: 4 }}>
+            Rule-based from account evidence — not entered by Sales.
+          </p>
         </div>
         <DetailRowsTable
           rows={[
@@ -204,14 +247,25 @@ function SnapshotSections({ review }) {
         {review.suggestion?.message ? (
           <p style={{ marginTop: 12 }}><strong>Suggestion:</strong> {review.suggestion.message}</p>
         ) : null}
-      </section>
+      </>
+    );
+  }
 
+  return (
+    <>
+      <DetailRowsTable
+        rows={[
+          { label: 'Status', value: <StatusBadge status={review.displayStatus} /> },
+          { label: 'Decided By', value: review.approvedBy || '—' },
+          { label: 'Decided At', value: review.decidedAt ? formatDisplayDateTime(review.decidedAt) : '—' },
+          { label: 'Approved Limit', value: formatMoneyOrNA(review.approvedLimit) },
+          { label: 'Decision Remarks', value: review.decisionRemarks || review.rejectionReason || '—' },
+        ]}
+      />
       {previous.length ? (
-        <section className="panel content-panel">
-          <div className="panel-section-header">
-            <h3>Previous Credit Decisions</h3>
-          </div>
-          <div className="table-shell">
+        <div style={{ marginTop: 16 }}>
+          <h4 className="subsection-title">Previous Credit Decisions</h4>
+          <div className="table-shell" style={{ marginTop: 8 }}>
             <table className="corvex-table">
               <thead>
                 <tr>
@@ -235,23 +289,8 @@ function SnapshotSections({ review }) {
               </tbody>
             </table>
           </div>
-        </section>
-      ) : null}
-
-      <section className="panel content-panel">
-        <div className="panel-section-header">
-          <h3>Branch Manager Decision</h3>
         </div>
-        <DetailRowsTable
-          rows={[
-            { label: 'Status', value: <StatusBadge status={review.displayStatus} /> },
-            { label: 'Decided By', value: review.approvedBy || '—' },
-            { label: 'Decided At', value: review.decidedAt ? formatDisplayDateTime(review.decidedAt) : '—' },
-            { label: 'Approved Limit', value: formatMoneyOrNA(review.approvedLimit) },
-            { label: 'Decision Remarks', value: review.decisionRemarks || review.rejectionReason || '—' },
-          ]}
-        />
-      </section>
+      ) : null}
     </>
   );
 }
@@ -538,6 +577,7 @@ export function SalesCreditReviewDetailPage({ ciId, navigate, showToast }) {
   const [review, setReview] = useState(null);
   const [loading, setLoading] = useState(true);
   const [requestOpen, setRequestOpen] = useState(false);
+  const [activeTab, setActiveTab] = useState('review');
 
   useEffect(() => {
     async function load() {
@@ -552,6 +592,10 @@ export function SalesCreditReviewDetailPage({ ciId, navigate, showToast }) {
     }
     load();
   }, [ciId, showToast]);
+
+  useEffect(() => {
+    setActiveTab('review');
+  }, [ciId]);
 
   if (loading) return <LoadingState message="Loading credit review…" />;
   if (!review) {
@@ -576,25 +620,31 @@ export function SalesCreditReviewDetailPage({ ciId, navigate, showToast }) {
             {review.reason || 'Credit review'} · Submitted {formatDisplayDateTime(review.submissionDate)}
           </p>
         </div>
-        <DetailRowsTable
-          rows={[
-            { label: 'Status', value: <StatusBadge status={review.displayStatus} /> },
-            { label: 'Risk', value: <StatusBadge status={review.riskLevel || '—'} /> },
-            { label: 'Requested Limit', value: formatMoneyOrNA(review.requestedLimit) },
-            { label: 'Remarks', value: review.requestRemarks || '—' },
-            ...(review.status === 'Revision Requested' ? [{
-              label: 'BM Revision Instructions',
-              value: review.decisionRemarks || review.rejectionReason || '—',
-            }] : []),
-            ...(review.status === 'Rejected' ? [{
-              label: 'Rejection Reason',
-              value: review.rejectionReason || review.decisionRemarks || '—',
-            }] : []),
-          ]}
-        />
-      </section>
 
-      <SnapshotSections review={review} />
+        <div
+          className="segmented-control"
+          role="tablist"
+          aria-label="Credit review detail sections"
+          style={{ marginBottom: 16, flexWrap: 'wrap' }}
+        >
+          {CREDIT_REVIEW_DETAIL_TABS.map((tab) => (
+            <button
+              key={tab.id}
+              type="button"
+              role="tab"
+              aria-selected={activeTab === tab.id}
+              className={activeTab === tab.id ? 'segment active' : 'segment'}
+              onClick={() => setActiveTab(tab.id)}
+            >
+              {tab.label}
+            </button>
+          ))}
+        </div>
+
+        <div role="tabpanel" aria-label={CREDIT_REVIEW_DETAIL_TABS.find((tab) => tab.id === activeTab)?.label}>
+          <CreditReviewDetailTabPanel review={review} activeTab={activeTab} />
+        </div>
+      </section>
 
       <div className="flex flex-wrap justify-end gap-2 mt-4">
         <button className="button ghost" type="button" onClick={() => navigate('/sales/credit-investigations')}>

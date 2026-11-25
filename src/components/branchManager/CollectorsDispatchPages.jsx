@@ -1,9 +1,9 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { createPortal } from 'react-dom';
+import { useEffect, useMemo, useState } from 'react';
 import { EmptyState } from '../shared/EmptyState';
 import { LoadingState } from '../shared/LoadingState';
 import { Stats } from '../shared/StatsGrid';
 import { Pagination } from '../shared/Pagination';
+import { RowActionsMenu } from '../shared/RowActionMenu';
 import { usePagination } from '../../hooks/usePagination';
 import { StatusBadge } from '../StatusBadge';
 import LeafletMap from '../common/LeafletMap';
@@ -77,89 +77,6 @@ function roadProviderNote(provider) {
 
 function hasMapableStops(collector) {
   return Number(collector?.todayStops || 0) > 0 || Boolean(collector?.hasMapStops);
-}
-
-function RowActionsMenu({ label, items }) {
-  const [open, setOpen] = useState(false);
-  const [pos, setPos] = useState(null);
-  const buttonRef = useRef(null);
-  const menuRef = useRef(null);
-
-  useLayoutEffect(() => {
-    if (!open || !buttonRef.current) return;
-    const rect = buttonRef.current.getBoundingClientRect();
-    const menuHeight = menuRef.current?.offsetHeight || 0;
-    const fitsBelow = rect.bottom + menuHeight + 8 < window.innerHeight;
-    setPos({
-      top: fitsBelow ? rect.bottom + 4 : Math.max(8, rect.top - menuHeight - 4),
-      right: Math.max(8, window.innerWidth - rect.right),
-    });
-  }, [open]);
-
-  useEffect(() => {
-    if (!open) return undefined;
-    const close = (event) => {
-      if (menuRef.current?.contains(event.target) || buttonRef.current?.contains(event.target)) return;
-      setOpen(false);
-    };
-    const onKey = (event) => { if (event.key === 'Escape') setOpen(false); };
-    const onScroll = () => setOpen(false);
-    document.addEventListener('mousedown', close);
-    document.addEventListener('keydown', onKey);
-    window.addEventListener('scroll', onScroll, true);
-    window.addEventListener('resize', onScroll);
-    return () => {
-      document.removeEventListener('mousedown', close);
-      document.removeEventListener('keydown', onKey);
-      window.removeEventListener('scroll', onScroll, true);
-      window.removeEventListener('resize', onScroll);
-    };
-  }, [open]);
-
-  const visible = items.filter(Boolean);
-  return (
-    <>
-      <button
-        ref={buttonRef}
-        type="button"
-        className="button ghost user-row-menu-trigger"
-        aria-haspopup="menu"
-        aria-expanded={open}
-        aria-label={label}
-        onClick={(event) => { event.stopPropagation(); setOpen((v) => !v); }}
-      >
-        ⋮
-      </button>
-      {open ? createPortal(
-        <div
-          ref={menuRef}
-          role="menu"
-          className="panel user-row-menu"
-          style={{ top: pos?.top ?? -9999, right: pos?.right ?? 0 }}
-          onClick={(event) => event.stopPropagation()}
-        >
-          {visible.map((item) => (
-            <button
-              key={item.key}
-              type="button"
-              role="menuitem"
-              className="button ghost user-row-menu-item"
-              disabled={item.disabled}
-              title={item.title}
-              onClick={() => {
-                if (item.disabled) return;
-                setOpen(false);
-                item.onSelect();
-              }}
-            >
-              {item.label}
-            </button>
-          ))}
-        </div>,
-        document.body
-      ) : null}
-    </>
-  );
 }
 
 function deriveRosterSummary(collectors) {

@@ -85,3 +85,20 @@ export const CIVIL_STATUS_OPTIONS = [
   'Annulled',
   'Divorced',
 ];
+
+/** Formats customer area (barangay, city) or falls back to address line. */
+export function areaOrAddress(customer) {
+  const city = String(customer?.address_city || '').trim();
+  const barangay = String(customer?.address_barangay || '').trim();
+  const address = String(customer?.address || '').trim();
+  if (barangay && city) return `${barangay}, ${city}`;
+  if (city) return city;
+  return address || '—';
+}
+
+/** Check whether customer has numeric, valid map coordinates. */
+export function hasValidCoords(customer) {
+  const lat = Number(customer?.latitude);
+  const lng = Number(customer?.longitude);
+  return Number.isFinite(lat) && Number.isFinite(lng) && !(lat === 0 && lng === 0);
+}

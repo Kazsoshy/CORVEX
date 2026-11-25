@@ -91,7 +91,7 @@ export const landingContent = {
       note: 'Durable weather-resistant woven rattan finish with ergonomic seating.',
       image: zooeyRattanSalaSet,
       fit: 'contain',
-      stage: '#f8fafc',
+      stage: 'var(--surface-2)',
     },
     {
       id: 'uratex-classic-mattress',
@@ -101,7 +101,7 @@ export const landingContent = {
       note: 'Long-lasting polyurethane foam core with premium jacquard fabric upholstery.',
       image: uratexClassicMattress,
       fit: 'contain',
-      stage: '#f8fafc',
+      stage: 'var(--surface-2)',
     },
     {
       id: 'square-table',
@@ -111,7 +111,7 @@ export const landingContent = {
       note: 'Reinforced polymer structure designed for versatile indoor and outdoor use.',
       image: squareTable,
       fit: 'contain',
-      stage: '#f8fafc',
+      stage: 'var(--surface-2)',
     },
     {
       id: 'zooey-dish-cabinet',
@@ -121,7 +121,7 @@ export const landingContent = {
       note: 'Includes integrated plate organizers, glass racks, and pull-out drawers.',
       image: zooeyDishCabinet,
       fit: 'contain',
-      stage: '#f8fafc',
+      stage: 'var(--surface-2)',
     },
     {
       id: 'uratex-kate-chair',
@@ -131,7 +131,7 @@ export const landingContent = {
       note: 'Heavy-duty resin construction with a sleek matte finish, easily stackable.',
       image: uratexKateChair,
       fit: 'contain',
-      stage: '#f8fafc',
+      stage: 'var(--surface-2)',
     },
     {
       id: 'bound-pocket-mattress',
@@ -141,7 +141,7 @@ export const landingContent = {
       note: 'Multi-layer construction with a quilted breathable fabric top layer.',
       image: boundPocketMattress,
       fit: 'contain',
-      stage: '#f8fafc',
+      stage: 'var(--surface-2)',
     },
     {
       id: 'folding-mattress',
@@ -151,7 +151,7 @@ export const landingContent = {
       note: 'High-density flexible foam that folds neatly for storage and transport.',
       image: foldingMattress,
       fit: 'contain',
-      stage: '#f8fafc',
+      stage: 'var(--surface-2)',
     },
     {
       id: 'monoblock-chair',
@@ -161,7 +161,7 @@ export const landingContent = {
       note: 'UV-resistant polymer with reinforced ribbing for durable daily use.',
       image: monoblockChair,
       fit: 'contain',
-      stage: '#f8fafc',
+      stage: 'var(--surface-2)',
     },
     {
       id: 'uratex-zoe-plastic-ware',
@@ -171,7 +171,7 @@ export const landingContent = {
       note: 'Durable modular storage solution for clothing, linens, and household essentials.',
       image: uratexZoePlasticWare,
       fit: 'contain',
-      stage: '#f8fafc',
+      stage: 'var(--surface-2)',
     },
     {
       id: 'ceramic-ginger-jar',
@@ -181,7 +181,7 @@ export const landingContent = {
       note: 'Classic urn silhouette with a fitted lid, ideal for tabletop display.',
       image: ceramicGingerJar,
       fit: 'contain',
-      stage: '#f8fafc',
+      stage: 'var(--surface-2)',
     },
   ],
 

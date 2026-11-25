@@ -842,7 +842,7 @@ function PageBody({ showMap, setShowMap, filter, setFilter, page, currentRole, n
                 zoom={12}
                 height={500}
                 markers={[
-                  { id: '1', position: [7.1907, 125.4553], label: 'A', color: '#0B2133', popup: 'Marker A' },
+                  { id: '1', position: [7.1907, 125.4553], label: 'A', color: 'var(--text)', popup: 'Marker A' },
                   { id: '2', position: [7.2000, 125.4500], label: 'B', color: '#153450', popup: 'Marker B' }
                 ]}
               />
@@ -883,7 +883,7 @@ function PageBody({ showMap, setShowMap, filter, setFilter, page, currentRole, n
                 zoom={12}
                 height={500}
                 markers={[
-                  { id: '1', position: [7.1907, 125.4553], label: 'P1', color: '#0B2133', popup: 'Location 1' },
+                  { id: '1', position: [7.1907, 125.4553], label: 'P1', color: 'var(--text)', popup: 'Location 1' },
                   { id: '2', position: [7.2000, 125.4500], label: 'P2', color: '#153450', popup: 'Location 2' }
                 ]}
               />

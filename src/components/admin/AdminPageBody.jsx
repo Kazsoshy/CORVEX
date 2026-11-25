@@ -1,9 +1,9 @@
 import { Pagination } from '../shared/Pagination';
-import { StatsGrid, Stats } from '../shared/StatsGrid';
+import { Stats } from '../shared/StatsGrid';
 import { usePagination } from '../../hooks/usePagination';
 import { useEffect, useMemo, useState, useCallback } from 'react';
 import apiClient from '../../api/apiClient';
-import { AreaChart, Area, BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
+import { AreaChart, Area, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 import { ADMIN_BRANCHES, ADMIN_INVENTORY, ADMIN_PROFILE, BRANCH_PERFORMANCE_CHART, TRANSFER_REQUESTS, USER_GROWTH, USER_STATS } from '../../data/adminMockData';
 import { fetchAuditLogs } from '../../api/adminService';
 import { EmptyState } from '../shared/EmptyState';
@@ -958,7 +958,7 @@ function AuditLogsPage({
               {filtered.length === 0 ? <tr><td colSpan="7" style={{
                   textAlign: 'center',
                   padding: '40px',
-                  color: '#5F7385'
+                  color: 'var(--text-secondary)'
                 }}>No audit logs found</td></tr> : paginated_filtered.map((l) => (
                   <tr key={l.log_id}>
                     <td>{formatDisplayDateTime(l.created_at)}</td>

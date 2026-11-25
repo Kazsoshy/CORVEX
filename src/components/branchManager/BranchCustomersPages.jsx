@@ -17,53 +17,13 @@ import {
   formatContactPersonName,
   formatSecondaryContactName,
 } from '../../utils/customerDisplay';
-import { paymentStanding } from '../../utils/customerStanding.js';
-import { openExternalNavigation } from '../../utils/mapsNavigation.js';
+import { paymentStanding, daysOverdue } from '../../utils/customerStanding.js';
+import { handleCustomerNavigate } from '../../utils/mapsNavigation.js';
+import { areaOrAddress, hasValidCoords } from '../../utils/customerDisplay.js';
 import { downloadPdf } from '../../utils/dataExport.js';
 
 function money(value) {
   return Math.round(Number(value || 0) * 100) / 100;
-}
-
-function areaOrAddress(customer) {
-  const city = String(customer?.address_city || '').trim();
-  const barangay = String(customer?.address_barangay || '').trim();
-  const address = String(customer?.address || '').trim();
-  if (barangay && city) return `${barangay}, ${city}`;
-  if (city) return city;
-  return address || '—';
-}
-
-function hasValidCoords(customer) {
-  const lat = Number(customer?.latitude);
-  const lng = Number(customer?.longitude);
-  return Number.isFinite(lat) && Number.isFinite(lng) && !(lat === 0 && lng === 0);
-}
-
-function daysOverdueOf(customer) {
-  if (paymentStanding(customer) !== 'Overdue') return 0;
-  const explicit = Number(customer?.daysOverdue);
-  if (Number.isFinite(explicit) && explicit > 0) return explicit;
-  const due = customer?.earliestDueDate;
-  if (!due) return 0;
-  const manilaToday = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Manila' }).format(new Date());
-  const diff = Math.floor(
-    (new Date(`${manilaToday}T12:00:00`) - new Date(`${due}T12:00:00`)) / 86400000
-  );
-  return Math.max(0, diff);
-}
-
-function handleCustomerNavigate(customer, showToast) {
-  if (!hasValidCoords(customer) && !String(customer?.address || '').trim()) {
-    showToast?.('No location pin or address is set for navigation.', 'error');
-    return;
-  }
-  const ok = openExternalNavigation({
-    latitude: hasValidCoords(customer) ? customer.latitude : undefined,
-    longitude: hasValidCoords(customer) ? customer.longitude : undefined,
-    address: customer.address,
-  });
-  if (!ok) showToast?.('Unable to open navigation.', 'error');
 }
 
 function standingToApiFilter(value) {
@@ -267,7 +227,7 @@ export function BranchCustomersPage({ navigate, opsBase, showToast }) {
                   area: areaOrAddress(c),
                   outstanding: money(c.outstandingBalance ?? c.outstanding_balance ?? 0),
                   standing: paymentStanding(c),
-                  days_overdue: daysOverdueOf(c),
+                  days_overdue: daysOverdue(c),
                   status: c.status || '',
                   sales_agent: c.assigned_sales_agent_name || '',
                 }));
@@ -305,7 +265,7 @@ export function BranchCustomersPage({ navigate, opsBase, showToast }) {
                     const standing = paymentStanding(customer);
                     const code = formatCustomerDisplayId(customer);
                     const canNavigate = hasValidCoords(customer) || Boolean(String(customer.address || '').trim());
-                    const overdueDays = daysOverdueOf(customer);
+                    const overdueDays = daysOverdue(customer);
                     return (
                       <tr
                         key={customer.customer_id}
@@ -430,7 +390,7 @@ export function BranchCustomerDetailPage({
   const creditLimit = money(customer.creditInfo?.credit_limit || 0);
   const remaining = Math.max(0, creditLimit - outstanding);
   const standing = paymentStanding(customer);
-  const overdueDays = daysOverdueOf(customer);
+  const overdueDays = daysOverdue(customer);
   const name = formatCustomerFullName(customer);
   const code = formatCustomerDisplayId(customer);
   const primaryContact = formatContactPersonName(customer);

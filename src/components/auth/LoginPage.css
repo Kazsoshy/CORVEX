@@ -385,7 +385,7 @@
 
 .login-page .login-input.has-error {
   border-color: rgba(220, 38, 38, 0.75) !important;
-  background: #FFFDFD !important;
+  background: var(--cvx-pure-white) !important;
 }
 
 .login-page .login-input.has-error:focus {
@@ -397,9 +397,38 @@
 .login-page .login-input:-webkit-autofill:hover,
 .login-page .login-input:-webkit-autofill:focus,
 .login-page .login-input:-webkit-autofill:active {
-  -webkit-box-shadow: 0 0 0 30px #FFFFFF inset !important;
-  -webkit-text-fill-color: #0B1930 !important;
+  -webkit-box-shadow: 0 0 0 30px var(--cvx-pure-white) inset !important;
+  -webkit-text-fill-color: var(--cvx-midnight-blue) !important;
   transition: background-color 5000s ease-in-out 0s;
+}
+
+/* Follow global theme on the form half (brand visual stays navy) */
+html[data-theme="dark"] .login-page,
+html[data-theme="dark"] .login-page--split {
+  --cvx-cloud-white: var(--bg);
+  --cvx-soft-mint: var(--surface-2);
+  --cvx-light-cyan: var(--surface-2);
+  --cvx-pure-white: var(--surface);
+  --cvx-steel-gray: var(--text-secondary);
+  --cvx-metallic-silver: var(--border);
+  --cvx-midnight-blue: var(--text);
+  background: var(--bg);
+  color: var(--text);
+}
+
+html[data-theme="dark"] .login-shell,
+html[data-theme="dark"] .login-shell--split,
+html[data-theme="dark"] .login-form-panel,
+html[data-theme="dark"] .login-form-side {
+  background: var(--surface);
+  color: var(--text);
+  border-color: var(--border);
+}
+
+html[data-theme="dark"] .login-visual {
+  --cvx-pure-white: #F5FAFC;
+  --cvx-metallic-silver: #CBD5E1;
+  --cvx-light-cyan: #F5FAFC;
 }
 
 .login-page .password-toggle {

@@ -29,7 +29,7 @@ function ProductDetailOverlay({ product, onClose }) {
         </header>
 
         <div className="customer-ad-overlay__layout">
-          <div className="customer-ad-overlay__media" style={{ background: product.stage || '#f8fafc' }}>
+          <div className="customer-ad-overlay__media" style={{ background: product.stage || 'var(--surface-2)' }}>
             <img src={product.image} alt={product.name} style={{ objectFit: product.fit || 'contain' }} />
           </div>
 
@@ -73,7 +73,7 @@ function ProductDetailOverlay({ product, onClose }) {
 function SponsoredAdCard({ product, onView }) {
   return (
     <article className="customer-sponsored-card">
-      <div className="customer-sponsored-card__media" style={{ background: product.stage || '#f8fafc' }}>
+      <div className="customer-sponsored-card__media" style={{ background: product.stage || 'var(--surface-2)' }}>
         <img src={product.image} alt="" style={{ objectFit: product.fit || 'contain' }} />
         {product.label ? <span className="customer-ad-badge customer-ad-badge--on-media">{product.label}</span> : null}
       </div>
@@ -136,7 +136,7 @@ function FeaturedCarousel({ products, onView }) {
       </div>
 
       <div className="customer-featured-carousel__stage" key={product.id}>
-        <div className="customer-featured-carousel__media" style={{ background: product.stage || '#f8fafc' }}>
+        <div className="customer-featured-carousel__media" style={{ background: product.stage || 'var(--surface-2)' }}>
           <img src={product.image} alt={product.name} style={{ objectFit: product.fit || 'contain' }} />
           {product.label ? <span className="customer-ad-badge customer-ad-badge--on-media">{product.label}</span> : null}
         </div>

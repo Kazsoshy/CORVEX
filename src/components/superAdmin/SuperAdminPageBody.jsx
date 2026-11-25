@@ -1,5 +1,5 @@
 import { Pagination } from '../shared/Pagination';
-import { StatsGrid, Stats } from '../shared/StatsGrid';
+import { Stats } from '../shared/StatsGrid';
 import { usePagination } from '../../hooks/usePagination';
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import apiClient from '../../api/apiClient';
@@ -896,7 +896,7 @@ function RolesPage({
           <div className="panel form-panel" style={{
         width: '100%',
         maxWidth: 500,
-        background: '#fff'
+        background: 'var(--surface)'
       }}>
             <div className="flex flex-col md:flex-row justify-between gap-4 items-start md:items-center mb-4">
               <h3>{editingItem ? 'Edit Role' : 'Create Role'}</h3>
@@ -938,7 +938,7 @@ function RolesPage({
           <div className="panel form-panel" style={{
         width: '100%',
         maxWidth: 500,
-        background: '#fff'
+        background: 'var(--surface)'
       }}>
             <div className="flex flex-col md:flex-row justify-between gap-4 items-start md:items-center mb-4">
               <h3>{editingItem ? 'Edit Permission' : 'Create Permission'}</h3>
@@ -956,7 +956,7 @@ function RolesPage({
             })} style={{
               width: '100%',
               padding: '8px 12px',
-              border: '1px solid #E2E8F0',
+              border: '1px solid var(--border)',
               borderRadius: 8
             }} /></div>
               <div style={{
@@ -1686,7 +1686,7 @@ function UsersPage({
           <div className="panel form-panel" style={{
         width: '100%',
         maxWidth: 600,
-        background: '#fff',
+        background: 'var(--surface)',
         maxHeight: '90vh',
         overflowY: 'auto'
       }}>

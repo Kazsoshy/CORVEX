@@ -3,16 +3,7 @@
  * combining SAW collection priority with road-network travel efficiency.
  */
 
-function haversineKm(lat1, lon1, lat2, lon2) {
-  const R = 6371;
-  const p1 = (Number(lat1) * Math.PI) / 180;
-  const p2 = (Number(lat2) * Math.PI) / 180;
-  const dlat = p2 - p1;
-  const dlon = ((Number(lon2) - Number(lon1)) * Math.PI) / 180;
-  const a = Math.sin(dlat / 2) ** 2
-    + Math.cos(p1) * Math.cos(p2) * Math.sin(dlon / 2) ** 2;
-  return 2 * R * Math.asin(Math.sqrt(a));
-}
+import { haversineKm } from './sawCollection.js';
 
 /** Nearest-neighbor visit order from depot (pure distance fallback). */
 export function nearestNeighborOrder(depot, stops) {

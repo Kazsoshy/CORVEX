@@ -3,17 +3,7 @@ import { manilaDateString } from './sawCollection.js';
 import { ApplyError, SyncConflict } from './syncErrors.js';
 import { calculateSalesPricing, POLICY_VERSION } from './salesPricingPolicy.js';
 import { OVERDUE_CUSTOMER_SQL } from './customerStanding.js';
-
-function positiveInteger(value) {
-  const parsed = Number(value);
-  return Number.isInteger(parsed) && parsed > 0 ? parsed : null;
-}
-
-function isValidDate(value) {
-  return typeof value === 'string'
-    && /^\d{4}-\d{2}-\d{2}$/.test(value)
-    && !Number.isNaN(Date.parse(`${value}T00:00:00`));
-}
+import { isValidDate, positiveInteger } from './salesAreaAssignments.js';
 
 function money(value) {
   return Math.round(Number(value) * 100) / 100;

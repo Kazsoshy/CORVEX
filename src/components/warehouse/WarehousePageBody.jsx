@@ -1,17 +1,14 @@
 import { Pagination } from '../shared/Pagination';
-import { StatsGrid, Stats } from '../shared/StatsGrid';
+import { StatsGrid } from '../shared/StatsGrid';
 import { usePagination } from '../../hooks/usePagination';
 import { useNotificationHighlight } from '../../hooks/useNotificationHighlight.js';
 import { idsMatch, readHighlightId, recordKey } from '../../utils/notificationHighlight.js';
 import { useEffect, useMemo, useState } from 'react';
 import {
-  createInventoryTransfer,
-  createRestock,
   createWarehouseProduct,
   deleteProductImage,
   uploadProductImage,
   fetchBranchInventory,
-  fetchInventoryBranches,
   fetchInventoryTransferById,
   fetchInventoryTransfers,
   fetchRestockById,

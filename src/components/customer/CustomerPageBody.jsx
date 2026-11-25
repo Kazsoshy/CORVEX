@@ -1,9 +1,8 @@
 import { Pagination } from '../shared/Pagination';
-import { StatsGrid, Stats } from '../shared/StatsGrid';
+import { StatsGrid } from '../shared/StatsGrid';
 import { usePagination } from '../../hooks/usePagination';
-import { useEffect, useMemo, useRef, useState } from 'react';
-import { Link } from 'react-router-dom';
-import { login as apiLogin, getEntryPathForRole, requestLogout } from '../../api/authService.js';
+import { useEffect, useMemo, useState } from 'react';
+import { login as apiLogin, getEntryPathForRole } from '../../api/authService.js';
 import {
   fetchCustomerPortalMe,
   fetchCustomerPortalPayments,

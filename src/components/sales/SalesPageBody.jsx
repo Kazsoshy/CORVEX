@@ -1,14 +1,12 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Link, useLocation } from 'react-router-dom';
+import { useLocation } from 'react-router-dom';
 import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import { Pagination } from '../shared/Pagination';
-import { StatsGrid, Stats } from '../shared/StatsGrid';
 import { usePagination, useServerPagination, DEFAULT_PAGE_SIZE } from '../../hooks/usePagination';
 import { ChartDrilldownModal } from '../shared/ChartDrilldownModal.jsx';
 import { useChartDrilldown } from '../../hooks/useChartDrilldown.js';
 import { formatCurrency as formatMoney } from '../../utils/formatters.js';
 import {
-  fetchCustomerById,
   fetchFieldVisits,
   fetchFieldVisitById,
   fetchInvoices,
@@ -717,7 +715,6 @@ function InventoryPage({
     <div className="page">
       <section className="panel content-panel relative overflow-hidden">
         <div className="list-section-header">
-          <h3>Inventory</h3>
           <p className="list-section-subtitle">Products and stock at your branch — view only. Warehouse handles restock.</p>
         </div>
         <div className="list-section-toolbar suppliers-toolbar audit-logs-toolbar">
@@ -1280,7 +1277,7 @@ function RouteTrackingPage({
     popup: `${v.customer_name} — ${v.status}`,
   }));
   const polyline = markers.length >= 2
-    ? [{ id: 'route', positions: markers.map(m => m.position), color: '#0B2133' }]
+    ? [{ id: 'route', positions: markers.map(m => m.position), color: 'var(--text)' }]
     : [];
   const coverage = visits.length ? Math.round((completed.length / visits.length) * 100) : 0;
   if (loading) return <LoadingState message="Loading route..." />;

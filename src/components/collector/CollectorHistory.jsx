@@ -204,9 +204,6 @@ export function CollectionHistoryPage({ navigate, showToast }) {
       <section className="panel content-panel relative overflow-hidden">
         <div className="list-section-header">
           <h3>Collection History</h3>
-          <p className="muted" style={{ margin: '4px 0 0' }}>
-            Payments you recorded in the field for your branch in {getUserAssignedLocation(currentUser)} — open any record to view, print, or send its digital receipt.
-          </p>
         </div>
 
         <div className="list-section-toolbar suppliers-toolbar audit-logs-toolbar">
@@ -594,10 +591,10 @@ export function DigitalReceiptPage({ receiptId, navigate, showToast }) {
         <div
           className="receipt-slip"
           style={{
-            border: '1px solid #E2E8F0',
+            border: '1px solid var(--border)',
             borderRadius: 12,
             padding: 20,
-            background: '#fff',
+            background: 'var(--surface)',
           }}
         >
           <div style={{ marginBottom: 16 }}>

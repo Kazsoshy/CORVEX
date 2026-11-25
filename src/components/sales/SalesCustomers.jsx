@@ -7,12 +7,14 @@ import {
 } from '../../api/salesService';
 import { getCurrentUser, getUserAssignedLocation } from '../../api/authService.js';
 import {
+  areaOrAddress,
   formatContactPersonName,
   formatCustomerDisplayId,
   formatCustomerFullName,
   formatSecondaryContactName,
+  hasValidCoords,
 } from '../../utils/customerDisplay';
-import { openExternalNavigation } from '../../utils/mapsNavigation';
+import { handleCustomerNavigate } from '../../utils/mapsNavigation';
 import { paymentStanding as sharedPaymentStanding } from '../../utils/customerStanding.js';
 import { formatCurrency, formatDisplayDate } from '../../utils/formatters.js';
 import { useServerPagination, DEFAULT_PAGE_SIZE } from '../../hooks/usePagination';
@@ -89,26 +91,11 @@ function customerRowItems(customer, { navigate, showToast }) {
   ];
 }
 
-function hasValidCoords(customer) {
-  const lat = Number(customer?.latitude);
-  const lng = Number(customer?.longitude);
-  return Number.isFinite(lat) && Number.isFinite(lng);
-}
-
 function truncateText(value, max = 48) {
   const text = String(value || '').trim();
   if (!text) return '—';
   if (text.length <= max) return text;
   return `${text.slice(0, max - 1)}…`;
-}
-
-function areaOrAddress(customer) {
-  const city = String(customer?.address_city || '').trim();
-  const barangay = String(customer?.address_barangay || '').trim();
-  const address = String(customer?.address || '').trim();
-  if (barangay && city) return `${barangay}, ${city}`;
-  if (city) return city;
-  return address || '—';
 }
 
 function paymentStanding(customer) {
@@ -126,19 +113,6 @@ function creditStatusLabel(customer) {
 
 function kycStatusLabel(customer) {
   return customer?.id_verification_status || 'Unverified';
-}
-
-function handleCustomerNavigate(customer, showToast) {
-  if (!hasValidCoords(customer) && !String(customer?.address || '').trim()) {
-    showToast?.('No location pin or address is set for navigation.', 'error');
-    return;
-  }
-  const ok = openExternalNavigation({
-    latitude: hasValidCoords(customer) ? customer.latitude : undefined,
-    longitude: hasValidCoords(customer) ? customer.longitude : undefined,
-    address: customer.address,
-  });
-  if (!ok) showToast?.('Add an address or map pin to navigate.', 'error');
 }
 
 export function CustomersPage({ navigate, showToast }) {
@@ -460,7 +434,7 @@ export function CustomerDetailPage({
               <img
                 src={customer.id_photo}
                 alt="Government ID"
-                style={{ maxWidth: 240, maxHeight: 160, borderRadius: 8, border: '1px solid #E2E8F0' }}
+                style={{ maxWidth: 240, maxHeight: 160, borderRadius: 8, border: '1px solid var(--border)' }}
               />
             </a>
           </div>
@@ -580,7 +554,7 @@ export function CustomerDetailPage({
               id: customer.customer_id,
               position: [Number(customer.latitude), Number(customer.longitude)],
               popup: `<strong>${ownerName}</strong><br/>${customer.address || ''}`,
-              color: '#0B2133',
+              color: 'var(--text)',
             }]}
           />
         ) : (
@@ -659,7 +633,7 @@ export function CustomerDetailPage({
                 </tr>
               )) : (
                 <tr>
-                  <td colSpan={6} style={{ textAlign: 'center', color: '#5F7385', padding: 16 }}>
+                  <td colSpan={6} style={{ textAlign: 'center', color: 'var(--text-secondary)', padding: 16 }}>
                     No recent payments
                   </td>
                 </tr>

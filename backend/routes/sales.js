@@ -41,7 +41,9 @@ import {
   autoCloseStaleAssignments,
   discoverAreaCustomers,
   fetchAssignmentOutcomeStats,
+  isValidDate,
   loadAssignmentProducts,
+  positiveInteger,
   resolveScopeDates,
   withProducts,
 } from '../lib/salesAreaAssignments.js';
@@ -59,17 +61,6 @@ const router = express.Router();
 
 const VISIT_TYPES = new Set(['Collection', 'Sales']);
 const VISIT_STATUSES = new Set(['Pending', 'Completed']);
-
-function positiveInteger(value) {
-  const parsed = Number(value);
-  return Number.isInteger(parsed) && parsed > 0 ? parsed : null;
-}
-
-function isValidDate(value) {
-  return typeof value === 'string'
-    && /^\d{4}-\d{2}-\d{2}$/.test(value)
-    && !Number.isNaN(Date.parse(`${value}T00:00:00`));
-}
 
 async function getInvoice(invoiceIdentifier, user) {
   const pool = user.pool;

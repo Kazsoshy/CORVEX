@@ -1,10 +1,9 @@
 import { Pagination } from '../shared/Pagination';
-import { StatsGrid, Stats } from '../shared/StatsGrid';
+import { Stats } from '../shared/StatsGrid';
 import { usePagination } from '../../hooks/usePagination';
 import { useEffect, useMemo, useState } from 'react';
-import { Link } from 'react-router-dom';
 import { AreaChart, Area, BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
-import { formatCurrency, formatDisplayDate, formatDisplayDateTime, formatPhone } from '../../utils/formatters.js';
+import { formatCurrency, formatDisplayDate, formatDisplayDateTime } from '../../utils/formatters.js';
 import { ApprovalCenterPage } from './ApprovalCenterPage.jsx';
 import {
   fetchOperationalAlerts,
@@ -21,9 +20,7 @@ import { LoadingState } from '../shared/LoadingState';
 import { DetailRowsTable } from '../shared/DetailRowsTable';
 import { AccountProfilePanel } from '../shared/AccountProfilePanel';
 import { NavIcon } from '../../navIcons';
-import LeafletMap from '../common/LeafletMap';
 import { StatusBadge } from '../StatusBadge';
-import { requestLogout, getCurrentUser } from '../../api/authService.js';
 import {
   getBranchAnalytics,
   getBranchStaff,
@@ -51,13 +48,11 @@ import {
 } from './SalesAgentsDispatchPages.jsx';
 import { BranchCustomersPage, BranchCustomerDetailPage } from './BranchCustomersPages.jsx';
 import { CreditInvestigationQueuePage, CreditInvestigationDetailPage } from './CreditInvestigationPages.jsx';
-import { formatMiddleNameDisplay } from '../../utils/customerDisplay.js';
-import { downloadPdf, exportRows } from '../../utils/dataExport.js';
+import { exportRows } from '../../utils/dataExport.js';
 import { UserSettingsPanel } from '../shared/UserSettingsPanel';
 import { chartSeries } from '../../theme/palette.js';
 import { ChartDrilldownModal } from '../shared/ChartDrilldownModal.jsx';
 import { useChartDrilldown } from '../../hooks/useChartDrilldown.js';
-import { formatCurrency as formatMoney } from '../../utils/formatters.js';
 import { BranchManagerDashboardPage } from './BranchManagerDashboardPage.jsx';
 
 // Re-export for use in other components
@@ -800,7 +795,7 @@ function ReportsHubPage({
                       { name: 'Sufficient', value: inventoryData?.summary?.sufficient || 0, color: '#153450' },
                       { name: 'Low Stock', value: inventoryData?.summary?.low || 0, color: '#f59e0b' },
                       { name: 'Critical Stock', value: inventoryData?.summary?.critical || 0, color: '#ef4444' },
-                      { name: 'Out of Stock', value: inventoryData?.summary?.outOfStock || 0, color: '#5F7385' },
+                      { name: 'Out of Stock', value: inventoryData?.summary?.outOfStock || 0, color: 'var(--text-secondary)' },
                     ].filter((d) => d.value > 0)}
                     dataKey="value"
                     nameKey="name"
@@ -822,7 +817,7 @@ function ReportsHubPage({
                       { name: 'Sufficient', color: '#153450' },
                       { name: 'Low Stock', color: '#f59e0b' },
                       { name: 'Critical Stock', color: '#ef4444' },
-                      { name: 'Out of Stock', color: '#5F7385' },
+                      { name: 'Out of Stock', color: 'var(--text-secondary)' },
                     ].map((entry) => <Cell key={entry.name} fill={entry.color} />)}
                   </Pie>
                   <Tooltip />
@@ -968,12 +963,12 @@ function ReportsHubPage({
           }].map(s => <div key={s.label} style={{
             padding: 14,
             background: '#eef0f4',
-            border: '1px solid #E2E8F0',
+            border: '1px solid var(--border)',
             borderRadius: 8
           }}>
                     <span style={{
               fontSize: '0.78rem',
-              color: '#5F7385',
+              color: 'var(--text-secondary)',
               fontWeight: 600,
               textTransform: 'uppercase',
               letterSpacing: '0.03em'

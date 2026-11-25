@@ -139,3 +139,25 @@ export function openNavigateBackToCollector({
 
   return openToStartFallback();
 }
+
+/**
+ * Opens external navigation (Google Maps) for a customer using coordinates or address.
+ * Notifies via showToast callback if location information is missing.
+ */
+export function handleCustomerNavigate(customer, showToast) {
+  const lat = Number(customer?.latitude);
+  const lng = Number(customer?.longitude);
+  const validCoords = Number.isFinite(lat) && Number.isFinite(lng) && !(lat === 0 && lng === 0);
+  const addressStr = String(customer?.address || '').trim();
+
+  if (!validCoords && !addressStr) {
+    showToast?.('No location pin or address is set for navigation.', 'error');
+    return;
+  }
+  const ok = openExternalNavigation({
+    latitude: validCoords ? customer.latitude : undefined,
+    longitude: validCoords ? customer.longitude : undefined,
+    address: customer.address,
+  });
+  if (!ok) showToast?.('Add an address or map pin to navigate.', 'error');
+}

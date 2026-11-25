@@ -329,7 +329,7 @@ export function buildBranchLeafletView({
         });
         bounds.push([area.lat, area.lng]);
       });
-      legend.push({ color: '#0B2133', label: 'Canvass area pin' });
+      legend.push({ color: 'var(--text)', label: 'Canvass area pin' });
       legend.push({ color: '#2A9B6A', label: 'Completed area' });
     }
 

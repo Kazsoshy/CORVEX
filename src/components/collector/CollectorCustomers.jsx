@@ -2,12 +2,14 @@ import { useEffect, useState } from 'react';
 import { fetchAccounts, fetchAccountById, flagCustomerForCreditReview } from '../../api/collectorService';
 import { getCurrentUser, getUserAssignedLocation } from '../../api/authService.js';
 import {
+  areaOrAddress,
   formatContactPersonName,
   formatCustomerDisplayId,
   formatCustomerFullName,
   formatSecondaryContactName,
+  hasValidCoords,
 } from '../../utils/customerDisplay';
-import { openExternalNavigation } from '../../utils/mapsNavigation';
+import { handleCustomerNavigate } from '../../utils/mapsNavigation';
 import { paymentStanding as sharedPaymentStanding } from '../../utils/customerStanding.js';
 import { formatCurrency, formatDisplayDate } from '../../utils/formatters.js';
 import { useServerPagination, DEFAULT_PAGE_SIZE } from '../../hooks/usePagination';
@@ -23,26 +25,11 @@ function money(value) {
   return Math.round(Number(value || 0) * 100) / 100;
 }
 
-function hasValidCoords(customer) {
-  const lat = Number(customer?.latitude);
-  const lng = Number(customer?.longitude);
-  return Number.isFinite(lat) && Number.isFinite(lng);
-}
-
 function truncateText(value, max = 48) {
   const text = String(value || '').trim();
   if (!text) return '—';
   if (text.length <= max) return text;
   return `${text.slice(0, max - 1)}…`;
-}
-
-function areaOrAddress(customer) {
-  const city = String(customer?.address_city || '').trim();
-  const barangay = String(customer?.address_barangay || '').trim();
-  const address = String(customer?.address || '').trim();
-  if (barangay && city) return `${barangay}, ${city}`;
-  if (city) return city;
-  return address || '—';
 }
 
 function paymentStanding(customer) {
@@ -72,19 +59,6 @@ function daysOverdueValue(customer) {
   const asOf = new Date(`${manilaToday}T12:00:00`);
   const due = new Date(earliest);
   return Math.max(0, Math.floor((asOf - due) / 86400000));
-}
-
-function handleCustomerNavigate(customer, showToast) {
-  if (!hasValidCoords(customer) && !String(customer?.address || '').trim()) {
-    showToast?.('No location pin or address is set for navigation.', 'error');
-    return;
-  }
-  const ok = openExternalNavigation({
-    latitude: hasValidCoords(customer) ? customer.latitude : undefined,
-    longitude: hasValidCoords(customer) ? customer.longitude : undefined,
-    address: customer.address,
-  });
-  if (!ok) showToast?.('Add an address or map pin to navigate.', 'error');
 }
 
 export function AccountsPage({ navigate, showToast }) {
@@ -408,7 +382,7 @@ export function AccountDetailPage({
               <img
                 src={customer.id_photo}
                 alt="Government ID"
-                style={{ maxWidth: 240, maxHeight: 160, borderRadius: 8, border: '1px solid #E2E8F0' }}
+                style={{ maxWidth: 240, maxHeight: 160, borderRadius: 8, border: '1px solid var(--border)' }}
               />
             </a>
           </div>
@@ -527,7 +501,7 @@ export function AccountDetailPage({
               id: customer.customer_id || customer.id,
               position: [Number(customer.latitude), Number(customer.longitude)],
               popup: `<strong>${ownerName}</strong><br/>${customer.address || ''}`,
-              color: '#0B2133',
+              color: 'var(--text)',
             }]}
           />
         ) : (
@@ -575,7 +549,7 @@ export function AccountDetailPage({
                 </tr>
               )) : (
                 <tr>
-                  <td colSpan={6} style={{ textAlign: 'center', color: '#5F7385', padding: 16 }}>
+                  <td colSpan={6} style={{ textAlign: 'center', color: 'var(--text-secondary)', padding: 16 }}>
                     No open invoices
                   </td>
                 </tr>
@@ -609,7 +583,7 @@ export function AccountDetailPage({
                 </tr>
               )) : (
                 <tr>
-                  <td colSpan={6} style={{ textAlign: 'center', color: '#5F7385', padding: 16 }}>
+                  <td colSpan={6} style={{ textAlign: 'center', color: 'var(--text-secondary)', padding: 16 }}>
                     No recent payments
                   </td>
                 </tr>

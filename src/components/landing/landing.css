@@ -23,6 +23,19 @@
   color-scheme: light;
 }
 
+html[data-theme="dark"] .cvx-site {
+  --cvx-ink: var(--text);
+  --cvx-navy: var(--brand);
+  --cvx-navy-deep: var(--brand-dark);
+  --cvx-blue: var(--brand);
+  --cvx-blue-soft: var(--surface-3);
+  --cvx-muted: var(--text-secondary);
+  --cvx-line: var(--navy-12);
+  --cvx-paper: var(--bg);
+  --cvx-white: var(--surface);
+  color-scheme: dark;
+}
+
 .cvx-site *,
 .cvx-site *::before,
 .cvx-site *::after {

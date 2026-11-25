@@ -74,6 +74,7 @@ export function FieldActivityReportsPage({ navigate, showToast }) {
   const [assignments, setAssignments] = useState([]);
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
+  const [activeTab, setActiveTab] = useState('queue');
   const [listScope, setListScope] = useState('today');
   const [formOpen, setFormOpen] = useState(Boolean(preselectedAssignmentId) || mode === 'new');
   const [editingId, setEditingId] = useState(null);
@@ -120,7 +121,12 @@ export function FieldActivityReportsPage({ navigate, showToast }) {
   }, []);
 
   useEffect(() => {
-    if (!preselectedAssignmentId) return;
+    if (!preselectedAssignmentId && mode !== 'new' && mode !== 'edit') return;
+    setActiveTab('queue');
+    if (!preselectedAssignmentId) {
+      if (mode === 'new') setFormOpen(true);
+      return;
+    }
     const existing = reports.find(
       (r) => String(r.assignment_id) === String(preselectedAssignmentId) && !r.is_superseded
     );
@@ -141,7 +147,7 @@ export function FieldActivityReportsPage({ navigate, showToast }) {
       setForm((prev) => ({ ...prev, assignment_id: String(preselectedAssignmentId) }));
       setFormOpen(true);
     }
-  }, [preselectedAssignmentId, reports]);
+  }, [preselectedAssignmentId, mode, reports]);
 
   const reportsByAssignment = useMemo(() => {
     const map = new Map();
@@ -175,7 +181,7 @@ export function FieldActivityReportsPage({ navigate, showToast }) {
     });
   }, [reports, listScope, today]);
 
-  const pagination = usePagination(filteredReports);
+  const pagination = usePagination(filteredReports, { resetKey: listScope });
 
   const updateField = (key, value) => {
     setForm((prev) => ({ ...prev, [key]: value }));
@@ -290,6 +296,7 @@ export function FieldActivityReportsPage({ navigate, showToast }) {
   };
 
   const startCreate = () => {
+    setActiveTab('queue');
     setEditingId(null);
     setForm(emptyForm(eligibleForCreate[0]?.assignment_id || ''));
     setErrors({});
@@ -297,6 +304,7 @@ export function FieldActivityReportsPage({ navigate, showToast }) {
   };
 
   const startEdit = (report) => {
+    setActiveTab('queue');
     setEditingId(report.report_id);
     setForm({
       assignment_id: String(report.assignment_id || ''),
@@ -328,215 +336,251 @@ export function FieldActivityReportsPage({ navigate, showToast }) {
               One consolidated report per assigned area. Submit before marking the assignment Done.
             </p>
           </div>
-          <div className="list-section-actions flex flex-wrap gap-2">
-            {formOpen ? (
-              <button className="button secondary" type="button" onClick={() => { setFormOpen(false); setEditingId(null); }}>
-                Hide Form
-              </button>
-            ) : (
-              <button
-                className="button"
-                type="button"
-                onClick={startCreate}
-                disabled={!eligibleForCreate.length}
-              >
-                Submit FAR
-              </button>
-            )}
-          </div>
         </div>
 
-        {!formOpen && !eligibleForCreate.length ? (
-          <EmptyState
-            title="No assignments waiting for a report"
-            description="Start an In Progress assignment from your schedule, or open an existing report to edit before the deadline."
-            actionLabel="Open Schedule"
-            onAction={() => navigate('/sales/schedule')}
-          />
-        ) : null}
-
-        {formOpen ? (
-          <div style={{ marginTop: 16 }}>
-            <h4 style={{ marginTop: 0 }}>{editingId ? 'Edit Field Activity Report' : 'Submit Field Activity Report'}</h4>
-            <div className="form-grid">
-              <div className="form-field">
-                <label htmlFor="far-assignment">Assigned Area</label>
-                <select
-                  id="far-assignment"
-                  className="filter-select"
-                  value={form.assignment_id}
-                  disabled={Boolean(editingId)}
-                  onChange={(e) => updateField('assignment_id', e.target.value)}
-                >
-                  <option value="">Select assigned area</option>
-                  {(editingId ? assignments : eligibleForCreate).map((a) => (
-                    <option key={a.assignment_id} value={a.assignment_id}>
-                      {areaLabel(a)} · {a.status}
-                    </option>
-                  ))}
-                </select>
-                {errors.assignment_id ? <p className="form-error">{errors.assignment_id}</p> : null}
-              </div>
-
-              <div className="form-field">
-                <label htmlFor="far-outcome">Overall Assignment Outcome</label>
-                <select
-                  id="far-outcome"
-                  className="filter-select"
-                  value={form.overall_outcome}
-                  onChange={(e) => updateField('overall_outcome', e.target.value)}
-                >
-                  <option value="">Select outcome</option>
-                  {SALES_ASSIGNMENT_OUTCOMES.map((outcome) => (
-                    <option key={outcome} value={outcome}>{outcome}</option>
-                  ))}
-                </select>
-                {errors.overall_outcome ? <p className="form-error">{errors.overall_outcome}</p> : null}
-              </div>
-
-              <div className="form-field" style={{ gridColumn: '1 / -1' }}>
-                <label htmlFor="far-remarks">Remarks</label>
-                <textarea
-                  id="far-remarks"
-                  className="filter-input"
-                  rows={4}
-                  value={form.remarks}
-                  onChange={(e) => updateField('remarks', e.target.value)}
-                  placeholder="Summarize the assigned area covered, canvassing activities performed, prospective customers encountered, products promoted, results, and any follow-up requirements."
-                />
-                {errors.remarks ? <p className="form-error">{errors.remarks}</p> : null}
-              </div>
-
-              <div className="form-field" style={{ gridColumn: '1 / -1' }}>
-                <label htmlFor="far-photo">Photo Evidence</label>
-                <input id="far-photo" type="file" accept="image/*" onChange={onPhotoChange} disabled={form.photo_exception} />
-                <p className="muted" style={{ marginTop: 4 }}>
-                  JPG/PNG/WebP, max about 700KB. {editingId && !form.photo ? 'Leave empty to keep the current photo.' : 'Required unless you record a photo exception.'}
-                </p>
-                {form.photoName ? <p className="muted">Selected: {form.photoName}</p> : null}
-                {form.photo ? (
-                  <img src={form.photo} alt="Evidence preview" style={{ marginTop: 8, maxWidth: 240, borderRadius: 8 }} />
-                ) : null}
-                {errors.photo ? <p className="form-error">{errors.photo}</p> : null}
-                <label className="flex items-center gap-2" style={{ marginTop: 8 }}>
-                  <input
-                    type="checkbox"
-                    checked={form.photo_exception}
-                    onChange={(e) => {
-                      updateField('photo_exception', e.target.checked);
-                      if (e.target.checked) {
-                        updateField('photo', '');
-                        updateField('photoName', '');
-                      }
-                    }}
-                  />
-                  <span>Photo cannot be provided (exception)</span>
-                </label>
-                {form.photo_exception ? (
-                  <>
-                    <textarea
-                      className="filter-input"
-                      rows={2}
-                      style={{ marginTop: 8 }}
-                      value={form.photo_exception_reason}
-                      onChange={(e) => updateField('photo_exception_reason', e.target.value)}
-                      placeholder="Explain why photo evidence is unavailable. Branch Manager will see this."
-                    />
-                    {errors.photo_exception_reason ? <p className="form-error">{errors.photo_exception_reason}</p> : null}
-                  </>
-                ) : null}
-              </div>
-            </div>
-            <div className="flex flex-wrap justify-end gap-2 mt-4">
-              <button className="button secondary" type="button" onClick={() => { setFormOpen(false); setEditingId(null); }}>
-                Cancel
-              </button>
-              <button className="button" type="button" disabled={submitting} onClick={handleSubmit}>
-                {submitting ? 'Saving…' : editingId ? 'Save Changes' : 'Submit Report'}
-              </button>
-            </div>
-          </div>
-        ) : null}
-      </section>
-
-      <section className="panel content-panel">
-        <div className="list-section-header">
-          <h3>My Reports</h3>
-          <div className="segmented-control">
-            {[
-              { id: 'today', label: 'Today' },
-              { id: 'history', label: 'History' },
-              { id: 'all', label: 'All' },
-            ].map((opt) => (
-              <button
-                key={opt.id}
-                type="button"
-                className={listScope === opt.id ? 'is-active' : ''}
-                onClick={() => setListScope(opt.id)}
-              >
-                {opt.label}
-              </button>
-            ))}
-          </div>
+        <div
+          className="segmented-control"
+          role="tablist"
+          aria-label="Field activity report views"
+          style={{ marginBottom: 16, flexWrap: 'wrap' }}
+        >
+          <button
+            type="button"
+            role="tab"
+            aria-selected={activeTab === 'queue'}
+            className={activeTab === 'queue' ? 'segment active' : 'segment'}
+            onClick={() => setActiveTab('queue')}
+          >
+            Field Activity Reports
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={activeTab === 'mine'}
+            className={activeTab === 'mine' ? 'segment active' : 'segment'}
+            onClick={() => setActiveTab('mine')}
+          >
+            My Reports
+          </button>
         </div>
 
-        {filteredReports.length ? (
+        {activeTab === 'queue' ? (
           <>
-            <div className="corvex-table-wrapper">
-              <table className="corvex-table">
-                <thead>
-                  <tr>
-                    <th>Assigned Area</th>
-                    <th>Work Date</th>
-                    <th>Overall Outcome</th>
-                    <th>Report Status</th>
-                    <th>Submitted At</th>
-                    <th>Last Updated</th>
-                    <th>Actions</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {pagination.paginatedData.map((report) => (
-                    <tr key={report.report_id}>
-                      <td>{reportAreaLabel(report)}</td>
-                      <td>{report.work_date ? formatDisplayDate(report.work_date) : '—'}</td>
-                      <td>{outcomeLabel(report.activity_type)}</td>
-                      <td><StatusBadge status={report.review_status || 'Submitted'} /></td>
-                      <td>{formatDisplayDateTime(report.created_at)}</td>
-                      <td>{formatDisplayDateTime(report.updated_at || report.created_at)}</td>
-                      <td className="table-actions">
-                        <button
-                          className="button ghost"
-                          type="button"
-                          onClick={() => navigate(`/sales/field-reports/${report.report_id}`)}
-                        >
-                          View
-                        </button>
-                        {report.editable !== false ? (
-                          <button className="button ghost" type="button" onClick={() => startEdit(report)}>
-                            Edit
-                          </button>
-                        ) : null}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+            <div className="list-section-header" style={{ marginBottom: 12 }}>
+              <div className="list-section-actions flex flex-wrap gap-2">
+                {formOpen ? (
+                  <button className="button secondary" type="button" onClick={() => { setFormOpen(false); setEditingId(null); }}>
+                    Hide Form
+                  </button>
+                ) : (
+                  <button
+                    className="button"
+                    type="button"
+                    onClick={startCreate}
+                    disabled={!eligibleForCreate.length}
+                  >
+                    Submit FAR
+                  </button>
+                )}
+              </div>
             </div>
-            <Pagination {...pagination} />
+
+            {!formOpen && !eligibleForCreate.length ? (
+              <EmptyState
+                title="No assignments waiting for a report"
+                description="Start an In Progress assignment from your schedule, or open an existing report to edit before the deadline."
+                actionLabel="Open Schedule"
+                onAction={() => navigate('/sales/schedule')}
+              />
+            ) : null}
+
+            {formOpen ? (
+              <div style={{ marginTop: 16 }}>
+                <h4 style={{ marginTop: 0 }}>{editingId ? 'Edit Field Activity Report' : 'Submit Field Activity Report'}</h4>
+                <div className="form-grid">
+                  <div className="form-field">
+                    <label htmlFor="far-assignment">Assigned Area</label>
+                    <select
+                      id="far-assignment"
+                      className="filter-select"
+                      value={form.assignment_id}
+                      disabled={Boolean(editingId)}
+                      onChange={(e) => updateField('assignment_id', e.target.value)}
+                    >
+                      <option value="">Select assigned area</option>
+                      {(editingId ? assignments : eligibleForCreate).map((a) => (
+                        <option key={a.assignment_id} value={a.assignment_id}>
+                          {areaLabel(a)} · {a.status}
+                        </option>
+                      ))}
+                    </select>
+                    {errors.assignment_id ? <p className="form-error">{errors.assignment_id}</p> : null}
+                  </div>
+
+                  <div className="form-field">
+                    <label htmlFor="far-outcome">Overall Assignment Outcome</label>
+                    <select
+                      id="far-outcome"
+                      className="filter-select"
+                      value={form.overall_outcome}
+                      onChange={(e) => updateField('overall_outcome', e.target.value)}
+                    >
+                      <option value="">Select outcome</option>
+                      {SALES_ASSIGNMENT_OUTCOMES.map((outcome) => (
+                        <option key={outcome} value={outcome}>{outcome}</option>
+                      ))}
+                    </select>
+                    {errors.overall_outcome ? <p className="form-error">{errors.overall_outcome}</p> : null}
+                  </div>
+
+                  <div className="form-field" style={{ gridColumn: '1 / -1' }}>
+                    <label htmlFor="far-remarks">Remarks</label>
+                    <textarea
+                      id="far-remarks"
+                      className="filter-input"
+                      rows={4}
+                      value={form.remarks}
+                      onChange={(e) => updateField('remarks', e.target.value)}
+                      placeholder="Summarize the assigned area covered, canvassing activities performed, prospective customers encountered, products promoted, results, and any follow-up requirements."
+                    />
+                    {errors.remarks ? <p className="form-error">{errors.remarks}</p> : null}
+                  </div>
+
+                  <div className="form-field" style={{ gridColumn: '1 / -1' }}>
+                    <label htmlFor="far-photo">Photo Evidence</label>
+                    <input id="far-photo" type="file" accept="image/*" onChange={onPhotoChange} disabled={form.photo_exception} />
+                    <p className="muted" style={{ marginTop: 4 }}>
+                      JPG/PNG/WebP, max about 700KB. {editingId && !form.photo ? 'Leave empty to keep the current photo.' : 'Required unless you record a photo exception.'}
+                    </p>
+                    {form.photoName ? <p className="muted">Selected: {form.photoName}</p> : null}
+                    {form.photo ? (
+                      <img src={form.photo} alt="Evidence preview" style={{ marginTop: 8, maxWidth: 240, borderRadius: 8 }} />
+                    ) : null}
+                    {errors.photo ? <p className="form-error">{errors.photo}</p> : null}
+                    <label className="flex items-center gap-2" style={{ marginTop: 8 }}>
+                      <input
+                        type="checkbox"
+                        checked={form.photo_exception}
+                        onChange={(e) => {
+                          updateField('photo_exception', e.target.checked);
+                          if (e.target.checked) {
+                            updateField('photo', '');
+                            updateField('photoName', '');
+                          }
+                        }}
+                      />
+                      <span>Photo cannot be provided (exception)</span>
+                    </label>
+                    {form.photo_exception ? (
+                      <>
+                        <textarea
+                          className="filter-input"
+                          rows={2}
+                          style={{ marginTop: 8 }}
+                          value={form.photo_exception_reason}
+                          onChange={(e) => updateField('photo_exception_reason', e.target.value)}
+                          placeholder="Explain why photo evidence is unavailable. Branch Manager will see this."
+                        />
+                        {errors.photo_exception_reason ? <p className="form-error">{errors.photo_exception_reason}</p> : null}
+                      </>
+                    ) : null}
+                  </div>
+                </div>
+                <div className="flex flex-wrap justify-end gap-2 mt-4">
+                  <button className="button secondary" type="button" onClick={() => { setFormOpen(false); setEditingId(null); }}>
+                    Cancel
+                  </button>
+                  <button className="button" type="button" disabled={submitting} onClick={handleSubmit}>
+                    {submitting ? 'Saving…' : editingId ? 'Save Changes' : 'Submit Report'}
+                  </button>
+                </div>
+              </div>
+            ) : null}
           </>
-        ) : (
-          <EmptyState
-            title={listScope === 'today' ? 'No FAR submitted today' : listScope === 'history' ? 'No historical reports' : 'No reports yet'}
-            description={
-              eligibleForCreate.length
-                ? 'Submit a Field Activity Report for an In Progress assignment.'
-                : 'All eligible assignments already have reports, or no assignments are available.'
-            }
-            actionLabel={eligibleForCreate.length ? 'Submit FAR' : 'Open Schedule'}
-            onAction={() => (eligibleForCreate.length ? startCreate() : navigate('/sales/schedule'))}
-          />
-        )}
+        ) : null}
+
+        {activeTab === 'mine' ? (
+          <>
+            <div className="list-section-header" style={{ marginBottom: 12 }}>
+              <div className="list-section-actions">
+                <div className="segmented-control" aria-label="Report date scope">
+                  {[
+                    { id: 'today', label: 'Today' },
+                    { id: 'history', label: 'History' },
+                    { id: 'all', label: 'All' },
+                  ].map((opt) => (
+                    <button
+                      key={opt.id}
+                      type="button"
+                      className={listScope === opt.id ? 'segment active' : 'segment'}
+                      onClick={() => setListScope(opt.id)}
+                    >
+                      {opt.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+
+            {filteredReports.length ? (
+              <>
+                <div className="corvex-table-wrapper">
+                  <table className="corvex-table">
+                    <thead>
+                      <tr>
+                        <th>Assigned Area</th>
+                        <th>Work Date</th>
+                        <th>Overall Outcome</th>
+                        <th>Report Status</th>
+                        <th>Submitted At</th>
+                        <th>Last Updated</th>
+                        <th>Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {pagination.paginatedData.map((report) => (
+                        <tr key={report.report_id}>
+                          <td>{reportAreaLabel(report)}</td>
+                          <td>{report.work_date ? formatDisplayDate(report.work_date) : '—'}</td>
+                          <td>{outcomeLabel(report.activity_type)}</td>
+                          <td><StatusBadge status={report.review_status || 'Submitted'} /></td>
+                          <td>{formatDisplayDateTime(report.created_at)}</td>
+                          <td>{formatDisplayDateTime(report.updated_at || report.created_at)}</td>
+                          <td className="table-actions">
+                            <button
+                              className="button ghost"
+                              type="button"
+                              onClick={() => navigate(`/sales/field-reports/${report.report_id}`)}
+                            >
+                              View
+                            </button>
+                            {report.editable !== false ? (
+                              <button className="button ghost" type="button" onClick={() => startEdit(report)}>
+                                Edit
+                              </button>
+                            ) : null}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                <Pagination {...pagination} />
+              </>
+            ) : (
+              <EmptyState
+                title={listScope === 'today' ? 'No FAR submitted today' : listScope === 'history' ? 'No historical reports' : 'No reports yet'}
+                description={
+                  eligibleForCreate.length
+                    ? 'Submit a Field Activity Report for an In Progress assignment.'
+                    : 'All eligible assignments already have reports, or no assignments are available.'
+                }
+                actionLabel={eligibleForCreate.length ? 'Submit FAR' : 'Open Schedule'}
+                onAction={() => (eligibleForCreate.length ? startCreate() : navigate('/sales/schedule'))}
+              />
+            )}
+          </>
+        ) : null}
       </section>
     </div>
   );
