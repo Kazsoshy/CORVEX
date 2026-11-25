@@ -348,3 +348,62 @@ export async function fetchBranchProducts(params = {}) {
     };
   }
 }
+
+export async function getBranchPaymentSettings() {
+  try {
+    const response = await apiClient.get('/branches/me/payment-settings');
+    return response.data;
+  } catch (error) {
+    console.error('Failed to load branch payment settings:', error);
+    return {
+      success: false,
+      message: error?.response?.data?.message || 'Failed to load payment settings.',
+      data: null,
+    };
+  }
+}
+
+export async function updateBranchPaymentSettings(payload) {
+  try {
+    const response = await apiClient.patch('/branches/me/payment-settings', payload);
+    return response.data;
+  } catch (error) {
+    console.error('Failed to update branch payment settings:', error);
+    return {
+      success: false,
+      message: error?.response?.data?.message || 'Failed to save payment settings.',
+      data: null,
+    };
+  }
+}
+
+export async function getSpotCashPickups() {
+  try {
+    const response = await apiClient.get('/branch-manager/spot-cash-pickups');
+    return response.data;
+  } catch (error) {
+    console.error('Failed to load Spot Cash pickups:', error);
+    return {
+      success: false,
+      message: error?.response?.data?.message || 'Failed to load Spot Cash pickups.',
+      data: [],
+    };
+  }
+}
+
+export async function assignSpotCashPickup(invoiceId, body) {
+  try {
+    const response = await apiClient.post(
+      `/branch-manager/spot-cash-pickups/${invoiceId}/assign`,
+      body
+    );
+    return response.data;
+  } catch (error) {
+    console.error('Failed to assign Spot Cash pickup:', error);
+    return {
+      success: false,
+      message: error?.response?.data?.message || 'Failed to assign pickup.',
+      data: error?.response?.data?.data || null,
+    };
+  }
+}

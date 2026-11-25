@@ -4,6 +4,7 @@ import { ApplyError, SyncConflict } from './syncErrors.js';
 import { calculateSalesPricing, POLICY_VERSION } from './salesPricingPolicy.js';
 import { OVERDUE_CUSTOMER_SQL } from './customerStanding.js';
 import { isValidDate, positiveInteger } from './salesAreaAssignments.js';
+import { recordSpotCashGcashPayment } from './spotCashPayment.js';
 
 function money(value) {
   return Math.round(Number(value) * 100) / 100;
@@ -167,8 +168,28 @@ export async function applySalesInvoice(client, user, body) {
     [paymentMethodId]
   );
   if (!paymentResult.rows.length) throw new ApplyError('Invalid payment method.');
-  if (!['cash', 'gcash'].includes(String(paymentResult.rows[0].method_name || '').trim().toLowerCase())) {
+  const methodName = String(paymentResult.rows[0].method_name || '').trim().toLowerCase();
+  if (!['cash', 'gcash'].includes(methodName)) {
     throw new ApplyError('Only Cash and GCash payment methods are supported for Log Sale.');
+  }
+
+  const gcashReference = String(body.gcash_reference ?? body.reference_number ?? '').trim();
+  const gcashPaymentProof = body.gcash_payment_proof ?? body.payment_proof_image ?? null;
+  if (payType === 'full' && methodName === 'gcash') {
+    const branchPay = await client.query(
+      `SELECT gcash_qr_image, gcash_account_name, gcash_mobile
+       FROM branches WHERE id = $1`,
+      [user.branchId]
+    );
+    if (!String(branchPay.rows[0]?.gcash_qr_image || '').trim()) {
+      throw new ApplyError(
+        'Branch GCash QR is not configured. Ask your Branch Manager to set it under Settings before Spot Cash GCash sales.',
+        400
+      );
+    }
+    if (!gcashReference || gcashReference.length < 6) {
+      throw new ApplyError('A valid GCash reference number (at least 6 characters) is required for Spot Cash GCash.', 400);
+    }
   }
 
   const lineItems = [];
@@ -226,9 +247,18 @@ export async function applySalesInvoice(client, user, body) {
   let resolvedMonthly = null;
   let resolvedDownPayment = 0;
 
+  let spotCashSettlement = null;
+  let invoiceNotes = notes || null;
+
   if (payType === 'full') {
     if (resolvedDueDate && resolvedDueDate < invoicesDate) {
       throw new ApplyError('due_date cannot be earlier than invoices_date.');
+    }
+    if (methodName === 'cash') {
+      spotCashSettlement = 'awaiting_pickup';
+      if (!resolvedDueDate) resolvedDueDate = invoicesDate;
+      const pickupNote = 'Spot Cash Cash — awaiting same-day collector pickup.';
+      invoiceNotes = invoiceNotes ? `${invoiceNotes}\n${pickupNote}` : pickupNote;
     }
   } else {
     if (downPayment > 0) {
@@ -306,9 +336,10 @@ export async function applySalesInvoice(client, user, body) {
         payment_method_id, status, invoices_date, due_date, notes,
         pay_type, down_payment, term_months, monthly_amount, first_due_date,
         payment_arrangement, original_total_amount, discount_rate, discount_amount,
-        final_obligation, pricing_policy_version, purchase_bracket, original_maturity_date)
+        final_obligation, pricing_policy_version, purchase_bracket, original_maturity_date,
+        spot_cash_settlement)
      VALUES ($1, $2, $3, $4, $5, $6, 'Pending Review', $7, $8, $9, $10, $11, $12, $13, $14,
-              $15, $16, $17, $18, $19, $20, $21, $22)
+              $15, $16, $17, $18, $19, $20, $21, $22, $23)
      RETURNING sales_invoices_id`,
     [
       invoiceNumber,
@@ -319,7 +350,7 @@ export async function applySalesInvoice(client, user, body) {
       paymentMethodId,
       invoicesDate,
       resolvedDueDate,
-      notes || null,
+      invoiceNotes,
       payType,
       resolvedDownPayment,
       resolvedTermMonths,
@@ -333,12 +364,17 @@ export async function applySalesInvoice(client, user, body) {
       POLICY_VERSION,
       pricing.termMonths ? `${pricing.originalTotal < 3000 ? '1000-2999' : pricing.originalTotal < 5000 ? '3000-4999' : pricing.originalTotal < 7000 ? '5000-6999' : '7000+'}` : null,
       pricing.maturityDate || null,
+      spotCashSettlement,
     ]
   );
   const invoiceId = invoiceInsert.rows[0].sales_invoices_id;
+  // Cash Spot Cash charges outstanding until collector pickup; GCash settles immediately (no charge).
+  const chargeAmount = payType === 'installment' || (payType === 'full' && methodName === 'cash')
+    ? pricing.finalObligation
+    : 0;
   const balance = await chargeCustomerForSale(client, {
     customerId,
-    amount: payType === 'installment' ? pricing.finalObligation : 0,
+    amount: chargeAmount,
     purchaseAmount: pricing.finalObligation,
   });
 
@@ -391,6 +427,20 @@ export async function applySalesInvoice(client, user, body) {
     );
   }
 
+  let spotCashPayment = null;
+  if (payType === 'full' && methodName === 'gcash') {
+    spotCashPayment = await recordSpotCashGcashPayment(client, user, {
+      invoiceId,
+      customerId,
+      amount: pricing.finalObligation,
+      paymentMethodId,
+      referenceNumber: gcashReference,
+      paymentProofImage: gcashPaymentProof,
+      generateReceipt: true,
+      ipAddress: body.ip_address || '127.0.0.1',
+    });
+  }
+
   return {
     kind: 'invoice',
     invoiceId,
@@ -401,5 +451,8 @@ export async function applySalesInvoice(client, user, body) {
     stockAlerts,
     branchId: user.branchId,
     agentId: user.id,
+    spotCashSettlement: spotCashPayment?.settlement || spotCashSettlement,
+    spotCashPayment: spotCashPayment?.payment || null,
+    receiptsId: spotCashPayment?.receiptsId || null,
   };
 }

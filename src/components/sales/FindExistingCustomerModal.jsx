@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import {
   requestCustomerBranchTransfer,
   resubmitBranchTransfer,
@@ -50,7 +50,9 @@ function MatchCard({ match, onOpen, action }) {
         </div>
         <div className="flex flex-wrap gap-2">
           {onOpen ? (
-            <button className="button secondary" type="button" onClick={onOpen}>Open Profile</button>
+            <button className="button secondary" type="button" onClick={onOpen}>
+              {String(match.status || '') === 'Rejected' ? 'Open and resubmit' : 'Open Profile'}
+            </button>
           ) : null}
           {action || null}
         </div>
@@ -60,7 +62,27 @@ function MatchCard({ match, onOpen, action }) {
 }
 
 /** Read-only profile drawer — field layout mirrors Approval Center CustomerProfileDrawer. */
-function PossibleMatchProfileDrawer({ open, loading, profile, onClose }) {
+function isOtherBranchMatch(match, agentBranchId) {
+  if (!match) return false;
+  if (match.cross_branch === true || match.same_branch === false) return true;
+  if (match.same_branch === true) return false;
+  const matchBranch = Number(match.branch_id ?? match.branchId);
+  const agent = Number(agentBranchId);
+  if (Number.isFinite(matchBranch) && Number.isFinite(agent) && matchBranch > 0 && agent > 0) {
+    return matchBranch !== agent;
+  }
+  return false;
+}
+
+function PossibleMatchProfileDrawer({
+  open,
+  loading,
+  profile,
+  onClose,
+  showTransferAction = false,
+  transferBusy = false,
+  onRequestTransfer,
+}) {
   if (!open) return null;
   const name = customerDisplayName(profile);
   return (
@@ -136,7 +158,17 @@ function PossibleMatchProfileDrawer({ open, loading, profile, onClose }) {
               ) : null}
             </dl>
             <div className="modal-actions" style={{ marginTop: 16 }}>
-              <button className="button" type="button" onClick={onClose}>Back to Possible Matches</button>
+              <button className="button ghost" type="button" onClick={onClose}>Back to Possible Matches</button>
+              {showTransferAction ? (
+                <button
+                  className="button"
+                  type="button"
+                  disabled={transferBusy}
+                  onClick={() => onRequestTransfer?.(profile)}
+                >
+                  Request Branch Transfer
+                </button>
+              ) : null}
             </div>
           </>
         )}
@@ -177,14 +209,9 @@ export function FindExistingCustomerModal({
   const [profileLoading, setProfileLoading] = useState(false);
   const [profileData, setProfileData] = useState(null);
 
-  useEffect(() => {
-    if (!open) return;
-    const persisted = readPersistedOpenTransferId();
-    if (persisted) {
-      setProgressTransferId(persisted);
-      setProgressOpen(true);
-    }
-  }, [open]);
+  // Do not auto-open persisted transfer progress here — Add Customer / Find Existing
+  // must stay a lookup flow. Progress is opened explicitly after submit or from
+  // "My branch transfers" on the customers page.
 
   if (!open) return null;
 
@@ -243,6 +270,10 @@ export function FindExistingCustomerModal({
         setProfileData({
           ...res.data,
           match_reasons: match.match_reasons || [match.match_reason].filter(Boolean),
+          cross_branch: match.cross_branch,
+          same_branch: match.same_branch,
+          branch_id: res.data.branch_id ?? match.branch_id,
+          branch_name: res.data.branch_name || match.branch_name,
         });
       } else {
         // Cross-branch or restricted: fall back to masked lookup card from search.
@@ -500,7 +531,7 @@ export function FindExistingCustomerModal({
           <div style={{ marginTop: 16 }}>
             <p className="form-error">
               Possible matches found. Registration cannot continue. Review the profiles below —
-              if one is the same person, open their existing account or request a branch transfer from Exact Match flow after refining your search.
+              if one is the same person at another branch, use Request Branch Transfer. Do not create a duplicate.
             </p>
             <div className="table-wrap" style={{ marginTop: 8 }}>
               <table className="data-table">
@@ -531,6 +562,11 @@ export function FindExistingCustomerModal({
                               label: 'View Profile',
                               onSelect: () => viewPossibleProfile(m),
                             },
+                            ...(isOtherBranchMatch(m, receivingBranchId) ? [{
+                              key: 'transfer',
+                              label: 'Request Branch Transfer',
+                              onSelect: () => beginTransferRequest(m),
+                            }] : []),
                           ]}
                         />
                       </td>
@@ -560,6 +596,12 @@ export function FindExistingCustomerModal({
         open={profileOpen}
         loading={profileLoading}
         profile={profileData}
+        showTransferAction={isOtherBranchMatch(profileData, receivingBranchId)}
+        transferBusy={transferBusy}
+        onRequestTransfer={(match) => {
+          setProfileOpen(false);
+          beginTransferRequest(match);
+        }}
         onClose={() => {
           setProfileOpen(false);
           setProfileData(null);
@@ -592,8 +634,12 @@ export function FindExistingCustomerModal({
         open={progressOpen}
         transferId={progressTransferId}
         showToast={showToast}
-        onClose={() => setProgressOpen(false)}
+        onClose={() => {
+          persistOpenTransferId(null);
+          setProgressOpen(false);
+        }}
         onOpenProfile={(customerId) => {
+          persistOpenTransferId(null);
           setProgressOpen(false);
           openExistingProfile(customerId);
         }}

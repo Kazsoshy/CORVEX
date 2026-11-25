@@ -111,6 +111,12 @@ const MIGRATIONS = [
   { file: '083_restock_completed_status.sql', label: '083_restock_completed_status.sql' },
   { file: '084_notification_related_entity.sql', label: '084_notification_related_entity.sql' },
   { file: '085_branch_transfer_receiving_first.sql', label: '085_branch_transfer_receiving_first.sql' },
+  { file: '086_branch_transfer_staffing.sql', label: '086_branch_transfer_staffing.sql' },
+  { file: '087_customer_email_otp.sql', label: '087_customer_email_otp.sql' },
+  { file: '088_customer_status_and_name_width.sql', label: '088_customer_status_and_name_width.sql' },
+  { file: '089_customer_status_rejected.sql', label: '089_customer_status_rejected.sql' },
+  { file: '090_branch_gcash_spot_cash.sql', label: '090_branch_gcash_spot_cash.sql' },
+  { file: '091_collection_payment_proof_image.sql', label: '091_collection_payment_proof_image.sql' },
 ];
 
 async function ensureMigrationsTable() {

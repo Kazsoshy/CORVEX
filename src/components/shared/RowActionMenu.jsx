@@ -3,7 +3,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 
 /**
  * Shared ⋮ overflow menu used across CORVEX list tables.
- * Supports screen edge flip (fitsBelow) and keyboard navigation (Escape).
+ * Supports screen edge flip (fitsBelow) and keyboard navigation.
  *
  * @param {{
  *   items: Array<{ key?: string, label: string, onSelect: () => void, disabled?: boolean, title?: string, danger?: boolean }|null|false>,
@@ -15,6 +15,8 @@ export function RowActionMenu({ items = [], label = 'Actions' }) {
   const [pos, setPos] = useState(null);
   const buttonRef = useRef(null);
   const menuRef = useRef(null);
+
+  const visible = (items || []).filter(Boolean);
 
   useLayoutEffect(() => {
     if (!open || !buttonRef.current) return;
@@ -34,7 +36,29 @@ export function RowActionMenu({ items = [], label = 'Actions' }) {
       setOpen(false);
     };
     const onKey = (event) => {
-      if (event.key === 'Escape') setOpen(false);
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        setOpen(false);
+        buttonRef.current?.focus();
+        return;
+      }
+      if (!menuRef.current) return;
+      const buttons = [...menuRef.current.querySelectorAll('[role="menuitem"]:not(:disabled)')];
+      if (!buttons.length) return;
+      const idx = buttons.indexOf(document.activeElement);
+      if (event.key === 'ArrowDown') {
+        event.preventDefault();
+        buttons[(idx + 1 + buttons.length) % buttons.length]?.focus();
+      } else if (event.key === 'ArrowUp') {
+        event.preventDefault();
+        buttons[(idx - 1 + buttons.length) % buttons.length]?.focus();
+      } else if (event.key === 'Home') {
+        event.preventDefault();
+        buttons[0]?.focus();
+      } else if (event.key === 'End') {
+        event.preventDefault();
+        buttons[buttons.length - 1]?.focus();
+      }
     };
     const onScroll = () => setOpen(false);
 
@@ -42,6 +66,9 @@ export function RowActionMenu({ items = [], label = 'Actions' }) {
     document.addEventListener('keydown', onKey);
     window.addEventListener('scroll', onScroll, true);
     window.addEventListener('resize', onScroll);
+    queueMicrotask(() => {
+      menuRef.current?.querySelector('[role="menuitem"]:not(:disabled)')?.focus();
+    });
     return () => {
       document.removeEventListener('mousedown', close);
       document.removeEventListener('keydown', onKey);
@@ -50,7 +77,6 @@ export function RowActionMenu({ items = [], label = 'Actions' }) {
     };
   }, [open]);
 
-  const visible = (items || []).filter(Boolean);
   return (
     <>
       <button
@@ -63,6 +89,13 @@ export function RowActionMenu({ items = [], label = 'Actions' }) {
         onClick={(event) => {
           event.stopPropagation();
           setOpen((v) => !v);
+        }}
+        onKeyDown={(event) => {
+          if (event.key === 'ArrowDown' || event.key === 'Enter' || event.key === ' ') {
+            event.preventDefault();
+            event.stopPropagation();
+            setOpen(true);
+          }
         }}
       >
         ⋮

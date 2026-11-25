@@ -1309,6 +1309,167 @@ router.post('/staff/collectors/:id/collection-assignments', requireAuth, async (
   }
 });
 
+// GET /api/branch-manager/spot-cash-pickups — Cash Spot Cash invoices awaiting same-day pickup
+router.get('/spot-cash-pickups', requireAuth, async (req, res) => {
+  try {
+    const pool = req.app.locals.pool;
+    const user = req.currentUser;
+    const branchId = isUnscoped(user) ? (Number(req.query.branch_id) || null) : user.branchId;
+    if (branchId == null) {
+      return res.status(400).json({ success: false, message: 'Branch scope is required.' });
+    }
+    const today = manilaDateString();
+    const result = await pool.query(
+      `SELECT si.sales_invoices_id,
+              si.invoice_number,
+              si.customer_id,
+              si.total_amount::float AS amount_due,
+              si.final_obligation::float AS final_obligation,
+              si.invoices_date::text AS invoices_date,
+              si.due_date::text AS due_date,
+              si.spot_cash_settlement,
+              si.status AS invoice_status,
+              si.notes,
+              COALESCE(NULLIF(TRIM(CONCAT_WS(' ', c.first_name, c.last_name)), ''), 'Customer') AS customer_name,
+              c.contact_phone,
+              c.customer_code,
+              sa.full_name AS sales_agent_name,
+              fv.visit_id,
+              fv.user_id AS assigned_collector_id,
+              fv.status AS visit_status,
+              COALESCE(NULLIF(TRIM(CONCAT_WS(' ', col.first_name, col.last_name)), ''), col.full_name) AS assigned_collector_name
+       FROM sales_invoices si
+       JOIN customers c ON c.customer_id = si.customer_id
+       LEFT JOIN users sa ON sa.id = si.sales_agent_id
+       LEFT JOIN LATERAL (
+         SELECT visit_id, user_id, status
+         FROM field_visits
+         WHERE customer_id = si.customer_id
+           AND visit_type = 'Collection'
+           AND scheduled_date = $2::date
+           AND status IN ('Pending', 'Completed')
+         ORDER BY visit_id DESC
+         LIMIT 1
+       ) fv ON TRUE
+       LEFT JOIN users col ON col.id = fv.user_id
+       WHERE si.branch_id = $1
+         AND si.pay_type = 'full'
+         AND si.spot_cash_settlement = 'awaiting_pickup'
+         AND si.status IN ('Pending Review', 'Confirmed')
+       ORDER BY si.invoices_date DESC, si.sales_invoices_id DESC`,
+      [branchId, today]
+    );
+    return res.status(200).json({
+      success: true,
+      data: result.rows,
+      meta: { today, branchId, count: result.rows.length },
+    });
+  } catch (err) {
+    console.error('[Branch Manager] GET /spot-cash-pickups error:', err.message);
+    return res.status(500).json({ success: false, message: 'Failed to load Spot Cash pickups.' });
+  }
+});
+
+// POST /api/branch-manager/spot-cash-pickups/:invoiceId/assign — same-day collector pickup
+router.post('/spot-cash-pickups/:invoiceId/assign', requireAuth, async (req, res) => {
+  try {
+    const pool = req.app.locals.pool;
+    const user = req.currentUser;
+    const invoiceId = Number(req.params.invoiceId);
+    const collectorId = Number(req.body.collector_id);
+    const scheduledDate = req.body.scheduled_date || manilaDateString();
+    if (!Number.isFinite(invoiceId) || !Number.isFinite(collectorId)) {
+      return res.status(400).json({ success: false, message: 'Valid invoiceId and collector_id are required.' });
+    }
+    if (scheduledDate !== manilaDateString()) {
+      return res.status(400).json({
+        success: false,
+        message: 'Spot Cash Cash pickups must be assigned for today (same-day).',
+      });
+    }
+
+    const invoice = await pool.query(
+      `SELECT si.sales_invoices_id, si.invoice_number, si.customer_id, si.branch_id,
+              si.spot_cash_settlement, si.pay_type, si.status,
+              COALESCE(NULLIF(TRIM(CONCAT_WS(' ', c.first_name, c.last_name)), ''), 'Customer') AS customer_name
+       FROM sales_invoices si
+       JOIN customers c ON c.customer_id = si.customer_id
+       WHERE si.sales_invoices_id = $1`,
+      [invoiceId]
+    );
+    if (!invoice.rows.length) {
+      return res.status(404).json({ success: false, message: 'Invoice not found.' });
+    }
+    const inv = invoice.rows[0];
+    if (!isUnscoped(user) && Number(inv.branch_id) !== Number(user.branchId)) {
+      return res.status(403).json({ success: false, message: 'Invoice is outside your branch.' });
+    }
+    if (inv.spot_cash_settlement !== 'awaiting_pickup' || inv.pay_type !== 'full') {
+      return res.status(400).json({
+        success: false,
+        message: 'Only Spot Cash invoices awaiting pickup can be assigned.',
+      });
+    }
+
+    const allowed = await assertStaffInBranch(pool, user, collectorId, 'collector');
+    if (!allowed) {
+      return res.status(404).json({ success: false, message: 'Collector not found in your branch.' });
+    }
+
+    const result = await assignCollectionVisits(pool, {
+      collectorId,
+      branchId: inv.branch_id,
+      customerIds: [inv.customer_id],
+      scheduledDate,
+    });
+
+    if (!result.created.length) {
+      const skip = result.skipped?.[0];
+      const reason = skip?.reason || 'assignment_conflict';
+      if (reason === 'already_scheduled' && Number(skip?.assigned_collector_id) === collectorId) {
+        return res.status(200).json({
+          success: true,
+          message: `Already assigned to this collector for ${scheduledDate}.`,
+          data: { ...result, invoice_number: inv.invoice_number },
+        });
+      }
+      return res.status(409).json({
+        success: false,
+        message: reason === 'assigned_to_other_collector'
+          ? `Already assigned to ${skip?.assigned_collector_name || 'another collector'} for today.`
+          : 'Could not create a same-day pickup visit (duplicate assignment).',
+        data: result,
+      });
+    }
+
+    await notifyScheduleAssigned(pool, {
+      userId: collectorId,
+      scheduledDate: result.scheduledDate,
+      visitType: 'Collection',
+      customerNames: [inv.customer_name],
+    });
+
+    await writeAuditFromReq(pool, req, {
+      module: 'Collections and Payments',
+      activity: 'Assign Spot Cash pickup',
+      action: 'Assign Spot Cash pickup',
+      description: `${inv.invoice_number} → collector ${collectorId} for ${scheduledDate}`.slice(0, 150),
+      status: AUDIT_STATUS.CREATED,
+      affectedRecord: `invoice:${invoiceId}`,
+      branchId: inv.branch_id,
+    });
+
+    return res.status(201).json({
+      success: true,
+      message: `Assigned same-day Spot Cash pickup for ${inv.invoice_number}.`,
+      data: { ...result, invoice_number: inv.invoice_number, customer_id: inv.customer_id },
+    });
+  } catch (err) {
+    console.error('[Branch Manager] POST /spot-cash-pickups/:invoiceId/assign error:', err.message);
+    return res.status(500).json({ success: false, message: 'Failed to assign Spot Cash pickup.' });
+  }
+});
+
 // GET /api/branch-manager/staff/collectors/:id — profile + published route for selected date
 router.get('/staff/collectors/:id', requireAuth, async (req, res) => {
   try {

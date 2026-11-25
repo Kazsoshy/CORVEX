@@ -404,6 +404,7 @@ export async function convertRecommendationToCi(client, {
   requestReason = null,
   requestedCreditLimit = null,
   requestRemarks = null,
+  creditProfile = null,
 }) {
   const params = [recommendationId];
   let scope = 'TRUE';
@@ -457,6 +458,7 @@ export async function convertRecommendationToCi(client, {
     requestReason: reason,
     requestedCreditLimit,
     requestRemarks: remarks,
+    creditProfile,
   });
 
   await updateRecommendationStatus(client, {

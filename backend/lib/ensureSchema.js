@@ -46,6 +46,10 @@ export async function ensureSchema(client) {
 
     ALTER TABLE customers ADD COLUMN IF NOT EXISTS portal_email VARCHAR(150);
     ALTER TABLE customers ADD COLUMN IF NOT EXISTS portal_status VARCHAR(30) NOT NULL DEFAULT 'none';
+    ALTER TABLE customers ALTER COLUMN status TYPE VARCHAR(30);
+    ALTER TABLE customers ALTER COLUMN first_name TYPE VARCHAR(100);
+    ALTER TABLE customers ALTER COLUMN middle_name TYPE VARCHAR(50);
+    ALTER TABLE customers ALTER COLUMN last_name TYPE VARCHAR(100);
     ALTER TABLE customers ADD COLUMN IF NOT EXISTS assigned_sales_agent_id INTEGER;
     ALTER TABLE customers ADD COLUMN IF NOT EXISTS id_type VARCHAR(80);
     ALTER TABLE customers ADD COLUMN IF NOT EXISTS id_number VARCHAR(80);
@@ -73,6 +77,7 @@ export async function ensureSchema(client) {
     ALTER TABLE customers ADD COLUMN IF NOT EXISTS privacy_notice_version VARCHAR(40);
     ALTER TABLE customers ADD COLUMN IF NOT EXISTS marketing_opt_in BOOLEAN NOT NULL DEFAULT false;
     ALTER TABLE customers ADD COLUMN IF NOT EXISTS phone_verification_status VARCHAR(20) NOT NULL DEFAULT 'Unverified';
+    ALTER TABLE customers ADD COLUMN IF NOT EXISTS email_verification_status VARCHAR(20) NOT NULL DEFAULT 'Unverified';
     ALTER TABLE customers ADD COLUMN IF NOT EXISTS identity_match_json JSONB NOT NULL DEFAULT '{}'::jsonb;
     ALTER TABLE customers ADD COLUMN IF NOT EXISTS identity_review_note TEXT;
     ALTER TABLE customers ADD COLUMN IF NOT EXISTS identity_reviewed_by INTEGER;
@@ -89,7 +94,7 @@ export async function ensureSchema(client) {
       END IF;
       ALTER TABLE customers
         ADD CONSTRAINT customers_status_check
-        CHECK (status IN ('Active', 'Inactive', 'Pending Identity Review'));
+        CHECK (status IN ('Active', 'Inactive', 'Pending Identity Review', 'Rejected'));
     EXCEPTION
       WHEN duplicate_object THEN NULL;
     END
@@ -100,6 +105,37 @@ export async function ensureSchema(client) {
     CREATE INDEX IF NOT EXISTS idx_customers_identity_review_queue
       ON customers (branch_id, status)
       WHERE status = 'Pending Identity Review';
+  `);
+
+  await client.query(`
+    DO $email_verify_status$
+    BEGIN
+      IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint WHERE conname = 'customers_email_verification_status_check'
+      ) THEN
+        ALTER TABLE customers
+          ADD CONSTRAINT customers_email_verification_status_check
+          CHECK (email_verification_status IN ('Unverified', 'Verified'));
+      END IF;
+    EXCEPTION
+      WHEN duplicate_object THEN NULL;
+    END
+    $email_verify_status$;
+  `);
+
+  await client.query(`
+    CREATE TABLE IF NOT EXISTS customer_email_otp_challenges (
+      id SERIAL PRIMARY KEY,
+      email_normalized VARCHAR(255) NOT NULL,
+      code_hash VARCHAR(128) NOT NULL,
+      expires_at TIMESTAMPTZ NOT NULL,
+      attempt_count INTEGER NOT NULL DEFAULT 0,
+      created_by_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+      consumed_at TIMESTAMPTZ,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+    CREATE INDEX IF NOT EXISTS idx_customer_email_otp_email_created
+      ON customer_email_otp_challenges (email_normalized, created_at DESC);
   `);
 
   await client.query(`
@@ -163,6 +199,8 @@ export async function ensureSchema(client) {
     ALTER TABLE customer_branch_transfers ADD COLUMN IF NOT EXISTS proposed_territory_id INTEGER REFERENCES territories(territory_id) ON DELETE SET NULL;
     ALTER TABLE customer_branch_transfers ADD COLUMN IF NOT EXISTS receiving_bm_id INTEGER REFERENCES users(id) ON DELETE SET NULL;
     ALTER TABLE customer_branch_transfers ADD COLUMN IF NOT EXISTS source_release_note TEXT;
+    ALTER TABLE customer_branch_transfers ADD COLUMN IF NOT EXISTS proposed_assigned_sales_agent_id INTEGER REFERENCES users(id) ON DELETE SET NULL;
+    ALTER TABLE customer_branch_transfers ADD COLUMN IF NOT EXISTS proposed_account_manager_id INTEGER REFERENCES users(id) ON DELETE SET NULL;
   `);
 
   await client.query(`
@@ -191,6 +229,7 @@ export async function ensureSchema(client) {
     ALTER TABLE sales_invoices ADD COLUMN IF NOT EXISTS term_months INTEGER;
     ALTER TABLE sales_invoices ADD COLUMN IF NOT EXISTS monthly_amount DECIMAL(12, 2);
     ALTER TABLE sales_invoices ADD COLUMN IF NOT EXISTS first_due_date DATE;
+    ALTER TABLE sales_invoices ADD COLUMN IF NOT EXISTS spot_cash_settlement VARCHAR(30);
   `);
 
   await client.query(`
@@ -524,6 +563,9 @@ export async function ensureSchema(client) {
     await client.query(`ALTER TABLE branches ADD COLUMN IF NOT EXISTS status_changed_by INTEGER`);
     await client.query(`ALTER TABLE branches ADD COLUMN IF NOT EXISTS status_policy_key VARCHAR(40)`);
     await client.query(`ALTER TABLE branches ADD COLUMN IF NOT EXISTS last_activity_at TIMESTAMPTZ`);
+    await client.query(`ALTER TABLE branches ADD COLUMN IF NOT EXISTS gcash_account_name VARCHAR(120)`);
+    await client.query(`ALTER TABLE branches ADD COLUMN IF NOT EXISTS gcash_mobile VARCHAR(30)`);
+    await client.query(`ALTER TABLE branches ADD COLUMN IF NOT EXISTS gcash_qr_image TEXT`);
     await client.query(`CREATE SEQUENCE IF NOT EXISTS branches_code_seq START 1`);
     await client.query(`
       DO $$
@@ -666,6 +708,7 @@ export async function ensureSchema(client) {
     ALTER TABLE field_visits ADD COLUMN IF NOT EXISTS visited_at TIMESTAMP;
 
     ALTER TABLE collection_payment ADD COLUMN IF NOT EXISTS reference_number VARCHAR(100);
+    ALTER TABLE collection_payment ADD COLUMN IF NOT EXISTS payment_proof_image TEXT;
   `);
 
   // One active Collection visit per customer per day (any collector).

@@ -350,8 +350,6 @@ export function AccountDetailPage({
           rows={[
             { label: 'Full Name', value: ownerName },
             { label: 'Customer Code', value: displayCode },
-            { label: "Mother's Maiden Name", value: customer.mothers_maiden_name || '—' },
-            { label: 'Civil Status', value: customer.civil_status || '—' },
             { label: 'Business / Mobile Phone', value: customer.contact_phone || customer.phone || '—' },
             {
               label: 'Alternate Contact',

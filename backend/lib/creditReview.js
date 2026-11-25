@@ -40,7 +40,10 @@ function parseJson(value, fallback) {
 export async function buildCustomerCreditEvidence(client, customerId) {
   const customerRes = await client.query(
     `SELECT c.customer_id, c.customer_code, c.first_name, c.middle_name, c.last_name,
-            c.status, c.id_verification_status, c.id_type, c.id_number,
+            c.status, c.id_verification_status, c.id_type, c.id_number, c.id_photo,
+            c.civil_status, c.mothers_maiden_name,
+            c.contact_person_fname, c.contact_person_mname, c.contact_person_lname,
+            c.contact_person_phone, c.contact_person_relationship,
             c.contact_phone, c.branch_id, b.name AS branch_name,
             c.customer_type, c.business_name, c.registration_profile_json,
             c.estimated_monthly_revenue, c.estimated_monthly_expenses, c.existing_obligations,
@@ -204,6 +207,15 @@ export async function buildCustomerCreditEvidence(client, customerId) {
       status: customer.status || 'Active',
       id_verification_status: customer.id_verification_status || 'Unverified',
       id_type: customer.id_type || null,
+      id_number: customer.id_number || null,
+      id_photo: customer.id_photo || null,
+      civil_status: customer.civil_status || profile.civil_status || null,
+      mothers_maiden_name: customer.mothers_maiden_name || profile.mothers_maiden_name || null,
+      contact_person_fname: customer.contact_person_fname || null,
+      contact_person_mname: customer.contact_person_mname || null,
+      contact_person_lname: customer.contact_person_lname || null,
+      contact_person_phone: customer.contact_person_phone || null,
+      contact_person_relationship: customer.contact_person_relationship || null,
       contact_phone: customer.contact_phone || null,
       branch_name: customer.branch_name || null,
       territory_name: customer.territory_name || null,
@@ -474,6 +486,188 @@ export function freezeCreditSnapshot(evidence) {
   };
 }
 
+const FIRST_CREDIT_CIVIL_STATUSES = new Set([
+  'Single', 'Married', 'Widowed', 'Separated', 'Annulled', 'Divorced',
+]);
+const FIRST_CREDIT_ID_TYPES = new Set([
+  "Driver's License", 'Passport', 'UMID', 'PhilSys ID', 'SSS ID', 'TIN ID',
+  "Voter's ID", 'Postal ID', 'PRC ID', 'Senior Citizen ID', 'Other Government ID',
+]);
+const FIRST_CREDIT_EMPLOYMENT = new Set([
+  'Employed', 'Self-Employed', 'Business Owner', 'OFW', 'Retired', 'Unemployed', 'Student', 'Other',
+]);
+
+function normalizeCreditIdPhoto(value) {
+  if (value === undefined || value === null || value === '') return null;
+  const photo = String(value).trim();
+  if (!photo.startsWith('data:image/')) {
+    const err = new Error('Government ID photo must be a valid image upload.');
+    err.status = 400;
+    throw err;
+  }
+  if (photo.length > 900_000) {
+    const err = new Error('Government ID photo is too large. Use a smaller image.');
+    err.status = 400;
+    throw err;
+  }
+  return photo;
+}
+
+/**
+ * Persist KYC / employment fields collected on first Apply for Credit (cash customers).
+ * Only allowed when customer has no approved credit_limit yet.
+ */
+export async function applyFirstCreditApplicationProfile(client, customerId, profile = {}) {
+  const creditCheck = await client.query(
+    `SELECT COALESCE(credit_limit, 0) AS credit_limit
+     FROM customer_credit_info WHERE customer_id = $1`,
+    [customerId]
+  );
+  const existingLimit = money(creditCheck.rows[0]?.credit_limit);
+  if (existingLimit > 0) {
+    const err = new Error('Credit profile can only be updated on a first installment application.');
+    err.status = 400;
+    throw err;
+  }
+
+  const civilStatus = cleanText(profile.civil_status);
+  const mothersMaiden = cleanText(profile.mothers_maiden_name);
+  const altName = cleanText(profile.alternate_contact_name);
+  const altPhone = cleanText(profile.alternate_contact_phone);
+  const altRel = cleanText(profile.alternate_contact_relationship);
+  const altNameParts = String(altName || '').trim().split(/\s+/).filter(Boolean);
+  const altFirst = altNameParts[0] || null;
+  const altLast = altNameParts.length > 1 ? altNameParts.slice(1).join(' ') : altFirst;
+  const employmentStatus = cleanText(profile.employment_status);
+  const employerOrOccupation = cleanText(profile.employer_or_occupation);
+  const monthlyIncomeRaw = profile.monthly_income;
+  const idType = cleanText(profile.id_type);
+  const idNumber = cleanText(profile.id_number);
+
+  if (!civilStatus || !FIRST_CREDIT_CIVIL_STATUSES.has(civilStatus)) {
+    const err = new Error('Civil status is required for first credit application.');
+    err.status = 400;
+    throw err;
+  }
+  if (!mothersMaiden) {
+    const err = new Error("Mother's maiden name is required for first credit application.");
+    err.status = 400;
+    throw err;
+  }
+  if (!altName || !altPhone || !altRel) {
+    const err = new Error('Alternate contact name, phone, and relationship are required.');
+    err.status = 400;
+    throw err;
+  }
+  if (!employmentStatus || !FIRST_CREDIT_EMPLOYMENT.has(employmentStatus)) {
+    const err = new Error('Employment status is required for first credit application.');
+    err.status = 400;
+    throw err;
+  }
+  if (!employerOrOccupation) {
+    const err = new Error('Employer or occupation is required for first credit application.');
+    err.status = 400;
+    throw err;
+  }
+  const monthlyIncome = money(monthlyIncomeRaw);
+  if (!(monthlyIncome > 0)) {
+    const err = new Error('Monthly income must be a positive amount.');
+    err.status = 400;
+    throw err;
+  }
+  if (!idType || !FIRST_CREDIT_ID_TYPES.has(idType)) {
+    const err = new Error('Government ID type is required for first credit application.');
+    err.status = 400;
+    throw err;
+  }
+  if (!idNumber) {
+    const err = new Error('Government ID number is required for first credit application.');
+    err.status = 400;
+    throw err;
+  }
+
+  const existing = await client.query(
+    `SELECT registration_profile_json, id_photo FROM customers WHERE customer_id = $1`,
+    [customerId]
+  );
+  if (!existing.rows.length) {
+    const err = new Error('Customer not found.');
+    err.status = 404;
+    throw err;
+  }
+  const storedPhoto = existing.rows[0].id_photo || null;
+  const rawPhoto = profile.id_photo;
+  let idPhoto = null;
+  if (rawPhoto != null && String(rawPhoto).trim() !== '' && String(rawPhoto).startsWith('data:image/')) {
+    try {
+      idPhoto = normalizeCreditIdPhoto(rawPhoto);
+    } catch (err) {
+      if (!err.status) err.status = 400;
+      throw err;
+    }
+  } else if (storedPhoto) {
+    // Keep existing on-file photo when Sales revises without a new upload.
+    idPhoto = storedPhoto;
+  }
+  if (!idPhoto) {
+    const err = new Error('Government ID photo is required for first credit application.');
+    err.status = 400;
+    throw err;
+  }
+  const priorProfile = parseJson(existing.rows[0].registration_profile_json, {}) || {};
+  const nextProfile = {
+    ...priorProfile,
+    employment: {
+      ...(priorProfile.employment && typeof priorProfile.employment === 'object' ? priorProfile.employment : {}),
+      status: employmentStatus,
+      employer_or_occupation: employerOrOccupation,
+      monthly_income: monthlyIncome,
+    },
+  };
+
+  await client.query(
+    `UPDATE customers SET
+       civil_status = $2,
+       mothers_maiden_name = $3,
+       contact_person_fname = $4,
+       contact_person_lname = $5,
+       contact_person_phone = $6,
+       contact_person_relationship = $7,
+       id_type = $8,
+       id_number = $9,
+       id_photo = $10,
+       id_verification_status = COALESCE(NULLIF(TRIM(id_verification_status), ''), 'Pending'),
+       registration_profile_json = $11::jsonb,
+       updated_at = CURRENT_TIMESTAMP
+     WHERE customer_id = $1`,
+    [
+      customerId,
+      civilStatus,
+      mothersMaiden,
+      altFirst,
+      altLast,
+      altPhone,
+      altRel,
+      idType,
+      idNumber,
+      idPhoto,
+      JSON.stringify(nextProfile),
+    ]
+  );
+
+  await client.query(
+    `INSERT INTO customer_credit_info (customer_id, credit_limit, monthly_income, employment_status, updated_at)
+     VALUES ($1, 0, $2, $3, CURRENT_TIMESTAMP)
+     ON CONFLICT (customer_id) DO UPDATE SET
+       monthly_income = EXCLUDED.monthly_income,
+       employment_status = EXCLUDED.employment_status,
+       updated_at = CURRENT_TIMESTAMP`,
+    [customerId, monthlyIncome, employmentStatus]
+  );
+
+  return { monthlyIncome, employmentStatus };
+}
+
 export async function createCreditReview(client, {
   customerId,
   branchId,
@@ -481,6 +675,7 @@ export async function createCreditReview(client, {
   requestReason,
   requestedCreditLimit,
   requestRemarks,
+  creditProfile = null,
 }) {
   const reason = cleanText(requestReason);
   if (!reason || !CREDIT_REVIEW_REASONS.includes(reason)) {
@@ -502,6 +697,24 @@ export async function createCreditReview(client, {
     throw err;
   }
 
+  const creditLimitRes = await client.query(
+    `SELECT COALESCE(credit_limit, 0) AS credit_limit
+     FROM customer_credit_info WHERE customer_id = $1`,
+    [customerId]
+  );
+  const hasApprovedCredit = money(creditLimitRes.rows[0]?.credit_limit) > 0;
+  if (!hasApprovedCredit && !(creditProfile && typeof creditProfile === 'object')) {
+    const err = new Error(
+      'First credit application requires civil status, alternate contact, employment, and government ID details.'
+    );
+    err.status = 400;
+    throw err;
+  }
+
+  if (creditProfile && typeof creditProfile === 'object') {
+    await applyFirstCreditApplicationProfile(client, customerId, creditProfile);
+  }
+
   const evidence = await buildCustomerCreditEvidence(client, customerId);
   if (!evidence) {
     const err = new Error('Customer not found.');
@@ -512,6 +725,13 @@ export async function createCreditReview(client, {
   if (customerStatus === 'Pending Identity Review') {
     const err = new Error(
       'This customer is Pending Identity Review. Wait for Branch Manager approval before requesting credit.'
+    );
+    err.status = 400;
+    throw err;
+  }
+  if (customerStatus === 'Rejected') {
+    const err = new Error(
+      'This registration was declined (Rejected). Fix details and resubmit for Branch Manager review before requesting credit.'
     );
     err.status = 400;
     throw err;
@@ -584,6 +804,7 @@ export async function resubmitCreditReview(client, {
   requestReason,
   requestedCreditLimit,
   requestRemarks,
+  creditProfile = null,
 }) {
   const existing = await client.query(
     `SELECT ci.*, c.branch_id AS customer_branch_id
@@ -621,6 +842,11 @@ export async function resubmitCreditReview(client, {
     const err = new Error('A valid request reason is required.');
     err.status = 400;
     throw err;
+  }
+
+  // Allow Sales to correct first-credit KYC/employment/ID before BM sees the refreshed case.
+  if (creditProfile && typeof creditProfile === 'object') {
+    await applyFirstCreditApplicationProfile(client, review.customer_id, creditProfile);
   }
 
   const evidence = await buildCustomerCreditEvidence(client, review.customer_id);
@@ -664,6 +890,8 @@ export async function resubmitCreditReview(client, {
        requested_credit_limit = $2,
        request_remarks = $3,
        form_remarks = $3,
+       decision_remarks = NULL,
+       rejection_reason = NULL,
        monthly_income = $4,
        financial_snapshot_json = $5::jsonb,
        risk_level = $6,
@@ -751,7 +979,14 @@ export async function applyCreditReviewDecision(client, {
   }
 
   const review = existing.rows[0];
-  if (review.status !== 'Pending' && review.status !== 'Revision Requested') {
+  if (review.status === 'Revision Requested') {
+    const err = new Error(
+      'This credit review is waiting for Sales to revise and resubmit. Another Branch Manager decision is not allowed until then.'
+    );
+    err.status = 409;
+    throw err;
+  }
+  if (review.status !== 'Pending') {
     const err = new Error(`This credit review is already ${review.status}.`);
     err.status = 409;
     throw err;
@@ -769,6 +1004,25 @@ export async function applyCreditReviewDecision(client, {
     const err = new Error('Revision instructions are required.');
     err.status = 400;
     throw err;
+  }
+
+  // Request Revision is only for first-installment / zero-limit applications.
+  if (status === 'Revision Requested') {
+    const reason = String(review.request_reason || review.purpose || '').trim();
+    const isFirstReason = reason === 'First installment' || reason === 'Initial CI';
+    const limitRes = await client.query(
+      `SELECT credit_limit FROM customer_credit_info WHERE customer_id = $1`,
+      [review.customer_id]
+    );
+    const liveLimit = limitRes.rows[0]?.credit_limit;
+    const hasApprovedLimit = liveLimit != null && Number(liveLimit) > 0;
+    if (hasApprovedLimit && !isFirstReason) {
+      const err = new Error(
+        'Request Revision is only available for first-installment applications. Approve or reject this limit increase instead.'
+      );
+      err.status = 400;
+      throw err;
+    }
   }
 
   let approvedLimit = null;
@@ -857,9 +1111,11 @@ export function mapCreditReviewApiRow(row, { liveEvidence = null } = {}) {
   const flags = parseJson(row.delinquency_flags_json, []);
   const payments = parseJson(row.payment_history_json, []);
 
-  const displayStatus = (row.status === 'Pending' || row.status === 'Revision Requested')
-    ? 'Needs BM'
-    : row.status;
+  const displayStatus = row.status === 'Pending'
+    ? 'Needs Decision'
+    : row.status === 'Revision Requested'
+      ? 'Needs More Info'
+      : row.status;
   const revisionHistory = parseJson(row.revision_history_json, []);
 
   return {

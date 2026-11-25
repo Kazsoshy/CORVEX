@@ -1,6 +1,12 @@
 import { useEffect, useState } from 'react';
-import { fetchCustomers, fetchCustomerById } from '../../api/salesService.js';
+import {
+  fetchCustomers,
+  fetchCustomerById,
+  updateCustomer,
+  decideCustomerIdentityReview,
+} from '../../api/salesService.js';
 import { fetchTerritories } from '../../api/territoriesService.js';
+import { getBranchStaff } from '../../api/branchManagerService.js';
 import { EmptyState } from '../shared/EmptyState';
 import { LoadingState } from '../shared/LoadingState';
 import { Stats } from '../shared/StatsGrid';
@@ -22,9 +28,24 @@ import { handleCustomerNavigate } from '../../utils/mapsNavigation.js';
 import { areaOrAddress, hasValidCoords } from '../../utils/customerDisplay.js';
 import { downloadPdf } from '../../utils/dataExport.js';
 
+function staffDisplayName(user) {
+  return [user?.first_name, user?.last_name].filter(Boolean).join(' ')
+    || user?.email
+    || (user?.id != null ? `#${user.id}` : '—');
+}
+
 function money(value) {
   return Math.round(Number(value || 0) * 100) / 100;
 }
+
+function isTerritoryExceptionHold(customer) {
+  if (String(customer?.status || '') !== 'Pending Identity Review') return false;
+  const profile = customer?.registration_profile_json || {};
+  return String(profile.hold_reason || '') === 'territory_exception'
+    || Boolean(profile.territory_outside_review)
+    || Boolean(customer?.territory_override_note);
+}
+
 
 function standingToApiFilter(value) {
   if (value === 'Current') return 'current';
@@ -90,7 +111,13 @@ export function BranchCustomersPage({ navigate, opsBase, showToast }) {
         include_stats: 1,
       };
       if (search.trim()) params.search = search.trim();
-      if (statusFilter === 'Active' || statusFilter === 'Inactive') params.status = statusFilter;
+      if (
+        statusFilter === 'Active'
+        || statusFilter === 'Inactive'
+        || statusFilter === 'Pending Identity Review'
+      ) {
+        params.status = statusFilter;
+      }
       const standing = standingToApiFilter(paymentFilter);
       if (standing) params.standing = standing;
       if (territoryFilter === 'none') params.territory_id = 'none';
@@ -186,8 +213,10 @@ export function BranchCustomersPage({ navigate, opsBase, showToast }) {
               onChange={(e) => setStatusFilter(e.target.value)}
               aria-label="Filter by status"
             >
-              {['All', 'Active', 'Inactive'].map((s) => (
-                <option key={s} value={s}>{s === 'All' ? 'All Statuses' : s}</option>
+              {['All', 'Active', 'Inactive', 'Pending Identity Review', 'Rejected'].map((s) => (
+                <option key={s} value={s}>
+                  {s === 'All' ? 'All Statuses' : (s === 'Rejected' ? 'Rejected (declined)' : s)}
+                </option>
               ))}
             </select>
             <select
@@ -353,9 +382,38 @@ export function BranchCustomerDetailPage({
 }) {
   const [customer, setCustomer] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [salesAgents, setSalesAgents] = useState([]);
+  const [collectors, setCollectors] = useState([]);
+  const [staffDraft, setStaffDraft] = useState({
+    assigned_sales_agent_id: '',
+    account_manager_id: '',
+  });
+  const [staffConfirm, setStaffConfirm] = useState(null);
+  const [staffBusy, setStaffBusy] = useState(false);
+  const [reviewNote, setReviewNote] = useState('');
+  const [reviewBusy, setReviewBusy] = useState(false);
   const backQuery = typeof window !== 'undefined'
     ? window.location.search
     : '';
+
+  const reloadCustomer = async () => {
+    const res = await fetchCustomerById(customerId);
+    if (res.success && res.data) {
+      setCustomer(res.data);
+      setStaffDraft({
+        assigned_sales_agent_id: res.data.assigned_sales_agent_id
+          ? String(res.data.assigned_sales_agent_id)
+          : '',
+        account_manager_id: res.data.account_manager_id
+          ? String(res.data.account_manager_id)
+          : '',
+      });
+      return res.data;
+    }
+    setCustomer(null);
+    showToast?.(res.message || 'Customer not found.', 'error');
+    return null;
+  };
 
   useEffect(() => {
     let cancelled = false;
@@ -363,8 +421,17 @@ export function BranchCustomerDetailPage({
       setLoading(true);
       const res = await fetchCustomerById(customerId);
       if (cancelled) return;
-      if (res.success && res.data) setCustomer(res.data);
-      else {
+      if (res.success && res.data) {
+        setCustomer(res.data);
+        setStaffDraft({
+          assigned_sales_agent_id: res.data.assigned_sales_agent_id
+            ? String(res.data.assigned_sales_agent_id)
+            : '',
+          account_manager_id: res.data.account_manager_id
+            ? String(res.data.account_manager_id)
+            : '',
+        });
+      } else {
         setCustomer(null);
         showToast?.(res.message || 'Customer not found.', 'error');
       }
@@ -373,6 +440,95 @@ export function BranchCustomerDetailPage({
     load();
     return () => { cancelled = true; };
   }, [customerId, showToast]);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function loadStaff() {
+      const res = await getBranchStaff();
+      if (cancelled) return;
+      if (!res.success) {
+        setSalesAgents([]);
+        setCollectors([]);
+        return;
+      }
+      const sales = (res.data?.salesAgents || []).filter(
+        (u) => String(u.status || 'Active') === 'Active' || Number(u.id) === Number(customer?.assigned_sales_agent_id)
+      );
+      const cols = (res.data?.collectors || []).filter(
+        (u) => String(u.status || 'Active') === 'Active' || Number(u.id) === Number(customer?.account_manager_id)
+      );
+      setSalesAgents(sales);
+      setCollectors(cols);
+    }
+    loadStaff();
+    return () => { cancelled = true; };
+  }, [customer?.assigned_sales_agent_id, customer?.account_manager_id]);
+
+  const openStaffConfirm = () => {
+    if (!customer) return;
+    const nextSa = staffDraft.assigned_sales_agent_id
+      ? Number(staffDraft.assigned_sales_agent_id)
+      : null;
+    const nextCollector = staffDraft.account_manager_id
+      ? Number(staffDraft.account_manager_id)
+      : null;
+    const currentSa = customer.assigned_sales_agent_id
+      ? Number(customer.assigned_sales_agent_id)
+      : null;
+    const currentCollector = customer.account_manager_id
+      ? Number(customer.account_manager_id)
+      : null;
+    if (nextSa === currentSa && nextCollector === currentCollector) {
+      showToast?.('No staffing changes to save.', 'error');
+      return;
+    }
+    const saName = nextSa
+      ? staffDisplayName(salesAgents.find((u) => Number(u.id) === nextSa))
+      : 'Unassigned';
+    const collectorName = nextCollector
+      ? staffDisplayName(collectors.find((u) => Number(u.id) === nextCollector))
+      : 'Unassigned';
+    setStaffConfirm({
+      assigned_sales_agent_id: nextSa,
+      account_manager_id: nextCollector,
+      saName,
+      collectorName,
+    });
+  };
+
+  const saveStaffing = async () => {
+    if (!staffConfirm || !customer) return;
+    setStaffBusy(true);
+    const result = await updateCustomer(customer.customer_id, {
+      assigned_sales_agent_id: staffConfirm.assigned_sales_agent_id,
+      account_manager_id: staffConfirm.account_manager_id,
+    });
+    setStaffBusy(false);
+    if (result.success) {
+      showToast?.(result.message || 'Field staffing updated.', 'success');
+      setStaffConfirm(null);
+      await reloadCustomer();
+    } else {
+      showToast?.(result.message || 'Could not update staffing.', 'error');
+    }
+  };
+
+  const decideTerritoryHold = async (decision) => {
+    if (!customer) return;
+    setReviewBusy(true);
+    const res = await decideCustomerIdentityReview(customer.customer_id, {
+      decision,
+      note: reviewNote.trim() || undefined,
+    });
+    setReviewBusy(false);
+    if (res.success) {
+      showToast?.(res.message || (decision === 'approve' ? 'Approved.' : 'Rejected.'), 'success');
+      setReviewNote('');
+      await reloadCustomer();
+    } else {
+      showToast?.(res.message || 'Could not record decision.', 'error');
+    }
+  };
 
   if (loading) return <LoadingState variant="detail" message="Loading customer..." />;
   if (!customer) {
@@ -396,6 +552,7 @@ export function BranchCustomerDetailPage({
   const primaryContact = formatContactPersonName(customer);
   const secondary = formatSecondaryContactName(customer);
   const pinOk = hasValidCoords(customer);
+  const territoryHold = isTerritoryExceptionHold(customer);
 
   return (
     <div className="page account-detail-page">
@@ -404,7 +561,9 @@ export function BranchCustomerDetailPage({
           <div>
             <h3>Profile</h3>
             <p className="muted" style={{ marginTop: 4 }}>
-              Read-only supervision view — same customer facts used by Sales and Collectors.
+              {territoryHold
+                ? 'Territory exception is pending — approve or reject below before sales can start.'
+                : 'Branch supervision view — profile facts are read-only; field staffing can be reassigned below.'}
             </p>
           </div>
           <StatusBadge status={standing} />
@@ -413,8 +572,6 @@ export function BranchCustomerDetailPage({
           rows={[
             { label: 'Full Name', value: name },
             { label: 'Customer Code', value: code },
-            { label: "Mother's Maiden Name", value: customer.mothers_maiden_name || '—' },
-            { label: 'Civil Status', value: customer.civil_status || '—' },
             { label: 'Business / Mobile Phone', value: customer.contact_phone || '—' },
             { label: 'Portal Email', value: customer.portal_email || '—' },
             {
@@ -433,12 +590,165 @@ export function BranchCustomerDetailPage({
             { label: 'Government ID', value: customer.id_type ? `${customer.id_type} · ${customer.id_number || '—'}` : '—' },
             { label: 'Branch', value: customer.branch_name || branchName || '—' },
             { label: 'Territory', value: customer.territory_name || '—' },
+            ...(customer.territory_override_note
+              ? [{
+                label: 'Territory exception',
+                value: territoryHold
+                  ? `${customer.territory_override_note} · awaiting BM decision`
+                  : customer.territory_override_note,
+              }]
+              : []),
             { label: 'Assigned Sales Agent', value: customer.assigned_sales_agent_name || '—' },
             { label: 'Account Manager / Collector', value: customer.account_manager_name || '—' },
           ]}
         />
       </section>
 
+      {territoryHold ? (
+        <section className="panel content-panel">
+          <div className="panel-section-header">
+            <div>
+              <h3>Territory exception review</h3>
+              <p className="muted" style={{ marginTop: 4 }}>
+                This registration is outside territory coverage. Approve to activate the account, or reject
+                to decline it (Rejected). The Sales Agent can fix details and resubmit the same customer — do not create a duplicate.
+              </p>
+            </div>
+            <StatusBadge status="Pending Identity Review" />
+          </div>
+          <DetailRowsTable
+            rows={[
+              { label: 'Address', value: customer.address || '—' },
+              { label: 'Territory', value: customer.territory_name || '—' },
+              { label: 'Exception note', value: customer.territory_override_note || '—' },
+              {
+                label: 'Map pin',
+                value: pinOk
+                  ? `${Number(customer.latitude).toFixed(5)}, ${Number(customer.longitude).toFixed(5)}`
+                  : 'Not set',
+              },
+              { label: 'Sales Agent', value: customer.assigned_sales_agent_name || '—' },
+            ]}
+          />
+          <div className="form-group" style={{ marginTop: 12 }}>
+            <label htmlFor="bm-territory-review-note">Decision note</label>
+            <textarea
+              id="bm-territory-review-note"
+              className="filter-input"
+              rows={2}
+              value={reviewNote}
+              disabled={reviewBusy}
+              onChange={(e) => setReviewNote(e.target.value)}
+              placeholder="Optional reason for approve or reject"
+            />
+          </div>
+          <div className="flex flex-wrap gap-2" style={{ marginTop: 12 }}>
+            <button
+              className="button"
+              type="button"
+              disabled={reviewBusy}
+              onClick={() => decideTerritoryHold('approve')}
+            >
+              {reviewBusy ? 'Saving…' : 'Approve & activate'}
+            </button>
+            <button
+              className="button secondary"
+              type="button"
+              disabled={reviewBusy}
+              onClick={() => decideTerritoryHold('reject')}
+            >
+              Reject (declined)
+            </button>
+          </div>
+        </section>
+      ) : null}
+
+      {!territoryHold ? (
+        <section className="panel content-panel">
+          <div className="panel-section-header">
+            <div>
+              <h3>Field staffing</h3>
+              <p className="muted" style={{ marginTop: 4 }}>
+                Reassign receiving-branch Sales Agent or Collector after transfers or staff changes.
+              </p>
+            </div>
+          </div>
+          <div className="account-detail-grid two-up">
+            <div className="form-group">
+              <label htmlFor="bm-assign-sa">Sales Agent</label>
+              <select
+                id="bm-assign-sa"
+                className="filter-select"
+                value={staffDraft.assigned_sales_agent_id}
+                disabled={staffBusy || Boolean(staffConfirm)}
+                onChange={(e) => setStaffDraft((prev) => ({
+                  ...prev,
+                  assigned_sales_agent_id: e.target.value,
+                }))}
+              >
+                <option value="">Unassigned</option>
+                {salesAgents.map((u) => (
+                  <option key={u.id} value={u.id}>{staffDisplayName(u)}</option>
+                ))}
+              </select>
+            </div>
+            <div className="form-group">
+              <label htmlFor="bm-assign-collector">Collector / Account Manager</label>
+              <select
+                id="bm-assign-collector"
+                className="filter-select"
+                value={staffDraft.account_manager_id}
+                disabled={staffBusy || Boolean(staffConfirm)}
+                onChange={(e) => setStaffDraft((prev) => ({
+                  ...prev,
+                  account_manager_id: e.target.value,
+                }))}
+              >
+                <option value="">Unassigned</option>
+                {collectors.map((u) => (
+                  <option key={u.id} value={u.id}>{staffDisplayName(u)}</option>
+                ))}
+              </select>
+            </div>
+          </div>
+          {staffConfirm ? (
+            <div className="panel" style={{ padding: 12, marginTop: 12, border: '1px solid var(--border-color, #ddd)' }}>
+              <strong>Confirm staffing change?</strong>
+              <dl className="account-detail-grid two-up" style={{ margin: '8px 0 0' }}>
+                <div>
+                  <dt className="muted">Sales Agent</dt>
+                  <dd style={{ margin: 0 }}>{staffConfirm.saName}</dd>
+                </div>
+                <div>
+                  <dt className="muted">Collector</dt>
+                  <dd style={{ margin: 0 }}>{staffConfirm.collectorName}</dd>
+                </div>
+              </dl>
+              <div className="modal-actions" style={{ marginTop: 12 }}>
+                <button
+                  className="button ghost"
+                  type="button"
+                  disabled={staffBusy}
+                  onClick={() => setStaffConfirm(null)}
+                >
+                  Cancel
+                </button>
+                <button className="button" type="button" disabled={staffBusy} onClick={saveStaffing}>
+                  {staffBusy ? 'Saving…' : 'Confirm Assignment'}
+                </button>
+              </div>
+            </div>
+          ) : (
+            <div className="modal-actions" style={{ marginTop: 12, justifyContent: 'flex-start' }}>
+              <button className="button" type="button" onClick={openStaffConfirm}>
+                Review &amp; Save Staffing
+              </button>
+            </div>
+          )}
+        </section>
+      ) : null}
+
+      {!territoryHold ? (
       <section className="panel content-panel">
         <div className="panel-section-header">
           <h3>Money</h3>
@@ -466,6 +776,7 @@ export function BranchCustomerDetailPage({
           ]}
         />
       </section>
+      ) : null}
 
       <section className="panel content-panel">
         <div className="panel-section-header">

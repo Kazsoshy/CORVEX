@@ -34,6 +34,7 @@ export const branchManagerRole = {
       items: [
         { label: 'Customers', to: '/branch-manager/customers' },
         { label: 'Payment History', to: '/branch-manager/credit-history' },
+        { label: 'Credit Investigations', to: '/branch-manager/ci-approvals' },
       ],
     },
     {
@@ -69,6 +70,7 @@ export const branchManagerRole = {
     { label: 'Territories', to: '/branch-manager/territories' },
     { label: 'Customers', to: '/branch-manager/customers' },
     { label: 'Payment History', to: '/branch-manager/credit-history' },
+    { label: 'Credit Investigations', to: '/branch-manager/ci-approvals' },
     { label: 'Approval Center', to: '/branch-manager/approval-center' },
     { label: 'Branch Inventory', to: '/branch-manager/branch-inventory' },
     { label: 'Staff Performance', to: '/branch-manager/staff-performance?period=week&tab=collectors' },

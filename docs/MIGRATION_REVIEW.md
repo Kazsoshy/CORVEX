@@ -2,33 +2,32 @@
 
 Complete this checklist **before** proposing or committing a new SQL migration or schema change.
 
-## Current change: `085_branch_transfer_receiving_first.sql`
+## Current change: `091_collection_payment_proof_image.sql`
 
 ### 1. Search first
 
-- [x] Searched `backend/migrations/` for related tables/columns (`080_identity_verify_branch_transfer.sql`)
-- [x] Checked `backend/lib/ensureSchema.js` for runtime guarantees already covering the need
-- [x] Confirmed no existing column/FK/index satisfies the requirement (location + Receiving BM fields missing)
-- [x] Confirmed this is not a second customer-identity / balance / payment ledger table (extends `customer_branch_transfers` only)
+- [x] Searched `backend/migrations/` / `ensureSchema` for payment proof / photo on `collection_payment` — only `reference_number` exists
+- [x] Confirmed extending `collection_payment` (not a parallel evidence table)
+- [x] Confirmed this is not a second customer-identity, balance, or payment-ledger structure
 
 ### 2. Justify
 
-- [x] Tied to approved field/customer workflows in `docs/PROJECT_SCOPE.md` (FR-16…21 field portal; RBAC FR-04…07) — cross-branch customer ownership revise
+- [x] Tied to Spot Cash GCash Log Sale payment proof capture (same settlement flow as `090`)
 - [x] Documented purpose in the migration header comment
-- [x] Chose **unique** `085_` prefix (renumbered from Bacaron `083_` to avoid collision with local `083_restock_completed_status.sql` / `084_notification_related_entity.sql`)
+- [x] Chose **unique** `091_` prefix
 - [x] Added file to `backend/run_migrations.js` `MIGRATIONS` list
 
 ### 3. Safety
 
 - [x] No `DROP TABLE` / `TRUNCATE` / unrestricted `DELETE` without explicit human authorization
-- [x] If destructive SQL is authorized, file starts with: `-- CORVEX-DESTRUCTIVE-AUTHORIZED: <ticket/reason>` — N/A (constraint/index rebuild only)
-- [x] Backward-compatible or paired with application deploy notes (status widen; legacy rows remapped)
+- [x] Non-destructive: `ADD COLUMN IF NOT EXISTS payment_proof_image TEXT`
+- [x] Backward-compatible (optional column)
 - [x] Does not invent requirements outside manuscript scope
 
 ### 4. Verify
 
-- [x] `npm run check:migrations` passes (authorized index/CHECK rebuild only)
-- [x] Local migrate smoke (dev only) when changing applied schema
+- [x] `npm run check:migrations` passes
+- [ ] Local migrate smoke (dev only) when changing applied schema
 - [x] No production execution without separate approval
 
 **Agents:** if any box is unchecked, stop and ask the user rather than inventing a parallel schema.

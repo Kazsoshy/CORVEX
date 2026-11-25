@@ -9,7 +9,6 @@ import { RowActionMenu } from '../shared/RowActionMenu';
 import { StatusBadge } from '../StatusBadge';
 import { formatCurrency, formatDisplayDate, formatDisplayDateTime } from '../../utils/formatters.js';
 import {
-  fetchCreditInvestigations,
   fetchPendingSalesInvoices,
   patchSalesInvoiceReview,
   fetchCollectionsForReview,
@@ -21,7 +20,6 @@ import {
   fetchPendingStockCounts,
   fetchStockCountApprovalById,
   patchStockCountApproval,
-  mapCreditInvestigationRow,
   fetchCustomerChangeRequests,
   patchCustomerChangeRequest,
 } from '../../api/approvalsService.js';
@@ -32,37 +30,147 @@ import {
   mapInventoryTransferRow,
 } from '../../api/inventoryService.js';
 import {
-  fetchCustomers,
-  fetchCustomerById,
-  decideCustomerIdentityReview,
   fetchBranchTransfers,
+  fetchCustomerById,
+  fetchCustomers,
+  decideCustomerIdentityReview,
   sourceSubmitBranchTransfer,
   receivingSubmitBranchTransfer,
   omDecideBranchTransfer,
   fetchBranchTransferTargetTerritories,
 } from '../../api/salesService.js';
+import { getBranchStaff } from '../../api/branchManagerService.js';
 import { getCurrentUser } from '../../api/authService.js';
-import { formatMoneyOrNA } from '../../utils/creditReview';
-import { CreditInvestigationDetailPage } from './CreditInvestigationPages';
+import { agingDaysManila, formatMoneyOrNA, waitingLabelManila } from '../../utils/creditReview';
+import { formatCustomerDisplayId, formatCustomerFullName } from '../../utils/customerDisplay';
 import {
   getUserBranchId,
   customerDisplayName,
 } from './approvalCenterHelpers.js';
+import { InvoiceReviewDrawer } from './InvoiceReviewDrawer.jsx';
+
+function staffDisplayName(user) {
+  return [user?.first_name, user?.last_name].filter(Boolean).join(' ')
+    || user?.email
+    || (user?.id != null ? `#${user.id}` : '—');
+}
 
 function tabFromSearch() {
   try {
     const params = new URLSearchParams(window.location.search);
-    const focus = params.get('focus');
-    if (focus === 'identity') return 'identity';
     const raw = params.get('tab') || '';
     const allowed = new Set([
       'collections', 'invoices', 'transfers', 'restocks', 'stock-counts',
-      'ci', 'customer-changes', 'identity', 'branch-transfers',
+      'customer-changes', 'branch-transfers', 'identity',
     ]);
+    // Legacy ?tab=ci → Credit Investigations desk (sidebar entry)
+    if (raw === 'ci') return 'ci-redirect';
     return allowed.has(raw) ? raw : null;
   } catch {
     return null;
   }
+}
+
+function transferLocationLabel(transfer) {
+  return [
+    transfer.address_street,
+    transfer.address_barangay,
+    transfer.address_city,
+    transfer.address_province,
+  ].filter(Boolean).join(', ') || transfer.address || '—';
+}
+
+function transferCustomerLabel(transfer) {
+  return [transfer.first_name, transfer.last_name].filter(Boolean).join(' ')
+    || transfer.customer_name
+    || transfer.customer_code
+    || `#${transfer.customer_id}`;
+}
+
+function transferRefLabel(transfer) {
+  return transfer.transfer_ref || transfer.progress?.transfer_ref || `CBT-${transfer.transfer_id}`;
+}
+
+function transferConfirmDetails(transfer, extras = []) {
+  return [
+    { label: 'Customer', value: transferCustomerLabel(transfer) },
+    { label: 'Customer ID', value: formatCustomerDisplayId(transfer) },
+    { label: 'Transfer ref', value: transferRefLabel(transfer) },
+    {
+      label: 'From → Receiving',
+      value: `${transfer.source_branch_name || transfer.source_branch_id} → ${transfer.target_branch_name || transfer.target_branch_id}`,
+      fullWidth: true,
+    },
+    ...extras,
+  ];
+}
+
+/** Limited card for Receiving BM — no financials / full phone / ID. */
+function limitedReceivingTransferProfile(transfer) {
+  const location = transferLocationLabel(transfer);
+  return {
+    first_name: transfer.first_name,
+    last_name: transfer.last_name,
+    customer_id: transfer.customer_id,
+    customer_code: transfer.customer_code,
+    status: transfer.customer_status || 'Active',
+    branch_name: transfer.source_branch_name || '—',
+    contact_phone_masked: 'Hidden until ownership transfer completes',
+    address: location,
+    address_street: transfer.address_street,
+    address_barangay: transfer.address_barangay,
+    address_city: transfer.address_city,
+    address_province: transfer.address_province,
+    limited: true,
+    transfer_ref: transferRefLabel(transfer),
+    transfer_reason: transfer.reason || null,
+    revision_note: transfer.revision_note || null,
+    proposed_territory_name: transfer.target_territory_name
+      || transfer.proposed_territory_name
+      || null,
+    receiving_branch_name: transfer.target_branch_name || null,
+  };
+}
+
+/** OM review card — transfer context plus optional full customer payload. */
+function omTransferReviewProfile(transfer, customer = null) {
+  const location = transferLocationLabel(transfer);
+  const base = customer && typeof customer === 'object' ? customer : {};
+  return {
+    ...base,
+    first_name: base.first_name || transfer.first_name,
+    last_name: base.last_name || transfer.last_name,
+    customer_id: transfer.customer_id,
+    customer_code: base.customer_code || transfer.customer_code,
+    status: base.status || transfer.customer_status || 'Active',
+    branch_name: base.branch_name || transfer.source_branch_name || '—',
+    territory_name: base.territory_name || null,
+    contact_phone: base.contact_phone || transfer.contact_phone || null,
+    address: location,
+    address_street: transfer.address_street || base.address_street,
+    address_barangay: transfer.address_barangay || base.address_barangay,
+    address_city: transfer.address_city || base.address_city,
+    address_province: transfer.address_province || base.address_province,
+    limited: false,
+    omReview: true,
+    transfer_ref: transferRefLabel(transfer),
+    transfer_reason: transfer.reason || null,
+    revision_note: transfer.revision_note || null,
+    source_release_note: transfer.source_release_note || null,
+    proposed_territory_name: transfer.target_territory_name
+      || transfer.proposed_territory_name
+      || null,
+    receiving_branch_name: transfer.target_branch_name || null,
+    source_branch_name: transfer.source_branch_name || null,
+    proposed_sales_agent_name: transfer.proposed_sales_agent_name || null,
+    proposed_account_manager_name: transfer.proposed_account_manager_name || null,
+    transfer_status: transfer.status,
+    activity: base.activity || null,
+    credit: base.credit || null,
+    id_verification_status: base.id_verification_status || null,
+    phone_verification_status: base.phone_verification_status || null,
+    created_at: base.created_at || null,
+  };
 }
 
 function sortOldestFirst(rows, dateKey) {
@@ -74,13 +182,35 @@ function sortOldestFirst(rows, dateKey) {
 }
 
 function waitingLabel(dateValue) {
-  if (!dateValue) return null;
-  const start = new Date(dateValue).getTime();
-  if (!Number.isFinite(start)) return null;
-  const days = Math.max(0, Math.floor((Date.now() - start) / 86400000));
-  if (days <= 0) return 'Waiting today';
-  if (days === 1) return 'Waiting 1 day';
-  return `Waiting ${days} days`;
+  return waitingLabelManila(dateValue);
+}
+
+function waitingToneClass(dateValue) {
+  const days = agingDaysManila(dateValue);
+  if (days >= 7) return 'waiting-age waiting-age--critical';
+  if (days >= 3) return 'waiting-age waiting-age--warn';
+  return 'waiting-age waiting-age--ok';
+}
+
+function invoiceTermsLabel(inv) {
+  const payType = String(inv?.pay_type || '').toLowerCase();
+  const method = inv?.payment_method || '';
+  if (payType === 'full' || inv?.payment_arrangement === 'spot_cash') {
+    return `Spot Cash${method ? ` · ${method}` : ''}`;
+  }
+  if (payType === 'installment') {
+    return `Installment${inv?.term_months ? ` · ${inv.term_months} mo` : ''}`;
+  }
+  return method || '—';
+}
+
+function invoiceAmountDisplay(inv) {
+  const finalAmt = Number(inv?.final_obligation ?? inv?.total_amount ?? 0);
+  const original = Number(inv?.original_total_amount);
+  const discounted = Number.isFinite(original)
+    && original > 0
+    && Math.abs(original - finalAmt) > 0.009;
+  return { finalAmt, original, discounted };
 }
 
 function QueueSummaryModal({ open, title, rows = [], onClose }) {
@@ -105,11 +235,22 @@ function QueueSummaryModal({ open, title, rows = [], onClose }) {
   );
 }
 
-function CustomerProfileDrawer({ open, loading, profile, onClose, title = 'Customer Profile' }) {
+function CustomerProfileDrawer({
+  open,
+  loading,
+  profile,
+  onClose,
+  title = 'Customer Profile',
+  limited = false,
+  actions = [],
+  busy = false,
+}) {
   if (!open) return null;
   const name = customerDisplayName(profile);
+  const isLimited = limited || Boolean(profile?.limited);
+  const isOmReview = Boolean(profile?.omReview);
   return (
-    <div className="modal-overlay" role="dialog" aria-modal="true" onClick={onClose}>
+    <div className="modal-overlay" role="dialog" aria-modal="true" onClick={busy ? undefined : onClose}>
       <div
         className="modal-content"
         style={{ maxWidth: 720, maxHeight: '90vh', overflow: 'auto' }}
@@ -122,9 +263,15 @@ function CustomerProfileDrawer({ open, loading, profile, onClose, title = 'Custo
             <div className="flex flex-wrap justify-between gap-2 items-start">
               <div>
                 <h3 style={{ marginTop: 0, marginBottom: 4 }}>{title}</h3>
-                <p className="muted" style={{ margin: 0 }}>Read-only — viewing does not approve or change the record.</p>
+                <p className="muted" style={{ margin: 0 }}>
+                  {isLimited
+                    ? 'Limited cross-branch preview for Receiving BM. Sensitive account data stays hidden until ownership transfers.'
+                    : isOmReview
+                      ? 'Review transfer details, then approve or reject ownership change.'
+                      : 'Read-only — viewing does not approve or change the record.'}
+                </p>
               </div>
-              <StatusBadge status={profile.status || 'Active'} />
+              <StatusBadge status={profile.transfer_status || profile.status || 'Active'} />
             </div>
             <dl className="account-detail-grid two-up" style={{ marginTop: 16 }}>
               <div>
@@ -132,27 +279,62 @@ function CustomerProfileDrawer({ open, loading, profile, onClose, title = 'Custo
                 <dd style={{ margin: 0 }}><strong>{name}</strong></dd>
               </div>
               <div>
-                <dt className="muted">Customer code</dt>
-                <dd style={{ margin: 0 }}>{profile.customer_code || '—'}</dd>
+                <dt className="muted">Customer ID</dt>
+                <dd style={{ margin: 0 }}>{formatCustomerDisplayId(profile)}</dd>
               </div>
               <div>
                 <dt className="muted">Mobile</dt>
-                <dd style={{ margin: 0 }}>{profile.contact_phone_masked || profile.contact_phone || '—'}</dd>
+                <dd style={{ margin: 0 }}>{profile.contact_phone_masked || (isLimited ? 'Hidden' : (profile.contact_phone || '—'))}</dd>
               </div>
               <div>
                 <dt className="muted">Home branch</dt>
-                <dd style={{ margin: 0 }}>{profile.branch_name || '—'}</dd>
+                <dd style={{ margin: 0 }}>{profile.branch_name || profile.source_branch_name || '—'}</dd>
               </div>
-              <div>
-                <dt className="muted">Territory</dt>
-                <dd style={{ margin: 0 }}>{profile.territory_name || '—'}</dd>
-              </div>
-              <div>
-                <dt className="muted">Registered</dt>
-                <dd style={{ margin: 0 }}>{formatDisplayDateTime(profile.created_at)}</dd>
-              </div>
+              {(isLimited || isOmReview) ? (
+                <>
+                  <div>
+                    <dt className="muted">Transfer ref</dt>
+                    <dd style={{ margin: 0 }}>{profile.transfer_ref || '—'}</dd>
+                  </div>
+                  <div>
+                    <dt className="muted">Receiving branch</dt>
+                    <dd style={{ margin: 0 }}>{profile.receiving_branch_name || '—'}</dd>
+                  </div>
+                  <div>
+                    <dt className="muted">{isOmReview ? 'Confirmed territory' : 'Proposed territory'}</dt>
+                    <dd style={{ margin: 0 }}>{profile.proposed_territory_name || 'Pending confirmation'}</dd>
+                  </div>
+                  {isOmReview ? (
+                    <>
+                      <div>
+                        <dt className="muted">Receiving Sales Agent</dt>
+                        <dd style={{ margin: 0 }}>{profile.proposed_sales_agent_name || '—'}</dd>
+                      </div>
+                      <div>
+                        <dt className="muted">Receiving Collector</dt>
+                        <dd style={{ margin: 0 }}>{profile.proposed_account_manager_name || '—'}</dd>
+                      </div>
+                      <div>
+                        <dt className="muted">Source release note</dt>
+                        <dd style={{ margin: 0 }}>{profile.source_release_note || '—'}</dd>
+                      </div>
+                    </>
+                  ) : null}
+                </>
+              ) : (
+                <>
+                  <div>
+                    <dt className="muted">Territory</dt>
+                    <dd style={{ margin: 0 }}>{profile.territory_name || '—'}</dd>
+                  </div>
+                  <div>
+                    <dt className="muted">Registered</dt>
+                    <dd style={{ margin: 0 }}>{formatDisplayDateTime(profile.created_at)}</dd>
+                  </div>
+                </>
+              )}
               <div style={{ gridColumn: '1 / -1' }}>
-                <dt className="muted">Address</dt>
+                <dt className="muted">{(isLimited || isOmReview) ? 'Current location (from transfer)' : 'Address'}</dt>
                 <dd style={{ margin: 0 }}>
                   {profile.address
                     || [profile.address_street, profile.address_barangay, profile.address_city, profile.address_province]
@@ -161,13 +343,25 @@ function CustomerProfileDrawer({ open, loading, profile, onClose, title = 'Custo
                     || '—'}
                 </dd>
               </div>
-              {(profile.match_reasons || []).length ? (
+              {(isLimited || isOmReview) && profile.transfer_reason ? (
+                <div style={{ gridColumn: '1 / -1' }}>
+                  <dt className="muted">Transfer reason</dt>
+                  <dd style={{ margin: 0 }}>{profile.transfer_reason}</dd>
+                </div>
+              ) : null}
+              {profile.revision_note ? (
+                <div style={{ gridColumn: '1 / -1' }}>
+                  <dt className="muted">Return note</dt>
+                  <dd style={{ margin: 0 }} className="form-error">{profile.revision_note}</dd>
+                </div>
+              ) : null}
+              {!isLimited && (profile.match_reasons || []).length ? (
                 <div style={{ gridColumn: '1 / -1' }}>
                   <dt className="muted">Match indicators</dt>
                   <dd style={{ margin: 0 }}>{(profile.match_reasons || []).join(', ')}</dd>
                 </div>
               ) : null}
-              {profile.activity || profile.credit ? (
+              {!isLimited && (profile.activity || profile.credit) ? (
                 <>
                   <div>
                     <dt className="muted">Outstanding balance</dt>
@@ -187,17 +381,32 @@ function CustomerProfileDrawer({ open, loading, profile, onClose, title = 'Custo
                   </div>
                 </>
               ) : null}
-              <div>
-                <dt className="muted">ID verification</dt>
-                <dd style={{ margin: 0 }}>{profile.id_verification_status || '—'}</dd>
-              </div>
-              <div>
-                <dt className="muted">Phone verification</dt>
-                <dd style={{ margin: 0 }}>{profile.phone_verification_status || '—'}</dd>
-              </div>
+              {!isLimited ? (
+                <>
+                  <div>
+                    <dt className="muted">ID verification</dt>
+                    <dd style={{ margin: 0 }}>{profile.id_verification_status || '—'}</dd>
+                  </div>
+                  <div>
+                    <dt className="muted">Phone verification</dt>
+                    <dd style={{ margin: 0 }}>{profile.phone_verification_status || '—'}</dd>
+                  </div>
+                </>
+              ) : null}
             </dl>
-            <div className="modal-actions" style={{ marginTop: 16 }}>
-              <button className="button" type="button" onClick={onClose}>Back to Identity Review</button>
+            <div className="modal-actions" style={{ marginTop: 16, flexWrap: 'wrap', gap: 8 }}>
+              <button className="button ghost" type="button" disabled={busy} onClick={onClose}>Close</button>
+              {(actions || []).map((action) => (
+                <button
+                  key={action.key}
+                  className={action.variant === 'ghost' ? 'button ghost' : 'button'}
+                  type="button"
+                  disabled={busy || action.disabled}
+                  onClick={action.onClick}
+                >
+                  {action.label}
+                </button>
+              ))}
             </div>
           </>
         )}
@@ -243,6 +452,52 @@ function ReasonDialog({
         <div className="modal-actions">
           <button className="button ghost" type="button" disabled={busy} onClick={onCancel}>Cancel</button>
           <button className="button" type="button" disabled={busy || !value.trim()} onClick={onConfirm}>
+            {busy ? 'Submitting…' : confirmLabel}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ConfirmDialog({
+  open,
+  title,
+  description,
+  details = [],
+  confirmLabel = 'Confirm',
+  cancelLabel = 'Cancel',
+  onCancel,
+  onConfirm,
+  busy = false,
+}) {
+  if (!open) return null;
+  return (
+    <div
+      className="modal-overlay"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="approval-confirm-title"
+      onClick={busy ? undefined : onCancel}
+    >
+      <div className="modal-content" style={{ maxWidth: 480 }} onClick={(e) => e.stopPropagation()}>
+        <h3 id="approval-confirm-title" style={{ marginTop: 0 }}>{title}</h3>
+        {description ? <p className="muted">{description}</p> : null}
+        {details.length ? (
+          <dl className="account-detail-grid two-up" style={{ margin: '12px 0 0' }}>
+            {details.map((row) => (
+              <div key={row.label} style={row.fullWidth ? { gridColumn: '1 / -1' } : undefined}>
+                <dt className="muted">{row.label}</dt>
+                <dd style={{ margin: 0 }}>{row.value ?? '—'}</dd>
+              </div>
+            ))}
+          </dl>
+        ) : null}
+        <div className="modal-actions" style={{ marginTop: 16 }}>
+          <button className="button ghost" type="button" disabled={busy} onClick={onCancel}>
+            {cancelLabel}
+          </button>
+          <button className="button" type="button" disabled={busy} onClick={onConfirm}>
             {busy ? 'Submitting…' : confirmLabel}
           </button>
         </div>
@@ -409,22 +664,35 @@ export function ApprovalCenterPage({
   showToast,
   opsBase,
 }) {
-  const [tab, setTab] = useState(() => tabFromSearch() || 'collections');
-  const [ciList, setCiList] = useState([]);
-  const [selectedCiId, setSelectedCiId] = useState(null);
+  const [tab, setTab] = useState(() => {
+    const fromSearch = tabFromSearch();
+    return fromSearch && fromSearch !== 'ci-redirect' ? fromSearch : 'collections';
+  });
   const [transferList, setTransferList] = useState([]);
   const [restockList, setRestockList] = useState([]);
   const [stockCountList, setStockCountList] = useState([]);
   const [invoiceList, setInvoiceList] = useState([]);
   const [collectionList, setCollectionList] = useState([]);
   const [customerChangeList, setCustomerChangeList] = useState([]);
-  const [identityList, setIdentityList] = useState([]);
+  const [identityReviewList, setIdentityReviewList] = useState([]);
   const [branchTransferList, setBranchTransferList] = useState([]);
   const [targetTerritoryOptionsByTransfer, setTargetTerritoryOptionsByTransfer] = useState({});
   const [transferDrafts, setTransferDrafts] = useState({});
+  const [receivingSalesAgents, setReceivingSalesAgents] = useState([]);
+  const [receivingCollectors, setReceivingCollectors] = useState([]);
+  const [staffOptionsLoaded, setStaffOptionsLoaded] = useState(false);
   const [summary, setSummary] = useState(null);
   const [queueSummary, setQueueSummary] = useState(null);
-  const [profileDrawer, setProfileDrawer] = useState({ open: false, loading: false, profile: null });
+  const [invoiceReview, setInvoiceReview] = useState({ open: false, id: null, seed: null });
+  const [profileDrawer, setProfileDrawer] = useState({
+    open: false,
+    loading: false,
+    profile: null,
+    limited: false,
+    title: undefined,
+    actions: [],
+    transfer: null,
+  });
   const [loading, setLoading] = useState(true);
   const [busyKey, setBusyKey] = useState(null);
   const currentUser = getCurrentUser();
@@ -441,13 +709,13 @@ export function ApprovalCenterPage({
 
   const [reasonDialog, setReasonDialog] = useState(null);
   const [reasonText, setReasonText] = useState('');
+  const [confirmDialog, setConfirmDialog] = useState(null);
   const [pendingFocus, setPendingFocus] = useState(null);
   const [highlightReady, setHighlightReady] = useState(false);
 
   const reload = async () => {
     setLoading(true);
-    const [ciRes, trRes, restockRes, countRes, invRes, pendingPayRes, summaryRes, changesRes, identityRes, xferRes] = await Promise.all([
-      fetchCreditInvestigations({ status: 'Needs BM', limit: 100 }),
+    const [trRes, restockRes, countRes, invRes, pendingPayRes, summaryRes, changesRes, xferRes, identityRes] = await Promise.all([
       fetchInventoryTransfers({ status: 'pending', limit: 100 }),
       fetchPendingRestocks(),
       fetchPendingStockCounts(),
@@ -455,18 +723,10 @@ export function ApprovalCenterPage({
       fetchCollectionsForReview('Pending'),
       fetchApprovalCenterSummary(),
       fetchCustomerChangeRequests({ status: 'Pending' }),
-      fetchCustomers({ status: 'Pending Identity Review', limit: 100 }),
       fetchBranchTransfers({ limit: 100 }),
+      fetchCustomers({ status: 'Pending Identity Review', limit: 100, sort_by: 'created_at', sort_dir: 'asc' }),
     ]);
 
-    const nextCi = ciRes.success
-      ? sortOldestFirst(
-        (ciRes.data || [])
-          .map(mapCreditInvestigationRow)
-          .filter((row) => row.status === 'Pending' || row.status === 'Revision Requested'),
-        'submissionDate'
-      )
-      : [];
     let nextTransfers = [];
     if (trRes.success) {
       nextTransfers = sortOldestFirst(
@@ -483,13 +743,12 @@ export function ApprovalCenterPage({
       ? sortOldestFirst(countRes.data || [], 'created_at')
       : [];
     const nextInvoices = invRes.success
-      ? sortOldestFirst(invRes.data || [], 'invoices_date')
+      ? sortOldestFirst(invRes.data || [], 'created_at')
       : [];
     const nextCollections = pendingPayRes.success
       ? sortOldestFirst(pendingPayRes.data || [], 'payment_date')
       : [];
 
-    setCiList(nextCi);
     setTransferList(nextTransfers);
     setRestockList(nextRestocks);
     setStockCountList(nextCounts);
@@ -499,49 +758,48 @@ export function ApprovalCenterPage({
     const nextIdentity = identityRes.success
       ? sortOldestFirst(identityRes.data || [], 'created_at')
       : [];
-    setIdentityList(nextIdentity);
+    setIdentityReviewList(nextIdentity);
     try {
       const params = new URLSearchParams(window.location.search);
-      const focusId = String(params.get('highlight') || params.get('id') || '').trim();
+      const focusId = String(params.get('highlight') || params.get('id') || params.get('verificationId') || '').trim();
       const focusTab = tabFromSearch();
-      if (focusId && focusTab === 'ci') {
-        const match = nextCi.find((c) => idsMatch(c.ciId || c.id, focusId));
-        setSelectedCiId(match ? (match.ciId || match.id) : focusId);
-      } else if (focusId && ['transfers', 'restocks', 'stock-counts'].includes(focusTab)) {
+      if (focusId && ['transfers', 'restocks', 'stock-counts', 'identity'].includes(focusTab)) {
         setPendingFocus({ tab: focusTab, id: focusId });
       }
     } catch { /* ignore */ }
-    const nextXfers = xferRes.success
-      ? sortOldestFirst(xferRes.data || [], 'created_at')
-      : [];
+    const rawXfers = xferRes.success ? (xferRes.data || []) : [];
+    // BM action queue: hide SA-return noise. OM keeps oversight of all open stages.
+    const nextXfers = sortOldestFirst(
+      isOm
+        ? rawXfers
+        : rawXfers.filter((row) => !['Returned to SA', 'Needs Revision'].includes(String(row.status || ''))),
+      'created_at'
+    );
     setBranchTransferList(nextXfers);
     if (summaryRes.success) setSummary(summaryRes.data || null);
     else setSummary(null);
 
     const preferred = tabFromSearch();
-    const identityCount = nextIdentity.length;
     const counts = {
       collections: nextCollections.length,
       invoices: nextInvoices.length,
       transfers: nextTransfers.length,
       restocks: nextRestocks.length,
       'stock-counts': nextCounts.length,
-      ci: nextCi.length,
       'customer-changes': changesRes.success ? (changesRes.data || []).length : 0,
-      identity: identityCount,
+      identity: nextIdentity.length,
       'branch-transfers': nextXfers.length,
     };
     setTab((current) => {
-      if (preferred && counts[preferred] != null) return preferred;
+      if (preferred && preferred !== 'ci-redirect' && counts[preferred] != null) return preferred;
       if (counts[current] > 0) return current;
+      if (counts.identity > 0) return 'identity';
       if (counts.collections > 0) return 'collections';
       if (counts.invoices > 0) return 'invoices';
       if (counts.transfers > 0) return 'transfers';
       if (counts.restocks > 0) return 'restocks';
       if (counts['stock-counts'] > 0) return 'stock-counts';
-      if (counts.ci > 0) return 'ci';
       if (counts['customer-changes'] > 0) return 'customer-changes';
-      if (counts.identity > 0) return 'identity';
       if (counts['branch-transfers'] > 0) return 'branch-transfers';
       return 'collections';
     });
@@ -550,6 +808,11 @@ export function ApprovalCenterPage({
   };
 
   useEffect(() => {
+    // Legacy Approval Center ?tab=ci → dedicated Credit Investigations desk
+    if (tabFromSearch() === 'ci-redirect') {
+      navigate(`${opsBase}/ci-approvals`, { replace: true });
+      return;
+    }
     reload();
   }, []);
 
@@ -559,21 +822,19 @@ export function ApprovalCenterPage({
     transfers: transferList.length,
     restocks: restockList.length,
     'stock-counts': stockCountList.length,
-    ci: ciList.length,
     'customer-changes': customerChangeList.length,
-    identity: identityList.length,
+    identity: identityReviewList.length,
     'branch-transfers': branchTransferList.length,
-  }), [collectionList, invoiceList, transferList, restockList, stockCountList, ciList, customerChangeList, identityList, branchTransferList]);
+  }), [collectionList, invoiceList, transferList, restockList, stockCountList, customerChangeList, identityReviewList, branchTransferList]);
 
   const tabs = [
+    { key: 'identity', label: `Territory / Identity (${counts.identity})` },
     { key: 'collections', label: `Collections (${counts.collections})` },
     { key: 'invoices', label: `Sales Invoices (${counts.invoices})` },
     { key: 'transfers', label: `Inventory Transfers (${counts.transfers})` },
     { key: 'restocks', label: `Restocks (${counts.restocks})` },
     { key: 'stock-counts', label: `Stock Counts (${counts['stock-counts']})` },
-    { key: 'ci', label: `Credit Reviews (${counts.ci})` },
     { key: 'customer-changes', label: `Customer Changes (${counts['customer-changes']})` },
-    { key: 'identity', label: `Identity Review (${counts.identity})` },
     { key: 'branch-transfers', label: `Branch Transfers (${counts['branch-transfers']})` },
   ];
 
@@ -582,7 +843,6 @@ export function ApprovalCenterPage({
   const paginationTransfers = usePagination(transferList);
   const paginationRestocks = usePagination(restockList);
   const paginationStockCounts = usePagination(stockCountList);
-  const paginationCi = usePagination(ciList);
 
   const highlightEntityByTab = {
     collections: 'collection',
@@ -590,9 +850,8 @@ export function ApprovalCenterPage({
     transfers: 'transfer',
     restocks: 'restock',
     'stock-counts': 'stock_count',
-    ci: 'ci',
     'customer-changes': 'customer_change',
-    identity: 'identity',
+    identity: 'customer',
     'branch-transfers': 'branch_transfer',
   };
   const highlightEntity = highlightEntityByTab[tab] || null;
@@ -651,18 +910,12 @@ export function ApprovalCenterPage({
         (row) => idsMatch(row.count_id, focusId) || idsMatch(row.count_ref, focusId),
         paginationStockCounts.goToPage
       );
-    } else if (tab === 'ci') {
-      goToMatch(
-        ciList,
-        (row) => idsMatch(row.ciId || row.id, focusId),
-        paginationCi.goToPage
-      );
     }
 
     const timer = window.setTimeout(() => setHighlightReady(true), 60);
     return () => window.clearTimeout(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [loading, tab, collectionList, invoiceList, transferList, restockList, stockCountList, ciList]);
+  }, [loading, tab, collectionList, invoiceList, transferList, restockList, stockCountList]);
 
   useNotificationHighlight(highlightEntity, {
     enabled: !loading && Boolean(highlightEntity),
@@ -860,17 +1113,49 @@ export function ApprovalCenterPage({
     });
   };
 
+  const removeInvoiceFromQueue = (invoiceId) => {
+    setInvoiceList((prev) => prev.filter((row) => Number(row.sales_invoices_id) !== Number(invoiceId)));
+    setInvoiceReview((prev) => (
+      Number(prev.id) === Number(invoiceId) ? { open: false, id: null, seed: null } : prev
+    ));
+  };
+
   const confirmInvoice = async (invoiceId) => {
     setBusyKey(`invoice-confirm-${invoiceId}`);
     const result = await patchSalesInvoiceReview(invoiceId, { status: 'Confirmed' });
     setBusyKey(null);
     if (result.success) {
       showToast?.(result.message || 'Invoice acknowledged.', 'success');
-      reload();
-    } else showToast?.(result.message || 'Acknowledge failed.', 'error');
+      removeInvoiceFromQueue(invoiceId);
+      fetchApprovalCenterSummary().then((summaryRes) => {
+        if (summaryRes.success) setSummary(summaryRes.data || null);
+      });
+    } else {
+      showToast?.(result.message || 'Acknowledge failed.', 'error');
+      throw new Error(result.message || 'Acknowledge failed.');
+    }
   };
 
-  const rejectInvoice = (invoiceId) => {
+  const rejectInvoice = async (invoiceId, reasonFromDrawer) => {
+    if (reasonFromDrawer != null) {
+      setBusyKey(`invoice-reject-${invoiceId}`);
+      const result = await patchSalesInvoiceReview(invoiceId, {
+        status: 'Cancelled',
+        review_note: reasonFromDrawer,
+      });
+      setBusyKey(null);
+      if (result.success) {
+        showToast?.(result.message || 'Invoice rejected.', 'success');
+        removeInvoiceFromQueue(invoiceId);
+        fetchApprovalCenterSummary().then((summaryRes) => {
+          if (summaryRes.success) setSummary(summaryRes.data || null);
+        });
+      } else {
+        showToast?.(result.message || 'Reject failed.', 'error');
+        throw new Error(result.message || 'Reject failed.');
+      }
+      return;
+    }
     openReasonDialog({
       key: `invoice-reject-${invoiceId}`,
       title: 'Reject sales invoice',
@@ -883,7 +1168,10 @@ export function ApprovalCenterPage({
         });
         if (result.success) {
           showToast?.(result.message || 'Invoice rejected.', 'success');
-          reload();
+          removeInvoiceFromQueue(invoiceId);
+          fetchApprovalCenterSummary().then((summaryRes) => {
+            if (summaryRes.success) setSummary(summaryRes.data || null);
+          });
         } else {
           showToast?.(result.message || 'Reject failed.', 'error');
           throw new Error(result.message || 'Reject failed.');
@@ -956,29 +1244,48 @@ export function ApprovalCenterPage({
     });
   };
 
-  const approveIdentityReview = async (customerId) => {
-    setBusyKey(`identity-approve-${customerId}`);
-    const result = await decideCustomerIdentityReview(customerId, { decision: 'approve' });
-    setBusyKey(null);
-    if (result.success) {
-      showToast?.(result.message || 'Customer identity approved.', 'success');
-      reload();
-    } else showToast?.(result.message || 'Approve failed.', 'error');
+  const identityHoldLabel = (customer) => {
+    const profile = customer?.registration_profile_json || {};
+    if (
+      String(profile.hold_reason || '') === 'territory_exception'
+      || Boolean(profile.territory_outside_review)
+      || Boolean(customer?.territory_override_note)
+    ) {
+      return 'Territory exception';
+    }
+    return 'Identity review';
   };
 
-  const rejectIdentityReview = (customerId) => {
+  const approveIdentityReview = async (customer) => {
+    const customerId = customer.customer_id;
+    setBusyKey(`identity-approve-${customerId}`);
+    const result = await decideCustomerIdentityReview(customerId, {
+      decision: 'approve',
+      note: null,
+    });
+    setBusyKey(null);
+    if (result.success) {
+      showToast?.(result.message || 'Customer activated.', 'success');
+      reload();
+    } else {
+      showToast?.(result.message || 'Approve failed.', 'error');
+    }
+  };
+
+  const rejectIdentityReview = (customer) => {
+    const customerId = customer.customer_id;
     openReasonDialog({
       key: `identity-reject-${customerId}`,
-      title: 'Reject customer identity',
-      description: 'The customer will be set Inactive and remain blocked from sales.',
-      confirmLabel: 'Reject Identity',
+      title: 'Reject registration',
+      description: 'The registration will be marked Rejected (declined). The Sales Agent can fix address/territory and resubmit the same customer — a new account should not be created.',
+      confirmLabel: 'Reject registration',
       onSubmit: async (reason) => {
         const result = await decideCustomerIdentityReview(customerId, {
           decision: 'reject',
           note: reason,
         });
         if (result.success) {
-          showToast?.(result.message || 'Customer identity rejected.', 'success');
+          showToast?.(result.message || 'Registration rejected.', 'success');
           reload();
         } else {
           showToast?.(result.message || 'Reject failed.', 'error');
@@ -988,43 +1295,120 @@ export function ApprovalCenterPage({
     });
   };
 
-;
-
   const loadTerritoriesForTransfer = async (transferId) => {
     const res = await fetchBranchTransferTargetTerritories(transferId);
     const rows = res.success ? (res.data || []) : [];
     setTargetTerritoryOptionsByTransfer((prev) => ({ ...prev, [transferId]: rows }));
   };
 
-  const submitReceivingTransfer = async (transfer) => {
+  const loadReceivingStaffOptions = async () => {
+    if (staffOptionsLoaded || isOm) return;
+    const res = await getBranchStaff();
+    if (res.success) {
+      setReceivingSalesAgents(
+        (res.data?.salesAgents || []).filter((u) => String(u.status || 'Active') === 'Active')
+      );
+      setReceivingCollectors(
+        (res.data?.collectors || []).filter((u) => String(u.status || 'Active') === 'Active')
+      );
+    } else {
+      setReceivingSalesAgents([]);
+      setReceivingCollectors([]);
+    }
+    setStaffOptionsLoaded(true);
+  };
+
+  const closeProfileDrawer = () => {
+    if (busyKey) return;
+    setProfileDrawer({
+      open: false,
+      loading: false,
+      profile: null,
+      limited: false,
+      title: undefined,
+      actions: [],
+      transfer: null,
+    });
+  };
+
+  const submitReceivingTransfer = (transfer) => {
     const draft = transferDrafts[transfer.transfer_id] || {};
     const territoryId = Number(
       draft.target_territory_id
       || transfer.target_territory_id
       || transfer.proposed_territory_id
     );
+    const salesAgentId = Number(
+      draft.assigned_sales_agent_id
+      || transfer.proposed_assigned_sales_agent_id
+      || transfer.requested_by
+    );
+    const collectorId = Number(
+      draft.account_manager_id
+      || transfer.proposed_account_manager_id
+    );
     if (!territoryId) {
       showToast?.('Select or confirm a receiving territory.', 'error');
       return;
     }
-    setBusyKey(`xfer-recv-${transfer.transfer_id}`);
-    const result = await receivingSubmitBranchTransfer(transfer.transfer_id, {
-      decision: 'confirm',
-      target_territory_id: territoryId,
-      note: draft.note || null,
+    if (!salesAgentId) {
+      showToast?.('Select the receiving Sales Agent.', 'error');
+      return;
+    }
+    if (!collectorId) {
+      showToast?.('Select the receiving Collector.', 'error');
+      return;
+    }
+    const territoryOptions = targetTerritoryOptionsByTransfer[transfer.transfer_id] || [];
+    const territoryName = territoryOptions.find((t) => Number(t.territory_id) === territoryId)?.territory_name
+      || transfer.target_territory_name
+      || transfer.proposed_territory_name
+      || `#${territoryId}`;
+    const saName = staffDisplayName(
+      receivingSalesAgents.find((u) => Number(u.id) === salesAgentId)
+    ) || transfer.proposed_sales_agent_name || transfer.requester_name || `#${salesAgentId}`;
+    const collectorName = staffDisplayName(
+      receivingCollectors.find((u) => Number(u.id) === collectorId)
+    ) || transfer.proposed_account_manager_name || `#${collectorId}`;
+    setConfirmDialog({
+      key: `xfer-recv-confirm-${transfer.transfer_id}`,
+      title: 'Confirm territory and staffing?',
+      description: 'This validates location for your branch, assigns receiving SA + Collector, and sends the request to Source BM for ownership release.',
+      confirmLabel: 'Confirm Territory & Staffing',
+      details: transferConfirmDetails(transfer, [
+        { label: 'Territory', value: territoryName, fullWidth: true },
+        { label: 'Sales Agent', value: saName },
+        { label: 'Collector', value: collectorName },
+        { label: 'Location', value: transferLocationLabel(transfer), fullWidth: true },
+      ]),
+      onConfirm: async () => {
+        setBusyKey(`xfer-recv-${transfer.transfer_id}`);
+        const result = await receivingSubmitBranchTransfer(transfer.transfer_id, {
+          decision: 'confirm',
+          target_territory_id: territoryId,
+          assigned_sales_agent_id: salesAgentId,
+          account_manager_id: collectorId,
+          note: draft.note || null,
+        });
+        setBusyKey(null);
+        if (result.success) {
+          showToast?.(result.message || 'Territory and staffing confirmed.', 'success');
+          setConfirmDialog(null);
+          closeProfileDrawer();
+          reload();
+        } else {
+          showToast?.(result.message || 'Submit failed.', 'error');
+          throw new Error(result.message || 'Submit failed.');
+        }
+      },
     });
-    setBusyKey(null);
-    if (result.success) {
-      showToast?.(result.message || 'Territory confirmed.', 'success');
-      reload();
-    } else showToast?.(result.message || 'Submit failed.', 'error');
   };
 
   const returnReceivingTransfer = (transfer) => {
     openReasonDialog({
       key: `xfer-recv-return-${transfer.transfer_id}`,
       title: 'Return location to Sales Agent',
-      description: 'Ask the SA to correct the customer\'s current address or landmark.',
+      description: 'Ask the SA to correct the customer\'s current address or landmark. Source BM will not see this until location is re-confirmed.',
       confirmLabel: 'Return to SA',
       onSubmit: async (reason) => {
         const result = await receivingSubmitBranchTransfer(transfer.transfer_id, {
@@ -1033,6 +1417,7 @@ export function ApprovalCenterPage({
         });
         if (result.success) {
           showToast?.(result.message || 'Returned to SA.', 'success');
+          closeProfileDrawer();
           reload();
         } else {
           showToast?.(result.message || 'Failed.', 'error');
@@ -1042,34 +1427,83 @@ export function ApprovalCenterPage({
     });
   };
 
-  const submitSourceTransfer = async (transfer) => {
-    setBusyKey(`xfer-source-${transfer.transfer_id}`);
-    const result = await sourceSubmitBranchTransfer(transfer.transfer_id, {
-      decision: 'release',
-      note: transferDrafts[transfer.transfer_id]?.note || null,
+  const openReceivingTransferReview = (transfer) => {
+    loadTerritoriesForTransfer(transfer.transfer_id);
+    loadReceivingStaffOptions();
+    setProfileDrawer({
+      open: true,
+      loading: false,
+      limited: true,
+      title: 'Review incoming transfer',
+      transfer,
+      profile: limitedReceivingTransferProfile(transfer),
+      actions: [
+        {
+          key: 'confirm-territory',
+          label: 'Confirm Territory & Staffing',
+          onClick: () => submitReceivingTransfer(transfer),
+        },
+        {
+          key: 'return-sa',
+          label: 'Return to SA',
+          variant: 'ghost',
+          onClick: () => returnReceivingTransfer(transfer),
+        },
+      ],
     });
-    setBusyKey(null);
-    if (result.success) {
-      showToast?.(result.message || 'Ownership released to OM.', 'success');
-      reload();
-    } else showToast?.(result.message || 'Submit failed.', 'error');
   };
 
-  const decideSourceTransfer = (transfer, decision) => {
+  const submitSourceTransfer = (transfer) => {
+    const receivingBranch = transfer.receiving_branch_name
+      || transfer.target_branch_name
+      || 'receiving branch';
+    setConfirmDialog({
+      key: `xfer-source-release-${transfer.transfer_id}`,
+      title: 'Release ownership?',
+      description: `Confirm releasing this customer to ${receivingBranch}. Ownership moves to Operating Manager for final approval.`,
+      confirmLabel: 'Release Ownership',
+      details: transferConfirmDetails(transfer, [
+        {
+          label: 'Territory',
+          value: transfer.target_territory_name || transfer.proposed_territory_name || '—',
+          fullWidth: true,
+        },
+      ]),
+      onConfirm: async () => {
+        setBusyKey(`xfer-source-${transfer.transfer_id}`);
+        const result = await sourceSubmitBranchTransfer(transfer.transfer_id, {
+          decision: 'release',
+          note: transferDrafts[transfer.transfer_id]?.note || null,
+        });
+        setBusyKey(null);
+        if (result.success) {
+          showToast?.(result.message || 'Ownership released to OM.', 'success');
+          setConfirmDialog(null);
+          closeProfileDrawer();
+          reload();
+        } else {
+          showToast?.(result.message || 'Submit failed.', 'error');
+          throw new Error(result.message || 'Submit failed.');
+        }
+      },
+    });
+  };
+
+  const decideSourceTransfer = (transfer) => {
+    // Location returns are Receiving-BM only; Source BM may release or hard-reject.
     openReasonDialog({
-      key: `xfer-source-${decision}-${transfer.transfer_id}`,
-      title: decision === 'reject' ? 'Reject ownership release' : 'Return transfer to SA',
-      description: decision === 'reject'
-        ? 'Customer remains in the source branch.'
-        : 'Sales Agent must correct location details.',
-      confirmLabel: decision === 'reject' ? 'Reject Transfer' : 'Return to SA',
+      key: `xfer-source-reject-${transfer.transfer_id}`,
+      title: 'Reject ownership release',
+      description: 'Customer remains in the source branch. This permanently stops the transfer.',
+      confirmLabel: 'Reject Transfer',
       onSubmit: async (reason) => {
         const result = await sourceSubmitBranchTransfer(transfer.transfer_id, {
-          decision,
+          decision: 'reject',
           note: reason,
         });
         if (result.success) {
           showToast?.(result.message || 'Updated.', 'success');
+          closeProfileDrawer();
           reload();
         } else {
           showToast?.(result.message || 'Failed.', 'error');
@@ -1079,38 +1513,97 @@ export function ApprovalCenterPage({
     });
   };
 
-  const decideOmTransfer = (transfer, decision) => {
+  const decideOmTransfer = (transfer, decision = 'reject') => {
     if (decision === 'approve') {
-      setBusyKey(`xfer-om-${transfer.transfer_id}`);
-      omDecideBranchTransfer(transfer.transfer_id, { decision: 'approve' }).then((result) => {
-        setBusyKey(null);
-        if (result.success) {
-          showToast?.(result.message || 'Transfer approved.', 'success');
-          reload();
-        } else showToast?.(result.message || 'Approve failed.', 'error');
+      setConfirmDialog({
+        key: `xfer-om-approve-${transfer.transfer_id}`,
+        title: 'Approve branch transfer?',
+        description: 'This moves the customer into the receiving branch, applies territory, address, receiving Sales Agent and Collector, and preserves outstanding balances on the same customer ID.',
+        confirmLabel: 'Approve Transfer',
+        details: transferConfirmDetails(transfer, [
+          {
+            label: 'Territory',
+            value: transfer.target_territory_name || transfer.proposed_territory_name || '—',
+            fullWidth: true,
+          },
+          { label: 'Sales Agent', value: transfer.proposed_sales_agent_name || '—' },
+          { label: 'Collector', value: transfer.proposed_account_manager_name || '—' },
+          {
+            label: 'Location',
+            value: transferLocationLabel(transfer),
+            fullWidth: true,
+          },
+        ]),
+        onConfirm: async () => {
+          setBusyKey(`xfer-om-${transfer.transfer_id}`);
+          const result = await omDecideBranchTransfer(transfer.transfer_id, { decision: 'approve' });
+          setBusyKey(null);
+          if (result.success) {
+            showToast?.(result.message || 'Transfer approved.', 'success');
+            setConfirmDialog(null);
+            closeProfileDrawer();
+            reload();
+          } else {
+            showToast?.(result.message || 'Approve failed.', 'error');
+            throw new Error(result.message || 'Approve failed.');
+          }
+        },
       });
       return;
     }
     openReasonDialog({
-      key: `xfer-om-${decision}-${transfer.transfer_id}`,
-      title: decision === 'reject' ? 'Reject branch transfer' : 'Return to Sales Agent',
-      description: decision === 'reject'
-        ? 'Customer remains in the source branch.'
-        : 'Sales Agent must correct location before Receiving BM re-validates.',
-      confirmLabel: decision === 'reject' ? 'Reject Transfer' : 'Return to SA',
+      key: `xfer-om-reject-${transfer.transfer_id}`,
+      title: 'Reject branch transfer',
+      description: 'Customer remains in the source branch. Location returns stay with Receiving BM; OM reject ends the transfer.',
+      confirmLabel: 'Reject Transfer',
       onSubmit: async (reason) => {
         const result = await omDecideBranchTransfer(transfer.transfer_id, {
-          decision: decision === 'needs_revision' ? 'return' : decision,
+          decision: 'reject',
           note: reason,
         });
         if (result.success) {
           showToast?.(result.message || 'Updated.', 'success');
+          closeProfileDrawer();
           reload();
         } else {
           showToast?.(result.message || 'Failed.', 'error');
           throw new Error(result.message || 'Failed.');
         }
       },
+    });
+  };
+
+  const openOmTransferReview = async (transfer) => {
+    setProfileDrawer({
+      open: true,
+      loading: true,
+      limited: false,
+      title: 'Review branch transfer',
+      transfer,
+      profile: omTransferReviewProfile(transfer),
+      actions: [
+        {
+          key: 'approve',
+          label: 'Approve Transfer',
+          onClick: () => decideOmTransfer(transfer, 'approve'),
+        },
+        {
+          key: 'reject',
+          label: 'Reject',
+          variant: 'ghost',
+          onClick: () => decideOmTransfer(transfer, 'reject'),
+        },
+      ],
+    });
+    const res = await fetchCustomerById(transfer.customer_id);
+    const customer = res.success ? (res.data || null) : null;
+    setProfileDrawer((prev) => {
+      if (!prev.open || Number(prev.transfer?.transfer_id) !== Number(transfer.transfer_id)) return prev;
+      return {
+        ...prev,
+        loading: false,
+        profile: omTransferReviewProfile(transfer, customer),
+      };
     });
   };
 
@@ -1129,8 +1622,6 @@ export function ApprovalCenterPage({
     && !transferList.length
     && !restockList.length
     && !stockCountList.length
-    && !ciList.length
-    && !identityList.length
   ) {
     return <LoadingState message="Loading approval center…" />;
   }
@@ -1269,7 +1760,9 @@ export function ApprovalCenterPage({
               Acknowledge a sale logged by a sales agent, or reject it with a reason.
             </p>
           </div>
-          {invoiceList.length ? (
+          {loading && !invoiceList.length ? (
+            <LoadingState message="Loading sales invoices…" />
+          ) : invoiceList.length ? (
             <>
               <div className="corvex-table-wrapper">
                 <table className="corvex-table">
@@ -1278,73 +1771,92 @@ export function ApprovalCenterPage({
                       <th>Invoice</th>
                       <th>Customer</th>
                       <th>Sales Agent</th>
-                      <th>Amount</th>
+                      <th className="is-money">Amount</th>
                       <th>Terms</th>
                       <th>Submitted</th>
-                      <th>Actions</th>
+                      <th aria-label="Row actions" />
                     </tr>
                   </thead>
                   <tbody>
-                    {paginationInvoices.paginatedData.map((inv) => (
-                      <tr
-                        key={inv.sales_invoices_id}
-                        data-record-key={recordKey('invoice', inv.sales_invoices_id || inv.invoice_number)}
-                        data-highlight-alt={inv.invoice_number || undefined}
-                      >
-                        <td><strong>{inv.invoice_number}</strong></td>
-                        <td>{inv.customer_name}</td>
-                        <td>{inv.sales_agent_name}</td>
-                        <td style={{ fontWeight: 600 }}>{formatCurrency(Number(inv.total_amount))}</td>
-                        <td>
-                          {inv.pay_type
-                            ? `${inv.pay_type}${inv.term_months ? ` · ${inv.term_months} mo` : ''}`
-                            : '—'}
-                        </td>
-                        <td>
-                          {formatDisplayDateTime(inv.invoices_date || inv.created_at)}
-                          {waitingLabel(inv.invoices_date || inv.created_at) ? (
-                            <div className="muted" style={{ fontSize: '0.75rem' }}>
-                              {waitingLabel(inv.invoices_date || inv.created_at)}
-                            </div>
-                          ) : null}
-                        </td>
-                        <td className="table-actions" onClick={(e) => e.stopPropagation()}>
-                          <RowActionMenu
-                            label={`Actions for invoice ${inv.invoice_number || inv.sales_invoices_id}`}
-                            items={[
-                              {
-                                key: 'view',
-                                label: 'View',
-                                disabled: Boolean(busyKey),
-                                onSelect: () => setQueueSummary({
-                                  title: `Invoice ${inv.invoice_number || inv.sales_invoices_id}`,
-                                  rows: [
-                                    { label: 'Invoice', value: inv.invoice_number || inv.sales_invoices_id },
-                                    { label: 'Customer', value: inv.customer_name || '—' },
-                                    { label: 'Sales Agent', value: inv.sales_agent_name || inv.agent_name || '—' },
-                                    { label: 'Amount', value: formatCurrency(Number(inv.total_amount ?? inv.amount ?? 0)) },
-                                    { label: 'Status', value: inv.status || '—' },
-                                    { label: 'Submitted', value: formatDisplayDateTime(inv.created_at || inv.invoice_date) },
-                                  ],
-                                }),
-                              },
-                              {
-                                key: 'ack',
-                                label: 'Acknowledge',
-                                disabled: Boolean(busyKey),
-                                onSelect: () => confirmInvoice(inv.sales_invoices_id),
-                              },
-                              {
-                                key: 'reject',
-                                label: 'Reject',
-                                disabled: Boolean(busyKey),
-                                onSelect: () => rejectInvoice(inv.sales_invoices_id),
-                              },
-                            ]}
-                          />
-                        </td>
-                      </tr>
-                    ))}
+                    {paginationInvoices.paginatedData.map((inv) => {
+                      const amount = invoiceAmountDisplay(inv);
+                      const submittedAt = inv.created_at || inv.invoices_date;
+                      return (
+                        <tr
+                          key={inv.sales_invoices_id}
+                          className="clickable-row"
+                          data-record-key={recordKey('invoice', inv.sales_invoices_id || inv.invoice_number)}
+                          data-highlight-alt={inv.invoice_number || undefined}
+                          onClick={() => setInvoiceReview({
+                            open: true,
+                            id: inv.sales_invoices_id,
+                            seed: inv,
+                          })}
+                        >
+                          <td><strong>{inv.invoice_number}</strong></td>
+                          <td>
+                            {inv.customer_name}
+                            {inv.customer_code ? (
+                              <span className="muted" style={{ display: 'block', fontSize: '0.8rem' }}>
+                                {inv.customer_code}
+                              </span>
+                            ) : null}
+                          </td>
+                          <td>
+                            <span className="received-by-cell">
+                              <span>{inv.sales_agent_name}</span>
+                              <span className="role-inline-badge">Sales Agent</span>
+                            </span>
+                          </td>
+                          <td className="is-money tabular-nums">
+                            <strong>{formatCurrency(amount.finalAmt)}</strong>
+                            {amount.discounted ? (
+                              <span className="muted" style={{ display: 'block', fontSize: '0.75rem' }}>
+                                was {formatCurrency(amount.original)}
+                              </span>
+                            ) : null}
+                          </td>
+                          <td>{invoiceTermsLabel(inv)}</td>
+                          <td>
+                            {formatDisplayDateTime(submittedAt)}
+                            {waitingLabel(submittedAt) ? (
+                              <div className={waitingToneClass(submittedAt)} style={{ fontSize: '0.75rem' }}>
+                                {waitingLabel(submittedAt)}
+                              </div>
+                            ) : null}
+                          </td>
+                          <td className="table-actions" onClick={(e) => e.stopPropagation()}>
+                            <RowActionMenu
+                              label="Row actions"
+                              items={[
+                                {
+                                  key: 'view',
+                                  label: 'View details',
+                                  disabled: Boolean(busyKey),
+                                  onSelect: () => setInvoiceReview({
+                                    open: true,
+                                    id: inv.sales_invoices_id,
+                                    seed: inv,
+                                  }),
+                                },
+                                {
+                                  key: 'ack',
+                                  label: 'Acknowledge',
+                                  disabled: Boolean(busyKey),
+                                  onSelect: () => confirmInvoice(inv.sales_invoices_id),
+                                },
+                                {
+                                  key: 'reject',
+                                  label: 'Reject',
+                                  disabled: Boolean(busyKey),
+                                  onSelect: () => rejectInvoice(inv.sales_invoices_id),
+                                },
+                              ]}
+                            />
+                          </td>
+                        </tr>
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>
@@ -1570,126 +2082,105 @@ export function ApprovalCenterPage({
         </section>
       ) : null}
 
-      {tab === 'ci' ? (
+      {tab === 'identity' ? (
         <section className="panel content-panel relative overflow-hidden">
-          {selectedCiId ? (
-            <>
-              <div className="mb-4" style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                <button
-                  className="button ghost"
-                  type="button"
-                  onClick={() => {
-                    setSelectedCiId(null);
-                    reload();
-                  }}
-                >
-                  Back to CI queue
-                </button>
-                <button
-                  className="button ghost"
-                  type="button"
-                  onClick={() => navigate(`${opsBase}/ci-approvals/${selectedCiId}`)}
-                >
-                  Open full desk
-                </button>
-              </div>
-              <CreditInvestigationDetailPage
-                ciId={selectedCiId}
-                navigate={navigate}
-                opsBase={opsBase}
-                showToast={showToast}
-              />
-            </>
-          ) : (
-          <>
-          <div className="flex flex-col md:flex-row justify-between gap-4 items-start md:items-center mb-4">
-            <div>
-              <h3>Credit Reviews</h3>
-              <p className="muted" style={{ margin: '4px 0 0' }}>
-                Review and decide here. Same decide UI as the Credit Review desk.
-              </p>
-            </div>
-            <button
-              className="button ghost"
-              type="button"
-              onClick={() => navigate(`${opsBase}/ci-approvals`)}
-            >
-              Full Credit Review Queue
-            </button>
+          <div className="list-section-header">
+            <h3>Territory / Identity Reviews</h3>
+            <p className="list-section-subtitle">
+              Approve territory-exception registrations (and other Pending Identity Review holds) so the account can sell, or reject to mark Inactive.
+            </p>
           </div>
-          {ciList.length ? (
-            <>
-              <div className="corvex-table-wrapper">
-                <table className="corvex-table">
-                  <thead>
-                    <tr>
-                      <th>Customer</th>
-                      <th>Sales Agent</th>
-                      <th>Risk</th>
-                      <th>Requested / Suggested</th>
-                      <th>Waiting Since</th>
-                      <th>Status</th>
-                      <th>Actions</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {paginationCi.paginatedData.map((ci) => (
+          {identityReviewList.length ? (
+            <div className="corvex-table-wrapper">
+              <table className="corvex-table">
+                <thead>
+                  <tr>
+                    <th>Customer</th>
+                    <th>Code</th>
+                    <th>Territory</th>
+                    <th>Hold</th>
+                    <th>Exception note</th>
+                    <th>Sales Agent</th>
+                    <th>Submitted</th>
+                    <th>Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {identityReviewList.map((customer) => {
+                    const name = formatCustomerFullName(customer) || customerDisplayName(customer) || '—';
+                    const code = formatCustomerDisplayId(customer);
+                    return (
                       <tr
-                        key={ci.id}
-                        className="clickable-row"
-                        data-record-key={recordKey('ci', ci.ciId || ci.id)}
-                        onClick={() => setSelectedCiId(ci.ciId || ci.id)}
+                        key={customer.customer_id}
+                        data-record-key={recordKey('customer', customer.customer_id)}
                       >
                         <td>
-                          <strong>{ci.customerName}</strong>
-                          {ci.customerCode ? (
-                            <span className="muted" style={{ display: 'block', fontSize: '0.8rem' }}>
-                              {ci.customerCode}
-                            </span>
-                          ) : null}
-                        </td>
-                        <td>{ci.submittedBy || '—'}</td>
-                        <td><StatusBadge status={ci.riskLevel || '—'} /></td>
-                        <td>
-                          <div>{formatMoneyOrNA(ci.requestedLimit)} requested</div>
-                          <div className="muted" style={{ fontSize: '0.8rem' }}>
-                            {formatMoneyOrNA(ci.suggestedLimit)} suggested
+                          <strong>{name}</strong>
+                          <div style={{ marginTop: 4 }}>
+                            <StatusBadge status={customer.status || 'Pending Identity Review'} />
                           </div>
                         </td>
-                        <td>
-                          {formatDisplayDate(ci.submissionDate)}
-                          {waitingLabel(ci.submissionDate) ? (
-                            <div className="muted" style={{ fontSize: '0.75rem' }}>
-                              {waitingLabel(ci.submissionDate)}
-                            </div>
-                          ) : null}
+                        <td>{code}</td>
+                        <td>{customer.territory_name || '—'}</td>
+                        <td>{identityHoldLabel(customer)}</td>
+                        <td style={{ whiteSpace: 'normal', maxWidth: 220 }}>
+                          {customer.territory_override_note || '—'}
                         </td>
-                        <td><StatusBadge status={ci.displayStatus || ci.status} /></td>
+                        <td>{customer.assigned_sales_agent_name || '—'}</td>
+                        <td>{formatDisplayDateTime(customer.created_at)}</td>
                         <td className="table-actions" onClick={(e) => e.stopPropagation()}>
                           <RowActionMenu
-                            label={`Actions for credit review ${ci.ciId || ci.id}`}
+                            label={`Actions for ${name}`}
                             items={[
-                              { key: 'view', label: 'View', onSelect: () => setSelectedCiId(ci.ciId || ci.id) },
-                              { key: 'desk', label: 'Open full desk', onSelect: () => navigate(`${opsBase}/ci-approvals/${ci.ciId || ci.id}`) },
+                              {
+                                key: 'view',
+                                label: 'View customer',
+                                disabled: Boolean(busyKey),
+                                onSelect: () => navigate(`${opsBase}/customers/${customer.customer_id}`),
+                              },
+                              {
+                                key: 'details',
+                                label: 'Review details',
+                                disabled: Boolean(busyKey),
+                                onSelect: () => setQueueSummary({
+                                  title: `${identityHoldLabel(customer)} · ${name}`,
+                                  rows: [
+                                    { label: 'Customer', value: name },
+                                    { label: 'Code', value: code },
+                                    { label: 'Territory', value: customer.territory_name || '—' },
+                                    { label: 'Address', value: customer.address || '—' },
+                                    { label: 'Exception note', value: customer.territory_override_note || '—' },
+                                    { label: 'Sales Agent', value: customer.assigned_sales_agent_name || '—' },
+                                    { label: 'Submitted', value: formatDisplayDateTime(customer.created_at) },
+                                  ],
+                                }),
+                              },
+                              {
+                                key: 'approve',
+                                label: 'Approve & activate',
+                                disabled: Boolean(busyKey),
+                                onSelect: () => approveIdentityReview(customer),
+                              },
+                              {
+                                key: 'reject',
+                                label: 'Reject registration',
+                                disabled: Boolean(busyKey),
+                                onSelect: () => rejectIdentityReview(customer),
+                              },
                             ]}
                           />
                         </td>
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-              <Pagination {...paginationCi} />
-            </>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
           ) : (
             <EmptyState
               title="Nothing waiting for your decision"
-              description="No credit reviews are awaiting a Branch Manager decision."
-              actionLabel="Full Credit Review Queue"
-              onAction={() => navigate(`${opsBase}/ci-approvals`)}
+              description="No territory exception or identity reviews are pending."
             />
-          )}
-          </>
           )}
         </section>
       ) : null}
@@ -1738,7 +2229,13 @@ export function ApprovalCenterPage({
                                   { label: 'Customer', value: request.customer_name || request.customer_code || request.customer_id || '—' },
                                   { label: 'Requested by', value: request.requester_name || '—' },
                                   { label: 'Change type', value: request.change_type || request.request_type || '—' },
-                                  { label: 'Summary', value: request.summary || request.change_summary || request.notes || '—' },
+                                  {
+                                    label: 'Proposed fields',
+                                    value: request.proposed_json && typeof request.proposed_json === 'object'
+                                      ? Object.keys(request.proposed_json).join(', ') || '—'
+                                      : '—',
+                                  },
+                                  { label: 'Reason', value: request.reason || '—' },
                                   { label: 'Submitted', value: formatDisplayDateTime(request.created_at) },
                                 ],
                               }),
@@ -1755,113 +2252,6 @@ export function ApprovalCenterPage({
             </div>
           ) : (
             <EmptyState title="Nothing waiting for your decision" description="No customer changes are awaiting approval." />
-          )}
-        </section>
-      ) : null}
-
-      {tab === 'identity' ? (
-        <section className="panel content-panel relative overflow-hidden">
-          <div className="list-section-header">
-            <h3>Customer Identity Review</h3>
-            <p className="list-section-subtitle">
-              Review customers held in Pending Identity Review. Possible-match registration is blocked at Find Existing Customer — no Branch Manager verification tickets are created.
-            </p>
-          </div>
-
-          {identityList.length ? (
-            <>
-              <h4 className="subsection-title">Legacy held customers (Pending Identity Review)</h4>
-              <div className="corvex-table-wrapper">
-                <table className="corvex-table">
-                  <thead>
-                    <tr>
-                      <th>Customer</th>
-                      <th>Phone</th>
-                      <th>Matches</th>
-                      <th>Submitted</th>
-                      <th>Actions</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {identityList.map((customer) => {
-                      const candidates = customer.identity_match_json?.candidates || [];
-                      return (
-                        <tr
-                          key={customer.customer_id}
-                          data-record-key={recordKey('identity', customer.customer_id)}
-                          data-highlight-alt={String(customer.customer_id)}
-                        >
-                          <td>
-                            <strong>
-                              {[customer.first_name, customer.last_name].filter(Boolean).join(' ')
-                                || `#${customer.customer_id}`}
-                            </strong>
-                            <StatusBadge status={customer.status} />
-                          </td>
-                          <td>{customer.contact_phone || '—'}</td>
-                          <td>
-                            {candidates.map((m) => (
-                              <div key={m.customer_id} className="muted" style={{ fontSize: '0.8rem' }}>
-                                {m.display_name || m.customer_code}
-                                {m.branch_name ? ` · ${m.branch_name}` : ''}
-                                {m.cross_branch ? ' (other branch)' : ''}
-                              </div>
-                            ))}
-                          </td>
-                          <td>{formatDisplayDateTime(customer.created_at)}</td>
-                          <td className="table-actions" onClick={(e) => e.stopPropagation()}>
-                            <RowActionMenu
-                              label={`Actions for customer ${customer.customer_id}`}
-                              items={[
-                                {
-                                  key: 'view',
-                                  label: 'View Profile',
-                                  disabled: Boolean(busyKey),
-                                  onSelect: async () => {
-                                    setProfileDrawer({ open: true, loading: true, profile: null });
-                                    const res = await fetchCustomerById(customer.customer_id);
-                                    if (!res.success || !res.data) {
-                                      setProfileDrawer({ open: false, loading: false, profile: null });
-                                      showToast?.(res.message || 'Could not load customer profile.', 'error');
-                                      return;
-                                    }
-                                    setProfileDrawer({
-                                      open: true,
-                                      loading: false,
-                                      profile: {
-                                        ...res.data,
-                                        contact_phone_masked: res.data.contact_phone,
-                                      },
-                                    });
-                                  },
-                                },
-                                {
-                                  key: 'approve',
-                                  label: 'Approve',
-                                  disabled: Boolean(busyKey),
-                                  onSelect: () => approveIdentityReview(customer.customer_id),
-                                },
-                                {
-                                  key: 'reject',
-                                  label: 'Reject',
-                                  disabled: Boolean(busyKey),
-                                  onSelect: () => rejectIdentityReview(customer.customer_id),
-                                },
-                              ]}
-                            />
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
-            </>
-          ) : (
-            <EmptyState
-              title="Nothing waiting for identity review"
-              description="No customers are held in Pending Identity Review."
-            />
           )}
         </section>
       ) : null}
@@ -1883,7 +2273,7 @@ export function ApprovalCenterPage({
                     <th>Customer ID</th>
                     <th>From → Receiving</th>
                     <th>Current Location</th>
-                    <th>Proposed Territory</th>
+                    <th>Territory / Staffing</th>
                     <th>Status</th>
                     <th>Actions</th>
                   </tr>
@@ -1896,69 +2286,123 @@ export function ApprovalCenterPage({
                     const isReceivingBm = !isOm && actorBranch === Number(transfer.target_branch_id);
                     const needsReceiving = transfer.status === 'Pending Receiving';
                     const needsSource = transfer.status === 'Pending Source';
-                    const locationLabel = [
-                      transfer.address_street,
-                      transfer.address_barangay,
-                      transfer.address_city,
-                      transfer.address_province,
-                    ].filter(Boolean).join(', ') || transfer.address || '—';
+                    const locationLabel = transferLocationLabel(transfer);
+                    const omCanDecide = isOm && transfer.status === 'Pending OM';
                     return (
                       <tr key={transfer.transfer_id}>
-                        <td>
+                        <td style={{ verticalAlign: 'top', whiteSpace: 'normal' }}>
                           <strong>
-                            {[transfer.first_name, transfer.last_name].filter(Boolean).join(' ')
-                              || transfer.customer_code
-                              || `#${transfer.customer_id}`}
+                            {transferCustomerLabel(transfer)}
                           </strong>
-                          <div className="muted" style={{ fontSize: '0.75rem' }}>{transfer.customer_code}</div>
-                          <StatusBadge status={transfer.customer_status || 'Active'} />
+                          <div style={{ marginTop: 4 }}>
+                            <StatusBadge status={transfer.customer_status || 'Active'} />
+                          </div>
                         </td>
-                        <td>{transfer.customer_id}</td>
-                        <td>
-                          {transfer.source_branch_name || transfer.source_branch_id}
-                          {' → '}
-                          {transfer.target_branch_name || transfer.target_branch_id}
-                          <div className="muted" style={{ fontSize: '0.75rem' }}>
+                        <td style={{ verticalAlign: 'top', whiteSpace: 'nowrap' }}>
+                          {formatCustomerDisplayId(transfer)}
+                        </td>
+                        <td style={{ verticalAlign: 'top', whiteSpace: 'normal', maxWidth: 180 }}>
+                          <div style={{ overflowWrap: 'anywhere', wordBreak: 'break-word' }}>
+                            {transfer.source_branch_name || transfer.source_branch_id}
+                            {' → '}
+                            {transfer.target_branch_name || transfer.target_branch_id}
+                          </div>
+                          <div className="muted" style={{ fontSize: '0.75rem', overflowWrap: 'anywhere' }}>
                             Requested by {transfer.requester_name || '—'}
                           </div>
                         </td>
-                        <td style={{ maxWidth: 220 }}>
-                          <div style={{ fontSize: '0.85rem' }}>{locationLabel}</div>
-                          <div className="muted" style={{ fontSize: '0.75rem' }}>{transfer.reason || '—'}</div>
+                        <td style={{ verticalAlign: 'top', maxWidth: 200, width: '22%' }}>
+                          <div style={{ fontSize: '0.85rem', overflowWrap: 'anywhere', wordBreak: 'break-word', whiteSpace: 'normal' }}>
+                            {locationLabel}
+                          </div>
+                          <div className="muted" style={{ fontSize: '0.75rem', marginTop: 4, overflowWrap: 'anywhere', wordBreak: 'break-word', whiteSpace: 'normal' }}>
+                            {transfer.reason || '—'}
+                          </div>
                           {transfer.revision_note ? (
-                            <p className="form-error" style={{ fontSize: '0.75rem', margin: '4px 0 0' }}>
+                            <p className="form-error" style={{ fontSize: '0.75rem', margin: '4px 0 0', overflowWrap: 'anywhere', wordBreak: 'break-word' }}>
                               Return note: {transfer.revision_note}
                             </p>
                           ) : null}
                         </td>
-                        <td style={{ minWidth: 200 }}>
+                        <td style={{ verticalAlign: 'top', maxWidth: 200, whiteSpace: 'normal' }}>
                           {needsReceiving && isReceivingBm ? (
-                            <select
-                              className="filter-select"
-                              value={draft.target_territory_id || transfer.target_territory_id || transfer.proposed_territory_id || ''}
-                              onFocus={() => loadTerritoriesForTransfer(transfer.transfer_id)}
-                              onChange={(e) => setTransferDrafts((prev) => ({
-                                ...prev,
-                                [transfer.transfer_id]: {
-                                  ...prev[transfer.transfer_id],
-                                  target_territory_id: e.target.value,
-                                },
-                              }))}
-                            >
-                              <option value="">Confirm receiving territory</option>
-                              {(targetTerritoryOptionsByTransfer[transfer.transfer_id] || []).map((t) => (
-                                <option key={t.territory_id} value={t.territory_id}>
-                                  {t.territory_name}
-                                </option>
-                              ))}
-                            </select>
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                              <select
+                                className="filter-select"
+                                value={draft.target_territory_id || transfer.target_territory_id || transfer.proposed_territory_id || ''}
+                                onFocus={() => {
+                                  loadTerritoriesForTransfer(transfer.transfer_id);
+                                  loadReceivingStaffOptions();
+                                }}
+                                onChange={(e) => setTransferDrafts((prev) => ({
+                                  ...prev,
+                                  [transfer.transfer_id]: {
+                                    ...prev[transfer.transfer_id],
+                                    target_territory_id: e.target.value,
+                                  },
+                                }))}
+                              >
+                                <option value="">Confirm receiving territory</option>
+                                {(targetTerritoryOptionsByTransfer[transfer.transfer_id] || []).map((t) => (
+                                  <option key={t.territory_id} value={t.territory_id}>
+                                    {t.territory_name}
+                                  </option>
+                                ))}
+                              </select>
+                              <select
+                                className="filter-select"
+                                value={draft.assigned_sales_agent_id
+                                  || transfer.proposed_assigned_sales_agent_id
+                                  || transfer.requested_by
+                                  || ''}
+                                onFocus={() => loadReceivingStaffOptions()}
+                                onChange={(e) => setTransferDrafts((prev) => ({
+                                  ...prev,
+                                  [transfer.transfer_id]: {
+                                    ...prev[transfer.transfer_id],
+                                    assigned_sales_agent_id: e.target.value,
+                                  },
+                                }))}
+                              >
+                                <option value="">Assign Sales Agent</option>
+                                {receivingSalesAgents.map((u) => (
+                                  <option key={u.id} value={u.id}>{staffDisplayName(u)}</option>
+                                ))}
+                              </select>
+                              <select
+                                className="filter-select"
+                                value={draft.account_manager_id || transfer.proposed_account_manager_id || ''}
+                                onFocus={() => loadReceivingStaffOptions()}
+                                onChange={(e) => setTransferDrafts((prev) => ({
+                                  ...prev,
+                                  [transfer.transfer_id]: {
+                                    ...prev[transfer.transfer_id],
+                                    account_manager_id: e.target.value,
+                                  },
+                                }))}
+                              >
+                                <option value="">Assign Collector</option>
+                                {receivingCollectors.map((u) => (
+                                  <option key={u.id} value={u.id}>{staffDisplayName(u)}</option>
+                                ))}
+                              </select>
+                            </div>
                           ) : (
-                            <div>
-                              {transfer.target_territory_name
-                                || transfer.proposed_territory_name
-                                || transfer.target_territory_id
-                                || transfer.proposed_territory_id
-                                || '—'}
+                            <div style={{ overflowWrap: 'anywhere', wordBreak: 'break-word' }}>
+                              <div>
+                                {transfer.target_territory_name
+                                  || transfer.proposed_territory_name
+                                  || transfer.target_territory_id
+                                  || transfer.proposed_territory_id
+                                  || '—'}
+                              </div>
+                              {(transfer.proposed_sales_agent_name || transfer.proposed_account_manager_name) ? (
+                                <div className="muted" style={{ fontSize: '0.75rem', marginTop: 4 }}>
+                                  SA: {transfer.proposed_sales_agent_name || '—'}
+                                  <br />
+                                  Collector: {transfer.proposed_account_manager_name || '—'}
+                                </div>
+                              ) : null}
                             </div>
                           )}
                         </td>
@@ -1967,14 +2411,16 @@ export function ApprovalCenterPage({
                           <RowActionMenu
                             label={`Actions for branch transfer ${transfer.transfer_id}`}
                             items={[
-                              {
-                                key: 'view',
-                                label: 'View',
+                              !isOm
+                                && !((needsReceiving && isReceivingBm) || (needsSource && isSourceBm)) && {
+                                key: 'view-transfer',
+                                label: 'View Transfer Details',
+                                disabled: Boolean(busyKey),
                                 onSelect: () => setQueueSummary({
-                                  title: `Branch transfer CBT-${transfer.transfer_id}`,
+                                  title: `Branch transfer ${transferRefLabel(transfer)}`,
                                   rows: [
-                                    { label: 'Customer', value: [transfer.first_name, transfer.last_name].filter(Boolean).join(' ') || transfer.customer_code || transfer.customer_id },
-                                    { label: 'Customer ID', value: transfer.customer_id },
+                                    { label: 'Customer', value: transferCustomerLabel(transfer) },
+                                    { label: 'Customer ID', value: formatCustomerDisplayId(transfer) },
                                     { label: 'From → Receiving', value: `${transfer.source_branch_name || transfer.source_branch_id} → ${transfer.target_branch_name || transfer.target_branch_id}` },
                                     { label: 'Location', value: locationLabel },
                                     { label: 'Status', value: transfer.status },
@@ -1986,8 +2432,14 @@ export function ApprovalCenterPage({
                                 }),
                               },
                               needsReceiving && isReceivingBm && {
+                                key: 'review-incoming',
+                                label: 'Review Customer Info',
+                                disabled: Boolean(busyKey),
+                                onSelect: () => openReceivingTransferReview(transfer),
+                              },
+                              needsReceiving && isReceivingBm && {
                                 key: 'confirm-territory',
-                                label: 'Confirm Territory',
+                                label: 'Confirm Territory & Staffing',
                                 disabled: Boolean(busyKey),
                                 onSelect: () => submitReceivingTransfer(transfer),
                               },
@@ -2001,23 +2453,7 @@ export function ApprovalCenterPage({
                                 key: 'view-profile',
                                 label: 'View Customer Profile',
                                 disabled: Boolean(busyKey),
-                                onSelect: async () => {
-                                  setProfileDrawer({ open: true, loading: true, profile: null });
-                                  const res = await fetchCustomerById(transfer.customer_id);
-                                  if (!res.success || !res.data) {
-                                    setProfileDrawer({ open: false, loading: false, profile: null });
-                                    showToast?.(res.message || 'Could not load customer profile.', 'error');
-                                    return;
-                                  }
-                                  setProfileDrawer({
-                                    open: true,
-                                    loading: false,
-                                    profile: {
-                                      ...res.data,
-                                      contact_phone_masked: res.data.contact_phone_masked || res.data.contact_phone,
-                                    },
-                                  });
-                                },
+                                onSelect: () => navigate(`/branch-manager/customers/${transfer.customer_id}`),
                               },
                               needsSource && isSourceBm && {
                                 key: 'release',
@@ -2026,39 +2462,57 @@ export function ApprovalCenterPage({
                                 onSelect: () => submitSourceTransfer(transfer),
                               },
                               needsSource && isSourceBm && {
-                                key: 'source-return',
-                                label: 'Return to SA',
-                                disabled: Boolean(busyKey),
-                                onSelect: () => decideSourceTransfer(transfer, 'return'),
-                              },
-                              needsSource && isSourceBm && {
                                 key: 'source-reject',
                                 label: 'Reject',
                                 disabled: Boolean(busyKey),
-                                onSelect: () => decideSourceTransfer(transfer, 'reject'),
+                                onSelect: () => decideSourceTransfer(transfer),
                               },
-                              isOm && transfer.status === 'Pending OM' && {
+                              omCanDecide && {
+                                key: 'review',
+                                label: 'Review Customer Info',
+                                disabled: Boolean(busyKey),
+                                onSelect: () => openOmTransferReview(transfer),
+                              },
+                              omCanDecide && {
                                 key: 'approve',
                                 label: 'Approve',
                                 disabled: Boolean(busyKey),
                                 onSelect: () => decideOmTransfer(transfer, 'approve'),
                               },
-                              isOm && transfer.status === 'Pending OM' && {
-                                key: 'revision',
-                                label: 'Return to SA',
-                                disabled: Boolean(busyKey),
-                                onSelect: () => decideOmTransfer(transfer, 'needs_revision'),
-                              },
-                              isOm && transfer.status === 'Pending OM' && {
+                              omCanDecide && {
                                 key: 'reject',
                                 label: 'Reject',
                                 disabled: Boolean(busyKey),
                                 onSelect: () => decideOmTransfer(transfer, 'reject'),
                               },
-                            ]}
+                              isOm && !omCanDecide && {
+                                key: 'oversight',
+                                label: 'View Transfer Details',
+                                disabled: Boolean(busyKey),
+                                onSelect: () => setQueueSummary({
+                                  title: `Branch transfer ${transferRefLabel(transfer)}`,
+                                  rows: [
+                                    { label: 'Customer', value: transferCustomerLabel(transfer) },
+                                    { label: 'Customer ID', value: formatCustomerDisplayId(transfer) },
+                                    { label: 'From → Receiving', value: `${transfer.source_branch_name || transfer.source_branch_id} → ${transfer.target_branch_name || transfer.target_branch_id}` },
+                                    { label: 'Location', value: locationLabel },
+                                    { label: 'Status', value: transfer.status },
+                                    { label: 'Requested by', value: transfer.requester_name || '—' },
+                                    { label: 'Reason', value: transfer.reason || '—' },
+                                    { label: 'Territory', value: transfer.target_territory_name || transfer.proposed_territory_name || '—' },
+                                    { label: 'Source release note', value: transfer.source_release_note || '—' },
+                                  ],
+                                }),
+                              },
+                            ].filter(Boolean)}
                           />
                           {!isOm && !isSourceBm && !isReceivingBm ? (
                             <div className="muted" style={{ fontSize: '0.75rem', marginTop: 4 }}>Waiting on Receiving BM / Source BM / OM</div>
+                          ) : null}
+                          {isOm && !omCanDecide ? (
+                            <div className="muted" style={{ fontSize: '0.75rem', marginTop: 4 }}>
+                              Waiting on {transfer.status === 'Pending Receiving' ? 'Receiving BM' : transfer.status === 'Pending Source' ? 'Source BM' : 'Sales Agent'}
+                            </div>
                           ) : null}
                         </td>
                       </tr>
@@ -2076,6 +2530,19 @@ export function ApprovalCenterPage({
         </section>
       ) : null}
 
+      <InvoiceReviewDrawer
+        open={invoiceReview.open}
+        invoiceId={invoiceReview.id}
+        seed={invoiceReview.seed}
+        busy={Boolean(busyKey)}
+        onClose={() => {
+          if (busyKey) return;
+          setInvoiceReview({ open: false, id: null, seed: null });
+        }}
+        onAcknowledge={confirmInvoice}
+        onReject={rejectInvoice}
+      />
+
       <QueueSummaryModal
         open={Boolean(queueSummary)}
         title={queueSummary?.title}
@@ -2086,7 +2553,11 @@ export function ApprovalCenterPage({
         open={profileDrawer.open}
         loading={profileDrawer.loading}
         profile={profileDrawer.profile}
-        onClose={() => setProfileDrawer({ open: false, loading: false, profile: null })}
+        limited={Boolean(profileDrawer.limited)}
+        title={profileDrawer.title || 'Customer Profile'}
+        actions={profileDrawer.actions || []}
+        busy={Boolean(busyKey)}
+        onClose={closeProfileDrawer}
       />
       <TransferDetailModal
         detail={transferDetail}
@@ -2170,6 +2641,26 @@ export function ApprovalCenterPage({
         onChange={setReasonText}
         onCancel={closeReasonDialog}
         onConfirm={submitReasonDialog}
+        busy={Boolean(busyKey)}
+      />
+
+      <ConfirmDialog
+        open={Boolean(confirmDialog)}
+        title={confirmDialog?.title || 'Confirm'}
+        description={confirmDialog?.description}
+        details={confirmDialog?.details || []}
+        confirmLabel={confirmDialog?.confirmLabel || 'Confirm'}
+        onCancel={() => {
+          if (!busyKey) setConfirmDialog(null);
+        }}
+        onConfirm={async () => {
+          if (!confirmDialog?.onConfirm) return;
+          try {
+            await confirmDialog.onConfirm();
+          } catch {
+            /* toast already shown by onConfirm */
+          }
+        }}
         busy={Boolean(busyKey)}
       />
     </div>

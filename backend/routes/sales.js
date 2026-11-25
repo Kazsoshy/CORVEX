@@ -110,6 +110,7 @@ async function getInvoice(invoiceIdentifier, user) {
        si.pricing_policy_version,
        si.purchase_bracket,
        si.original_maturity_date::text AS original_maturity_date,
+       si.spot_cash_settlement,
        pm.method_name AS payment_method,
        si.created_at,
        si.updated_at
@@ -484,7 +485,19 @@ router.post('/credit-investigations', salesStaffOnly, async (req, res) => {
     );
     const submitterName = submitterMeta.rows[0]?.display_name || 'Sales agent';
 
-    await client.query('BEGIN');
+    const creditLimitRes = await client.query(
+      `SELECT COALESCE(credit_limit, 0) AS credit_limit
+       FROM customer_credit_info WHERE customer_id = $1`,
+      [customerId]
+    );
+    const hasApprovedCredit = Number(creditLimitRes.rows[0]?.credit_limit || 0) > 0;
+    const creditProfile = req.body.credit_profile && typeof req.body.credit_profile === 'object'
+      ? req.body.credit_profile
+      : null;
+    let effectiveReason = requestReason;
+    if (!hasApprovedCredit && !Number.isFinite(resubmitCiId)) {
+      effectiveReason = 'First installment';
+    }
 
     // Auto-detect open revision for this customer when Sales re-requests without an explicit id.
     let targetResubmitId = Number.isFinite(resubmitCiId) ? resubmitCiId : null;
@@ -503,21 +516,32 @@ router.post('/credit-investigations', salesStaffOnly, async (req, res) => {
       }
     }
 
+    if (!targetResubmitId && !hasApprovedCredit && !creditProfile) {
+      return res.status(400).json({
+        success: false,
+        message: 'First credit application requires civil status, alternate contact, employment, and government ID details.',
+      });
+    }
+
+    await client.query('BEGIN');
+
     const created = targetResubmitId
       ? await resubmitCreditReview(client, {
         ciId: targetResubmitId,
         submittedBy: user.id,
-        requestReason,
+        requestReason: effectiveReason || requestReason,
         requestedCreditLimit,
         requestRemarks,
+        creditProfile: !hasApprovedCredit ? creditProfile : null,
       })
       : await createCreditReview(client, {
         customerId,
         branchId: access.row.branch_id,
         submittedBy: user.id,
-        requestReason,
+        requestReason: effectiveReason,
         requestedCreditLimit,
         requestRemarks,
+        creditProfile: !hasApprovedCredit ? creditProfile : null,
       });
 
     if (Number.isFinite(recommendationId) && recommendationId > 0 && !created.resubmitted) {
@@ -597,7 +621,9 @@ router.get('/credit-investigations', salesStaffOnly, async (req, res) => {
     let statusSql = '';
     if (status && status !== 'All') {
       if (status === 'Needs BM' || status === 'Pending' || status === 'needs_bm') {
-        statusSql = ` AND ci.status IN ('Pending', 'Revision Requested')`;
+        statusSql = ` AND ci.status = 'Pending'`;
+      } else if (status === 'Needs More Info' || status === 'Revision Requested') {
+        statusSql = ` AND ci.status = 'Revision Requested'`;
       } else {
         statusSql = ' AND ci.status = $2';
         params.push(status);
@@ -776,6 +802,9 @@ router.post('/credit-recommendations/:id/convert', salesStaffOnly, async (req, r
       });
     }
 
+    const creditProfile = req.body.credit_profile && typeof req.body.credit_profile === 'object'
+      ? req.body.credit_profile
+      : null;
     const converted = await convertRecommendationToCi(client, {
       recommendationId,
       branchId: row.branch_id,
@@ -783,6 +812,7 @@ router.post('/credit-recommendations/:id/convert', salesStaffOnly, async (req, r
       requestReason: req.body.request_reason || null,
       requestedCreditLimit: req.body.requested_credit_limit,
       requestRemarks: req.body.request_remarks || null,
+      creditProfile,
     });
     await client.query('COMMIT');
 
@@ -1021,6 +1051,43 @@ router.get('/invoices/:invoiceId', salesStaffOrOperatingManager, async (req, res
 
 router.use(salesStaffOnly);
 
+router.get('/branch-payment-settings', async (req, res) => {
+  try {
+    const pool = req.app.locals.pool;
+    const branchId = req.currentUser.branchId;
+    if (branchId == null) {
+      return res.status(400).json({ success: false, message: 'No branch assigned.' });
+    }
+    const result = await pool.query(
+      `SELECT id AS branch_id,
+              name AS branch_name,
+              gcash_account_name,
+              gcash_mobile,
+              gcash_qr_image
+       FROM branches
+       WHERE id = $1`,
+      [branchId]
+    );
+    if (!result.rows.length) {
+      return res.status(404).json({ success: false, message: 'Branch not found.' });
+    }
+    const row = result.rows[0];
+    return res.status(200).json({
+      success: true,
+      data: {
+        ...row,
+        configured: Boolean(String(row.gcash_qr_image || '').trim()),
+      },
+    });
+  } catch (error) {
+    console.error('[Sales] GET /branch-payment-settings error:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to load branch payment settings',
+    });
+  }
+});
+
 router.get('/payment-methods', async (req, res) => {
   const pool = req.app.locals.pool;
 
@@ -1078,7 +1145,12 @@ router.post('/invoices', async (req, res) => {
 
   try {
     await client.query('BEGIN');
-    const applied = await applySalesInvoice(client, user, req.body);
+    const applied = await applySalesInvoice(client, {
+      ...user,
+    }, {
+      ...req.body,
+      ip_address: req.ip || req.headers['x-forwarded-for'] || '127.0.0.1',
+    });
     const invoiceNumber = applied.invoiceNumber;
     const stockAlerts = applied.stockAlerts;
     await client.query('COMMIT');
@@ -1101,19 +1173,37 @@ router.post('/invoices', async (req, res) => {
       affectedRecord: `invoice:${applied.invoiceId}`,
     });
 
+    const settlement = applied.spotCashSettlement;
+    let message = 'Sale logged successfully.';
+    if (settlement === 'gcash_recorded') {
+      message = 'Sale logged. GCash Spot Cash payment recorded; invoice awaits Branch Head review.';
+    } else if (settlement === 'awaiting_pickup') {
+      message = 'Sale logged. Spot Cash Cash awaits same-day collector pickup.';
+    }
+
     try {
       const invoice = await getInvoice(invoiceNumber, { ...user, pool });
       return res.status(201).json({
         success: true,
-        data: invoice,
-        message: 'Sale logged successfully.',
+        data: {
+          ...invoice,
+          spot_cash_payment: applied.spotCashPayment || null,
+          receipts_id: applied.receiptsId || null,
+        },
+        message,
       });
     } catch (lookupError) {
       console.error('[Sales] invoice lookup after commit:', lookupError.message);
       return res.status(201).json({
         success: true,
-        data: { invoice_number: invoiceNumber, sales_invoices_id: applied.invoiceId },
-        message: 'Sale logged successfully.',
+        data: {
+          invoice_number: invoiceNumber,
+          sales_invoices_id: applied.invoiceId,
+          spot_cash_settlement: settlement || null,
+          spot_cash_payment: applied.spotCashPayment || null,
+          receipts_id: applied.receiptsId || null,
+        },
+        message,
       });
     }
   } catch (error) {

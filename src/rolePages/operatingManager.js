@@ -27,6 +27,7 @@ export const operatingManagerRole = {
         { label: 'Sales History', to: '/operating-manager/sales-history' },
         { label: 'Digital Receipts', to: '/operating-manager/digital-receipts' },
         { label: 'Payment History', to: '/operating-manager/operations/credit-history' },
+        { label: 'Credit Investigations', to: '/operating-manager/operations/ci-approvals' },
       ],
     },
     {
@@ -78,6 +79,7 @@ export const operatingManagerRole = {
     { label: 'Sales History', to: '/operating-manager/sales-history' },
     { label: 'Digital Receipts', to: '/operating-manager/digital-receipts' },
     { label: 'Payment History', to: '/operating-manager/operations/credit-history' },
+    { label: 'Credit Investigations', to: '/operating-manager/operations/ci-approvals' },
     { label: 'User Management', to: '/operating-manager/admin/users' },
     { label: 'Branch Management', to: '/operating-manager/admin/branches' },
     { label: 'Territories', to: '/operating-manager/territories' },

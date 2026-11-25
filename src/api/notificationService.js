@@ -99,8 +99,14 @@ export function inferNotificationEntity(row) {
   if (cat === 'ci' || cat.includes('credit') || title.includes('credit')) {
     return title.includes('flag') ? 'customer' : 'ci';
   }
+  if (
+    cat.includes('identity')
+    || title.includes('territory exception')
+    || title.includes('identity review')
+  ) {
+    return 'identity';
+  }
   if (cat.includes('customer')) return 'customer';
-  if (cat.includes('identity')) return 'identity';
   if (cat.includes('receipt') || cat.includes('collection') || cat.includes('payment')) return 'collection';
   if (cat.includes('purchase')) return 'purchase_request';
   if (cat.includes('schedule') || cat.includes('route') || cat.includes('assignment')) return 'schedule';
@@ -248,8 +254,9 @@ export function resolveNotificationNavigation(row, {
           `${isOm ? '/operating-manager/operations' : opsBase}/ci-approvals/${id}`,
           { highlight: id }
         );
-      } else if (approvalBase) path = withQuery(`${approvalBase}`, { tab: 'ci', ...focusParams });
-      else if (isCollector) path = '/collector/accounts';
+      } else if (isBm || isOm) {
+        path = `${isOm ? '/operating-manager/operations' : opsBase}/ci-approvals`;
+      } else if (isCollector) path = '/collector/accounts';
       break;
 
     case 'customer_change':
@@ -264,11 +271,22 @@ export function resolveNotificationNavigation(row, {
           verificationId: id || undefined,
           highlight: id || undefined,
         });
-      } else if (isSales && id) path = withQuery(`/sales/customers/verification/${id}`, { highlight: id });
+      } else if (isBm && id) path = withQuery(`${opsBase}/customers/${id}`, { highlight: id });
+      else if (isSales && id) path = withQuery(`/sales/customers/verification/${id}`, { highlight: id });
       break;
 
     case 'customer':
-      if (isOm && id) path = withQuery(`/operating-manager/customers/${id}`, { highlight: id });
+      if (
+        (isBm || isOm)
+        && approvalBase
+        && /territory exception|identity review|pending identity/i.test(`${row?.title || ''} ${row?.message || ''}`)
+      ) {
+        path = withQuery(`${approvalBase}`, {
+          tab: 'identity',
+          highlight: id || undefined,
+          verificationId: id || undefined,
+        });
+      } else if (isOm && id) path = withQuery(`/operating-manager/customers/${id}`, { highlight: id });
       else if (isBm && id) path = withQuery(`${opsBase}/customers/${id}`, { highlight: id });
       else if (isSales && id) path = withQuery(`/sales/customers/${id}`, { highlight: id });
       else if (isCollector && id) path = withQuery(`/collector/accounts/${id}`, { highlight: id });

@@ -6,8 +6,22 @@ import {
   dispatchPortalActivationEmail,
 } from '../lib/customerPortal.js';
 import { isMailConfigured } from '../lib/mail.js';
+import {
+  isValidEmailFormat,
+  normalizeEmail,
+  sendEmailOtpChallenge,
+  verifyEmailOtpChallenge,
+  verifyEmailVerificationToken,
+} from '../lib/customerEmailOtp.js';
 import { AUDIT_STATUS, writeAuditFromReq } from '../lib/auditLog.js';
-import { notifyCustomerProfileUpdated, writeCustomerAudit } from '../lib/customerNotifications.js';
+import {
+  notifyCustomerCreated,
+  notifyCustomerProfileUpdated,
+  notifyTerritoryReviewDecided,
+  notifyTerritoryReviewSubmitted,
+  writeCustomerAudit,
+} from '../lib/customerNotifications.js';
+import { upsertOpenOperationalAlert, resolveAlertsBySourceKey } from '../lib/operationalAlerts.js';
 import {
   OVERDUE_CUSTOMER_SQL,
   paymentStandingFromFlags,
@@ -18,7 +32,6 @@ import {
   limitedMatchCard,
   digitsOnly,
 } from '../lib/customerDuplicateLookup.js';
-import { resolveAlertsBySourceKey } from '../lib/operationalAlerts.js';
 import {
   createBranchTransferRequest,
   findOpenBranchTransferForCustomer,
@@ -30,6 +43,20 @@ import {
   sourceBmSubmitTransfer,
   omDecideTransfer,
 } from '../lib/customerBranchTransfer.js';
+import {
+  notifyBranchTransferSubmitted,
+  notifyBranchTransferReturnedToSa,
+  notifyBranchTransferPendingSource,
+  notifyBranchTransferPendingOm,
+  notifyBranchTransferRejected,
+  notifyBranchTransferApproved,
+} from '../lib/branchTransferNotifications.js';
+
+function transferCustomerLabel(row) {
+  return [row?.first_name, row?.last_name].filter(Boolean).join(' ')
+    || row?.customer_code
+    || (row?.customer_id != null ? `Customer #${row.customer_id}` : 'Customer');
+}
 
 /** Stable advisory-lock key for concurrent cash registration by phone. */
 const CUSTOMER_CREATE_PHONE_LOCK_NS = 748392210;
@@ -220,6 +247,7 @@ const CUSTOMER_SELECT_CORE = `
          c.privacy_notice_version,
          c.marketing_opt_in,
          c.phone_verification_status,
+         c.email_verification_status,
          c.identity_match_json,
          c.identity_review_note,
          c.identity_reviewed_by,
@@ -249,6 +277,7 @@ router.get('/', async (req, res) => {
       territory_id,
       assigned_sales_agent_id,
       agent,
+      eligibility,
       page = 1,
       limit = 20,
       include_stats,
@@ -266,6 +295,17 @@ router.get('/', async (req, res) => {
 
     if (branch_id) { conditions.push(`c.branch_id = $${pIdx++}`); params.push(Number(branch_id)); }
     if (status)    { conditions.push(`c.status = $${pIdx++}`);    params.push(status); }
+
+    // Match list "creditLimit" column: Cash = no approved limit; Credit = limit > 0.
+    const creditLimitExpr = `COALESCE((
+      SELECT cci.credit_limit FROM customer_credit_info cci WHERE cci.customer_id = c.customer_id LIMIT 1
+    ), 0)`;
+    const eligibilityKey = String(eligibility || req.query.eligibility || '').trim().toLowerCase();
+    if (eligibilityKey === 'cash') {
+      conditions.push(`${creditLimitExpr} <= 0`);
+    } else if (eligibilityKey === 'credit' || eligibilityKey === 'installment') {
+      conditions.push(`${creditLimitExpr} > 0`);
+    }
     const salesAgentFilter = Number(assigned_sales_agent_id || agent);
     if (Number.isInteger(salesAgentFilter) && salesAgentFilter > 0) {
       conditions.push(`c.assigned_sales_agent_id = $${pIdx++}`);
@@ -549,6 +589,54 @@ router.get('/lookup', async (req, res) => {
   }
 });
 
+router.post('/email-otp/send', allow(ROLE_SETS.customerWrite), async (req, res) => {
+  try {
+    const result = await sendEmailOtpChallenge(req.app.locals.pool, {
+      email: req.body?.email,
+      userId: req.currentUser?.id,
+    });
+    return res.status(200).json({
+      success: true,
+      message: 'Verification code sent.',
+      data: result,
+    });
+  } catch (err) {
+    const status = Number(err.status) || 500;
+    if (status >= 500) console.error('[Customers] POST /email-otp/send error:', err.message);
+    return res.status(status).json({
+      success: false,
+      message: err.message || 'Failed to send verification code.',
+      cooldown_seconds: err.cooldownSeconds,
+    });
+  }
+});
+
+router.post('/email-otp/verify', allow(ROLE_SETS.customerWrite), async (req, res) => {
+  try {
+    const result = await verifyEmailOtpChallenge(req.app.locals.pool, {
+      email: req.body?.email,
+      code: req.body?.code,
+      userId: req.currentUser?.id,
+    });
+    return res.status(200).json({
+      success: true,
+      message: 'Email verified.',
+      data: {
+        email: result.email,
+        email_verification_token: result.email_verification_token,
+        expires_in_seconds: result.expires_in_seconds,
+      },
+    });
+  } catch (err) {
+    const status = Number(err.status) || 500;
+    if (status >= 500) console.error('[Customers] POST /email-otp/verify error:', err.message);
+    return res.status(status).json({
+      success: false,
+      message: err.message || 'Failed to verify email code.',
+    });
+  }
+});
+
 router.get('/branch-transfers', allow(ROLE_SETS.customerRead, ROLE_SETS.branchOps), async (req, res) => {
   try {
     const pool = req.app.locals.pool;
@@ -676,9 +764,19 @@ router.post('/:id/branch-transfer-requests', async (req, res) => {
     });
 
     const full = await getBranchTransferById(req.app.locals.pool, transfer.transfer_id);
+    try {
+      await notifyBranchTransferSubmitted(req.app.locals.pool, {
+        transferId: transfer.transfer_id,
+        customerName: transferCustomerLabel(full),
+        targetBranchId: full.target_branch_id,
+        sourceBranchId: full.source_branch_id,
+      });
+    } catch (notifyErr) {
+      console.error('[Customers] branch transfer submit notify:', notifyErr.message);
+    }
     return res.status(201).json({
       success: true,
-      message: 'Branch transfer requested. Receiving Branch Manager will validate location and territory.',
+      message: 'Branch transfer requested. Receiving Branch Manager will validate location, territory, and staffing.',
       data: { ...full, progress: deriveTransferProgress(full) },
     });
   } catch (err) {
@@ -740,7 +838,28 @@ router.post('/branch-transfers/:id/sa-resubmit', async (req, res) => {
         : null,
     });
     await client.query('COMMIT');
+
+    await writeAuditFromReq(req.app.locals.pool, req, {
+      module: 'Customer Management',
+      activity: 'Branch Transfer',
+      action: 'Resubmit Branch Transfer',
+      description: `SA resubmitted branch transfer #${transferId}.`,
+      status: AUDIT_STATUS.UPDATED,
+      affectedRecord: `customer_branch_transfer:${transferId}`,
+    });
+
     const full = await getBranchTransferById(req.app.locals.pool, transfer.transfer_id);
+    try {
+      await notifyBranchTransferSubmitted(req.app.locals.pool, {
+        transferId: transfer.transfer_id,
+        customerName: transferCustomerLabel(full),
+        targetBranchId: full.target_branch_id,
+        sourceBranchId: full.source_branch_id,
+        resubmit: true,
+      });
+    } catch (notifyErr) {
+      console.error('[Customers] branch transfer resubmit notify:', notifyErr.message);
+    }
     return res.json({
       success: true,
       message: 'Transfer resubmitted to Receiving Branch Manager.',
@@ -811,14 +930,51 @@ router.post('/branch-transfers/:id/receiving-submit', allow(ROLE_SETS.branchOps)
       targetTerritoryId: req.body?.target_territory_id
         ? Number(req.body.target_territory_id)
         : null,
+      assignedSalesAgentId: req.body?.assigned_sales_agent_id
+        ? Number(req.body.assigned_sales_agent_id)
+        : null,
+      accountManagerId: req.body?.account_manager_id
+        ? Number(req.body.account_manager_id)
+        : null,
       note: req.body?.note || req.body?.remarks || null,
     });
     await client.query('COMMIT');
+
+    const decisionLabel = String(req.body?.decision || 'confirm').trim().toLowerCase();
+    await writeAuditFromReq(req.app.locals.pool, req, {
+      module: 'Customer Management',
+      activity: 'Branch Transfer',
+      action: decisionLabel === 'return' || decisionLabel === 'needs_revision' || decisionLabel === 'revision'
+        ? 'Receiving Return to SA'
+        : 'Receiving Confirm Territory & Staffing',
+      description: `Receiving BM updated branch transfer #${transferId} (${transfer.status}).`,
+      status: AUDIT_STATUS.UPDATED,
+      affectedRecord: `customer_branch_transfer:${transferId}`,
+    });
+
     const full = await getBranchTransferById(req.app.locals.pool, transfer.transfer_id);
+    try {
+      if (transfer.status === 'Returned to SA') {
+        await notifyBranchTransferReturnedToSa(req.app.locals.pool, {
+          transferId,
+          customerName: transferCustomerLabel(full),
+          requestedBy: full.requested_by,
+          note: full.revision_note,
+        });
+      } else if (transfer.status === 'Pending Source') {
+        await notifyBranchTransferPendingSource(req.app.locals.pool, {
+          transferId,
+          customerName: transferCustomerLabel(full),
+          sourceBranchId: full.source_branch_id,
+        });
+      }
+    } catch (notifyErr) {
+      console.error('[Customers] branch transfer receiving notify:', notifyErr.message);
+    }
     return res.json({
       success: true,
       message: transfer.status === 'Pending Source'
-        ? 'Territory confirmed. Waiting on Source Branch Manager ownership release.'
+        ? 'Territory and staffing confirmed. Waiting on Source Branch Manager ownership release.'
         : 'Transfer returned to Sales Agent for location correction.',
       data: { ...full, progress: deriveTransferProgress(full) },
     });
@@ -857,7 +1013,37 @@ router.post('/branch-transfers/:id/source-submit', allow(ROLE_SETS.branchOps), a
       note: req.body?.note || req.body?.remarks || req.body?.reason || null,
     });
     await client.query('COMMIT');
+
+    const sourceDecision = String(req.body?.decision || 'release').trim().toLowerCase();
+    await writeAuditFromReq(req.app.locals.pool, req, {
+      module: 'Customer Management',
+      activity: 'Branch Transfer',
+      action: sourceDecision === 'reject' || sourceDecision === 'rejected'
+        ? 'Source Reject Branch Transfer'
+        : 'Source Release Ownership',
+      description: `Source BM updated branch transfer #${transferId} (${transfer.status}).`,
+      status: transfer.status === 'Rejected' ? AUDIT_STATUS.UPDATED : AUDIT_STATUS.UPDATED,
+      affectedRecord: `customer_branch_transfer:${transferId}`,
+    });
+
     const full = await getBranchTransferById(req.app.locals.pool, transfer.transfer_id);
+    try {
+      if (transfer.status === 'Rejected') {
+        await notifyBranchTransferRejected(req.app.locals.pool, {
+          transferId,
+          customerName: transferCustomerLabel(full),
+          requestedBy: full.requested_by,
+          note: full.rejection_note,
+        });
+      } else if (transfer.status === 'Pending OM') {
+        await notifyBranchTransferPendingOm(req.app.locals.pool, {
+          transferId,
+          customerName: transferCustomerLabel(full),
+        });
+      }
+    } catch (notifyErr) {
+      console.error('[Customers] branch transfer source notify:', notifyErr.message);
+    }
     return res.json({
       success: true,
       message: transfer.status === 'Pending OM'
@@ -885,6 +1071,9 @@ router.post('/branch-transfers/:id/om-decide', allow(ROLE_SETS.org), async (req,
       omUserId: req.currentUser.id,
       assignedSalesAgentId: req.body?.assigned_sales_agent_id
         ? Number(req.body.assigned_sales_agent_id)
+        : null,
+      accountManagerId: req.body?.account_manager_id
+        ? Number(req.body.account_manager_id)
         : null,
     });
 
@@ -917,10 +1106,31 @@ router.post('/branch-transfers/:id/om-decide', allow(ROLE_SETS.org), async (req,
       affectedRecord: `customer_branch_transfer:${transferId}`,
     });
 
+    try {
+      const full = await getBranchTransferById(req.app.locals.pool, transferId);
+      if (result.applied) {
+        await notifyBranchTransferApproved(req.app.locals.pool, {
+          transferId,
+          customerName: transferCustomerLabel(full),
+          requestedBy: full?.requested_by,
+          targetBranchId: full?.target_branch_id,
+        });
+      } else if (result.transfer?.status === 'Rejected') {
+        await notifyBranchTransferRejected(req.app.locals.pool, {
+          transferId,
+          customerName: transferCustomerLabel(full),
+          requestedBy: full?.requested_by,
+          note: full?.rejection_note || req.body?.note || req.body?.remarks,
+        });
+      }
+    } catch (notifyErr) {
+      console.error('[Customers] branch transfer OM notify:', notifyErr.message);
+    }
+
     return res.json({
       success: true,
       message: result.applied
-        ? 'Branch transfer approved. Customer is now in the receiving branch.'
+        ? 'Branch transfer approved. Customer is now in the receiving branch with assigned SA and collector.'
         : `Transfer updated (${result.transfer.status}).`,
       data: result.transfer,
     });
@@ -1205,6 +1415,7 @@ router.post('/', async (req, res) => {
     privacy_notice_version: privacyNoticeVersionRaw,
     marketing_opt_in: marketingOptInRaw,
     phone_verification_status: phoneVerificationStatusRaw,
+    email_verification_token: emailVerificationTokenRaw,
     cash_registration: cashRegistrationRaw,
   } = req.body;
 
@@ -1248,6 +1459,18 @@ router.post('/', async (req, res) => {
     || (customerType === 'Business' ? cleanPart(contact_person_fname) : '');
   const resolvedLastName = cleanPart(last_name)
     || (customerType === 'Business' ? cleanPart(contact_person_lname) : '');
+  if (resolvedFirstName && resolvedFirstName.length > 100) {
+    return res.status(400).json({ success: false, message: 'First name must be 100 characters or fewer.' });
+  }
+  if (resolvedLastName && resolvedLastName.length > 100) {
+    return res.status(400).json({ success: false, message: 'Last name must be 100 characters or fewer.' });
+  }
+  if (middle_name && String(middle_name).trim().length > 50) {
+    return res.status(400).json({ success: false, message: 'Middle name must be 50 characters or fewer.' });
+  }
+  if (nameSuffix && nameSuffix.length > 20) {
+    return res.status(400).json({ success: false, message: 'Name suffix must be 20 characters or fewer.' });
+  }
   const alternateFirstName = cashRegistration ? null : cleanPart(contact_person_fname);
   const alternateMiddleName = cashRegistration ? null : cleanPart(contact_person_mname);
   const alternateLastName = cashRegistration ? null : cleanPart(contact_person_lname);
@@ -1343,7 +1566,25 @@ router.post('/', async (req, res) => {
 
   // A supplied portal email explicitly requests an activation workflow; no default
   // password is ever created and the invitation remains linked to this customer.
-  const portalRequested = Boolean(String(portal_email || '').trim());
+  const portalEmailNormalized = normalizeEmail(portal_email);
+  const portalRequested = Boolean(portalEmailNormalized);
+  if (portalRequested && !isValidEmailFormat(portalEmailNormalized)) {
+    return res.status(400).json({ success: false, message: 'A valid portal email is required.' });
+  }
+  let emailVerificationStatus = 'Unverified';
+  if (portalRequested) {
+    const tokenCheck = verifyEmailVerificationToken(emailVerificationTokenRaw, portalEmailNormalized);
+    if (!tokenCheck.ok) {
+      return res.status(400).json({
+        success: false,
+        message: tokenCheck.reason === 'expired'
+          ? 'Email verification expired. Send a new code and verify again.'
+          : 'Verify the portal email with the code we sent before registering.',
+        code: 'EMAIL_VERIFICATION_REQUIRED',
+      });
+    }
+    emailVerificationStatus = 'Verified';
+  }
   if (portalRequested && !isMailConfigured()) {
     return res.status(503).json({ success: false, message: PORTAL_EMAIL_NOT_CONFIGURED });
   }
@@ -1382,7 +1623,7 @@ router.post('/', async (req, res) => {
 
       const dup = await findCustomerDuplicates(client, {
         contact_phone: contact_phone.trim(),
-        portal_email: portal_email,
+        portal_email: portalEmailNormalized || portal_email,
         name: customerFullNameForLookup,
         address_barangay: addressParts.address_barangay,
         address: composedAddress,
@@ -1524,6 +1765,23 @@ router.post('/', async (req, res) => {
       account_eligibility: 'Cash',
     };
 
+    const territoryHold = Boolean(territoryOverrideNote)
+      || Boolean(profileInput.territory_outside_review)
+      || String(profileInput.hold_reason || '') === 'territory_exception';
+    if (territoryHold) {
+      if (!territoryOverrideNote) {
+        await client.query('ROLLBACK');
+        return res.status(400).json({
+          success: false,
+          message: 'Territory exception note is required when registering outside coverage.',
+          code: 'TERRITORY_EXCEPTION_NOTE_REQUIRED',
+        });
+      }
+      customerStatus = 'Pending Identity Review';
+      registrationProfile.hold_reason = 'territory_exception';
+      registrationProfile.territory_outside_review = true;
+    }
+
     const result = await client.query(
       `INSERT INTO customers
         (branch_id, account_manager_id, assigned_sales_agent_id, territory_id,
@@ -1538,9 +1796,9 @@ router.post('/', async (req, res) => {
          customer_type, business_name, registration_profile_json, source_assignment_id,
          territory_override_note, estimated_monthly_revenue, estimated_monthly_expenses, existing_obligations,
          privacy_notice_acknowledged_at, privacy_notice_version, marketing_opt_in,
-         phone_verification_status, identity_match_json)
+         phone_verification_status, email_verification_status, identity_match_json)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,'Unverified',$34,$35,$36::jsonb,$37,$38,$39,$40,$41,
-         $42,$43,$44,$45,$46::jsonb)
+         $42,$43,$44,$45,$46,$47::jsonb)
        RETURNING customer_id, created_at`,
       [
         resolvedBranchId,
@@ -1588,6 +1846,7 @@ router.post('/', async (req, res) => {
         privacyAcknowledged ? privacyVersion : null,
         marketingOptIn,
         phoneVerificationStatus,
+        emailVerificationStatus,
         JSON.stringify(identityMatchJson),
       ]
     );
@@ -1623,20 +1882,42 @@ router.post('/', async (req, res) => {
     }
 
     let portalMeta = null;
-    if (portalRequested) {
+    const deferPortalInvite = territoryHold && portalRequested;
+    if (portalRequested && !deferPortalInvite) {
       portalMeta = await createPortalInvitation(client, {
         customerId,
         branchId: resolvedBranchId,
-        portalEmail: portal_email,
+        portalEmail: portalEmailNormalized,
         contactFirstName: contact_person_fname,
         contactLastName: contact_person_lname,
       });
       console.log(`[CustomerPortal] Invitation created for customer ${customerId}: ${portalMeta.activationUrl}`);
+    } else if (deferPortalInvite) {
+      await client.query(
+        `UPDATE customers
+         SET portal_email = $1, portal_status = 'none'
+         WHERE customer_id = $2`,
+        [portalEmailNormalized, customerId]
+      );
     } else {
       await client.query(
         `UPDATE customers SET portal_status = 'none' WHERE customer_id = $1 AND (portal_status IS NULL OR portal_status = 'none')`,
         [customerId]
       );
+    }
+
+    if (territoryHold) {
+      await upsertOpenOperationalAlert(client, {
+        branchId: resolvedBranchId,
+        alertType: 'Territory Exception Review',
+        severity: 'Warning',
+        title: 'Territory exception review',
+        message: `${resolvedFirstName} ${resolvedLastName} was registered outside territory coverage. Review address and assignment before activating.`,
+        sourceKey: `customer-territory-review:${customerId}`,
+        entityType: 'customer',
+        entityId: customerId,
+        linkPath: `/branch-manager/customers/${customerId}`,
+      });
     }
 
     await client.query('COMMIT');
@@ -1665,16 +1946,40 @@ router.post('/', async (req, res) => {
     );
 
     const portalPayload = portalMeta ? buildPortalApiPayload(portalMeta, emailResult) : null;
+    const displayName = `${resolvedFirstName} ${resolvedLastName}`.trim();
+    const actorLabel = salesAgentDisplayName(req.currentUser);
 
     let createMessage = 'Customer created.';
-    if (portalMeta) {
-      const inbox = portalMeta.portalEmail;
-      createMessage = emailResult?.sent
-        ? `Customer created. Activation email sent to ${inbox} — the customer can open it in Gmail (or their inbox) to activate their account.`
-        : `Customer created, but the activation email could not be delivered to ${inbox}. Share the activation link manually or use Resend Invitation.`;
-      if (emailResult?.error) {
-        createMessage += ` (${emailResult.error})`;
+    if (territoryHold) {
+      createMessage = 'Customer submitted for Branch Manager territory exception review. Sales stay blocked until approved.';
+      if (deferPortalInvite) {
+        createMessage += ' Portal invitation will send after approval.';
       }
+      await notifyTerritoryReviewSubmitted(req.app.locals.pool, {
+        branchId: resolvedBranchId,
+        customerId,
+        customerCode: generatedCode,
+        customerName: displayName,
+        actorName: actorLabel,
+        note: territoryOverrideNote,
+      });
+    } else {
+      if (portalMeta) {
+        const inbox = portalMeta.portalEmail;
+        createMessage = emailResult?.sent
+          ? `Customer created. Activation email sent to ${inbox} — the customer can open it in Gmail (or their inbox) to activate their account.`
+          : `Customer created, but the activation email could not be delivered to ${inbox}. Share the activation link manually or use Resend Invitation.`;
+        if (emailResult?.error) {
+          createMessage += ` (${emailResult.error})`;
+        }
+      }
+      await notifyCustomerCreated(req.app.locals.pool, {
+        branchId: resolvedBranchId,
+        customerId,
+        customerCode: generatedCode,
+        customerName: displayName,
+        actorName: actorLabel,
+      });
     }
 
     if (creditReview?.row?.ci_id) {
@@ -1684,8 +1989,10 @@ router.post('/', async (req, res) => {
     await writeAuditFromReq(req.app.locals.pool, req, {
       module: 'Customer Management',
       activity: 'Create Customer',
-      action: 'Create Customer',
-      description: `Created customer ${resolvedFirstName} ${resolvedLastName}${creditReview?.row?.ci_id ? ` with CI #${creditReview.row.ci_id}` : ''}.`,
+      action: territoryHold ? 'Submit Territory Exception' : 'Create Customer',
+      description: territoryHold
+        ? `Submitted territory exception for ${displayName} (#${customerId}).`
+        : `Created customer ${displayName}${creditReview?.row?.ci_id ? ` with CI #${creditReview.row.ci_id}` : ''}.`,
       status: AUDIT_STATUS.CREATED,
       affectedRecord: `customer:${customerId}`,
     });
@@ -1695,6 +2002,7 @@ router.post('/', async (req, res) => {
       message: createMessage,
       data: detail.rows[0],
       portal: portalPayload,
+      territory_hold: territoryHold,
       credit_investigation: creditReview?.row
         ? {
           ci_id: creditReview.row.ci_id,
@@ -1737,7 +2045,9 @@ router.post('/:id/identity-review', allow(ROLE_SETS.branchOps), async (req, res)
   try {
     await client.query('BEGIN');
     const existing = await client.query(
-      `SELECT customer_id, branch_id, status, first_name, last_name, contact_phone
+      `SELECT customer_id, branch_id, status, first_name, last_name, contact_phone,
+              customer_code, portal_email, portal_status, assigned_sales_agent_id,
+              registration_profile_json, territory_override_note
        FROM customers
        WHERE customer_id = $1
        FOR UPDATE`,
@@ -1760,36 +2070,330 @@ router.post('/:id/identity-review', allow(ROLE_SETS.branchOps), async (req, res)
       });
     }
 
-    const nextStatus = decision === 'approve' ? 'Active' : 'Inactive';
+    const profile = customer.registration_profile_json && typeof customer.registration_profile_json === 'object'
+      ? customer.registration_profile_json
+      : {};
+    const isTerritoryHold = String(profile.hold_reason || '') === 'territory_exception'
+      || Boolean(profile.territory_outside_review)
+      || Boolean(customer.territory_override_note);
+
+    const nextStatus = decision === 'approve' ? 'Active' : 'Rejected';
+    const clearHold = decision === 'approve';
     const updated = await client.query(
       `UPDATE customers
        SET status = $2,
-           identity_match_json = CASE WHEN $2 = 'Active' THEN '{}'::jsonb ELSE identity_match_json END,
+           identity_match_json = CASE WHEN $5 THEN '{}'::jsonb ELSE identity_match_json END,
            identity_review_note = $3,
            identity_reviewed_by = $4,
            identity_reviewed_at = CURRENT_TIMESTAMP,
+           registration_profile_json = CASE
+             WHEN $5 THEN COALESCE(registration_profile_json, '{}'::jsonb) - 'hold_reason'
+             ELSE registration_profile_json
+           END,
            updated_at = CURRENT_TIMESTAMP
        WHERE customer_id = $1
        RETURNING customer_id, status, identity_review_note, identity_reviewed_at`,
-      [customerId, nextStatus, note, req.currentUser.id]
+      [customerId, nextStatus, note, req.currentUser.id, clearHold]
     );
 
     await resolveAlertsBySourceKey(client, `customer-identity-review:${customerId}`, {
       resolvedBy: req.currentUser.id,
       resolutionNote: decision === 'approve'
         ? (note || 'Identity review approved — customer activated.')
-        : (note || 'Identity review rejected — customer set Inactive.'),
+        : (note || 'Identity review rejected — registration declined (Rejected).'),
     });
+    if (isTerritoryHold) {
+      await resolveAlertsBySourceKey(client, `customer-territory-review:${customerId}`, {
+        resolvedBy: req.currentUser.id,
+        resolutionNote: decision === 'approve'
+          ? (note || 'Territory exception approved — customer activated.')
+          : (note || 'Territory exception rejected — registration declined (Rejected).'),
+      });
+    }
+
+    let portalMeta = null;
+    if (decision === 'approve'
+      && customer.portal_email
+      && String(customer.portal_status || 'none') === 'none') {
+      if (!isMailConfigured()) {
+        await client.query('ROLLBACK');
+        return res.status(503).json({ success: false, message: PORTAL_EMAIL_NOT_CONFIGURED });
+      }
+      portalMeta = await createPortalInvitation(client, {
+        customerId,
+        branchId: customer.branch_id,
+        portalEmail: customer.portal_email,
+        contactFirstName: customer.first_name,
+        contactLastName: customer.last_name,
+      });
+    }
+
+    await client.query('COMMIT');
+
+    if (portalMeta) {
+      const agentContact = await loadSalesAgentContact(
+        req.app.locals.pool,
+        customer.assigned_sales_agent_id
+      );
+      await dispatchPortalActivationEmail(req.app.locals.pool, {
+        portalMeta,
+        customerFirstName: customer.first_name,
+        salesAgentName: agentContact.name || undefined,
+        salesAgentEmail: agentContact.email || undefined,
+        branchId: customer.branch_id,
+      });
+    }
+
+    const displayName = [customer.first_name, customer.last_name].filter(Boolean).join(' ');
+    const actorLabel = salesAgentDisplayName(req.currentUser);
+    await writeAuditFromReq(req.app.locals.pool, req, {
+      module: 'Customer Management',
+      activity: isTerritoryHold ? 'Territory Exception Review' : 'Identity Review',
+      action: decision === 'approve'
+        ? (isTerritoryHold ? 'Approve Territory Exception' : 'Approve Identity')
+        : (isTerritoryHold ? 'Reject Territory Exception' : 'Reject Identity'),
+      description: `${decision === 'approve' ? 'Approved' : 'Rejected'} ${isTerritoryHold ? 'territory exception' : 'identity review'} for ${displayName} (#${customerId}).`,
+      status: decision === 'approve' ? AUDIT_STATUS.APPROVED : AUDIT_STATUS.REJECTED,
+      affectedRecord: `customer:${customerId}`,
+    });
+
+    if (isTerritoryHold) {
+      await notifyTerritoryReviewDecided(req.app.locals.pool, {
+        salesAgentId: customer.assigned_sales_agent_id,
+        customerId,
+        customerCode: customer.customer_code,
+        customerName: displayName,
+        approved: decision === 'approve',
+        note,
+        actorName: actorLabel,
+      });
+    }
+
+    const detail = await req.app.locals.pool.query(
+      `SELECT ${CUSTOMER_SELECT_CORE}
+       FROM customers c
+       LEFT JOIN branches b ON b.id = c.branch_id
+       LEFT JOIN users mgr ON mgr.id = c.account_manager_id
+       LEFT JOIN users agent ON agent.id = c.assigned_sales_agent_id
+       LEFT JOIN territories t ON t.territory_id = c.territory_id
+       WHERE c.customer_id = $1`,
+      [customerId]
+    );
+
+    return res.json({
+      success: true,
+      message: decision === 'approve'
+        ? (isTerritoryHold
+          ? 'Territory exception approved. Account is now Active for cash sales.'
+          : 'Customer identity approved. Account is now Active for cash sales.')
+        : (isTerritoryHold
+          ? 'Territory exception rejected. Registration declined (Rejected) — fix address/territory and resubmit for review; do not create a new customer.'
+          : 'Customer identity rejected. Registration declined (Rejected) — fix details and resubmit for review; do not create a new customer.'),
+      data: detail.rows[0] || updated.rows[0],
+    });
+  } catch (err) {
+    try { await client.query('ROLLBACK'); } catch { /* ignore */ }
+    console.error('[Customers] POST /:id/identity-review error:', err.message);
+    return res.status(500).json({ success: false, message: 'Failed to decide identity review.' });
+  } finally {
+    client.release();
+  }
+});
+
+/**
+ * SA reopen: Rejected → Pending Identity Review (same customer_id).
+ * Soft address/territory/exception patches may be included; otherwise use prior PUT edits.
+ */
+router.post('/:id/identity-review/resubmit', allow(ROLE_SETS.customerWrite), async (req, res) => {
+  const customerId = Number(req.params.id);
+  if (!Number.isInteger(customerId) || customerId <= 0) {
+    return res.status(400).json({ success: false, message: 'Invalid customer id.' });
+  }
+  if (req.currentUser?.roleSlug !== 'sales_staff') {
+    return res.status(403).json({ success: false, message: 'Only Sales Agents can resubmit a declined registration.' });
+  }
+
+  const client = await req.app.locals.pool.connect();
+  try {
+    await client.query('BEGIN');
+    const existing = await client.query(
+      `SELECT customer_id, branch_id, status, first_name, last_name, customer_code,
+              assigned_sales_agent_id, territory_id, territory_override_note,
+              registration_profile_json, identity_review_note, identity_reviewed_at,
+              address, address_street, address_barangay, address_city, address_province,
+              address_region, address_zip, latitude, longitude
+       FROM customers
+       WHERE customer_id = $1
+       FOR UPDATE`,
+      [customerId]
+    );
+    if (!existing.rows.length) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ success: false, message: 'Customer not found.' });
+    }
+    const customer = existing.rows[0];
+    if (!assertSameBranch(res, req.currentUser, customer.branch_id)) {
+      await client.query('ROLLBACK');
+      return;
+    }
+    if (Number(customer.assigned_sales_agent_id) !== Number(req.currentUser.id)) {
+      await client.query('ROLLBACK');
+      return res.status(403).json({
+        success: false,
+        message: 'Only the assigned Sales Agent can resubmit this registration.',
+      });
+    }
+    if (String(customer.status) !== 'Rejected') {
+      await client.query('ROLLBACK');
+      return res.status(400).json({
+        success: false,
+        message: 'Only Rejected registrations can be resubmitted for Branch Manager review.',
+      });
+    }
+
+    const softKeys = [
+      'territory_id', 'territory_override_note',
+      'address', 'address_street', 'address_barangay', 'address_city',
+      'address_province', 'address_region', 'address_zip',
+      'latitude', 'longitude',
+    ];
+    const updates = [];
+    const params = [];
+    let pIdx = 1;
+    for (const key of softKeys) {
+      if (req.body?.[key] !== undefined) {
+        updates.push(`${key} = $${pIdx++}`);
+        const raw = req.body[key];
+        params.push(raw === '' || raw === null ? null : raw);
+      }
+    }
+
+    let nextTerritoryId = req.body?.territory_id !== undefined
+      ? (req.body.territory_id === '' || req.body.territory_id == null ? null : Number(req.body.territory_id))
+      : (customer.territory_id != null ? Number(customer.territory_id) : null);
+    let nextOverrideNote = req.body?.territory_override_note !== undefined
+      ? cleanPart(req.body.territory_override_note)
+      : cleanPart(customer.territory_override_note);
+
+    if (nextTerritoryId != null && !Number.isFinite(nextTerritoryId)) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ success: false, message: 'Invalid territory.' });
+    }
+    if (nextTerritoryId) {
+      const territoryCheck = await client.query(
+        `SELECT territory_id, branch_id, COALESCE(status, 'Active') AS status
+         FROM territories WHERE territory_id = $1`,
+        [nextTerritoryId]
+      );
+      if (!territoryCheck.rows.length || Number(territoryCheck.rows[0].branch_id) !== Number(customer.branch_id)) {
+        await client.query('ROLLBACK');
+        return res.status(400).json({ success: false, message: 'Territory must belong to the customer branch.' });
+      }
+      if (territoryCheck.rows[0].status !== 'Active') {
+        await client.query('ROLLBACK');
+        return res.status(400).json({ success: false, message: 'Territory must be Active.' });
+      }
+    } else {
+      await client.query('ROLLBACK');
+      return res.status(400).json({
+        success: false,
+        message: 'Assign an Active territory before resubmitting.',
+      });
+    }
+
+    const priorProfile = customer.registration_profile_json && typeof customer.registration_profile_json === 'object'
+      ? { ...customer.registration_profile_json }
+      : {};
+    // Hold only when SA still claims outside coverage (note and/or explicit flag).
+    const territoryHold = Boolean(nextOverrideNote)
+      || Boolean(req.body?.territory_outside_review);
+    if (Boolean(req.body?.territory_outside_review) && !nextOverrideNote) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({
+        success: false,
+        message: 'Territory exception note is required when resubmitting outside coverage.',
+        code: 'TERRITORY_EXCEPTION_NOTE_REQUIRED',
+      });
+    }
+
+    const priorRejection = {
+      note: customer.identity_review_note || null,
+      decided_at: customer.identity_reviewed_at || null,
+      resubmitted_at: new Date().toISOString(),
+    };
+    const nextProfile = {
+      ...priorProfile,
+      prior_rejection: priorRejection,
+    };
+    if (territoryHold) {
+      nextProfile.hold_reason = 'territory_exception';
+      nextProfile.territory_outside_review = true;
+    } else {
+      delete nextProfile.hold_reason;
+      delete nextProfile.territory_outside_review;
+    }
+
+    // Still outside coverage → Pending for BM. In coverage with no exception → Active.
+    const nextStatus = territoryHold ? 'Pending Identity Review' : 'Active';
+
+    updates.push(`status = $${pIdx++}`);
+    params.push(nextStatus);
+    updates.push(`registration_profile_json = $${pIdx++}::jsonb`);
+    params.push(JSON.stringify(nextProfile));
+    updates.push('identity_review_note = NULL');
+    updates.push('identity_reviewed_by = NULL');
+    updates.push('identity_reviewed_at = NULL');
+    if (!updates.some((u) => u.startsWith('territory_override_note'))) {
+      updates.push(`territory_override_note = $${pIdx++}`);
+      params.push(nextOverrideNote);
+    }
+    updates.push('updated_at = CURRENT_TIMESTAMP');
+    params.push(customerId);
+
+    const updated = await client.query(
+      `UPDATE customers SET ${updates.join(', ')} WHERE customer_id = $${pIdx}
+       RETURNING customer_id, status, territory_override_note, registration_profile_json`,
+      params
+    );
+
+    if (territoryHold) {
+      await upsertOpenOperationalAlert(client, {
+        branchId: customer.branch_id,
+        alertType: 'Territory Exception Review',
+        severity: 'Warning',
+        title: 'Territory exception review',
+        message: `${[customer.first_name, customer.last_name].filter(Boolean).join(' ') || 'Customer'} was resubmitted outside territory coverage. Review before activating.`,
+        sourceKey: `customer-territory-review:${customerId}`,
+        entityType: 'customer',
+        entityId: customerId,
+        linkPath: `/branch-manager/customers/${customerId}`,
+      });
+    }
 
     await client.query('COMMIT');
 
     const displayName = [customer.first_name, customer.last_name].filter(Boolean).join(' ');
+    const actorLabel = salesAgentDisplayName(req.currentUser);
+
+    if (territoryHold) {
+      await notifyTerritoryReviewSubmitted(req.app.locals.pool, {
+        branchId: customer.branch_id,
+        customerId,
+        customerCode: customer.customer_code,
+        customerName: displayName,
+        actorName: actorLabel,
+        note: nextOverrideNote,
+      });
+    }
+
     await writeAuditFromReq(req.app.locals.pool, req, {
       module: 'Customer Management',
-      activity: 'Identity Review',
-      action: decision === 'approve' ? 'Approve Identity' : 'Reject Identity',
-      description: `${decision === 'approve' ? 'Approved' : 'Rejected'} identity review for ${displayName} (#${customerId}).`,
-      status: decision === 'approve' ? AUDIT_STATUS.APPROVED : AUDIT_STATUS.REJECTED,
+      activity: 'Resubmit Identity Review',
+      action: territoryHold ? 'Resubmit Territory Exception' : 'Resubmit Registration After Decline',
+      description: territoryHold
+        ? `Resubmitted territory exception for ${displayName} (#${customerId}) for Branch Manager review.`
+        : `Resubmitted declined registration for ${displayName} (#${customerId}); account activated (in coverage).`,
+      status: AUDIT_STATUS.UPDATED,
       affectedRecord: `customer:${customerId}`,
     });
 
@@ -1806,15 +2410,15 @@ router.post('/:id/identity-review', allow(ROLE_SETS.branchOps), async (req, res)
 
     return res.json({
       success: true,
-      message: decision === 'approve'
-        ? 'Customer identity approved. Account is now Active for cash sales.'
-        : 'Customer identity rejected. Account set to Inactive.',
+      message: territoryHold
+        ? 'Resubmitted for Branch Manager territory exception review. Sales stay blocked until approved.'
+        : 'Registration reopened in coverage. Account is now Active for cash sales.',
       data: detail.rows[0] || updated.rows[0],
     });
   } catch (err) {
     try { await client.query('ROLLBACK'); } catch { /* ignore */ }
-    console.error('[Customers] POST /:id/identity-review error:', err.message);
-    return res.status(500).json({ success: false, message: 'Failed to decide identity review.' });
+    console.error('[Customers] POST /:id/identity-review/resubmit error:', err.message);
+    return res.status(500).json({ success: false, message: 'Failed to resubmit registration for review.' });
   } finally {
     client.release();
   }
@@ -2035,6 +2639,38 @@ router.put('/:id', async (req, res) => {
       const protectedPatch = customerChangePatch(req.body, { protectedOnly: true });
       const softPatch = customerSoftPatch(req.body);
 
+      // Declined registrations: SA may fix address/territory directly, then resubmit for BM.
+      if (String(before.status) === 'Rejected') {
+        const reopenKeys = new Set([
+          'territory_id', 'territory_override_note',
+          'address', 'address_region', 'address_province', 'address_city',
+          'address_barangay', 'address_street', 'address_zip',
+          'latitude', 'longitude',
+        ]);
+        const reopenOnly = Object.keys(protectedPatch).every((k) => reopenKeys.has(k));
+        if (reopenOnly && (Object.keys(protectedPatch).length || Object.keys(softPatch).length)) {
+          const merged = { ...protectedPatch, ...softPatch };
+          const reopenUpdates = [];
+          const reopenParams = [];
+          let reopenIdx = 1;
+          for (const [col, val] of Object.entries(merged)) {
+            reopenUpdates.push(`${col} = $${reopenIdx++}`);
+            reopenParams.push(val === '' ? null : val);
+          }
+          reopenUpdates.push('updated_at = CURRENT_TIMESTAMP');
+          reopenParams.push(customerId);
+          const reopenResult = await pool.query(
+            `UPDATE customers SET ${reopenUpdates.join(', ')} WHERE customer_id = $${reopenIdx} RETURNING *`,
+            reopenParams
+          );
+          return res.status(200).json({
+            success: true,
+            message: 'Updated declined registration. Use Fix & resubmit to send it back to Branch Manager.',
+            data: reopenResult.rows[0],
+          });
+        }
+      }
+
       // Soft-only updates apply immediately.
       if (!Object.keys(protectedPatch).length && Object.keys(softPatch).length) {
         const softUpdates = [];
@@ -2105,7 +2741,7 @@ router.put('/:id', async (req, res) => {
       contact_person_phone, contact_person_relationship,
       secondary_contact_fname, secondary_contact_lname,
       secondary_contact_phone, secondary_contact_relationship,
-      branch_id, territory_id, account_manager_id, status,
+      branch_id, territory_id, account_manager_id, assigned_sales_agent_id, status,
       id_type, id_number, id_photo, id_verification_status,
     } = req.body;
 
@@ -2216,8 +2852,55 @@ router.put('/:id', async (req, res) => {
       }
       addField('territory_id', nextTerritoryId, 'territory');
     }
+    const assertBranchStaff = async (userId, roleSlug, label) => {
+      const id = Number(userId);
+      if (!Number.isInteger(id) || id <= 0) {
+        return { ok: false, message: `${label} is invalid.` };
+      }
+      const customerBranchId = branch_id !== undefined && !isSalesAgent
+        ? Number(branch_id)
+        : Number(before.branch_id);
+      const staff = await pool.query(
+        `SELECT u.id, u.branch_id, u.status, r.slug
+         FROM users u
+         JOIN roles r ON r.role_id = u.role_id
+         WHERE u.id = $1`,
+        [id]
+      );
+      const row = staff.rows[0];
+      if (!row || row.status !== 'Active') {
+        return { ok: false, message: `${label} must be an Active user.` };
+      }
+      if (Number(row.branch_id) !== Number(customerBranchId)) {
+        return { ok: false, message: `${label} must belong to the customer branch.` };
+      }
+      if (String(row.slug) !== String(roleSlug)) {
+        return { ok: false, message: `${label} must have role ${roleSlug}.` };
+      }
+      return { ok: true };
+    };
+
     if (!isSalesAgent && account_manager_id !== undefined) {
-      addField('account_manager_id', account_manager_id ? Number(account_manager_id) : null, 'account manager');
+      if (account_manager_id) {
+        const check = await assertBranchStaff(account_manager_id, 'collector', 'Collector');
+        if (!check.ok) {
+          return res.status(400).json({ success: false, message: check.message });
+        }
+      }
+      addField('account_manager_id', account_manager_id ? Number(account_manager_id) : null, 'collector');
+    }
+    if (!isSalesAgent && assigned_sales_agent_id !== undefined) {
+      if (assigned_sales_agent_id) {
+        const check = await assertBranchStaff(assigned_sales_agent_id, 'sales_staff', 'Sales Agent');
+        if (!check.ok) {
+          return res.status(400).json({ success: false, message: check.message });
+        }
+      }
+      addField(
+        'assigned_sales_agent_id',
+        assigned_sales_agent_id ? Number(assigned_sales_agent_id) : null,
+        'sales agent'
+      );
     }
     if (!isSalesAgent && status !== undefined) {
       addField('status', status, 'account status');

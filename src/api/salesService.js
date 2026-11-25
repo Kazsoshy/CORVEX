@@ -88,6 +88,35 @@ export async function createCustomer(payload) {
   }
 }
 
+export async function sendCustomerEmailOtp(email) {
+  try {
+    const response = await apiClient.post('/customers/email-otp/send', { email });
+    return response.data;
+  } catch (error) {
+    const body = error?.response?.data || {};
+    return {
+      success: false,
+      message: body.message || error?.message || 'Failed to send verification code.',
+      status: error?.response?.status,
+      cooldown_seconds: body.cooldown_seconds,
+    };
+  }
+}
+
+export async function verifyCustomerEmailOtp(email, code) {
+  try {
+    const response = await apiClient.post('/customers/email-otp/verify', { email, code });
+    return response.data;
+  } catch (error) {
+    const body = error?.response?.data || {};
+    return {
+      success: false,
+      message: body.message || error?.message || 'Failed to verify email code.',
+      status: error?.response?.status,
+    };
+  }
+}
+
 export async function decideCustomerIdentityReview(customerId, payload) {
   try {
     const response = await apiClient.post(`/customers/${customerId}/identity-review`, payload);
@@ -97,6 +126,20 @@ export async function decideCustomerIdentityReview(customerId, payload) {
       success: false,
       message: error?.response?.data?.message || error?.message || 'Failed to decide identity review.',
       status: error?.response?.status,
+    };
+  }
+}
+
+export async function resubmitCustomerIdentityReview(customerId, payload = {}) {
+  try {
+    const response = await apiClient.post(`/customers/${customerId}/identity-review/resubmit`, payload);
+    return response.data;
+  } catch (error) {
+    return {
+      success: false,
+      message: error?.response?.data?.message || error?.message || 'Failed to resubmit registration for review.',
+      status: error?.response?.status,
+      code: error?.response?.data?.code,
     };
   }
 }
@@ -215,7 +258,11 @@ export async function omDecideBranchTransfer(transferId, payload) {
 export async function updateCustomer(customerId, payload) {
   try {
     const response = await apiClient.put(`/customers/${customerId}`, payload);
-    return response.data;
+    return {
+      ...response.data,
+      status: response.status,
+      pending: Boolean(response.data?.pending) || response.status === 202,
+    };
   } catch (error) {
     const message = error?.response?.data?.message || error?.message || 'Failed to update customer';
     console.error('Failed to update customer:', error);
@@ -279,6 +326,17 @@ export async function fetchPaymentMethods() {
     const message = error?.response?.data?.message || error?.message || 'Failed to fetch payment methods';
     console.error('Failed to fetch payment methods:', error);
     return { success: false, data: [], message };
+  }
+}
+
+export async function fetchBranchPaymentSettings() {
+  try {
+    const response = await apiClient.get('/sales/branch-payment-settings');
+    return response.data;
+  } catch (error) {
+    const message = error?.response?.data?.message || error?.message || 'Failed to load branch payment settings';
+    console.error('Failed to fetch branch payment settings:', error);
+    return { success: false, data: null, message };
   }
 }
 
