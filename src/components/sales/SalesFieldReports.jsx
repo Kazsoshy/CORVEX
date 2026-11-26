@@ -17,6 +17,7 @@ import { SALES_ASSIGNMENT_OUTCOMES, outcomeLabel, reportPhotoSrc } from '../../u
 import { EmptyState } from '../shared/EmptyState';
 import { LoadingState } from '../shared/LoadingState';
 import { DetailRowsTable } from '../shared/DetailRowsTable';
+import { RowActionMenu } from '../shared/RowActionMenu';
 import { Pagination } from '../shared/Pagination';
 import { StatusBadge } from '../StatusBadge';
 
@@ -546,19 +547,22 @@ export function FieldActivityReportsPage({ navigate, showToast }) {
                           <td><StatusBadge status={report.review_status || 'Submitted'} /></td>
                           <td>{formatDisplayDateTime(report.created_at)}</td>
                           <td>{formatDisplayDateTime(report.updated_at || report.created_at)}</td>
-                          <td className="table-actions">
-                            <button
-                              className="button ghost"
-                              type="button"
-                              onClick={() => navigate(`/sales/field-reports/${report.report_id}`)}
-                            >
-                              View
-                            </button>
-                            {report.editable !== false ? (
-                              <button className="button ghost" type="button" onClick={() => startEdit(report)}>
-                                Edit
-                              </button>
-                            ) : null}
+                          <td className="table-actions" onClick={(e) => e.stopPropagation()}>
+                            <RowActionMenu
+                              label="Field report actions"
+                              items={[
+                                {
+                                  key: 'view',
+                                  label: 'View',
+                                  onSelect: () => navigate(`/sales/field-reports/${report.report_id}`),
+                                },
+                                report.editable !== false ? {
+                                  key: 'edit',
+                                  label: 'Edit',
+                                  onSelect: () => startEdit(report),
+                                } : null,
+                              ]}
+                            />
                           </td>
                         </tr>
                       ))}

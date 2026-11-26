@@ -17,8 +17,8 @@ import { formatDisplayDate, formatCurrency, formatPhone } from '../../utils/form
 import { EmptyState } from '../shared/EmptyState';
 import { LoadingState } from '../shared/LoadingState';
 import { DetailRowsTable } from '../shared/DetailRowsTable';
+import { RowActionMenu } from '../shared/RowActionMenu';
 import { StatusBadge } from '../StatusBadge';
-import { NavIcon } from '../../navIcons';
 import { UserSettingsPanel } from '../shared/UserSettingsPanel';
 import { CustomerProfilePanel } from '../shared/CustomerProfilePanel';
 import { CustomerProductAdsPanel } from './CustomerProductAdsPanel.jsx';
@@ -396,15 +396,13 @@ function PaymentHistoryPage({
                     <td>{formatCurrency(Number(p.amount))}</td>
                     <td>{p.collector_name || '—'}</td>
                     <td>{p.receipt_number || '—'}</td>
-                    <td className="table-actions">
-                      <button
-                        className="icon-action-button"
-                        type="button"
-                        title="View"
-                        onClick={() => setSelectedPayment(p)}
-                      >
-                        <NavIcon name="view" />
-                      </button>
+                    <td className="table-actions" onClick={(e) => e.stopPropagation()}>
+                      <RowActionMenu
+                        label={`Actions for payment ${p.receipt_number || p.collectionpayment_id}`}
+                        items={[
+                          { key: 'view', label: 'View', onSelect: () => setSelectedPayment(p) },
+                        ]}
+                      />
                     </td>
                   </tr>)}
               </tbody>
@@ -480,10 +478,13 @@ function ReceiptsPage({
                     <td>{formatDisplayDate(r.receipt_date || r.payment_date)}</td>
                     <td>{formatCurrency(Number(r.amount))}</td>
                     <td>{r.payment_method || '—'}</td>
-                    <td className="table-actions">
-                      <button className="icon-action-button" type="button" title="View" onClick={() => navigate(`/customer/receipts/${r.receipts_id}`)}>
-                        <NavIcon name="view" />
-                      </button>
+                    <td className="table-actions" onClick={(e) => e.stopPropagation()}>
+                      <RowActionMenu
+                        label={`Actions for receipt ${r.receipt_number || r.receipts_id}`}
+                        items={[
+                          { key: 'view', label: 'View', onSelect: () => navigate(`/customer/receipts/${r.receipts_id}`) },
+                        ]}
+                      />
                     </td>
                   </tr>)}
               </tbody>
@@ -554,21 +555,30 @@ function StatementsPage({
                   return <tr key={id}>
                     <td>{label}</td>
                     <td>{formatCurrency(Number(s.total_paid || 0))}</td>
-                    <td className="table-actions">
-                      <button className="icon-action-button" type="button" title="View" onClick={() => navigate(`/customer/statements/${encodeURIComponent(id)}`)}>
-                        <NavIcon name="view" />
-                      </button>
-                      <button className="icon-action-button" type="button" title="Export PDF" onClick={() => {
-                        const ok = downloadPdf([{
-                          month: label,
-                          total_paid: s.total_paid,
-                          outstanding_balance: summary?.outstanding_balance || 0,
-                        }], { filename: `statement-${id}.pdf`, title: `${label} Statement` });
-                        if (ok) showToast('Statement exported as PDF.', 'success');
-                        else showToast('Nothing to export.', 'error');
-                      }}>
-                        <NavIcon name="download" />
-                      </button>
+                    <td className="table-actions" onClick={(e) => e.stopPropagation()}>
+                      <RowActionMenu
+                        label={`Actions for ${label}`}
+                        items={[
+                          {
+                            key: 'view',
+                            label: 'View',
+                            onSelect: () => navigate(`/customer/statements/${encodeURIComponent(id)}`),
+                          },
+                          {
+                            key: 'export-pdf',
+                            label: 'Export PDF',
+                            onSelect: () => {
+                              const ok = downloadPdf([{
+                                month: label,
+                                total_paid: s.total_paid,
+                                outstanding_balance: summary?.outstanding_balance || 0,
+                              }], { filename: `statement-${id}.pdf`, title: `${label} Statement` });
+                              if (ok) showToast('Statement exported as PDF.', 'success');
+                              else showToast('Nothing to export.', 'error');
+                            },
+                          },
+                        ]}
+                      />
                     </td>
                   </tr>;
                 })}

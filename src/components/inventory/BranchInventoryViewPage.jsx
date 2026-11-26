@@ -6,6 +6,7 @@ import { usePagination } from '../../hooks/usePagination';
 import { Pagination } from '../shared/Pagination';
 import { EmptyState } from '../shared/EmptyState';
 import { LoadingState } from '../shared/LoadingState';
+import { RowActionMenu } from '../shared/RowActionMenu';
 import { StatusBadge } from '../StatusBadge';
 import { NavIcon } from '../../navIcons';
 
@@ -36,12 +37,10 @@ export function BranchInventoryViewPage({
   showToast,
   branchName,
   navigate,
-  opsBase = '/branch-manager',
   mode = 'readonly',
   initialStockFilter = 'All',
 }) {
   const isWarehouse = mode === 'warehouse';
-  const isOversight = !isWarehouse;
   const user = getCurrentUser();
   const [records, setRecords] = useState([]);
   const [catalogExtras, setCatalogExtras] = useState([]);
@@ -133,20 +132,6 @@ export function BranchInventoryViewPage({
     return names;
   }, [sourceRows]);
 
-  const summary = useMemo(() => {
-    const attention = records.filter((r) => isAttention(statusOf(r))).length;
-    const out = records.filter((r) => statusOf(r) === 'Out of Stock' || Number(r.available_stock) <= 0).length;
-    const pendingRows = records.filter((r) => Number(r.pending_outbound) > 0).length;
-    const never = catalogExtras.length;
-    return {
-      all: records.length,
-      attention,
-      out,
-      pendingRows,
-      never,
-    };
-  }, [records, catalogExtras]);
-
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
     const rows = sourceRows.filter((row) => {
@@ -217,72 +202,6 @@ export function BranchInventoryViewPage({
 
   return (
     <div className="page">
-      {isOversight ? (
-        <section className="panel content-panel relative overflow-hidden">
-          <div className="list-section-header">
-            <div className="flex flex-wrap gap-2 items-center">
-              <StatusBadge status="View only" />
-              {navigate ? (
-                <>
-                  <button
-                    className="button secondary"
-                    type="button"
-                    onClick={() => navigate(`${opsBase}/approval-center?tab=transfers`)}
-                  >
-                    Transfer Approvals
-                  </button>
-                  <button
-                    className="button"
-                    type="button"
-                    onClick={() => navigate(`${opsBase}/approval-center?tab=restocks`)}
-                  >
-                    Restock Approvals
-                  </button>
-                  <button
-                    className="button ghost"
-                    type="button"
-                    onClick={() => navigate(`${opsBase}/approval-center?tab=stock-counts`)}
-                  >
-                    Stock Count Approvals
-                  </button>
-                </>
-              ) : null}
-            </div>
-          </div>
-
-          <div className="pos-chips" role="group" aria-label="Stock triage" style={{ marginTop: 12 }}>
-            <button
-              type="button"
-              className={statusFilter === 'All' ? 'pos-chip active' : 'pos-chip'}
-              onClick={() => setStatusFilter('All')}
-            >
-              All tracked · {summary.all}
-            </button>
-            <button
-              type="button"
-              className={statusFilter === 'Attention' ? 'pos-chip active' : 'pos-chip'}
-              onClick={() => setStatusFilter('Attention')}
-            >
-              Needs attention · {summary.attention}
-            </button>
-            <button
-              type="button"
-              className={statusFilter === 'Out of Stock' ? 'pos-chip active' : 'pos-chip'}
-              onClick={() => setStatusFilter('Out of Stock')}
-            >
-              Out · {summary.out}
-            </button>
-            <button
-              type="button"
-              className={statusFilter === 'Pending' ? 'pos-chip active' : 'pos-chip'}
-              onClick={() => setStatusFilter('Pending')}
-            >
-              Pending outbound · {summary.pendingRows}
-            </button>
-          </div>
-        </section>
-      ) : null}
-
       <section className="panel content-panel relative overflow-hidden">
         <div className="list-section-toolbar branch-stock-toolbar">
           <div className="list-section-controls branch-stock-filter-controls">
@@ -395,15 +314,17 @@ export function BranchInventoryViewPage({
                       <td>{row.never_stocked ? '—' : (Number(row.pending_outbound) || 0)}</td>
                       <td>{alertBadge(row)}</td>
                       {isWarehouse && navigate ? (
-                        <td className="cell-actions" onClick={(e) => e.stopPropagation()}>
-                          <button
-                            className="icon-action-button"
-                            type="button"
-                            title="View product"
-                            onClick={() => navigate(`/warehouse/product/${row.product_id}`)}
-                          >
-                            <NavIcon name="view" />
-                          </button>
+                        <td className="table-actions cell-actions" onClick={(e) => e.stopPropagation()}>
+                          <RowActionMenu
+                            label={`Actions for ${row.product_name || 'product'}`}
+                            items={[
+                              {
+                                key: 'view',
+                                label: 'View product',
+                                onSelect: () => navigate(`/warehouse/product/${row.product_id}`),
+                              },
+                            ]}
+                          />
                         </td>
                       ) : null}
                     </tr>

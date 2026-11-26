@@ -80,28 +80,6 @@ function hasMapableStops(collector) {
   return Number(collector?.todayStops || 0) > 0 || Boolean(collector?.hasMapStops);
 }
 
-function deriveRosterSummary(collectors) {
-  const list = Array.isArray(collectors) ? collectors : [];
-  const active = list.filter((c) => String(c.status || 'Active') === 'Active');
-  const counts = {
-    totalActive: active.length,
-    routesPublished: 0,
-    unassigned: 0,
-    plannedStops: 0,
-    completedStops: 0,
-    needsAttention: 0,
-  };
-  for (const collector of active) {
-    const status = normalizeRouteStatus(collector.todayRouteStatus);
-    counts.plannedStops += Number(collector.todayStops) || 0;
-    counts.completedStops += Number(collector.todayCompleted) || 0;
-    if (status === 'Needs Attention') counts.needsAttention += 1;
-    if (status === 'No Route') counts.unassigned += 1;
-    else if (status !== 'No Route') counts.routesPublished += 1;
-  }
-  return counts;
-}
-
 function buildMarkersFromRows(rows, {
   idKey = 'customer_id',
   labelKey = 'route_sequence',
@@ -174,7 +152,6 @@ export function CollectorsDispatchRoster({ navigate, opsBase, showToast }) {
     });
   }, [collectors, search, routeStatus, activeStatus]);
 
-  const summary = useMemo(() => deriveRosterSummary(collectors), [collectors]);
   const pagination = usePagination(filtered);
   const rows = pagination.paginatedData;
 
@@ -211,61 +188,57 @@ export function CollectorsDispatchRoster({ navigate, opsBase, showToast }) {
           </div>
         </div>
 
-        <div className="flex flex-wrap gap-2 items-end mb-4">
-          <label className="flex flex-col gap-1 text-sm">
-            Work date
+        <div className="list-section-toolbar suppliers-toolbar audit-logs-toolbar">
+          <div className="list-section-controls audit-logs-filters">
             <input
-              type="date"
-              className="input"
-              value={dispatchDate}
-              onChange={(e) => setDispatchDate(e.target.value)}
-            />
-          </label>
-          <button
-            className="button secondary"
-            type="button"
-            onClick={() => setDispatchDate(manilaDateInputValue())}
-          >
-            Today
-          </button>
-          <label className="flex flex-col gap-1 text-sm" style={{ minWidth: 220 }}>
-            Search
-            <input
-              className="input"
-              placeholder="Name, employee ID, or email"
+              className="filter-input search"
+              type="search"
+              placeholder="Search name, employee ID, or email"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
+              aria-label="Search collectors"
             />
-          </label>
-          <label className="flex flex-col gap-1 text-sm">
-            Route status
-            <select className="filter-select" value={routeStatus} onChange={(e) => setRouteStatus(e.target.value)}>
-              <option value="all">All</option>
+            <select
+              className="filter-select"
+              value={routeStatus}
+              onChange={(e) => setRouteStatus(e.target.value)}
+              aria-label="Filter by route status"
+            >
+              <option value="all">All route statuses</option>
               <option value="No Route">No Route</option>
               <option value="Published">Published</option>
               <option value="In Progress">In Progress</option>
               <option value="Completed">Completed</option>
               <option value="Needs Attention">Needs Attention</option>
             </select>
-          </label>
-          <label className="flex flex-col gap-1 text-sm">
-            Account status
-            <select className="filter-select" value={activeStatus} onChange={(e) => setActiveStatus(e.target.value)}>
-              <option value="Active">Active</option>
-              <option value="Inactive">Inactive</option>
-              <option value="all">All</option>
+            <select
+              className="filter-select"
+              value={activeStatus}
+              onChange={(e) => setActiveStatus(e.target.value)}
+              aria-label="Filter by account status"
+            >
+              <option value="Active">Active accounts</option>
+              <option value="Inactive">Inactive accounts</option>
+              <option value="all">All accounts</option>
             </select>
-          </label>
+            <input
+              type="date"
+              className="filter-input"
+              value={dispatchDate}
+              onChange={(e) => setDispatchDate(e.target.value)}
+              aria-label="Work date"
+              title="Work date"
+            />
+            <button
+              className="button secondary"
+              type="button"
+              disabled={dispatchDate === manilaDateInputValue()}
+              onClick={() => setDispatchDate(manilaDateInputValue())}
+            >
+              Today
+            </button>
+          </div>
         </div>
-
-        <Stats stats={[
-          { label: 'Active Collectors', value: String(summary.totalActive) },
-          { label: 'Routes Published', value: String(summary.routesPublished) },
-          { label: 'Unassigned Collectors', value: String(summary.unassigned) },
-          { label: 'Planned Stops', value: String(summary.plannedStops) },
-          { label: 'Completed Stops', value: String(summary.completedStops) },
-          { label: 'Needs Attention', value: String(summary.needsAttention) },
-        ]} />
 
         {!filtered.length ? (
           <EmptyState
@@ -1108,10 +1081,13 @@ export function CollectorRouteHistoryPage({
                       <td>{row.remaining}</td>
                       <td><StatusBadge status={normalizeRouteStatus(row.route_status)} /></td>
                       <td>{row.published_by || '—'}</td>
-                      <td>
-                        <button className="button secondary" type="button" onClick={() => openDetails(row)}>
-                          View Details
-                        </button>
+                      <td className="table-actions" onClick={(e) => e.stopPropagation()}>
+                        <RowActionsMenu
+                          label={`Actions for ${row.collector_name}`}
+                          items={[
+                            { key: 'details', label: 'View Details', onSelect: () => openDetails(row) },
+                          ]}
+                        />
                       </td>
                     </tr>
                   ))}

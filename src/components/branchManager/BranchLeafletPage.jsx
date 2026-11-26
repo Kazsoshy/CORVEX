@@ -184,111 +184,140 @@ export function BranchLeafletPage({
   return (
     <div className="page">
       <section className="panel content-panel relative overflow-hidden">
-        <div className="flex flex-col md:flex-row justify-between gap-4 items-start md:items-center mb-4">
+        <div className="list-section-header" style={{ marginBottom: 12 }}>
           <div>
-            <p className="text-[0.82rem] font-bold tracking-widest uppercase text-navy/60 m-0">{scopedBranchLabel}</p>
-            <h3>Field Map</h3>
+            <p
+              className="text-[0.75rem] font-bold tracking-widest uppercase text-navy/60"
+              style={{ margin: '0 0 2px' }}
+            >
+              {scopedBranchLabel}
+            </p>
+            <h3 style={{ margin: 0 }}>Field Map</h3>
             <p className="text-ink/70" style={{ margin: '4px 0 0', fontSize: '0.85rem' }}>
               View your branch&apos;s customers and planned field activities.
             </p>
           </div>
         </div>
 
-        <div className="segmented-control" style={{ marginBottom: 12 }}>
-          {MAP_MODES.map((item) => (
-            <button
-              key={item.key}
-              className={mode === item.key ? 'segment active' : 'segment'}
-              type="button"
-              onClick={() => {
-                setMode(item.key);
-                setFocusCustomerId(null);
-              }}
-            >
-              {item.label}
-            </button>
-          ))}
-        </div>
+        <div className="list-section-toolbar suppliers-toolbar audit-logs-toolbar" style={{ marginBottom: 12 }}>
+          <div className="list-section-controls audit-logs-filters">
+            {isOrgScope ? (
+              <select
+                className="filter-select"
+                aria-label="Branch"
+                value={branchId}
+                onChange={(e) => {
+                  setBranchId(e.target.value);
+                  setStaffId('all');
+                }}
+              >
+                <option value="all">All Branches</option>
+                {(payload?.branches || []).map((branch) => (
+                  <option key={branch.id} value={branch.id}>{branch.name}</option>
+                ))}
+              </select>
+            ) : null}
 
-        <div className="accounts-filters">
-          {isOrgScope ? (
-            <select
-              className="filter-select"
-              value={branchId}
-              onChange={(e) => {
-                setBranchId(e.target.value);
-                setStaffId('all');
-              }}
-            >
-              <option value="all">All Branches</option>
-              {(payload?.branches || []).map((branch) => (
-                <option key={branch.id} value={branch.id}>{branch.name}</option>
-              ))}
-            </select>
-          ) : null}
-
-          {mode === 'routes' ? (
-            <select className="filter-select" value={period} onChange={(e) => setPeriod(e.target.value)}>
-              {PERIOD_OPTIONS.map((option) => (
-                <option key={option.value} value={option.value}>{option.label}</option>
-              ))}
-            </select>
-          ) : null}
-
-          <select
-            className="filter-select"
-            value={staffType}
-            onChange={(e) => {
-              setStaffType(e.target.value);
-              setStaffId('all');
-            }}
-          >
-            {STAFF_TYPE_OPTIONS.map((option) => (
-              <option key={option.value} value={option.value}>{option.label}</option>
-            ))}
-          </select>
-
-          <select
-            className="filter-select"
-            value={staffId}
-            onChange={(e) => {
-              const next = e.target.value;
-              setStaffId(next);
-              const nextParams = new URLSearchParams(searchParams);
-              if (next === 'all') nextParams.delete('staff');
-              else nextParams.set('staff', next);
-              setSearchParams(nextParams, { replace: true });
-            }}
-          >
-            <option value="all">All Staff</option>
-            {staffType !== 'sales' && staffPool.collectors.map((collector) => (
-              <option key={`collector-${collector.id}`} value={collector.id}>Collector · {collector.name}</option>
-            ))}
-            {staffType !== 'collectors' && staffPool.salesAgents.map((agent) => (
-              <option key={`sales-${agent.id}`} value={agent.id}>Sales · {agent.name}</option>
-            ))}
-          </select>
-
-          {mode === 'customers' ? (
-            <>
-              <select className="filter-select" value={standing} onChange={(e) => setStanding(e.target.value)}>
-                {STANDING_OPTIONS.map((option) => (
+            {mode === 'routes' ? (
+              <select
+                className="filter-select"
+                aria-label="Period"
+                value={period}
+                onChange={(e) => setPeriod(e.target.value)}
+              >
+                {PERIOD_OPTIONS.map((option) => (
                   <option key={option.value} value={option.value}>{option.label}</option>
                 ))}
               </select>
-              <input
-                className="filter-select"
-                style={{ minWidth: 180 }}
-                type="search"
-                placeholder="Search customer name"
-                value={search}
-                onChange={(e) => {
-                  setSearch(e.target.value);
-                  setFocusCustomerId(null);
-                }}
-              />
-            </>
-          ) : null}
+            ) : null}
+
+            <select
+              className="filter-select"
+              aria-label="Staff role"
+              value={staffType}
+              onChange={(e) => {
+                setStaffType(e.target.value);
+                setStaffId('all');
+              }}
+            >
+              {STAFF_TYPE_OPTIONS.map((option) => (
+                <option key={option.value} value={option.value}>{option.label}</option>
+              ))}
+            </select>
+
+            <select
+              className="filter-select"
+              aria-label="Staff member"
+              value={staffId}
+              onChange={(e) => {
+                const next = e.target.value;
+                setStaffId(next);
+                const nextParams = new URLSearchParams(searchParams);
+                if (next === 'all') nextParams.delete('staff');
+                else nextParams.set('staff', next);
+                setSearchParams(nextParams, { replace: true });
+              }}
+            >
+              <option value="all">All Staff</option>
+              {staffType !== 'sales' && staffPool.collectors.map((collector) => (
+                <option key={`collector-${collector.id}`} value={collector.id}>Collector · {collector.name}</option>
+              ))}
+              {staffType !== 'collectors' && staffPool.salesAgents.map((agent) => (
+                <option key={`sales-${agent.id}`} value={agent.id}>Sales · {agent.name}</option>
+              ))}
+            </select>
+
+            {mode === 'customers' ? (
+              <>
+                <select
+                  className="filter-select"
+                  aria-label="Payment standing"
+                  value={standing}
+                  onChange={(e) => setStanding(e.target.value)}
+                >
+                  {STANDING_OPTIONS.map((option) => (
+                    <option key={option.value} value={option.value}>{option.label}</option>
+                  ))}
+                </select>
+                <input
+                  className="filter-input search"
+                  type="search"
+                  placeholder="Search customer name"
+                  aria-label="Search customer name"
+                  value={search}
+                  onChange={(e) => {
+                    setSearch(e.target.value);
+                    setFocusCustomerId(null);
+                  }}
+                />
+              </>
+            ) : null}
+          </div>
+
+          <div className="suppliers-toolbar-actions">
+            <div
+              className="segmented-control"
+              role="tablist"
+              aria-label="Field map views"
+              style={{ marginBottom: 0 }}
+            >
+              {MAP_MODES.map((item) => (
+                <button
+                  key={item.key}
+                  role="tab"
+                  aria-selected={mode === item.key}
+                  className={mode === item.key ? 'segment active' : 'segment'}
+                  type="button"
+                  onClick={() => {
+                    setMode(item.key);
+                    setFocusCustomerId(null);
+                  }}
+                >
+                  {item.label}
+                </button>
+              ))}
+            </div>
+          </div>
         </div>
 
         {mode === 'customers' && searchMatches.length > 0 && search.trim() ? (
@@ -307,46 +336,57 @@ export function BranchLeafletPage({
           </div>
         ) : null}
 
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12, marginBottom: 12, fontSize: '0.85rem', color: 'var(--ink, #0B2133)' }}>
-          {mode === 'customers' ? (
-            <>
-              <span>Customers on map: <strong>{view.accountCount}</strong></span>
-              <span>
-                Missing location:{' '}
-                <button
-                  type="button"
-                  className="button ghost"
-                  style={{ padding: 0, fontSize: 'inherit', fontWeight: 700 }}
-                  onClick={() => navigate(`${opsBase}/customers`)}
-                >
-                  {view.missingLocationCount}
-                </button>
-              </span>
-            </>
-          ) : null}
-          {mode === 'routes' ? (
-            <span>Planned stops: <strong>{view.visitCount}</strong></span>
-          ) : null}
-          {mode === 'routes' ? (
-            <span className="text-ink/70">Routes are planned schedules — not live GPS tracking.</span>
-          ) : null}
-          {mode === 'coverage' ? (
-            <span className="text-ink/70">Coverage shapes are approximate from customer locations.</span>
+        <div
+          style={{
+            display: 'flex',
+            flexWrap: 'wrap',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            gap: '8px 16px',
+            marginBottom: 12,
+          }}
+        >
+          <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 12, fontSize: '0.85rem', color: 'var(--ink, #0B2133)' }}>
+            {mode === 'customers' ? (
+              <>
+                <span>Customers on map: <strong>{view.accountCount}</strong></span>
+                <span>
+                  Missing location:{' '}
+                  <button
+                    type="button"
+                    className="button ghost"
+                    style={{ padding: 0, fontSize: 'inherit', fontWeight: 700 }}
+                    onClick={() => navigate(`${opsBase}/customers`)}
+                  >
+                    {view.missingLocationCount}
+                  </button>
+                </span>
+              </>
+            ) : null}
+            {mode === 'routes' ? (
+              <>
+                <span>Planned stops: <strong>{view.visitCount}</strong></span>
+                <span className="text-ink/70">Routes are planned schedules — not live GPS tracking.</span>
+              </>
+            ) : null}
+            {mode === 'coverage' ? (
+              <span className="text-ink/70">Coverage shapes are approximate from customer locations.</span>
+            ) : null}
+          </div>
+
+          {view.legend.length ? (
+            <div className="map-legend" style={{ marginTop: 0 }}>
+              {view.legend.map((item) => (
+                <span key={item.label} className="map-legend-item">
+                  <span className="map-legend-swatch" style={{ background: item.color }} />
+                  {item.label}
+                </span>
+              ))}
+            </div>
           ) : null}
         </div>
 
-        {view.legend.length ? (
-          <div className="map-legend">
-            {view.legend.map((item) => (
-              <span key={item.label} className="map-legend-item">
-                <span className="map-legend-swatch" style={{ background: item.color }} />
-                {item.label}
-              </span>
-            ))}
-          </div>
-        ) : null}
-
-        <div style={{ marginTop: 16 }}>
+        <div style={{ width: '100%' }}>
           <LeafletMap
             center={focusCustomerId
               ? (view.markers.find((m) => String(m.id) === `acct-${focusCustomerId}`)?.position || mapCenter)

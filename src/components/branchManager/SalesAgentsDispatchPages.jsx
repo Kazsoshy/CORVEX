@@ -157,41 +157,32 @@ export function SalesAgentsDispatchRoster({ navigate, opsBase, showToast }) {
               {orgScope ? ' Organization-wide.' : ` Branch: ${currentUser?.branch?.name || 'your branch'}.`}
             </p>
           </div>
-          <button
-            className="button secondary"
-            type="button"
-            onClick={() => navigate(`${opsBase}/field-operations/sales/history`)}
-          >
-            Sales Assignment History
-          </button>
         </div>
 
         <div className="list-section-toolbar suppliers-toolbar audit-logs-toolbar">
           <div className="list-section-controls audit-logs-filters">
-            <label className="flex flex-col gap-1 text-sm">
-              Work date
-              <input
-                type="date"
-                className="filter-input"
-                value={dispatchDate}
-                onChange={(e) => setDispatchDate(e.target.value)}
-              />
-            </label>
-            <button
-              className="button secondary"
-              type="button"
-              onClick={() => setDispatchDate(manilaDateInputValue())}
-            >
-              Today
-            </button>
             <input
               className="filter-input search"
               type="search"
-              placeholder="Search name, EMP id, or email"
+              placeholder="Search name, employee ID, or email"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               aria-label="Search sales agents"
             />
+            <select
+              className="filter-select"
+              value={statusTab}
+              onChange={(e) => setStatusTab(e.target.value)}
+              aria-label="Filter by work status"
+            >
+              {ROSTER_TABS.map((tab) => (
+                <option key={tab.key} value={tab.key}>
+                  {tab.key === 'all'
+                    ? `All statuses (${tabCounts.all ?? 0})`
+                    : `${tab.label} (${tabCounts[tab.key] ?? 0})`}
+                </option>
+              ))}
+            </select>
             <select
               className="filter-select"
               value={territoryFilter}
@@ -215,27 +206,39 @@ export function SalesAgentsDispatchRoster({ navigate, opsBase, showToast }) {
               <option value="Inactive">Inactive accounts</option>
               <option value="all">All accounts</option>
             </select>
-          </div>
-        </div>
-
-        <div className="segmented-control" style={{ marginBottom: 16 }}>
-          {ROSTER_TABS.map((tab) => (
+            <input
+              type="date"
+              className="filter-input"
+              value={dispatchDate}
+              onChange={(e) => setDispatchDate(e.target.value)}
+              aria-label="Work date"
+              title="Work date"
+            />
             <button
-              key={tab.key}
+              className="button secondary"
               type="button"
-              className={statusTab === tab.key ? 'segment active' : 'segment'}
-              onClick={() => setStatusTab(tab.key)}
+              disabled={dispatchDate === manilaDateInputValue()}
+              onClick={() => setDispatchDate(manilaDateInputValue())}
             >
-              {tab.label} ({tabCounts[tab.key] ?? 0})
+              Today
             </button>
-          ))}
+          </div>
+          <div className="suppliers-toolbar-actions">
+            <button
+              className="button secondary"
+              type="button"
+              onClick={() => navigate(`${opsBase}/field-operations/sales/history`)}
+            >
+              Sales Assignment History
+            </button>
+          </div>
         </div>
 
         {!filtered.length ? (
           <EmptyState
             title={agents.length ? 'No sales agents match the current filters' : 'No sales agents assigned to your branch'}
             description={agents.length
-              ? 'Adjust search, territory, account status, or tab.'
+              ? 'Adjust search, work status, territory, or account status filters.'
               : (orgScope
                 ? 'No sales agents match the current filters.'
                 : 'Contact the Operating Manager to create a Sales Agent account.')}
@@ -696,20 +699,23 @@ export function SalesAgentDispatchDetailPage({
                           <td>{area.radius_meters || 800} m</td>
                           <td>{hasPin ? 'Pin set' : 'No pin'}</td>
                           <td><StatusBadge status={area.status} /></td>
-                          <td>
-                            <button
-                              className="button secondary"
-                              type="button"
-                              onClick={() => {
-                                setSelectedAssignment(area);
-                                setExtendDate(area.end_date || area.work_date);
-                                setReassignAgentId('');
-                              }}
-                            >
-                              {area.status === 'Expired' || area.status === 'Not Started' || area.status === 'Incomplete'
-                                ? 'Extend / Reassign'
-                                : 'View'}
-                            </button>
+                          <td className="table-actions" onClick={(e) => e.stopPropagation()}>
+                            <RowActionsMenu
+                              label={`Actions for ${area.area_name}`}
+                              items={[
+                                {
+                                  key: 'open',
+                                  label: area.status === 'Expired' || area.status === 'Not Started' || area.status === 'Incomplete'
+                                    ? 'Extend / Reassign'
+                                    : 'View',
+                                  onSelect: () => {
+                                    setSelectedAssignment(area);
+                                    setExtendDate(area.end_date || area.work_date);
+                                    setReassignAgentId('');
+                                  },
+                                },
+                              ]}
+                            />
                           </td>
                         </tr>
                       );
@@ -1132,23 +1138,33 @@ export function SalesAssignmentHistoryPage({
 
         <div className="list-section-toolbar suppliers-toolbar audit-logs-toolbar">
           <div className="list-section-controls audit-logs-filters">
-            <label className="flex flex-col gap-1 text-sm">
-              From
-              <input type="date" className="filter-input" value={from} onChange={(e) => setFrom(e.target.value)} />
-            </label>
-            <label className="flex flex-col gap-1 text-sm">
-              To
-              <input type="date" className="filter-input" value={to} onChange={(e) => setTo(e.target.value)} />
-            </label>
+            <input
+              className="filter-input search"
+              type="search"
+              placeholder="Search area, territory, or agent"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              aria-label="Search assignment history"
+            />
             {!agentId ? (
-              <select className="filter-select" value={agentFilter} onChange={(e) => setAgentFilter(e.target.value)}>
+              <select
+                className="filter-select"
+                value={agentFilter}
+                onChange={(e) => setAgentFilter(e.target.value)}
+                aria-label="Filter by sales agent"
+              >
                 <option value="all">All agents</option>
                 {agents.map((a) => (
                   <option key={a.id} value={String(a.id)}>{a.name}</option>
                 ))}
               </select>
             ) : null}
-            <select className="filter-select" value={territoryId} onChange={(e) => setTerritoryId(e.target.value)}>
+            <select
+              className="filter-select"
+              value={territoryId}
+              onChange={(e) => setTerritoryId(e.target.value)}
+              aria-label="Filter by territory"
+            >
               <option value="all">All territories</option>
               {activeTerritories.map((t) => (
                 <option key={t.territory_id || t.id} value={String(t.territory_id || t.id)}>
@@ -1156,7 +1172,12 @@ export function SalesAssignmentHistoryPage({
                 </option>
               ))}
             </select>
-            <select className="filter-select" value={status} onChange={(e) => setStatus(e.target.value)}>
+            <select
+              className="filter-select"
+              value={status}
+              onChange={(e) => setStatus(e.target.value)}
+              aria-label="Filter by assignment status"
+            >
               <option value="all">All statuses</option>
               <option value="Assigned">Assigned</option>
               <option value="In Progress">In Progress</option>
@@ -1165,12 +1186,21 @@ export function SalesAssignmentHistoryPage({
               <option value="Incomplete">Incomplete</option>
             </select>
             <input
-              className="filter-input search"
-              type="search"
-              placeholder="Search area, territory, or agent"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              aria-label="Search assignment history"
+              type="date"
+              className="filter-input"
+              value={from}
+              onChange={(e) => setFrom(e.target.value)}
+              aria-label="From date"
+              title="From date"
+            />
+            <span className="muted" aria-hidden="true">–</span>
+            <input
+              type="date"
+              className="filter-input"
+              value={to}
+              onChange={(e) => setTo(e.target.value)}
+              aria-label="To date"
+              title="To date"
             />
           </div>
         </div>

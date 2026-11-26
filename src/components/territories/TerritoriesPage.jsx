@@ -1,6 +1,8 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { EmptyState } from '../shared/EmptyState';
 import { Pagination } from '../shared/Pagination';
+import { RowActionMenu } from '../shared/RowActionMenu';
 import { usePagination } from '../../hooks/usePagination';
 import { StatusBadge } from '../StatusBadge';
 import LeafletMap from '../common/LeafletMap';
@@ -149,191 +151,242 @@ function TerritoryFormModal({
     ? `Pin set for ${form.barangay_name || form.territory_name || 'this territory'}. Drag the pin or click the map to adjust.`
     : 'Select a barangay, then Locate — or click the map to place the pin.';
 
-  return (
-    <div className="modal-overlay" role="dialog" aria-modal="true" aria-labelledby="territory-form-title" onClick={onClose}>
+  return createPortal(
+    <div
+      className="modal-overlay"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="territory-form-title"
+      onClick={onClose}
+    >
       <div
-        className="modal-content"
-        style={{ maxWidth: 760, maxHeight: '90vh', overflow: 'auto' }}
+        className="modal-content modal-content--wide"
+        style={{
+          display: 'flex',
+          flexDirection: 'column',
+          overflow: 'hidden',
+        }}
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="modal-header" style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'flex-start' }}>
+        <div
+          className="modal-header"
+          style={{
+            alignItems: 'flex-start',
+            flexShrink: 0,
+          }}
+        >
           <div>
             <h3 id="territory-form-title">{editing ? 'Edit Territory' : 'Create Territory'}</h3>
-            <p className="muted" style={{ marginTop: 4, marginBottom: 0 }}>
+            <p className="muted" style={{ margin: '4px 0 0', fontSize: '0.84rem' }}>
               Geography-first coverage zone. Staff are assigned through daily field ops, not territory defaults.
             </p>
           </div>
-          <button className="button ghost" type="button" onClick={onClose} aria-label="Close">×</button>
-        </div>
-
-        <h4 className="subsection-title">Territory Information</h4>
-        <div className="account-detail-grid two-up">
-          <div className="form-group">
-            <label htmlFor="terr-name">Territory Name</label>
-            <input
-              id="terr-name"
-              value={form.territory_name || 'Select a barangay…'}
-              readOnly
-              aria-readonly="true"
-            />
-            <p className="muted" style={{ marginTop: 4, fontSize: '0.85rem' }}>
-              Filled automatically from the barangay.
-            </p>
-            {errors.territory_name ? <p className="form-error">{errors.territory_name}</p> : null}
-          </div>
-          <div className="form-group">
-            <label htmlFor="terr-branch">Branch *</label>
-            {isBranchManager ? (
-              <input
-                id="terr-branch"
-                value={currentUser?.branch?.name || `Branch #${userBranchId}`}
-                disabled
-              />
-            ) : (
-              <select
-                id="terr-branch"
-                className="filter-select"
-                value={form.branch_id}
-                onChange={(e) => onBranchChange(e.target.value)}
-                disabled={Boolean(editing)}
-              >
-                <option value="">Select branch</option>
-                {branches.map((branch) => (
-                  <option key={getBranchId(branch)} value={getBranchId(branch)}>
-                    {getBranchLabel(branch)}
-                  </option>
-                ))}
-              </select>
-            )}
-            {errors.branch_id ? <p className="form-error">{errors.branch_id}</p> : null}
-          </div>
-          <div className="form-group" style={{ gridColumn: '1 / -1' }}>
-            <label htmlFor="terr-notes">Specific Location / Coverage Description</label>
-            <textarea
-              id="terr-notes"
-              rows={2}
-              value={form.notes}
-              onChange={(e) => setForm((prev) => ({ ...prev, notes: e.target.value }))}
-              placeholder="Optional sub-zone notes (e.g. north of the market)"
-            />
-          </div>
-        </div>
-
-        <h4 className="subsection-title">Barangay *</h4>
-        <p className="muted" style={{ marginTop: 0 }}>
-          Limited to this branch&apos;s service area
-          {geoScope?.label ? ` (${geoScope.label})` : ''}. Nationwide places are not listed.
-        </p>
-        <div className="account-detail-grid two-up">
-          <div className="form-group">
-            <label htmlFor="terr-region">Region</label>
-            <input id="terr-region" value={regionName || '—'} readOnly disabled />
-          </div>
-          <div className="form-group">
-            <label htmlFor="terr-province">Province / HUC</label>
-            <input id="terr-province" value={provinceName || '—'} readOnly disabled />
-          </div>
-          <div className="form-group">
-            <label htmlFor="terr-city">City / Municipality{geoScope?.lockCity ? '' : ' *'}</label>
-            {geoScope?.lockCity ? (
-              <input id="terr-city" value={cityName || '—'} readOnly disabled />
-            ) : (
-              <select
-                id="terr-city"
-                className="filter-select"
-                value={geoCodes.munCityCode}
-                onChange={(e) => onSelectCity(e.target.value)}
-                disabled={!geoCodes.provCode}
-              >
-                <option value="">Select city / municipality</option>
-                {cityOptions.map((row) => (
-                  <option key={row.munCityCode} value={row.munCityCode}>{row.munCityName}</option>
-                ))}
-              </select>
-            )}
-          </div>
-          <div className="form-group">
-            <label htmlFor="terr-barangay">Barangay *</label>
-            <select
-              id="terr-barangay"
-              className="filter-select"
-              value={form.barangay_code || ''}
-              onChange={(e) => onSelectBarangay(e.target.value)}
-              disabled={!geoCodes.munCityCode || barangaysLoading}
-            >
-              <option value="">{barangaysLoading ? 'Loading…' : 'Select barangay'}</option>
-              {barangayOptions.map((row) => (
-                <option key={row.brgyCode} value={row.brgyCode}>{String(row.brgyName || '').trim()}</option>
-              ))}
-            </select>
-            {errors.barangay_name ? <p className="form-error">{errors.barangay_name}</p> : null}
-          </div>
-        </div>
-        <div className="flex gap-2" style={{ marginBottom: 12, flexWrap: 'wrap', alignItems: 'center' }}>
           <button
-            className="button secondary"
+            className="button ghost"
             type="button"
-            disabled={!form.barangay_name || geocoding}
-            onClick={onGeocode}
+            onClick={onClose}
+            aria-label="Close"
+            style={{ padding: '4px 8px', minHeight: 32, lineHeight: 1, fontSize: '1.15rem', flexShrink: 0 }}
           >
-            {geocoding ? 'Locating…' : 'Locate on map'}
+            ×
           </button>
-          {geocodeError ? <span className="form-error" style={{ margin: 0 }}>{geocodeError}</span> : null}
         </div>
 
-        <h4 className="subsection-title">Map Pin *</h4>
-        <p className="muted" style={{ marginTop: 0 }}>
-          Place or adjust the pin on the map. Sales Agent assignment does not use this pin — Field Ops does.
-        </p>
-        <div style={{ height: 300, marginBottom: 12, borderRadius: 8, overflow: 'hidden', position: 'relative' }}>
-          <LeafletMap
-            center={mapCenter}
-            zoom={mapZoom}
-            height={300}
-            markers={mapMarkers}
-            circles={mapCircles}
-            pinStatusLabel={pinStatusLabel}
-            onMapClick={({ lat, lng }) => {
-              setForm((prev) => ({
-                ...prev,
-                latitude: String(Number(lat.toFixed(7))),
-                longitude: String(Number(lng.toFixed(7))),
-              }));
-            }}
-          />
-        </div>
-        {errors.latitude || errors.longitude ? (
-          <p className="form-error">{errors.latitude || errors.longitude}</p>
-        ) : null}
+        <div style={{ overflowY: 'auto', flex: '1 1 auto', paddingRight: 4 }}>
+          <fieldset className="user-form-section">
+            <legend>Territory Information</legend>
+            <div className="grid two-up">
+              <div className="form-group">
+                <label htmlFor="terr-name">Territory Name</label>
+                <input
+                  id="terr-name"
+                  value={form.territory_name || ''}
+                  placeholder="Select a barangay…"
+                  readOnly
+                  disabled
+                  aria-readonly="true"
+                />
+                {errors.territory_name ? <p className="form-error">{errors.territory_name}</p> : null}
+              </div>
 
-        <div className="form-group" style={{ maxWidth: 320 }}>
-          <label htmlFor="terr-radius">Map coverage zone (optional)</label>
-          <input
-            id="terr-radius"
-            type="number"
-            min={100}
-            max={20000}
-            step={50}
-            value={form.radius_meters}
-            onChange={(e) => setForm((prev) => ({ ...prev, radius_meters: e.target.value }))}
-            placeholder={`${DEFAULT_RADIUS}`}
-          />
-          <p className="muted" style={{ marginTop: 4, fontSize: '0.85rem' }}>
-            Approximate circle on the Field Map only
-            {form.radius_meters ? ` (≈ ${formatRadiusLabel(form.radius_meters)})` : ` — default ${DEFAULT_RADIUS} m`}.
-            Not used when assigning Sales Agents.
-          </p>
-          {errors.radius_meters ? <p className="form-error">{errors.radius_meters}</p> : null}
+              <div className="form-group">
+                <label htmlFor="terr-branch">Branch *</label>
+                {isBranchManager ? (
+                  <input
+                    id="terr-branch"
+                    value={currentUser?.branch?.name || `Branch #${userBranchId}`}
+                    disabled
+                  />
+                ) : (
+                  <select
+                    id="terr-branch"
+                    className="filter-select"
+                    value={form.branch_id}
+                    onChange={(e) => onBranchChange(e.target.value)}
+                    disabled={Boolean(editing)}
+                  >
+                    <option value="">Select branch</option>
+                    {branches.map((branch) => (
+                      <option key={getBranchId(branch)} value={getBranchId(branch)}>
+                        {getBranchLabel(branch)}
+                      </option>
+                    ))}
+                  </select>
+                )}
+                {errors.branch_id ? <p className="form-error">{errors.branch_id}</p> : null}
+              </div>
+            </div>
+
+            <div className="form-group">
+              <label htmlFor="terr-notes">Specific Location / Coverage Description</label>
+              <textarea
+                id="terr-notes"
+                rows={2}
+                value={form.notes}
+                onChange={(e) => setForm((prev) => ({ ...prev, notes: e.target.value }))}
+                placeholder="Optional sub-zone notes (e.g. north of the market)"
+              />
+            </div>
+          </fieldset>
+
+          <fieldset className="user-form-section">
+            <legend>Barangay *</legend>
+            <p className="muted" style={{ margin: '0 0 10px', fontSize: '0.82rem' }}>
+              Limited to this branch&apos;s service area
+              {geoScope?.label ? ` (${geoScope.label})` : ''}. Nationwide places are not listed.
+            </p>
+            <div className="grid two-up">
+              <div className="form-group">
+                <label htmlFor="terr-region">Region</label>
+                <input id="terr-region" value={regionName || '—'} readOnly disabled />
+              </div>
+              <div className="form-group">
+                <label htmlFor="terr-province">Province / HUC</label>
+                <input id="terr-province" value={provinceName || '—'} readOnly disabled />
+              </div>
+              <div className="form-group">
+                <label htmlFor="terr-city">City / Municipality{geoScope?.lockCity ? '' : ' *'}</label>
+                {geoScope?.lockCity ? (
+                  <input id="terr-city" value={cityName || '—'} readOnly disabled />
+                ) : (
+                  <select
+                    id="terr-city"
+                    className="filter-select"
+                    value={geoCodes.munCityCode}
+                    onChange={(e) => onSelectCity(e.target.value)}
+                    disabled={!geoCodes.provCode}
+                  >
+                    <option value="">Select city / municipality</option>
+                    {cityOptions.map((row) => (
+                      <option key={row.munCityCode} value={row.munCityCode}>{row.munCityName}</option>
+                    ))}
+                  </select>
+                )}
+              </div>
+              <div className="form-group">
+                <label htmlFor="terr-barangay">Barangay *</label>
+                <select
+                  id="terr-barangay"
+                  className="filter-select"
+                  value={form.barangay_code || ''}
+                  onChange={(e) => onSelectBarangay(e.target.value)}
+                  disabled={!geoCodes.munCityCode || barangaysLoading}
+                >
+                  <option value="">{barangaysLoading ? 'Loading…' : 'Select barangay'}</option>
+                  {barangayOptions.map((row) => (
+                    <option key={row.brgyCode} value={row.brgyCode}>{String(row.brgyName || '').trim()}</option>
+                  ))}
+                </select>
+                {errors.barangay_name ? <p className="form-error">{errors.barangay_name}</p> : null}
+              </div>
+            </div>
+            <div className="flex gap-2" style={{ margin: '0 0 10px', flexWrap: 'wrap', alignItems: 'center' }}>
+              <button
+                className="button secondary"
+                type="button"
+                disabled={!form.barangay_name || geocoding}
+                onClick={onGeocode}
+              >
+                {geocoding ? 'Locating…' : 'Locate on map'}
+              </button>
+              {geocodeError ? <span className="form-error" style={{ margin: 0 }}>{geocodeError}</span> : null}
+            </div>
+          </fieldset>
+
+          <fieldset className="user-form-section" style={{ marginBottom: 0 }}>
+            <legend>Map Pin *</legend>
+            <p className="muted" style={{ margin: '0 0 10px', fontSize: '0.82rem' }}>
+              Place or adjust the pin on the map. Sales Agent assignment does not use this pin — Field Ops does.
+            </p>
+            <div
+              style={{
+                height: 260,
+                marginBottom: 12,
+                borderRadius: 8,
+                overflow: 'hidden',
+                position: 'relative',
+                border: '1px solid var(--border)',
+              }}
+            >
+              <LeafletMap
+                center={mapCenter}
+                zoom={mapZoom}
+                height={260}
+                markers={mapMarkers}
+                circles={mapCircles}
+                pinStatusLabel={pinStatusLabel}
+                onMapClick={({ lat, lng }) => {
+                  setForm((prev) => ({
+                    ...prev,
+                    latitude: String(Number(lat.toFixed(7))),
+                    longitude: String(Number(lng.toFixed(7))),
+                  }));
+                }}
+              />
+            </div>
+            {errors.latitude || errors.longitude ? (
+              <p className="form-error" style={{ marginBottom: 10 }}>{errors.latitude || errors.longitude}</p>
+            ) : null}
+
+            <div className="form-group" style={{ maxWidth: 320 }}>
+              <label htmlFor="terr-radius">Map coverage zone (optional)</label>
+              <input
+                id="terr-radius"
+                type="number"
+                min={100}
+                max={20000}
+                step={50}
+                value={form.radius_meters}
+                onChange={(e) => setForm((prev) => ({ ...prev, radius_meters: e.target.value }))}
+                placeholder={`${DEFAULT_RADIUS}`}
+              />
+              <p className="muted" style={{ margin: '4px 0 0', fontSize: '0.78rem' }}>
+                Approximate circle on the Field Map only
+                {form.radius_meters ? ` (≈ ${formatRadiusLabel(form.radius_meters)})` : ` — default ${DEFAULT_RADIUS} m`}.
+                Not used when assigning Sales Agents.
+              </p>
+              {errors.radius_meters ? <p className="form-error">{errors.radius_meters}</p> : null}
+            </div>
+          </fieldset>
         </div>
 
-        <div className="modal-actions" style={{ marginTop: 16 }}>
+        <div
+          className="modal-actions"
+          style={{
+            paddingTop: 12,
+            marginTop: 12,
+            borderTop: '1px solid var(--border)',
+            flexShrink: 0,
+          }}
+        >
           <button className="button secondary" type="button" onClick={onClose} disabled={submitting}>Cancel</button>
           <button className="button" type="button" disabled={submitting} onClick={onSubmit}>
             {submitting ? 'Saving…' : (editing ? 'Save Changes' : 'Create Territory')}
           </button>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }
 
@@ -401,9 +454,6 @@ export function TerritoriesPage({ showToast, navigate, opsBase }) {
   const [barangayOptions, setBarangayOptions] = useState([]);
   const [barangaysLoading, setBarangaysLoading] = useState(false);
 
-  const [menuOpenId, setMenuOpenId] = useState(null);
-  const menuRef = useRef(null);
-
   const [deactivateRow, setDeactivateRow] = useState(null);
   const [deactivateDeps, setDeactivateDeps] = useState(null);
   const [deactivateLoading, setDeactivateLoading] = useState(false);
@@ -446,15 +496,6 @@ export function TerritoriesPage({ showToast, navigate, opsBase }) {
     loadBranches();
     return () => { cancelled = true; };
   }, [canListAllBranches]);
-
-  useEffect(() => {
-    function onDocClick(event) {
-      if (!menuRef.current) return;
-      if (!menuRef.current.contains(event.target)) setMenuOpenId(null);
-    }
-    document.addEventListener('mousedown', onDocClick);
-    return () => document.removeEventListener('mousedown', onDocClick);
-  }, []);
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -602,7 +643,6 @@ export function TerritoriesPage({ showToast, navigate, opsBase }) {
       province_name: row.province_name || '',
     });
     setShowForm(true);
-    setMenuOpenId(null);
     await applyGeoScope(branchMeta(row.branch_id), {
       preferredBarangayCode: row.barangay_code,
       preferredBarangayName: row.barangay_name,
@@ -773,7 +813,6 @@ export function TerritoriesPage({ showToast, navigate, opsBase }) {
   }
 
   async function openDeactivate(row) {
-    setMenuOpenId(null);
     setDeactivateRow(row);
     setDeactivateDeps(null);
     setDeactivateLoading(true);
@@ -828,56 +867,49 @@ export function TerritoriesPage({ showToast, navigate, opsBase }) {
 
   return (
     <div className="page">
-      <section className="panel content-panel relative overflow-hidden mb-4">
-        <div className="list-section-header">
-          <div>
-            <h3>Branch Territories</h3>
-            <p className="muted" style={{ marginTop: 4, marginBottom: 0 }}>
-              Permanent barangay coverage zones with map pins. Daily staffing is assigned in Field Operations.
-            </p>
-          </div>
-          <button className="button" type="button" onClick={openCreate}>
-            New Territory
-          </button>
-        </div>
-
-        <div className="list-section-controls" style={{ flexWrap: 'wrap', gap: 8 }}>
-          <input
-            className="filter-input"
-            type="search"
-            placeholder="Search name, barangay, notes…"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-          />
-          <select
-            className="filter-select"
-            value={statusFilter}
-            onChange={(e) => setStatusFilter(e.target.value)}
-            aria-label="Status filter"
-          >
-            <option value="all">All statuses</option>
-            <option value="Active">Active</option>
-            <option value="Inactive">Inactive</option>
-          </select>
-          {canListAllBranches ? (
+      <section className="panel content-panel relative overflow-hidden">
+        <div className="list-section-toolbar suppliers-toolbar">
+          <div className="list-section-controls" style={{ flexWrap: 'wrap', gap: 8 }}>
+            <input
+              className="filter-input search"
+              type="search"
+              placeholder="Search name, barangay, notes…"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+            />
             <select
               className="filter-select"
-              value={branchFilter}
-              onChange={(e) => setBranchFilter(e.target.value)}
-              aria-label="Branch filter"
+              value={statusFilter}
+              onChange={(e) => setStatusFilter(e.target.value)}
+              aria-label="Status filter"
             >
-              <option value="">All branches</option>
-              {branches.map((branch) => (
-                <option key={getBranchId(branch)} value={getBranchId(branch)}>
-                  {getBranchLabel(branch)}
-                </option>
-              ))}
+              <option value="all">All statuses</option>
+              <option value="Active">Active</option>
+              <option value="Inactive">Inactive</option>
             </select>
-          ) : null}
+            {canListAllBranches ? (
+              <select
+                className="filter-select"
+                value={branchFilter}
+                onChange={(e) => setBranchFilter(e.target.value)}
+                aria-label="Branch filter"
+              >
+                <option value="">All branches</option>
+                {branches.map((branch) => (
+                  <option key={getBranchId(branch)} value={getBranchId(branch)}>
+                    {getBranchLabel(branch)}
+                  </option>
+                ))}
+              </select>
+            ) : null}
+          </div>
+          <div className="suppliers-toolbar-actions">
+            <button className="button" type="button" onClick={openCreate}>
+              New Territory
+            </button>
+          </div>
         </div>
-      </section>
 
-      <section className="panel content-panel relative overflow-hidden">
         {loading ? (
           <p className="muted">Loading territories…</p>
         ) : !filtered.length ? (
@@ -900,7 +932,7 @@ export function TerritoriesPage({ showToast, navigate, opsBase }) {
                     <th>{sortLabel('overdue', 'Overdue')}</th>
                     <th>Coverage</th>
                     <th>{sortLabel('status', 'Status')}</th>
-                    <th aria-label="Actions" />
+                    <th>Actions</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -939,51 +971,16 @@ export function TerritoriesPage({ showToast, navigate, opsBase }) {
                         </div>
                       </td>
                       <td><StatusBadge status={row.status || 'Active'} /></td>
-                      <td style={{ position: 'relative' }}>
-                        <div ref={menuOpenId === row.territory_id ? menuRef : null}>
-                          <button
-                            type="button"
-                            className="button ghost"
-                            aria-label="Territory actions"
-                            aria-expanded={menuOpenId === row.territory_id}
-                            onClick={() => setMenuOpenId((id) => (id === row.territory_id ? null : row.territory_id))}
-                          >
-                            ⋮
-                          </button>
-                          {menuOpenId === row.territory_id ? (
-                            <div
-                              className="panel"
-                              style={{
-                                position: 'absolute',
-                                right: 0,
-                                top: '100%',
-                                zIndex: 20,
-                                minWidth: 160,
-                                padding: 8,
-                                boxShadow: '0 8px 24px rgba(0,0,0,0.12)',
-                              }}
-                            >
-                              <button
-                                type="button"
-                                className="button ghost"
-                                style={{ display: 'block', width: '100%', textAlign: 'left' }}
-                                onClick={() => openEdit(row)}
-                              >
-                                Edit
-                              </button>
-                              {String(row.status || 'Active') === 'Active' ? (
-                                <button
-                                  type="button"
-                                  className="button ghost"
-                                  style={{ display: 'block', width: '100%', textAlign: 'left' }}
-                                  onClick={() => openDeactivate(row)}
-                                >
-                                  Deactivate
-                                </button>
-                              ) : null}
-                            </div>
-                          ) : null}
-                        </div>
+                      <td className="table-actions" onClick={(e) => e.stopPropagation()}>
+                        <RowActionMenu
+                          label={`Actions for ${row.territory_name}`}
+                          items={[
+                            { key: 'edit', label: 'Edit', onSelect: () => openEdit(row) },
+                            String(row.status || 'Active') === 'Active'
+                              ? { key: 'deactivate', label: 'Deactivate', danger: true, onSelect: () => openDeactivate(row) }
+                              : null,
+                          ]}
+                        />
                       </td>
                     </tr>
                   ))}

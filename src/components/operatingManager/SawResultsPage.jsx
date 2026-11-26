@@ -14,6 +14,7 @@ import { Pagination } from '../shared/Pagination';
 import { usePagination } from '../../hooks/usePagination';
 import { EmptyState } from '../shared/EmptyState';
 import { LoadingState } from '../shared/LoadingState';
+import { RowActionMenu } from '../shared/RowActionMenu';
 import { NavIcon } from '../../navIcons';
 import { fetchSawResults, recomputeOrgSawResults } from '../../api/sawResultsService';
 import { formatCurrency, formatDisplayDate, formatDisplayDateTime } from '../../utils/formatters.js';
@@ -733,23 +734,22 @@ export function SawResultsPage({ navigate, showToast }) {
                             {generated.time ? <span className="saw-generated-time">{generated.time}</span> : null}
                           </span>
                         </td>
-                        <td className="table-actions saw-col-actions">
-                          <button
-                            className="icon-action-button"
-                            type="button"
-                            title="Open customer"
-                            onClick={() => navigate(`/operating-manager/operations/customers/${row.customer_id}`)}
-                          >
-                            <NavIcon name="view" />
-                          </button>
-                          <button
-                            className="icon-action-button"
-                            type="button"
-                            title="View map"
-                            onClick={() => navigate('/operating-manager/leaflet')}
-                          >
-                            <NavIcon name="map" />
-                          </button>
+                        <td className="table-actions saw-col-actions" onClick={(e) => e.stopPropagation()}>
+                          <RowActionMenu
+                            label={`Actions for ${row.customer_name || 'customer'}`}
+                            items={[
+                              {
+                                key: 'open',
+                                label: 'Open customer',
+                                onSelect: () => navigate(`/operating-manager/operations/customers/${row.customer_id}`),
+                              },
+                              {
+                                key: 'map',
+                                label: 'View map',
+                                onSelect: () => navigate('/operating-manager/leaflet'),
+                              },
+                            ]}
+                          />
                         </td>
                       </tr>
                     );

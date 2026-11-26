@@ -26,6 +26,7 @@ import {
 import { getCurrentUser } from '../../api/authService.js';
 import { AccountProfilePanel } from '../shared/AccountProfilePanel';
 import { UserSettingsPanel } from '../shared/UserSettingsPanel';
+import { RowActionMenu } from '../shared/RowActionMenu';
 import { QuantityStepper } from '../shared/QuantityStepper.jsx';
 
 function ProductThumb({ src, alt = '', size }) {
@@ -527,17 +528,13 @@ function InventoryPage({
                           ) : onHand}
                         </td>
                         <td><StatusBadge status={statusLabel} /></td>
-                        <td className="cell-actions" onClick={(e) => e.stopPropagation()}>
-                          <div className="table-actions">
-                            <button
-                              className="icon-action-button"
-                              type="button"
-                              title="View"
-                              onClick={() => navigate(`/warehouse/product/${product.product_id}`)}
-                            >
-                              <NavIcon name="view" />
-                            </button>
-                          </div>
+                        <td className="table-actions cell-actions" onClick={(e) => e.stopPropagation()}>
+                          <RowActionMenu
+                            label={`Actions for ${product.product_name || 'product'}`}
+                            items={[
+                              { key: 'view', label: 'View', onSelect: () => navigate(`/warehouse/product/${product.product_id}`) },
+                            ]}
+                          />
                         </td>
                       </tr>
                     );
@@ -1318,15 +1315,13 @@ function StockCountHistoryPage({ navigate }) {
                       </td>
                       <td><StatusBadge status={row.status || 'Completed'} /></td>
                       <td>{row.counted_by_name || '—'}</td>
-                      <td className="cell-actions" onClick={(e) => e.stopPropagation()}>
-                        <button
-                          className="icon-action-button"
-                          type="button"
-                          title="View"
-                          onClick={() => navigate(`/warehouse/stock-counts/${row.count_id}`)}
-                        >
-                          <NavIcon name="view" />
-                        </button>
+                      <td className="table-actions cell-actions" onClick={(e) => e.stopPropagation()}>
+                        <RowActionMenu
+                          label={`Actions for ${formatDocumentRef(row.count_ref)}`}
+                          items={[
+                            { key: 'view', label: 'View', onSelect: () => navigate(`/warehouse/stock-counts/${row.count_id}`) },
+                          ]}
+                        />
                       </td>
                     </tr>
                   ))}
@@ -1740,18 +1735,18 @@ function MovementsPage({
                           {movementTotalLabel(txn)}
                         </td>
                         <td>{txn.performed_by_name || '—'}</td>
-                        <td className="cell-actions" onClick={(e) => e.stopPropagation()}>
-                          <div className="table-actions">
-                            <button
-                              className="icon-action-button"
-                              type="button"
-                              title="View"
-                              disabled={!detailId}
-                              onClick={() => detailId && navigate(`/warehouse/movements/${detailId}`)}
-                            >
-                              <NavIcon name="view" />
-                            </button>
-                          </div>
+                        <td className="table-actions cell-actions" onClick={(e) => e.stopPropagation()}>
+                          <RowActionMenu
+                            label={`Actions for ${reference}`}
+                            items={[
+                              {
+                                key: 'view',
+                                label: 'View',
+                                disabled: !detailId,
+                                onSelect: () => detailId && navigate(`/warehouse/movements/${detailId}`),
+                              },
+                            ]}
+                          />
                         </td>
                       </tr>
                     );
@@ -2386,17 +2381,13 @@ function TransfersPage({
                         <td style={{ fontSize: '0.82rem' }}>{formatDisplayDate(t.submitted_date)}</td>
                         <td>{t.submitted_by_name || '—'}</td>
                         <td><StatusBadge status={t.status} /></td>
-                        <td className="cell-actions" onClick={(e) => e.stopPropagation()}>
-                          <div className="table-actions">
-                            <button
-                              className="icon-action-button"
-                              type="button"
-                              title="View"
-                              onClick={() => openDetail(t.transfer_id)}
-                            >
-                              <NavIcon name="view" />
-                            </button>
-                          </div>
+                        <td className="table-actions cell-actions" onClick={(e) => e.stopPropagation()}>
+                          <RowActionMenu
+                            label={`Actions for ${formatDocumentRef(t.transfer_ref)}`}
+                            items={[
+                              { key: 'view', label: 'View', onSelect: () => openDetail(t.transfer_id) },
+                            ]}
+                          />
                         </td>
                       </tr>
                     );
@@ -2877,17 +2868,13 @@ function RestockHistoryPage({ navigate }) {
                         <td>{formatDisplayDate(r.received_date)}</td>
                         <td><StatusBadge status={r.status || 'Posted'} /></td>
                         <td>{r.recorded_by_name || '—'}</td>
-                        <td className="cell-actions" onClick={(e) => e.stopPropagation()}>
-                          <div className="table-actions">
-                            <button
-                              className="icon-action-button"
-                              type="button"
-                              title="View"
-                              onClick={() => navigate(`/warehouse/restock-history/${r.restock_id}`)}
-                            >
-                              <NavIcon name="view" />
-                            </button>
-                          </div>
+                        <td className="table-actions cell-actions" onClick={(e) => e.stopPropagation()}>
+                          <RowActionMenu
+                            label={`Actions for ${formatDocumentRef(r.delivery_ref || r.restock_ref)}`}
+                            items={[
+                              { key: 'view', label: 'View', onSelect: () => navigate(`/warehouse/restock-history/${r.restock_id}`) },
+                            ]}
+                          />
                         </td>
                       </tr>
                     );
@@ -3065,17 +3052,13 @@ function RestockDetailPage({ restockId, navigate, showToast }) {
                     <td><span className="mono-cell">{line.sku || '—'}</span></td>
                     <td><strong>{line.product_name}</strong></td>
                     <td style={{ color: '#2A9B6A', fontWeight: 600 }}>+{line.quantity}</td>
-                    <td className="cell-actions">
-                      <div className="table-actions">
-                        <button
-                          className="icon-action-button"
-                          type="button"
-                          title="View product"
-                          onClick={() => navigate(`/warehouse/product/${line.product_id}`)}
-                        >
-                          <NavIcon name="view" />
-                        </button>
-                      </div>
+                    <td className="table-actions cell-actions" onClick={(e) => e.stopPropagation()}>
+                      <RowActionMenu
+                        label={`Actions for ${line.product_name || 'product'}`}
+                        items={[
+                          { key: 'view', label: 'View product', onSelect: () => navigate(`/warehouse/product/${line.product_id}`) },
+                        ]}
+                      />
                     </td>
                   </tr>
                 ))}
@@ -3380,17 +3363,13 @@ function SuppliersPage({
                       <td>{supplier.email || '—'}</td>
                       <td title={supplier.address || ''}>{truncateText(supplier.address)}</td>
                       <td><StatusBadge status={supplier.status} /></td>
-                      <td className="cell-actions" onClick={(e) => e.stopPropagation()}>
-                        <div className="table-actions">
-                          <button
-                            className="icon-action-button"
-                            type="button"
-                            title="View"
-                            onClick={() => openDetail(supplier.suppliers_id)}
-                          >
-                            <NavIcon name="view" />
-                          </button>
-                        </div>
+                      <td className="table-actions cell-actions" onClick={(e) => e.stopPropagation()}>
+                        <RowActionMenu
+                          label={`Actions for ${supplier.supplier_name}`}
+                          items={[
+                            { key: 'view', label: 'View', onSelect: () => openDetail(supplier.suppliers_id) },
+                          ]}
+                        />
                       </td>
                     </tr>
                   ))}
@@ -3514,15 +3493,13 @@ function SupplierDetailPage({
                     <td>{r.line_count ?? '—'}</td>
                     <td style={{ color: '#2A9B6A', fontWeight: 600 }}>+{r.total_quantity ?? 0}</td>
                     <td>{r.recorded_by_name || '—'}</td>
-                    <td className="cell-actions" onClick={(e) => e.stopPropagation()}>
-                      <button
-                        className="icon-action-button"
-                        type="button"
-                        title="View restock"
-                        onClick={() => navigate(`/warehouse/restock-history/${r.restock_id}`)}
-                      >
-                        <NavIcon name="view" />
-                      </button>
+                    <td className="table-actions cell-actions" onClick={(e) => e.stopPropagation()}>
+                      <RowActionMenu
+                        label={`Actions for ${formatDocumentRef(r.delivery_ref || r.restock_ref)}`}
+                        items={[
+                          { key: 'view', label: 'View restock', onSelect: () => navigate(`/warehouse/restock-history/${r.restock_id}`) },
+                        ]}
+                      />
                     </td>
                   </tr>
                 ))}
@@ -3667,15 +3644,13 @@ function ProductCategoriesPage({
                       <td><strong>{c.category_name}</strong></td>
                       <td><StatusBadge status={c.status} /></td>
                       <td>{Number(c.product_count) || 0}</td>
-                      <td className="cell-actions" onClick={(e) => e.stopPropagation()}>
-                        <button
-                          className="icon-action-button"
-                          type="button"
-                          title="View products"
-                          onClick={() => openProducts(c.category_id)}
-                        >
-                          <NavIcon name="view" />
-                        </button>
+                      <td className="table-actions cell-actions" onClick={(e) => e.stopPropagation()}>
+                        <RowActionMenu
+                          label={`Actions for ${c.category_name}`}
+                          items={[
+                            { key: 'view', label: 'View products', onSelect: () => openProducts(c.category_id) },
+                          ]}
+                        />
                       </td>
                     </tr>
                   ))}

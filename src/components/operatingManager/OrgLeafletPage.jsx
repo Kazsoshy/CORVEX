@@ -4,8 +4,8 @@ import { Pagination } from '../shared/Pagination';
 import { usePagination } from '../../hooks/usePagination';
 import { EmptyState } from '../shared/EmptyState';
 import { LoadingState } from '../shared/LoadingState';
+import { RowActionMenu } from '../shared/RowActionMenu';
 import { StatusBadge } from '../StatusBadge';
-import { NavIcon } from '../../navIcons';
 import { getBranchMap, getSawMapRoads } from '../../api/branchManagerService.js';
 import { formatCurrency, formatDisplayDate } from '../../utils/formatters.js';
 import {
@@ -350,15 +350,13 @@ export function OrgLeafletPage({
                       <td><StatusBadge status={account.paymentStatus} /></td>
                       <td>{account.lastVisit ? formatDisplayDate(account.lastVisit) : '—'}</td>
                       <td>{account.assignedStaff}</td>
-                      <td className="table-actions">
-                        <button
-                          className="icon-action-button"
-                          type="button"
-                          title="View"
-                          onClick={() => navigate(`${opsBase}/customers/${account.id}`)}
-                        >
-                          <NavIcon name="view" />
-                        </button>
+                      <td className="table-actions" onClick={(e) => e.stopPropagation()}>
+                        <RowActionMenu
+                          label={`Actions for ${account.customerName}`}
+                          items={[
+                            { key: 'view', label: 'View', onSelect: () => navigate(`${opsBase}/customers/${account.id}`) },
+                          ]}
+                        />
                       </td>
                     </tr>
                   ))}

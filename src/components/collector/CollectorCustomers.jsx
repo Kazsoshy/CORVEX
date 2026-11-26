@@ -18,8 +18,8 @@ import { EmptyState } from '../shared/EmptyState';
 import { LoadingState } from '../shared/LoadingState';
 import { DetailRowsTable } from '../shared/DetailRowsTable';
 import { Pagination } from '../shared/Pagination';
+import { RowActionMenu } from '../shared/RowActionMenu';
 import { StatusBadge } from '../StatusBadge';
-import { NavIcon } from '../../navIcons';
 
 function money(value) {
   return Math.round(Number(value || 0) * 100) / 100;
@@ -194,24 +194,13 @@ export function AccountsPage({ navigate, showToast }) {
                         <td>{daysOverdueValue(customer)}</td>
                         <td><StatusBadge status={customer.status || 'Active'} /></td>
                         <td className="table-actions" onClick={(e) => e.stopPropagation()}>
-                          <button
-                            className="icon-action-button"
-                            type="button"
-                            title="View"
-                            onClick={() => navigate(detailPath)}
-                          >
-                            <NavIcon name="view" />
-                          </button>
-                          {canNavigate ? (
-                            <button
-                              className="icon-action-button"
-                              type="button"
-                              title="Navigate"
-                              onClick={() => handleCustomerNavigate(customer, showToast)}
-                            >
-                              <NavIcon name="map" />
-                            </button>
-                          ) : null}
+                          <RowActionMenu
+                            label={`Actions for ${formatCustomerFullName(customer)}`}
+                            items={[
+                              { key: 'view', label: 'View', onSelect: () => navigate(detailPath) },
+                              canNavigate ? { key: 'navigate', label: 'Navigate', onSelect: () => handleCustomerNavigate(customer, showToast) } : null,
+                            ]}
+                          />
                         </td>
                       </tr>
                     );

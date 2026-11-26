@@ -19,6 +19,7 @@ import { CentralInventoryPanel } from '../inventory/CentralInventoryPanel';
 import { ProductImagePicker } from '../shared/ProductImagePicker';
 import { deleteProductImage, uploadProductImage } from '../../api/inventoryService';
 import { DetailRowsTable } from '../shared/DetailRowsTable';
+import { RowActionMenu } from '../shared/RowActionMenu';
 import { UserFormPage, UserListPage } from './UserManagement';
 import { BranchListPage, BranchDetailPage } from './BranchManagement';
 
@@ -436,20 +437,16 @@ function InventoryPage({
                       <td>{p.unit_price != null ? Number(p.unit_price).toFixed(2) : '—'}</td>
                       <td>{p.total_quantity ?? p.quantity ?? '—'}</td>
                       <td><StatusPill status={p.status || p.stock_status} /></td>
-                      <td className="table-actions">
-                        <button className="icon-action-button" type="button" title="Edit" onClick={() => openEditProduct(p)}><NavIcon name="edit" /></button>
-                        {String(p.status) === 'Inactive' ? (
-                          <button className="icon-action-button" type="button" title="Restore" onClick={() => handleRestoreProduct(p)}><NavIcon name="reset" /></button>
-                        ) : (
-                          <button
-                            className="icon-action-button danger"
-                            type="button"
-                            title="Archive"
-                            onClick={() => setConfirmProductAction({ type: 'archive', product: p })}
-                          >
-                            <NavIcon name="archive" />
-                          </button>
-                        )}
+                      <td className="table-actions" onClick={(e) => e.stopPropagation()}>
+                        <RowActionMenu
+                          label={`Actions for ${p.product_name}`}
+                          items={[
+                            { key: 'edit', label: 'Edit', onSelect: () => openEditProduct(p) },
+                            String(p.status) === 'Inactive'
+                              ? { key: 'restore', label: 'Restore', onSelect: () => handleRestoreProduct(p) }
+                              : { key: 'archive', label: 'Archive', danger: true, onSelect: () => setConfirmProductAction({ type: 'archive', product: p }) },
+                          ]}
+                        />
                       </td>
                     </tr>)}
                 </tbody>
@@ -550,11 +547,14 @@ function InventoryPage({
                     <td>{t.transfer_ref}</td><td>{t.product_name}</td><td>{t.source_branch}</td><td>{t.destination_branch}</td><td>{t.quantity}</td>
                     <td>{t.submitted_by_name || '—'}</td><td>{formatDisplayDate(t.submitted_date)}</td>
                     <td><StatusPill status={t.status} /></td>
-                    <td className="table-actions">
-                      {pendingTransfer(t) && <>
-                        <button className="icon-action-button" type="button" title="Approve" onClick={() => updateTransferStatus(t.transfer_id, 'Approved')}><NavIcon name="check" /></button>
-                        <button className="icon-action-button danger" type="button" title="Reject" onClick={() => updateTransferStatus(t.transfer_id, 'Rejected')}><NavIcon name="close" /></button>
-                      </>}
+                    <td className="table-actions" onClick={(e) => e.stopPropagation()}>
+                      <RowActionMenu
+                        label={`Actions for transfer ${t.transfer_ref}`}
+                        items={pendingTransfer(t) ? [
+                          { key: 'approve', label: 'Approve', onSelect: () => updateTransferStatus(t.transfer_id, 'Approved') },
+                          { key: 'reject', label: 'Reject', danger: true, onSelect: () => updateTransferStatus(t.transfer_id, 'Rejected') },
+                        ] : []}
+                      />
                     </td>
                   </tr>)}
               </tbody>
@@ -967,16 +967,13 @@ function AuditLogsPage({
                     <td>{l.module || '—'}</td>
                     <td>{auditActivityLabel(l)}</td>
                     <td>{l.ip_address || '—'}</td>
-                    <td>
-                      <button
-                        className="icon-action-button"
-                        type="button"
-                        title="View"
-                        aria-label={`View audit log ${l.log_id}`}
-                        onClick={() => setViewingLog(l)}
-                      >
-                        <NavIcon name="view" />
-                      </button>
+                    <td className="table-actions" onClick={(e) => e.stopPropagation()}>
+                      <RowActionMenu
+                        label={`Actions for audit log ${l.log_id}`}
+                        items={[
+                          { key: 'view', label: 'View', onSelect: () => setViewingLog(l) },
+                        ]}
+                      />
                     </td>
                   </tr>
                 ))}
@@ -1145,28 +1142,28 @@ function ProductCategoriesPage({
                     <td><StatusPill status={c.status} /></td>
                     <td>{Number(c.product_count) || 0}</td>
                     <td>{formatDisplayDateTime(c.updated_at || c.created_at)}</td>
-                    <td className="table-actions">
-                      <button className="icon-action-button" type="button" title="Edit" onClick={() => handleEdit(c)}><NavIcon name="edit" /></button>
-                      {String(c.status || '').toLowerCase() === 'inactive' ? (
-                        <button
-                          className="icon-action-button"
-                          type="button"
-                          title="Restore"
-                          onClick={async () => {
-                            try {
-                              await apiClient.put(`/product-categories/${c.category_id}`, { status: 'Active' });
-                              showToast('Category restored.', 'success');
-                              loadData();
-                            } catch (err) {
-                              showToast(err.response?.data?.message || 'Failed to restore.', 'error');
+                    <td className="table-actions" onClick={(e) => e.stopPropagation()}>
+                      <RowActionMenu
+                        label={`Actions for ${c.category_name}`}
+                        items={[
+                          { key: 'edit', label: 'Edit', onSelect: () => handleEdit(c) },
+                          String(c.status || '').toLowerCase() === 'inactive'
+                            ? {
+                              key: 'restore',
+                              label: 'Restore',
+                              onSelect: async () => {
+                                try {
+                                  await apiClient.put(`/product-categories/${c.category_id}`, { status: 'Active' });
+                                  showToast('Category restored.', 'success');
+                                  loadData();
+                                } catch (err) {
+                                  showToast(err.response?.data?.message || 'Failed to restore.', 'error');
+                                }
+                              },
                             }
-                          }}
-                        >
-                          <NavIcon name="reset" />
-                        </button>
-                      ) : (
-                        <button className="icon-action-button danger" type="button" title="Archive" onClick={() => handleArchive(c)}><NavIcon name="archive" /></button>
-                      )}
+                            : { key: 'archive', label: 'Archive', danger: true, onSelect: () => handleArchive(c) },
+                        ]}
+                      />
                     </td>
                   </tr>)}
               </tbody>
@@ -1367,30 +1364,28 @@ function SuppliersAdminPage({
                     <td>{s.email || '—'}</td>
                     <td>{s.address?.trim() ? s.address : '—'}</td>
                     <td><StatusPill status={s.status || 'Active'} /></td>
-                    <td className="table-actions">
-                      <button className="icon-action-button" type="button" title="Edit" onClick={() => openForm(s)}><NavIcon name="edit" /></button>
-                      {String(s.status || 'Active').toLowerCase() === 'inactive' ? (
-                        <button
-                          className="icon-action-button"
-                          type="button"
-                          title="Restore"
-                          onClick={async () => {
-                            try {
-                              await apiClient.put(`/suppliers/${s.suppliers_id ?? s.supplier_id}`, { status: 'Active' });
-                              showToast('Supplier restored.', 'success');
-                              loadData();
-                            } catch (err) {
-                              showToast(err.response?.data?.message || 'Failed to restore supplier.', 'error');
+                    <td className="table-actions" onClick={(e) => e.stopPropagation()}>
+                      <RowActionMenu
+                        label={`Actions for ${s.supplier_name}`}
+                        items={[
+                          { key: 'edit', label: 'Edit', onSelect: () => openForm(s) },
+                          String(s.status || 'Active').toLowerCase() === 'inactive'
+                            ? {
+                              key: 'restore',
+                              label: 'Restore',
+                              onSelect: async () => {
+                                try {
+                                  await apiClient.put(`/suppliers/${s.suppliers_id ?? s.supplier_id}`, { status: 'Active' });
+                                  showToast('Supplier restored.', 'success');
+                                  loadData();
+                                } catch (err) {
+                                  showToast(err.response?.data?.message || 'Failed to restore supplier.', 'error');
+                                }
+                              },
                             }
-                          }}
-                        >
-                          <NavIcon name="reset" />
-                        </button>
-                      ) : (
-                        <button className="icon-action-button danger" type="button" title="Archive" onClick={() => setConfirmArchive(s)}>
-                          <NavIcon name="archive" />
-                        </button>
-                      )}
+                            : { key: 'archive', label: 'Archive', danger: true, onSelect: () => setConfirmArchive(s) },
+                        ]}
+                      />
                     </td>
                   </tr>)}
               </tbody>

@@ -21,7 +21,9 @@ import apiClient from '../../api/apiClient';
 import { fetchCustomers, fetchCustomerById } from '../../api/salesService';
 import { EmptyState } from '../shared/EmptyState';
 import { LoadingState } from '../shared/LoadingState';
+import { StatsGrid } from '../shared/StatsGrid';
 import { DetailRowsTable } from '../shared/DetailRowsTable';
+import { RowActionMenu } from '../shared/RowActionMenu';
 import { ChartDrilldownModal } from '../shared/ChartDrilldownModal.jsx';
 import { useChartDrilldown } from '../../hooks/useChartDrilldown.js';
 import { NavIcon } from '../../navIcons';
@@ -1150,15 +1152,14 @@ function AlertsPage({
                       <td>{a.type}</td><td>{a.branch}</td><td>{a.message}</td>
                       <td><SeverityBadge severity={a.severity} /></td>
                       <td>{formatDisplayDate(a.date)}</td><td><StatusBadge status={a.resolved ? 'Resolved' : 'Open'} /></td>
-                      <td className="table-actions">
-                        {!a.resolved ? (
-                          <button className="icon-action-button" type="button" title="Resolve" onClick={() => resolveAlert(a.id)}>
-                            <NavIcon name="check" />
-                          </button>
-                        ) : null}
-                        {a.branchId ? <button className="icon-action-button" type="button" title="View" onClick={() => navigate(`/operating-manager/branch-performance/branch/${a.branchId}`)}>
-                          <NavIcon name="view" />
-                        </button> : null}
+                      <td className="table-actions" onClick={(e) => e.stopPropagation()}>
+                        <RowActionMenu
+                          label={`Actions for ${a.type || 'alert'}`}
+                          items={[
+                            !a.resolved ? { key: 'resolve', label: 'Resolve', onSelect: () => resolveAlert(a.id) } : null,
+                            a.branchId ? { key: 'view', label: 'View', onSelect: () => navigate(`/operating-manager/branch-performance/branch/${a.branchId}`) } : null,
+                          ]}
+                        />
                       </td>
                     </tr>)}
                 </tbody>
@@ -1347,8 +1348,13 @@ function CustomerRecordsPage({
                     <td>{r.address}</td>
                     <td>{formatPhone(r.contact_phone)}</td>
                     <td><StatusBadge status={r.status} /></td>
-                    <td className="table-actions">
-                      <button className="icon-action-button" type="button" title="View" onClick={() => navigate(`/operating-manager/customers/${r.customer_id}`)}><NavIcon name="view" /></button>
+                    <td className="table-actions" onClick={(e) => e.stopPropagation()}>
+                      <RowActionMenu
+                        label={`Actions for ${r.first_name} ${r.last_name}`}
+                        items={[
+                          { key: 'view', label: 'View', onSelect: () => navigate(`/operating-manager/customers/${r.customer_id}`) },
+                        ]}
+                      />
                     </td>
                   </tr>)}
               </tbody>
@@ -3098,13 +3104,21 @@ function DigitalReceiptsPage({
                     <td><StatusBadge status={r.payment_status || '—'} /></td>
                     <td>{r.generated_by_name || '—'}</td>
                     <td>{formatDisplayDateTime(r.receipt_date)}</td>
-                    <td className="table-actions">
-                      {r.payment_status === 'Pending' && r.collection_id ? <>
-                        <button className="icon-action-button" type="button" title="Confirm" onClick={() => confirmReceipt(r.collection_id)}><NavIcon name="check" /></button>
-                        <button className="icon-action-button danger" type="button" title="Reject" onClick={() => openReviewModal(r.collection_id, 'reject', r)}><NavIcon name="close" /></button>
-                      </> : null}
-                      {r.payment_status === 'Completed' && r.collection_id ? <button className="button ghost" type="button" onClick={() => openReviewModal(r.collection_id, 'reverse', r)}>Reverse</button> : null}
-                      {r.payment_status !== 'Pending' && r.payment_status !== 'Completed' ? <span className="muted">—</span> : null}
+                    <td className="table-actions" onClick={(e) => e.stopPropagation()}>
+                      <RowActionMenu
+                        label={`Actions for receipt ${r.receipt_number || r.receipts_id}`}
+                        items={[
+                          r.payment_status === 'Pending' && r.collection_id
+                            ? { key: 'confirm', label: 'Confirm', onSelect: () => confirmReceipt(r.collection_id) }
+                            : null,
+                          r.payment_status === 'Pending' && r.collection_id
+                            ? { key: 'reject', label: 'Reject', danger: true, onSelect: () => openReviewModal(r.collection_id, 'reject', r) }
+                            : null,
+                          r.payment_status === 'Completed' && r.collection_id
+                            ? { key: 'reverse', label: 'Reverse', danger: true, onSelect: () => openReviewModal(r.collection_id, 'reverse', r) }
+                            : null,
+                        ]}
+                      />
                     </td>
                   </tr>)}
               </tbody>

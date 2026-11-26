@@ -18,9 +18,9 @@ import { EmptyState } from '../shared/EmptyState';
 import { LoadingState } from '../shared/LoadingState';
 import { DetailRowsTable } from '../shared/DetailRowsTable';
 import { Pagination } from '../shared/Pagination';
+import { RowActionMenu } from '../shared/RowActionMenu';
 import { ConfirmModal } from '../shared/ConfirmModal';
 import { StatusBadge } from '../StatusBadge';
-import { NavIcon } from '../../navIcons';
 import { CreditReviewRequestModal } from '../shared/CreditReviewRequestModal';
 
 function limitCell(review) {
@@ -551,23 +551,24 @@ export function SalesCreditReviewsPage({ navigate, showToast }) {
                         <td>{formatCreditAmount(row.outstanding_balance, { emptyLabel: 'No records available' })}</td>
                         <td>{row.suggested_action || '—'}</td>
                         <td><StatusBadge status={row.status} /></td>
-                        <td className="table-actions">
-                          <button
-                            className="button ghost"
-                            type="button"
-                            disabled={convertingId === row.recommendation_id}
-                            onClick={() => openRequestFromRecommendation(row)}
-                          >
-                            View / Prefill
-                          </button>
-                          <button
-                            className="button secondary"
-                            type="button"
-                            disabled={convertingId === row.recommendation_id}
-                            onClick={() => convertRecommendationDirect(row)}
-                          >
-                            Request Credit Review
-                          </button>
+                        <td className="table-actions" onClick={(e) => e.stopPropagation()}>
+                          <RowActionMenu
+                            label={`Actions for ${row.customer_name}`}
+                            items={[
+                              {
+                                key: 'prefill',
+                                label: 'View / Prefill',
+                                disabled: convertingId === row.recommendation_id,
+                                onSelect: () => openRequestFromRecommendation(row),
+                              },
+                              {
+                                key: 'request',
+                                label: 'Request Credit Review',
+                                disabled: convertingId === row.recommendation_id,
+                                onSelect: () => convertRecommendationDirect(row),
+                              },
+                            ]}
+                          />
                         </td>
                       </tr>
                     ))}
@@ -630,24 +631,21 @@ export function SalesCreditReviewsPage({ navigate, showToast }) {
                       <td><StatusBadge status={review.displayStatus} /></td>
                       <td>{formatDisplayDate(review.updatedAt || review.submissionDate)}</td>
                       <td className="table-actions" onClick={(e) => e.stopPropagation()}>
-                        <button
-                          className="icon-action-button"
-                          type="button"
-                          title="View"
-                          aria-label={`View credit review for ${review.customerName}`}
-                          onClick={() => navigate(`/sales/credit-investigations/${review.ciId}`)}
-                        >
-                          <NavIcon name="view" />
-                        </button>
-                        {review.status === 'Revision Requested' ? (
-                          <button
-                            className="button secondary"
-                            type="button"
-                            onClick={() => navigate(`/sales/credit-investigations/${review.ciId}?revise=1`)}
-                          >
-                            Revise
-                          </button>
-                        ) : null}
+                        <RowActionMenu
+                          label={`Actions for credit review of ${review.customerName}`}
+                          items={[
+                            {
+                              key: 'view',
+                              label: 'View',
+                              onSelect: () => navigate(`/sales/credit-investigations/${review.ciId}`),
+                            },
+                            review.status === 'Revision Requested' ? {
+                              key: 'revise',
+                              label: 'Revise',
+                              onSelect: () => navigate(`/sales/credit-investigations/${review.ciId}?revise=1`),
+                            } : null,
+                          ]}
+                        />
                       </td>
                     </tr>
                   ))}

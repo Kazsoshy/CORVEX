@@ -1,16 +1,18 @@
 import { createPortal } from 'react-dom';
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { MoreVertical } from 'lucide-react';
 
 /**
- * Shared ⋮ overflow menu used across CORVEX list tables.
- * Supports screen edge flip (fitsBelow) and keyboard navigation.
+ * Shared vertical three-dot (⋮) overflow menu used across CORVEX list tables.
+ * Portal-rendered to document.body with viewport clamping, flip-above, and keyboard navigation.
  *
  * @param {{
- *   items: Array<{ key?: string, label: string, onSelect: () => void, disabled?: boolean, title?: string, danger?: boolean }|null|false>,
- *   label?: string
+ *   items: Array<{ key?: string, label: string, onSelect?: () => void, onClick?: () => void, disabled?: boolean, title?: string, danger?: boolean, icon?: import('react').ReactNode }|null|false>,
+ *   label?: string,
+ *   emptyFallback?: import('react').ReactNode
  * }} props
  */
-export function RowActionMenu({ items = [], label = 'Actions' }) {
+export function RowActionMenu({ items = [], label = 'Actions', emptyFallback = <span className="muted">—</span> }) {
   const [open, setOpen] = useState(false);
   const [pos, setPos] = useState(null);
   const buttonRef = useRef(null);
@@ -21,13 +23,16 @@ export function RowActionMenu({ items = [], label = 'Actions' }) {
   useLayoutEffect(() => {
     if (!open || !buttonRef.current) return;
     const rect = buttonRef.current.getBoundingClientRect();
+    const menuWidth = menuRef.current?.offsetWidth || 200;
     const menuHeight = menuRef.current?.offsetHeight || 0;
-    const fitsBelow = rect.bottom + menuHeight + 8 < window.innerHeight;
-    setPos({
-      top: fitsBelow ? rect.bottom + 4 : Math.max(8, rect.top - menuHeight - 4),
-      right: Math.max(8, window.innerWidth - rect.right),
-    });
-  }, [open]);
+    const viewportW = window.innerWidth;
+    const viewportH = window.innerHeight;
+    const fitsBelow = rect.bottom + menuHeight + 8 <= viewportH;
+    const top = fitsBelow ? rect.bottom + 4 : Math.max(8, rect.top - menuHeight - 4);
+    const idealLeft = rect.right - menuWidth;
+    const left = Math.max(8, Math.min(idealLeft, viewportW - menuWidth - 8));
+    setPos({ top, left });
+  }, [open, visible.length]);
 
   useEffect(() => {
     if (!open) return undefined;
@@ -60,12 +65,16 @@ export function RowActionMenu({ items = [], label = 'Actions' }) {
         buttons[buttons.length - 1]?.focus();
       }
     };
-    const onScroll = () => setOpen(false);
+    const onScroll = (event) => {
+      if (menuRef.current?.contains(event.target)) return;
+      setOpen(false);
+    };
+    const onResize = () => setOpen(false);
 
     document.addEventListener('mousedown', close);
     document.addEventListener('keydown', onKey);
     window.addEventListener('scroll', onScroll, true);
-    window.addEventListener('resize', onScroll);
+    window.addEventListener('resize', onResize);
     queueMicrotask(() => {
       menuRef.current?.querySelector('[role="menuitem"]:not(:disabled)')?.focus();
     });
@@ -73,19 +82,22 @@ export function RowActionMenu({ items = [], label = 'Actions' }) {
       document.removeEventListener('mousedown', close);
       document.removeEventListener('keydown', onKey);
       window.removeEventListener('scroll', onScroll, true);
-      window.removeEventListener('resize', onScroll);
+      window.removeEventListener('resize', onResize);
     };
   }, [open]);
+
+  if (!visible.length) return emptyFallback;
 
   return (
     <>
       <button
         ref={buttonRef}
         type="button"
-        className="button ghost user-row-menu-trigger"
+        className="button ghost user-row-menu-trigger row-action-trigger"
         aria-haspopup="menu"
         aria-expanded={open}
         aria-label={label}
+        title={label}
         onClick={(event) => {
           event.stopPropagation();
           setOpen((v) => !v);
@@ -98,34 +110,39 @@ export function RowActionMenu({ items = [], label = 'Actions' }) {
           }
         }}
       >
-        ⋮
+        <MoreVertical size={16} strokeWidth={2} aria-hidden="true" />
       </button>
       {open
         ? createPortal(
             <div
               ref={menuRef}
               role="menu"
-              className="panel user-row-menu"
-              style={{ top: pos?.top ?? -9999, right: pos?.right ?? 0 }}
+              className="panel user-row-menu row-action-menu"
+              style={{ top: pos?.top ?? -9999, left: pos?.left ?? -9999 }}
               onClick={(event) => event.stopPropagation()}
             >
-              {visible.map((item, idx) => (
-                <button
-                  key={item.key || item.label || idx}
-                  type="button"
-                  role="menuitem"
-                  className={`button ghost user-row-menu-item${item.danger ? ' danger-text' : ''}`}
-                  disabled={item.disabled}
-                  title={item.title}
-                  onClick={() => {
-                    if (item.disabled) return;
-                    setOpen(false);
-                    item.onSelect();
-                  }}
-                >
-                  {item.label}
-                </button>
-              ))}
+              {visible.map((item, idx) => {
+                const handler = item.onSelect || item.onClick;
+                return (
+                  <button
+                    key={item.key || item.label || idx}
+                    type="button"
+                    role="menuitem"
+                    className={`button ghost user-row-menu-item${item.danger ? ' danger-text' : ''}`}
+                    disabled={item.disabled}
+                    title={item.title}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      if (item.disabled) return;
+                      setOpen(false);
+                      handler?.(event);
+                    }}
+                  >
+                    {item.icon ? <span className="user-row-menu-item-icon" aria-hidden="true">{item.icon}</span> : null}
+                    <span className="user-row-menu-item-label">{item.label}</span>
+                  </button>
+                );
+              })}
             </div>,
             document.body
           )

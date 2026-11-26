@@ -46,8 +46,8 @@ import {
 import { EmptyState } from '../shared/EmptyState';
 import { LoadingState } from '../shared/LoadingState';
 import { DetailRowsTable } from '../shared/DetailRowsTable';
+import { RowActionMenu } from '../shared/RowActionMenu';
 import { StatusBadge } from '../StatusBadge';
-import { NavIcon } from '../../navIcons';
 import LeafletMap from '../common/LeafletMap';
 import { CreditHistoryListPage, CreditHistoryDetailPage } from '../shared/CreditHistoryPages';
 function OfflineBanner() {
@@ -797,15 +797,16 @@ function InventoryPage({
                         <td style={{ fontWeight: 600 }}>{qty}</td>
                         <td><StatusBadge status={status} /></td>
                         <td className="table-actions" onClick={(e) => e.stopPropagation()}>
-                          <button
-                            className="icon-action-button"
-                            type="button"
-                            title="View"
-                            aria-label={`View ${product.product_name}`}
-                            onClick={() => navigate(`/sales/inventory/${product.product_id}`)}
-                          >
-                            <NavIcon name="view" />
-                          </button>
+                          <RowActionMenu
+                            label={`Actions for ${product.product_name}`}
+                            items={[
+                              {
+                                key: 'view',
+                                label: 'View',
+                                onSelect: () => navigate(`/sales/inventory/${product.product_id}`),
+                              },
+                            ]}
+                          />
                         </td>
                       </tr>
                     );
@@ -1104,9 +1105,16 @@ export function SalesHistoryPage({
                     <td>{formatDisplayDate(item.invoices_date)}</td>
                     <td><StatusBadge status={item.status} /></td>
                     <td className="table-actions" onClick={e => e.stopPropagation()}>
-                      <button className="icon-action-button" type="button" title="View" onClick={() => navigate(getInvoiceDetailPath(item.invoice_number))}>
-                        <NavIcon name="view" />
-                      </button>
+                      <RowActionMenu
+                        label={`Actions for ${item.invoice_number}`}
+                        items={[
+                          {
+                            key: 'view',
+                            label: 'View',
+                            onSelect: () => navigate(getInvoiceDetailPath(item.invoice_number)),
+                          },
+                        ]}
+                      />
                     </td>
                   </tr>)}
               </tbody>

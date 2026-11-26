@@ -9,6 +9,7 @@ import { EmptyState } from '../shared/EmptyState';
 import { LoadingState } from '../shared/LoadingState';
 import { Pagination } from '../shared/Pagination';
 import { DetailRowsTable } from '../shared/DetailRowsTable';
+import { RowActionMenu } from '../shared/RowActionMenu';
 import { InfoHint } from '../shared/InfoHint';
 import { ConfirmModal } from '../shared/ConfirmModal';
 import { StatusBadge } from '../StatusBadge';
@@ -195,74 +196,68 @@ export function CreditInvestigationQueuePage({ navigate, opsBase, showToast }) {
 
   return (
     <div className="page">
-      <section className="panel content-panel mb-4">
-        <div className="list-section-header">
-          <div>
-            <h3>Credit Investigations</h3>
-            <p className="muted" style={{ marginTop: 4, marginBottom: 0 }}>
-              Review credit applications and prior Branch Manager decisions for this branch.
-            </p>
-          </div>
-        </div>
-        <div className="segmented-control" style={{ marginTop: 12 }}>
-          <button
-            type="button"
-            className={mainTab === 'applications' ? 'segment active' : 'segment'}
-            onClick={() => switchTab('applications')}
-          >
-            Applications
-          </button>
-          <button
-            type="button"
-            className={mainTab === 'history' ? 'segment active' : 'segment'}
-            onClick={() => switchTab('history')}
-          >
-            Investigation History
-          </button>
-        </div>
-      </section>
-
       <section className="panel content-panel">
-        <div className="list-section-controls" style={{ flexWrap: 'wrap', gap: 8, marginBottom: 12 }}>
-          <div className="ci-search-field">
-            <span className="ci-search-field__icon" aria-hidden="true">⌕</span>
-            <input
-              className="filter-input search"
-              type="search"
-              placeholder="Search customer, code, or CI ID"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              aria-label="Search credit investigations"
-            />
+        <div className="list-section-toolbar suppliers-toolbar" style={{ marginBottom: 12 }}>
+          <div className="list-section-controls" style={{ flexWrap: 'wrap', gap: 8 }}>
+            <div className="ci-search-field">
+              <span className="ci-search-field__icon" aria-hidden="true">⌕</span>
+              <input
+                className="filter-input search"
+                type="search"
+                placeholder="Search customer, code, or CI ID"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                aria-label="Search credit investigations"
+              />
+            </div>
+            <select className="filter-select" value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}>
+              {statusOptions.map((f) => (
+                <option key={f.value} value={f.value}>{f.label}</option>
+              ))}
+            </select>
+            <select className="filter-select" value={riskFilter} onChange={(e) => setRiskFilter(e.target.value)}>
+              {['All', 'High', 'Medium', 'Low'].map((s) => (
+                <option key={s} value={s}>{s === 'All' ? 'All Risk Levels' : `${s} Risk`}</option>
+              ))}
+            </select>
+            <select className="filter-select" value={sort} onChange={(e) => setSort(e.target.value)}>
+              <option value="oldest">Oldest First</option>
+              <option value="newest">Newest Submitted</option>
+              <option value="risk">Highest Risk First</option>
+              <option value="updated">Recently Updated</option>
+            </select>
+            {customerIdFilter ? (
+              <button
+                className="button ghost"
+                type="button"
+                onClick={() => {
+                  setCustomerIdFilter('');
+                  navigate(`${opsBase}/ci-approvals`, { replace: true });
+                }}
+              >
+                Clear customer filter
+              </button>
+            ) : null}
           </div>
-          <select className="filter-select" value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}>
-            {statusOptions.map((f) => (
-              <option key={f.value} value={f.value}>{f.label}</option>
-            ))}
-          </select>
-          <select className="filter-select" value={riskFilter} onChange={(e) => setRiskFilter(e.target.value)}>
-            {['All', 'High', 'Medium', 'Low'].map((s) => (
-              <option key={s} value={s}>{s === 'All' ? 'All Risk Levels' : `${s} Risk`}</option>
-            ))}
-          </select>
-          <select className="filter-select" value={sort} onChange={(e) => setSort(e.target.value)}>
-            <option value="oldest">Oldest First</option>
-            <option value="newest">Newest Submitted</option>
-            <option value="risk">Highest Risk First</option>
-            <option value="updated">Recently Updated</option>
-          </select>
-          {customerIdFilter ? (
-            <button
-              className="button ghost"
-              type="button"
-              onClick={() => {
-                setCustomerIdFilter('');
-                navigate(`${opsBase}/ci-approvals`, { replace: true });
-              }}
-            >
-              Clear customer filter
-            </button>
-          ) : null}
+
+          <div className="suppliers-toolbar-actions">
+            <div className="segmented-control" style={{ marginBottom: 0 }}>
+              <button
+                type="button"
+                className={mainTab === 'applications' ? 'segment active' : 'segment'}
+                onClick={() => switchTab('applications')}
+              >
+                Applications
+              </button>
+              <button
+                type="button"
+                className={mainTab === 'history' ? 'segment active' : 'segment'}
+                onClick={() => switchTab('history')}
+              >
+                Investigation History
+              </button>
+            </div>
+          </div>
         </div>
 
         {loading && !items.length ? (
@@ -282,7 +277,7 @@ export function CreditInvestigationQueuePage({ navigate, opsBase, showToast }) {
                       <th>Remarks</th>
                       <th>BM</th>
                       <th>Decided At</th>
-                      <th>Open</th>
+                      <th>Actions</th>
                     </tr>
                   ) : (
                     <tr>
@@ -294,7 +289,7 @@ export function CreditInvestigationQueuePage({ navigate, opsBase, showToast }) {
                       <th>Risk</th>
                       <th>Submitted</th>
                       <th>Status</th>
-                      <th>Review</th>
+                      <th>Actions</th>
                     </tr>
                   )}
                 </thead>
@@ -329,14 +324,17 @@ export function CreditInvestigationQueuePage({ navigate, opsBase, showToast }) {
                                 ? formatDisplayDateTime(row.decidedAt)
                                 : missingInfoLabel('not_on_file')}
                             </td>
-                            <td onClick={(e) => e.stopPropagation()}>
-                              <button
-                                className="button secondary"
-                                type="button"
-                                onClick={() => navigate(`${opsBase}/ci-approvals/${row.ciId}`)}
-                              >
-                                Open
-                              </button>
+                            <td className="table-actions" onClick={(e) => e.stopPropagation()}>
+                              <RowActionMenu
+                                label={`Actions for CI #${row.ciId}`}
+                                items={[
+                                  {
+                                    key: 'open',
+                                    label: 'Open',
+                                    onSelect: () => navigate(`${opsBase}/ci-approvals/${row.ciId}`),
+                                  },
+                                ]}
+                              />
                             </td>
                           </>
                         ) : (
@@ -356,14 +354,17 @@ export function CreditInvestigationQueuePage({ navigate, opsBase, showToast }) {
                               </div>
                             </td>
                             <td><StatusBadge status={row.displayStatus} /></td>
-                            <td onClick={(e) => e.stopPropagation()}>
-                              <button
-                                className="button"
-                                type="button"
-                                onClick={() => navigate(`${opsBase}/ci-approvals/${row.ciId}`)}
-                              >
-                                Review
-                              </button>
+                            <td className="table-actions" onClick={(e) => e.stopPropagation()}>
+                              <RowActionMenu
+                                label={`Actions for CI #${row.ciId}`}
+                                items={[
+                                  {
+                                    key: 'review',
+                                    label: 'Review',
+                                    onSelect: () => navigate(`${opsBase}/ci-approvals/${row.ciId}`),
+                                  },
+                                ]}
+                              />
                             </td>
                           </>
                         )}

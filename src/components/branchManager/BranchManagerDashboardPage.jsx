@@ -493,16 +493,6 @@ export function BranchManagerDashboardPage({
         </>
       )}
 
-      {/* G. Short shortcuts */}
-      <div className="flex flex-wrap gap-2 mt-2">
-        <button className="button" type="button" onClick={() => navigate(`${opsBase}/leaflet`)}>Field Map</button>
-        <button className="button secondary" type="button" onClick={() => navigate(`${opsBase}/approval-center`)}>Approvals</button>
-        <button className="button secondary" type="button" onClick={() => navigate(`${opsBase}/branch-inventory`)}>Inventory</button>
-        <button className="button secondary" type="button" onClick={() => navigate(`${opsBase}/field-operations`)}>Field Ops</button>
-        <button className="button secondary" type="button" onClick={() => navigate(`${opsBase}/reports`)}>Reports</button>
-        <button className="button secondary" type="button" onClick={() => navigate(`${opsBase}/alerts`)}>Alerts</button>
-      </div>
-
       <ChartDrilldownModal {...drilldown} onClose={closeDrilldown} showToast={showToast} />
     </div>
   );

@@ -9,6 +9,9 @@ reports/
 .kilo/
 .kiro/
 
+# Prevent accidental nested clone of this repo into itself
+/CORVEX/
+
 # Quarantine and local data dumps (see _archive/MANIFEST.md)
 _archive/**
 !_archive/MANIFEST.md

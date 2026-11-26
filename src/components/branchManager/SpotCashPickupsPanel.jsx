@@ -7,6 +7,7 @@ import {
 import { formatCurrency } from '../../utils/formatters.js';
 import { EmptyState } from '../shared/EmptyState';
 import { LoadingState } from '../shared/LoadingState';
+import { RowActionMenu } from '../shared/RowActionMenu';
 
 export function SpotCashPickupsPanel({ showToast, navigate, opsBase }) {
   const [loading, setLoading] = useState(true);
@@ -69,9 +70,6 @@ export function SpotCashPickupsPanel({ showToast, navigate, opsBase }) {
             Cash Spot Cash sales awaiting same-day collector pickup. Assign a collector; they collect the full amount on their published route.
           </p>
         </div>
-        <button className="button secondary" type="button" onClick={load}>
-          Refresh
-        </button>
       </div>
 
       <p className="muted" style={{ marginTop: 8 }}>
@@ -93,7 +91,7 @@ export function SpotCashPickupsPanel({ showToast, navigate, opsBase }) {
                 <th>Amount</th>
                 <th>Agent</th>
                 <th>Assignment</th>
-                <th aria-label="Actions" />
+                <th>Actions</th>
               </tr>
             </thead>
             <tbody>
@@ -137,27 +135,26 @@ export function SpotCashPickupsPanel({ showToast, navigate, opsBase }) {
                         </select>
                       )}
                     </td>
-                    <td style={{ textAlign: 'right' }}>
-                      {assigned ? (
-                        <button
-                          className="button ghost"
-                          type="button"
-                          onClick={() => navigate?.(
-                            `${opsBase}/field-operations/collectors/${row.assigned_collector_id}`
-                          )}
-                        >
-                          Open route
-                        </button>
-                      ) : (
-                        <button
-                          className="button"
-                          type="button"
-                          disabled={assigningId === row.sales_invoices_id}
-                          onClick={() => handleAssign(row.sales_invoices_id)}
-                        >
-                          {assigningId === row.sales_invoices_id ? 'Assigning…' : 'Assign today'}
-                        </button>
-                      )}
+                    <td className="table-actions" onClick={(e) => e.stopPropagation()}>
+                      <RowActionMenu
+                        label={`Actions for ${row.invoice_number}`}
+                        items={[
+                          assigned
+                            ? {
+                              key: 'open-route',
+                              label: 'Open route',
+                              onSelect: () => navigate?.(
+                                `${opsBase}/field-operations/collectors/${row.assigned_collector_id}`
+                              ),
+                            }
+                            : {
+                              key: 'assign',
+                              label: assigningId === row.sales_invoices_id ? 'Assigning…' : 'Assign today',
+                              disabled: assigningId === row.sales_invoices_id,
+                              onSelect: () => handleAssign(row.sales_invoices_id),
+                            },
+                        ]}
+                      />
                     </td>
                   </tr>
                 );

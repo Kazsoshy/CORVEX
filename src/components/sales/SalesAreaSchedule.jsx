@@ -773,13 +773,16 @@ export function AreaAssignmentDetailPage({ assignmentId, navigate, showToast }) 
                         ].filter(Boolean).join(' · ') || '—'}
                       </td>
                       <td className="table-actions" onClick={(e) => e.stopPropagation()}>
-                        <button
-                          className="button ghost"
-                          type="button"
-                          onClick={() => navigate(`/sales/customer-detail/${customer.customer_id}?from=schedule`)}
-                        >
-                          Open
-                        </button>
+                        <RowActionMenu
+                          label={`Actions for ${customer.customer_name || 'customer'}`}
+                          items={[
+                            {
+                              key: 'open',
+                              label: 'Open',
+                              onSelect: () => navigate(`/sales/customer-detail/${customer.customer_id}?from=schedule`),
+                            },
+                          ]}
+                        />
                       </td>
                     </tr>
                   ))}

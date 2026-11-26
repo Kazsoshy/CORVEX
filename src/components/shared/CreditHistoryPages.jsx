@@ -17,7 +17,6 @@ import { formatCurrency, formatDisplayDate } from '../../utils/formatters.js';
 import { downloadPdf } from '../../utils/dataExport.js';
 import {
   copyText,
-  downloadCsv,
   invoiceDiscountLabel,
   parsePaymentRemarks,
   paymentSourceLabel,
@@ -200,10 +199,6 @@ export function CreditHistoryListPage({
 }) {
   const location = useLocation();
   const isSales = variant === 'sales';
-  const pageTitle = 'Payment History';
-  const pageSubtitle = isSales
-    ? 'Review payment records and outstanding balances for your assigned customers.'
-    : 'Monitor customer payment records and outstanding balances across your branch.';
 
   const resolvedCustomerBase = customerBasePath
     || (isSales ? '/sales/customer-detail' : basePath.replace(/\/credit-history$/, '/customers'));
@@ -432,102 +427,23 @@ export function CreditHistoryListPage({
   return (
     <div className="page">
       <section className="panel content-panel relative overflow-hidden">
-        <div className="list-section-header">
-          <div>
-            <h3>{pageTitle}</h3>
-            <p className="muted">{pageSubtitle}</p>
-            {customerFilterId ? (
-              <p className="muted" style={{ marginTop: 8 }}>
-                Filtered to {customerFilterName || `customer #${customerFilterId}`}
-                {' · '}
-                <button className="button ghost" type="button" style={{ padding: 0, minHeight: 0 }} onClick={clearCustomerFilter}>
-                  Clear customer filter
-                </button>
-              </p>
-            ) : null}
+        {customerFilterId ? (
+          <div className="list-section-header">
+            <p className="muted" style={{ margin: 0 }}>
+              Filtered to {customerFilterName || `customer #${customerFilterId}`}
+              {' · '}
+              <button className="button ghost" type="button" style={{ padding: 0, minHeight: 0 }} onClick={clearCustomerFilter}>
+                Clear customer filter
+              </button>
+            </p>
           </div>
-          <div className="flex flex-wrap gap-2">
-            <button
-              className="button secondary"
-              type="button"
-              disabled={!summary.filtered_count}
-              onClick={async () => {
-                const exportRes = await getCreditHistory({
-                  customer_id: customerFilterId || undefined,
-                  payment_status: statusFilter !== 'All' ? statusFilter : undefined,
-                  date_from: dateFrom || undefined,
-                  date_to: dateTo || undefined,
-                  q: search.trim() || undefined,
-                  payment_method: methodFilter !== 'All' ? methodFilter : undefined,
-                  payment_source: sourceFilter !== 'All' ? sourceFilter : undefined,
-                  received_by: receivedBy.trim() || undefined,
-                  sort,
-                  sort_dir: sortDir,
-                  page: 1,
-                  limit: 1000,
-                });
-                const rows = exportRes.success ? (exportRes.data || []) : records;
-                downloadPaymentHistoryListPdf(rows, showToast, {
-                  title: isSales ? 'Payment History' : 'Branch Payment History',
-                  subtitle: `Exports ${rows.length} filtered record${rows.length === 1 ? '' : 's'}`,
-                });
-              }}
-            >
-              {isSales ? 'Export PDF' : 'Export Branch PDF'}
-              {summary.filtered_count
-                ? ` · Exports ${summary.filtered_count} filtered record${summary.filtered_count === 1 ? '' : 's'}`
-                : ''}
-            </button>
-            <button
-              className="button ghost"
-              type="button"
-              disabled={!summary.filtered_count}
-              onClick={async () => {
-                const exportRes = await getCreditHistory({
-                  customer_id: customerFilterId || undefined,
-                  payment_status: statusFilter !== 'All' ? statusFilter : undefined,
-                  date_from: dateFrom || undefined,
-                  date_to: dateTo || undefined,
-                  q: search.trim() || undefined,
-                  payment_method: methodFilter !== 'All' ? methodFilter : undefined,
-                  payment_source: sourceFilter !== 'All' ? sourceFilter : undefined,
-                  received_by: receivedBy.trim() || undefined,
-                  sort,
-                  sort_dir: sortDir,
-                  page: 1,
-                  limit: 1000,
-                });
-                const rows = exportRes.success ? (exportRes.data || []) : records;
-                downloadCsv(rows);
-                showToast?.(`Exported ${rows.length} filtered record(s) as CSV.`, 'success');
-              }}
-            >
-              Export CSV
-            </button>
-          </div>
-        </div>
-
-        <div className="payment-history-summary-strip" aria-label="Filtered summary">
-          <div>
-            <span className="muted">Total collected</span>
-            <strong className="tabular-nums">{formatCurrency(summary.total_collected)}</strong>
-          </div>
-          <div>
-            <span className="muted">Total outstanding (rows)</span>
-            <strong className="tabular-nums">{formatCurrency(summary.total_outstanding)}</strong>
-          </div>
-          <div>
-            <span className="muted">Overdue count</span>
-            <strong className="tabular-nums">{summary.overdue_count}</strong>
-          </div>
-          <div>
-            <span className="muted">Filtered records</span>
-            <strong className="tabular-nums">{summary.filtered_count}</strong>
-          </div>
-        </div>
+        ) : null}
 
         <div className="list-section-toolbar">
-          <div className="list-section-controls payment-history-filters">
+          <div
+            className="list-section-controls payment-history-filters"
+            style={{ width: '100%', alignItems: 'flex-end' }}
+          >
             <label className="filter-field">
               <span className="muted">Search</span>
               <input
@@ -550,18 +466,6 @@ export function CreditHistoryListPage({
               >
                 {['All', 'Paid', 'Partial', 'Overdue', 'Pending', 'Void'].map((status) => (
                   <option key={status} value={status}>{status === 'All' ? 'All statuses' : status}</option>
-                ))}
-              </select>
-            </label>
-            <label className="filter-field">
-              <span className="muted">Payment method</span>
-              <select
-                className="filter-select"
-                value={methodFilter}
-                onChange={(e) => setMethodFilter(e.target.value)}
-              >
-                {['All', 'Cash', 'GCash'].map((m) => (
-                  <option key={m} value={m}>{m === 'All' ? 'All methods' : m}</option>
                 ))}
               </select>
             </label>
@@ -606,23 +510,40 @@ export function CreditHistoryListPage({
                 onChange={(e) => setDateTo(e.target.value)}
               />
             </label>
-            <label className="filter-field">
-              <span className="muted">Page size</span>
-              <select
-                className="filter-select"
-                value={pageSize}
-                onChange={(e) => setPageSize(Number(e.target.value) || DEFAULT_PAGE_SIZE)}
-              >
-                {[10, 25, 50, 100].map((n) => (
-                  <option key={n} value={n}>{n}</option>
-                ))}
-              </select>
-            </label>
             <button className="button secondary" type="button" onClick={() => setSearch(searchDraft)}>
               Search
             </button>
             <button className="button ghost" type="button" onClick={resetFilters}>
               Reset filters
+            </button>
+            <button
+              className="button secondary"
+              type="button"
+              style={{ marginLeft: 'auto', whiteSpace: 'nowrap' }}
+              disabled={!summary.filtered_count}
+              onClick={async () => {
+                const exportRes = await getCreditHistory({
+                  customer_id: customerFilterId || undefined,
+                  payment_status: statusFilter !== 'All' ? statusFilter : undefined,
+                  date_from: dateFrom || undefined,
+                  date_to: dateTo || undefined,
+                  q: search.trim() || undefined,
+                  payment_method: methodFilter !== 'All' ? methodFilter : undefined,
+                  payment_source: sourceFilter !== 'All' ? sourceFilter : undefined,
+                  received_by: receivedBy.trim() || undefined,
+                  sort,
+                  sort_dir: sortDir,
+                  page: 1,
+                  limit: 1000,
+                });
+                const rows = exportRes.success ? (exportRes.data || []) : records;
+                downloadPaymentHistoryListPdf(rows, showToast, {
+                  title: isSales ? 'Payment History' : 'Branch Payment History',
+                  subtitle: `Exports ${rows.length} filtered record${rows.length === 1 ? '' : 's'}`,
+                });
+              }}
+            >
+              Export PDF
             </button>
           </div>
         </div>

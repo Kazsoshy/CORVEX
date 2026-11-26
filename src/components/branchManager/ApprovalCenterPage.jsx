@@ -1628,19 +1628,7 @@ export function ApprovalCenterPage({
 
   return (
     <div className="page">
-      <section className="panel content-panel" style={{ marginBottom: 12 }}>
-        <div className="list-section-header">
-          <div>
-            <h3>Approval Center</h3>
-            <p className="muted" style={{ marginTop: 4, marginBottom: 0 }}>
-              Pending decisions for your branch.
-            </p>
-          </div>
-          <button className="button secondary" type="button" disabled={loading || Boolean(busyKey)} onClick={reload}>
-            {loading ? 'Refreshing…' : 'Refresh'}
-          </button>
-        </div>
-      </section>
+     
 
       <div className="segmented-control">
         {tabs.map((item) => (

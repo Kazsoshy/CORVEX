@@ -20,8 +20,8 @@ import { EmptyState } from '../shared/EmptyState';
 import { LoadingState } from '../shared/LoadingState';
 import { DetailRowsTable } from '../shared/DetailRowsTable';
 import { Pagination } from '../shared/Pagination';
+import { RowActionMenu } from '../shared/RowActionMenu';
 import { StatusBadge } from '../StatusBadge';
-import { NavIcon } from '../../navIcons';
 
 function manilaToday() {
   return new Intl.DateTimeFormat('en-CA', {
@@ -284,24 +284,17 @@ export function CollectionHistoryPage({ navigate, showToast }) {
                         <td style={{ fontWeight: 600 }}>{formatCurrency(Number(p.amount))}</td>
                         <td><StatusBadge status={p.status} /></td>
                         <td className="table-actions" onClick={(e) => e.stopPropagation()}>
-                          <button
-                            className="icon-action-button"
-                            type="button"
-                            title="View Details"
-                            onClick={() => navigate(detailPath)}
-                          >
-                            <NavIcon name="view" />
-                          </button>
-                          {p.receipts_id ? (
-                            <button
-                              className="icon-action-button"
-                              type="button"
-                              title="Open Receipt"
-                              onClick={() => navigate(`/collector/receipts/${p.receipts_id}`)}
-                            >
-                              <NavIcon name="receipt" />
-                            </button>
-                          ) : null}
+                          <RowActionMenu
+                            label={`Actions for payment ${p.collectionpayment_id || ''}`}
+                            items={[
+                              { key: 'view', label: 'View Details', onSelect: () => navigate(detailPath) },
+                              p.receipts_id ? {
+                                key: 'receipt',
+                                label: 'Open Receipt',
+                                onSelect: () => navigate(`/collector/receipts/${p.receipts_id}`),
+                              } : null,
+                            ]}
+                          />
                         </td>
                       </tr>
                     );

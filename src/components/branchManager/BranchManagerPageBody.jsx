@@ -18,8 +18,8 @@ import { BranchInventoryViewPage } from '../inventory/BranchInventoryViewPage.js
 import { EmptyState } from '../shared/EmptyState';
 import { LoadingState } from '../shared/LoadingState';
 import { DetailRowsTable } from '../shared/DetailRowsTable';
+import { RowActionMenu } from '../shared/RowActionMenu';
 import { AccountProfilePanel } from '../shared/AccountProfilePanel';
-import { NavIcon } from '../../navIcons';
 import { StatusBadge } from '../StatusBadge';
 import {
   getBranchAnalytics,
@@ -48,7 +48,6 @@ import {
 } from './SalesAgentsDispatchPages.jsx';
 import { BranchCustomersPage, BranchCustomerDetailPage } from './BranchCustomersPages.jsx';
 import { CreditInvestigationQueuePage, CreditInvestigationDetailPage } from './CreditInvestigationPages.jsx';
-import { exportRows } from '../../utils/dataExport.js';
 import { UserSettingsPanel } from '../shared/UserSettingsPanel';
 import { BranchPaymentSettingsPanel } from './BranchPaymentSettingsPanel.jsx';
 import { chartSeries } from '../../theme/palette.js';
@@ -320,9 +319,12 @@ function FieldOperationsHub({
                       <td>{row.progress}</td>
                       <td>{row.remaining}</td>
                       <td className="table-actions" onClick={(e) => e.stopPropagation()}>
-                        <button className="button ghost" type="button" onClick={() => navigate(row.detailPath)}>
-                          Open
-                        </button>
+                        <RowActionMenu
+                          label={`Actions for ${row.name}`}
+                          items={[
+                            { key: 'open', label: 'Open', onSelect: () => navigate(row.detailPath) },
+                          ]}
+                        />
                       </td>
                     </tr>
                   ))}
@@ -377,7 +379,6 @@ function ReportsHubPage({
   const [loadErrors, setLoadErrors] = useState({});
   const [viewingInvoiceId, setViewingInvoiceId] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [exportingInvoices, setExportingInvoices] = useState(false);
 
   const tabs = [{
     key: 'collection',
@@ -479,9 +480,6 @@ function ReportsHubPage({
     || salesData?.periodLabel
     || kpi?.periodLabel
     || 'Last 7 days';
-  const rangeHint = collectionData?.dateFrom && collectionData?.dateTo
-    ? `${formatDisplayDate(collectionData.dateFrom)} – ${formatDisplayDate(collectionData.dateTo)}`
-    : null;
 
   const selectTab = (nextTab) => {
     const match = tabs.find((t) => t.key === nextTab);
@@ -492,108 +490,14 @@ function ReportsHubPage({
 
   if (loading) return <LoadingState message="Loading reports..." />;
 
-  const exportBranchReport = async (format) => {
-    let rows = [];
-    let title = `Branch ${tab} Report`;
-    let filename = `branch-${tab}-report`;
-    if (tab === 'collection') {
-      if (loadErrors.collection || !collectionData) {
-        showToast('Collections report is unavailable. Retry before exporting.', 'error');
-        return;
-      }
-      rows = (collectionData?.daily || []).map((row) => ({ day: row.day, collected: row.amount, target: row.target }));
-      title = `Collections vs Target (${periodHint}) — ${branchName || 'Branch'}`;
-    } else if (tab === 'sales') {
-      if (loadErrors.sales || !salesData) {
-        showToast('Sales report is unavailable. Retry before exporting.', 'error');
-        return;
-      }
-      rows = (salesData?.weekly || []).map((row) => ({ day: row.day, actual: row.actual, target: row.target, invoices: row.invoices }));
-      title = `Sales Revenue vs Target (${periodHint}) — ${branchName || 'Branch'}`;
-    } else if (tab === 'inventory') {
-      if (loadErrors.inventory || !inventoryData) {
-        showToast('Inventory report is unavailable. Retry before exporting.', 'error');
-        return;
-      }
-      rows = (inventoryData?.lowStockItems || []).map((row) => ({ product: row.product_name, sku: row.sku, stock: row.available_stock, status: row.status }));
-      title = `Inventory Alerts — ${branchName || 'Branch'}`;
-    } else if (tab === 'delinquency') {
-      if (loadErrors.delinquency || !delinquencyData) {
-        showToast('Delinquency report is unavailable. Retry before exporting.', 'error');
-        return;
-      }
-      rows = (delinquencyData?.delinquency || []).map((row) => ({ asOf: row.week || row.asOf, accounts: row.accounts, rate: row.rate }));
-      title = `Overdue Accounts Trend — ${branchName || 'Branch'}`;
-    } else {
-      if (loadErrors.invoices) {
-        showToast('Invoice report is unavailable. Retry before exporting.', 'error');
-        return;
-      }
-      setExportingInvoices(true);
-      const all = [];
-      const limit = 200;
-      let page = 1;
-      let totalPages = 1;
-      do {
-        const res = await getReportInvoices({ page, limit });
-        if (!res.success) {
-          setExportingInvoices(false);
-          showToast(res.message || 'Failed to load invoices for export.', 'error');
-          return;
-        }
-        all.push(...(res.data || []));
-        totalPages = Number(res.pagination?.totalPages) || 1;
-        page += 1;
-      } while (page <= totalPages);
-      setExportingInvoices(false);
-      rows = all.map((row) => ({
-        invoice: row.invoice_number,
-        customer: row.customer_name,
-        amount: row.total_amount,
-        date: row.invoices_date,
-        status: row.status,
-      }));
-      title = `Sales Invoices (complete filtered set) — ${branchName || 'Branch'}`;
-      filename = 'branch-invoices-report';
-    }
-    const ok = exportRows(rows, { format, filename, title });
-    if (ok) showToast(format === 'pdf' ? 'Report exported as PDF.' : 'Excel file downloaded.', 'success');
-    else showToast('Nothing to export.', 'error');
-  };
-
   return <div className="page">
-      <section className="panel content-panel" style={{ marginBottom: 12 }}>
-        <div className="flex flex-col md:flex-row justify-between gap-3 items-start md:items-center">
-          <div>
-            <h3 style={{ margin: 0 }}>Reports</h3>
-            <p className="muted" style={{ margin: '4px 0 0' }}>
-              Analyze and export branch performance in greater detail than the Dashboard.
-            </p>
-            <p className="muted" style={{ margin: '4px 0 0', fontSize: '0.85rem' }}>
-              {branchName === 'All Branches' ? 'Organization-wide view' : (branchName || 'Branch')}
-              {rangeHint ? ` · ${periodHint}: ${rangeHint}` : ` · ${periodHint}`}
-            </p>
-          </div>
-          <div className="flex flex-wrap gap-2">
-            <button className="button ghost" type="button" onClick={() => { reloadCore(); if (tab === 'invoices') reloadInvoices(invoicePage); }}>
-              Retry / Refresh
-            </button>
-            <button className="button secondary" type="button" disabled={exportingInvoices} onClick={() => exportBranchReport('pdf')}>
-              {exportingInvoices ? 'Preparing…' : 'Export PDF'}
-            </button>
-            <button className="button secondary" type="button" disabled={exportingInvoices} onClick={() => exportBranchReport('excel')}>
-              {exportingInvoices ? 'Preparing…' : 'Export Excel'}
-            </button>
-          </div>
-        </div>
-      </section>
       <div className="segmented-control">
         {tabs.map(t => <button key={t.key} className={tab === t.key ? 'segment active' : 'segment'} type="button" onClick={() => selectTab(t.key)}>{t.label}</button>)}
       </div>
 
       {tab === 'collection' && <>
           {loadErrors.collection ? (
-            <EmptyState title="Collections report unavailable" description="The collections API failed. Use Retry / Refresh." />
+            <EmptyState title="Collections report unavailable" description="Could not load collections data." actionLabel="Retry" onAction={reloadCore} />
           ) : !collectionData?.daily?.length ? (
             <EmptyState title="No collection records" description="No confirmed collections found for this reporting period." />
           ) : null}
@@ -679,7 +583,7 @@ function ReportsHubPage({
 
       {tab === 'sales' && <>
           {loadErrors.sales ? (
-            <EmptyState title="Sales report unavailable" description="The sales API failed. Use Retry / Refresh." />
+            <EmptyState title="Sales report unavailable" description="Could not load sales data." actionLabel="Retry" onAction={reloadCore} />
           ) : null}
           <Stats stats={[{
         label: 'Sales (7 days)',
@@ -770,7 +674,7 @@ function ReportsHubPage({
 
       {tab === 'inventory' && <>
           {loadErrors.inventory ? (
-            <EmptyState title="Inventory report unavailable" description="The inventory API failed. Use Retry / Refresh." />
+            <EmptyState title="Inventory report unavailable" description="Could not load inventory data." actionLabel="Retry" onAction={reloadCore} />
           ) : !inventoryData?.totalProducts ? (
             <EmptyState title="No inventory records" description="No monitored stock products for this branch." />
           ) : null}
@@ -846,7 +750,7 @@ function ReportsHubPage({
 
       {tab === 'delinquency' && <>
           {loadErrors.delinquency ? (
-            <EmptyState title="Delinquency report unavailable" description="The delinquency API failed. Use Retry / Refresh." />
+            <EmptyState title="Delinquency report unavailable" description="Could not load delinquency data." actionLabel="Retry" onAction={reloadCore} />
           ) : !delinquencyData?.delinquency?.length ? (
             <EmptyState title="No delinquency data" description="No overdue snapshot data for this reporting window." />
           ) : null}
@@ -941,7 +845,7 @@ function ReportsHubPage({
           </div>
 
           {loadErrors.invoices ? (
-            <EmptyState title="Invoice report unavailable" description="The invoices API failed. Use Retry / Refresh." />
+            <EmptyState title="Invoice report unavailable" description="Could not load invoice data." actionLabel="Retry" onAction={() => reloadInvoices(invoicePage)} />
           ) : invoices.length ? <>
               <div style={{
           display: 'grid',
@@ -1017,14 +921,12 @@ function ReportsHubPage({
                             <StatusBadge status={inv.status} />
                           </td>
                           <td className="table-actions" onClick={e => e.stopPropagation()}>
-                            <button
-                              className="icon-action-button"
-                              type="button"
-                              title="View"
-                              onClick={() => setViewingInvoiceId(invoiceKey)}
-                            >
-                              <NavIcon name="view" />
-                            </button>
+                            <RowActionMenu
+                              label={`Actions for ${inv.invoice_number || 'invoice'}`}
+                              items={[
+                                { key: 'view', label: 'View', onSelect: () => setViewingInvoiceId(invoiceKey) },
+                              ]}
+                            />
                           </td>
                         </tr>;
                 })}
@@ -1151,13 +1053,15 @@ function StaffPerformancePage({
   navigate,
   pageType,
   opsBase,
-  branchName,
   showToast,
 }) {
   const pathTab = pageType === 'staffSales' ? 'sales' : 'collectors';
   const initialQuery = parseStaffPerformanceQuery();
   const [tab, setTab] = useState(pageType === 'staffPerformance' ? initialQuery.tab : pathTab);
   const [period, setPeriod] = useState(initialQuery.period);
+  const [search, setSearch] = useState('');
+  const [activityFilter, setActivityFilter] = useState('all');
+  const [branchFilter, setBranchFilter] = useState('all');
   const [payload, setPayload] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -1201,20 +1105,56 @@ function StaffPerformancePage({
 
   const changeTab = (next) => {
     setTab(next);
+    setActivityFilter('all');
     syncUrl(period, next);
   };
 
-  const collectors = payload?.collectors || [];
-  const salesAgents = payload?.salesAgents || [];
+  const collectors = useMemo(() => payload?.collectors || [], [payload]);
+  const salesAgents = useMemo(() => payload?.salesAgents || [], [payload]);
   const showBranchCol = Boolean(payload && payload.branchScoped === false);
-  const paginationCollectors = usePagination(collectors);
-  const paginationSales = usePagination(salesAgents);
 
-  const periodLabel = payload?.periodLabel
-    || (period === 'month' ? 'This Month' : 'This Week');
-  const rangeLabel = payload?.dateFrom && payload?.dateTo
-    ? `${formatDisplayDate(payload.dateFrom)} – ${formatDisplayDate(payload.dateTo)}`
-    : '—';
+  const branchOptions = useMemo(() => {
+    if (!showBranchCol) return [];
+    const names = [...new Set([...collectors, ...salesAgents].map((r) => r.branchName).filter(Boolean))];
+    names.sort((a, b) => a.localeCompare(b));
+    return names;
+  }, [showBranchCol, collectors, salesAgents]);
+
+  const filteredCollectors = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    return collectors.filter((c) => {
+      if (q && !String(c.name || '').toLowerCase().includes(q) && !String(c.branchName || '').toLowerCase().includes(q)) {
+        return false;
+      }
+      if (showBranchCol && branchFilter !== 'all' && String(c.branchName || '') !== branchFilter) {
+        return false;
+      }
+      if (activityFilter === 'collected' && !(Number(c.collectedAmount || 0) > 0)) return false;
+      if (activityFilter === 'missed' && !(Number(c.missedVisits || 0) > 0)) return false;
+      if (activityFilter === 'assigned' && c.visitCompletion == null) return false;
+      return true;
+    });
+  }, [collectors, search, showBranchCol, branchFilter, activityFilter]);
+
+  const filteredSalesAgents = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    return salesAgents.filter((a) => {
+      if (q && !String(a.name || '').toLowerCase().includes(q) && !String(a.branchName || '').toLowerCase().includes(q)) {
+        return false;
+      }
+      if (showBranchCol && branchFilter !== 'all' && String(a.branchName || '') !== branchFilter) {
+        return false;
+      }
+      if (activityFilter === 'revenue' && !(Number(a.confirmedRevenue || 0) > 0)) return false;
+      if (activityFilter === 'customers' && !(Number(a.newCustomers || 0) > 0)) return false;
+      if (activityFilter === 'assigned' && a.visitCompletion == null) return false;
+      return true;
+    });
+  }, [salesAgents, search, showBranchCol, branchFilter, activityFilter]);
+
+  const filterResetKey = `${period}|${tab}|${search}|${activityFilter}|${branchFilter}`;
+  const paginationCollectors = usePagination(filteredCollectors, { resetKey: filterResetKey });
+  const paginationSales = usePagination(filteredSalesAgents, { resetKey: filterResetKey });
 
   const openCollector = (id) => {
     navigate(`${opsBase}/field-operations/collectors/${id}?period=${period}`);
@@ -1229,165 +1169,205 @@ function StaffPerformancePage({
 
   return (
     <div className="page">
-      <section className="panel content-panel" style={{ marginBottom: 12 }}>
-        <div className="flex flex-col md:flex-row justify-between gap-4 items-start md:items-center">
-          <div>
-            <h3 style={{ margin: 0 }}>Staff Performance</h3>
-            <p className="muted" style={{ margin: '4px 0 0' }}>
-              Review collection and sales performance for {branchName || 'your branch'}.
-            </p>
-            <p className="muted" style={{ margin: '4px 0 0', fontSize: '0.85rem' }}>
-              {periodLabel}: {rangeLabel}
-              {showBranchCol ? ' · Organization-wide view (branch shown per staff)' : ''}
-            </p>
-          </div>
-          <div className="segmented-control">
-            {[
-              { key: 'week', label: 'This Week' },
-              { key: 'month', label: 'This Month' },
-            ].map((p) => (
-              <button
-                key={p.key}
-                className={period === p.key ? 'segment active' : 'segment'}
-                type="button"
-                disabled={loading}
-                onClick={() => changePeriod(p.key)}
-              >
-                {p.label}
-              </button>
-            ))}
-          </div>
-        </div>
-      </section>
-
-      <div className="segmented-control" style={{ marginBottom: 12 }}>
-        <button
-          className={tab === 'collectors' ? 'segment active' : 'segment'}
-          type="button"
-          onClick={() => changeTab('collectors')}
-        >
-          Collectors ({collectors.length})
-        </button>
-        <button
-          className={tab === 'sales' ? 'segment active' : 'segment'}
-          type="button"
-          onClick={() => changeTab('sales')}
-        >
-          Sales Agents ({salesAgents.length})
-        </button>
-      </div>
-
       {error && !payload ? (
         <EmptyState title="Could not load performance" description={error} />
       ) : null}
-
-      {tab === 'collectors' ? (
-        <section className="panel content-panel relative overflow-hidden">
-          <div className="list-section-header">
-            <h3 style={{ margin: 0 }}>Collector rankings</h3>
-            <p className="list-section-subtitle">
-              Ranked by visit completion, then confirmed collections. Visit Completion = completed ÷ valid assigned visits in the period (N/A when none assigned).
-            </p>
+      <section className="panel content-panel relative overflow-hidden">
+        <div className="list-section-toolbar suppliers-toolbar audit-logs-toolbar" style={{ marginBottom: 14 }}>
+          <div className="list-section-controls audit-logs-filters">
+            <input
+              className="filter-input search"
+              type="search"
+              placeholder={tab === 'collectors' ? 'Search collector name…' : 'Search sales agent name…'}
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              aria-label="Search staff performance"
+            />
+            <select
+              className="filter-select"
+              value={period}
+              disabled={loading}
+              onChange={(e) => changePeriod(e.target.value)}
+              aria-label="Reporting period"
+            >
+              <option value="week">This Week</option>
+              <option value="month">This Month</option>
+            </select>
+            <select
+              className="filter-select"
+              value={activityFilter}
+              onChange={(e) => setActivityFilter(e.target.value)}
+              aria-label="Filter by performance"
+            >
+              {tab === 'collectors' ? (
+                <>
+                  <option value="all">All collectors</option>
+                  <option value="collected">With collections</option>
+                  <option value="missed">With missed visits</option>
+                  <option value="assigned">With assigned visits</option>
+                </>
+              ) : (
+                <>
+                  <option value="all">All sales agents</option>
+                  <option value="revenue">With revenue</option>
+                  <option value="customers">With new customers</option>
+                  <option value="assigned">With assigned visits</option>
+                </>
+              )}
+            </select>
+            {showBranchCol && branchOptions.length ? (
+              <select
+                className="filter-select"
+                value={branchFilter}
+                onChange={(e) => setBranchFilter(e.target.value)}
+                aria-label="Filter by branch"
+              >
+                <option value="all">All branches</option>
+                {branchOptions.map((name) => (
+                  <option key={name} value={name}>{name}</option>
+                ))}
+              </select>
+            ) : null}
           </div>
-          {!collectors.length ? (
-            <EmptyState title="No collectors" description="Active collectors for this scope will appear here." />
-          ) : (
-            <>
-              <div className="corvex-table-wrapper">
-                <table className="corvex-table">
-                  <thead>
-                    <tr>
-                      <th>Rank</th>
-                      <th>Collector</th>
-                      {showBranchCol ? <th>Branch</th> : null}
-                      <th>Visit Completion</th>
-                      <th>Collected</th>
-                      <th>Missed Visits</th>
-                      <th>Actions</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {paginationCollectors.paginatedData.map((c) => (
-                      <tr
-                        key={c.id}
-                        className="clickable-row"
-                        onClick={() => openCollector(c.id)}
-                      >
-                        <td>#{c.rank}</td>
-                        <td><strong>{c.name}</strong></td>
-                        {showBranchCol ? <td>{c.branchName || '—'}</td> : null}
-                        <td>{formatVisitCompletion(c.visitCompletion)}</td>
-                        <td style={{ fontWeight: 600 }}>{formatCurrency(c.collectedAmount || 0)}</td>
-                        <td>{c.missedVisits ?? 0}</td>
-                        <td className="table-actions" onClick={(e) => e.stopPropagation()}>
-                          <button className="button ghost" type="button" onClick={() => openCollector(c.id)}>
-                            Open details
-                          </button>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-              <Pagination {...paginationCollectors} />
-            </>
-          )}
-        </section>
-      ) : null}
 
-      {tab === 'sales' ? (
-        <section className="panel content-panel relative overflow-hidden">
-          <div className="list-section-header">
-            <h3 style={{ margin: 0 }}>Sales Agent rankings</h3>
-            <p className="list-section-subtitle">
-              Ranked by confirmed invoice revenue, then visit completion, then new customers created in the period.
-            </p>
+          <div className="suppliers-toolbar-actions">
+            <div className="segmented-control" style={{ marginBottom: 0 }}>
+              <button
+                className={tab === 'collectors' ? 'segment active' : 'segment'}
+                type="button"
+                onClick={() => changeTab('collectors')}
+              >
+                Collectors ({collectors.length})
+              </button>
+              <button
+                className={tab === 'sales' ? 'segment active' : 'segment'}
+                type="button"
+                onClick={() => changeTab('sales')}
+              >
+                Sales Agents ({salesAgents.length})
+              </button>
+            </div>
           </div>
-          {!salesAgents.length ? (
-            <EmptyState title="No sales agents" description="Active sales agents for this scope will appear here." />
-          ) : (
-            <>
-              <div className="corvex-table-wrapper">
-                <table className="corvex-table">
-                  <thead>
-                    <tr>
-                      <th>Rank</th>
-                      <th>Sales Agent</th>
-                      {showBranchCol ? <th>Branch</th> : null}
-                      <th>Visit Completion</th>
-                      <th>Confirmed Revenue</th>
-                      <th>New Customers</th>
-                      <th>Actions</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {paginationSales.paginatedData.map((a) => (
-                      <tr
-                        key={a.id}
-                        className="clickable-row"
-                        onClick={() => openSalesAgent(a.id)}
-                      >
-                        <td>#{a.rank}</td>
-                        <td><strong>{a.name}</strong></td>
-                        {showBranchCol ? <td>{a.branchName || '—'}</td> : null}
-                        <td>{formatVisitCompletion(a.visitCompletion)}</td>
-                        <td style={{ fontWeight: 600 }}>{formatCurrency(a.confirmedRevenue || 0)}</td>
-                        <td>{a.newCustomers ?? 0}</td>
-                        <td className="table-actions" onClick={(e) => e.stopPropagation()}>
-                          <button className="button ghost" type="button" onClick={() => openSalesAgent(a.id)}>
-                            Open details
-                          </button>
-                        </td>
+        </div>
+
+        {tab === 'collectors' ? (
+          <>
+            {!filteredCollectors.length ? (
+              <EmptyState
+                title={collectors.length ? 'No collectors match the current filters' : 'No collectors'}
+                description={collectors.length
+                  ? 'Adjust search or filter selections.'
+                  : 'Active collectors for this scope will appear here.'}
+              />
+            ) : (
+              <>
+                <div className="corvex-table-wrapper">
+                  <table className="corvex-table">
+                    <thead>
+                      <tr>
+                        <th>Rank</th>
+                        <th>Collector</th>
+                        {showBranchCol ? <th>Branch</th> : null}
+                        <th>Visit Completion</th>
+                        <th>Collected</th>
+                        <th>Missed Visits</th>
+                        <th>Actions</th>
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-              <Pagination {...paginationSales} />
-            </>
-          )}
-        </section>
-      ) : null}
+                    </thead>
+                    <tbody>
+                      {paginationCollectors.paginatedData.map((c) => (
+                        <tr
+                          key={c.id}
+                          className="clickable-row"
+                          onClick={() => openCollector(c.id)}
+                        >
+                          <td>#{c.rank}</td>
+                          <td><strong>{c.name}</strong></td>
+                          {showBranchCol ? <td>{c.branchName || '—'}</td> : null}
+                          <td>{formatVisitCompletion(c.visitCompletion)}</td>
+                          <td style={{ fontWeight: 600 }}>{formatCurrency(c.collectedAmount || 0)}</td>
+                          <td>{c.missedVisits ?? 0}</td>
+                          <td className="table-actions" onClick={(e) => e.stopPropagation()}>
+                            <RowActionMenu
+                              label={`Actions for ${c.name}`}
+                              items={[
+                                { key: 'open', label: 'Open details', onSelect: () => openCollector(c.id) },
+                              ]}
+                            />
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                <Pagination {...paginationCollectors} />
+              </>
+            )}
+          </>
+        ) : null}
+
+        {tab === 'sales' ? (
+          <>
+            <div className="list-section-header">
+              <h3 style={{ margin: 0 }}>Sales Agent rankings</h3>
+              <p className="list-section-subtitle">
+                Ranked by confirmed invoice revenue, then visit completion, then new customers created in the period.
+              </p>
+            </div>
+            {!filteredSalesAgents.length ? (
+              <EmptyState
+                title={salesAgents.length ? 'No sales agents match the current filters' : 'No sales agents'}
+                description={salesAgents.length
+                  ? 'Adjust search or filter selections.'
+                  : 'Active sales agents for this scope will appear here.'}
+              />
+            ) : (
+              <>
+                <div className="corvex-table-wrapper">
+                  <table className="corvex-table">
+                    <thead>
+                      <tr>
+                        <th>Rank</th>
+                        <th>Sales Agent</th>
+                        {showBranchCol ? <th>Branch</th> : null}
+                        <th>Visit Completion</th>
+                        <th>Confirmed Revenue</th>
+                        <th>New Customers</th>
+                        <th>Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {paginationSales.paginatedData.map((a) => (
+                        <tr
+                          key={a.id}
+                          className="clickable-row"
+                          onClick={() => openSalesAgent(a.id)}
+                        >
+                          <td>#{a.rank}</td>
+                          <td><strong>{a.name}</strong></td>
+                          {showBranchCol ? <td>{a.branchName || '—'}</td> : null}
+                          <td>{formatVisitCompletion(a.visitCompletion)}</td>
+                          <td style={{ fontWeight: 600 }}>{formatCurrency(a.confirmedRevenue || 0)}</td>
+                          <td>{a.newCustomers ?? 0}</td>
+                          <td className="table-actions" onClick={(e) => e.stopPropagation()}>
+                            <RowActionMenu
+                              label={`Actions for ${a.name}`}
+                              items={[
+                                { key: 'open', label: 'Open details', onSelect: () => openSalesAgent(a.id) },
+                              ]}
+                            />
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                <Pagination {...paginationSales} />
+              </>
+            )}
+          </>
+        ) : null}
+      </section>
     </div>
   );
 }
@@ -1398,7 +1378,6 @@ function AlertsPage({
   showToast,
   currentUser,
   opsBase,
-  branchName,
 }) {
   const [view, setView] = useState('open'); // open | mine | resolved
   const [category, setCategory] = useState('All');
@@ -1522,22 +1501,6 @@ function AlertsPage({
           : 'Branch exceptions that need follow-up will appear here.';
 
   return <div className="page">
-      <section className="panel content-panel" style={{ marginBottom: 12 }}>
-        <div className="flex flex-col md:flex-row justify-between gap-3 items-start md:items-center">
-          <div>
-            <h3 style={{ margin: 0 }}>Alerts & Exceptions</h3>
-            <p className="muted" style={{ margin: '4px 0 0' }}>
-              Open branch exceptions — assign ownership and resolve after follow-up.
-            </p>
-            <p className="muted" style={{ margin: '4px 0 0', fontSize: '0.85rem' }}>
-              {branchName === 'All Branches' ? 'Organization-wide view' : (branchName || 'Branch')}
-              {` · ${filtered.length} shown`}
-            </p>
-          </div>
-          <button className="button ghost" type="button" onClick={load}>Retry / Refresh</button>
-        </div>
-      </section>
-
       <section className="panel content-panel relative overflow-hidden">
         <div className="list-section-toolbar" style={{ marginBottom: 12, gap: 12, flexWrap: 'wrap' }}>
           <div className="segmented-control">
@@ -1634,45 +1597,28 @@ function AlertsPage({
                       <td>
                         <StatusBadge status={a.resolved ? 'Resolved' : (a.escalated ? 'Escalated' : (a.status || 'Open'))} />
                       </td>
-                      <td className="table-actions">
-                        {deep ? (
-                          <button
-                            className="icon-action-button"
-                            type="button"
-                            title="Open related record"
-                            onClick={() => navigate(deep)}
-                          >
-                            <NavIcon name="view" />
-                          </button>
-                        ) : null}
-                        {!a.resolved ? <>
-                          <button
-                            className="icon-action-button"
-                            type="button"
-                            title={a.assignedTo === currentUser?.id ? 'Assigned to you' : 'Assign to Me'}
-                            onClick={() => assignAlert(a.id)}
-                          >
-                            <NavIcon name="user" />
-                          </button>
-                          <button
-                            className="icon-action-button"
-                            type="button"
-                            title="Resolve"
-                            onClick={() => { setResolveTarget(a); setResolveNote(''); }}
-                          >
-                            <NavIcon name="check" />
-                          </button>
-                          {!a.escalated ? (
-                            <button
-                              className="icon-action-button"
-                              type="button"
-                              title="Escalate"
-                              onClick={() => { setEscalateTarget(a); setEscalateReason(''); }}
-                            >
-                              <NavIcon name="alert" />
-                            </button>
-                          ) : null}
-                        </> : <span className="muted">—</span>}
+                      <td className="table-actions" onClick={(e) => e.stopPropagation()}>
+                        <RowActionMenu
+                          label={`Actions for ${a.title}`}
+                          items={[
+                            deep ? { key: 'open', label: 'Open related record', onSelect: () => navigate(deep) } : null,
+                            !a.resolved ? {
+                              key: 'assign',
+                              label: a.assignedTo === currentUser?.id ? 'Assigned to you' : 'Assign to Me',
+                              onSelect: () => assignAlert(a.id),
+                            } : null,
+                            !a.resolved ? {
+                              key: 'resolve',
+                              label: 'Resolve',
+                              onSelect: () => { setResolveTarget(a); setResolveNote(''); },
+                            } : null,
+                            !a.resolved && !a.escalated ? {
+                              key: 'escalate',
+                              label: 'Escalate',
+                              onSelect: () => { setEscalateTarget(a); setEscalateReason(''); },
+                            } : null,
+                          ]}
+                        />
                       </td>
                     </tr>
                   );
@@ -1871,9 +1817,7 @@ function referenceDeepLink(log, opsBase) {
 
 function AuditLogPage({
   navigate,
-  showToast,
   opsBase,
-  branchName,
 }) {
   const [logs, setLogs] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -1936,92 +1880,76 @@ function AuditLogPage({
     setDateTo('');
   };
 
-  const exportActivity = (format) => {
-    const exportRowsData = filtered.map((l) => ({
-      timestamp: formatDisplayDateTime(l.created_at),
-      user: l.user_name || 'System',
-      module: l.module || '—',
-      activity: branchActivityLabel(l),
-      reference: l.affected_record || '—',
-      details: l.description || l.status_details || '—',
-      branch: l.branch_name || branchName || '—',
-    }));
-    const ok = exportRows(exportRowsData, {
-      format,
-      filename: 'branch-activity',
-      title: `Branch Activity — ${branchName || 'Branch'}`,
-    });
-    if (ok) showToast?.(format === 'pdf' ? 'Branch activity exported as PDF.' : 'Excel downloaded.', 'success');
-    else showToast?.('Nothing to export.', 'error');
-  };
-
   if (loading && !logs.length && !error) return <LoadingState message="Loading branch activity…" />;
 
   return <div className="page">
-      <section className="panel content-panel" style={{ marginBottom: 12 }}>
-        <div className="flex flex-col md:flex-row justify-between gap-3 items-start md:items-center">
-          <div>
-            <h3 style={{ margin: 0 }}>Branch Activity</h3>
-            <p className="muted" style={{ margin: '4px 0 0' }}>
-              Review important financial and operational activities recorded within your branch.
-            </p>
-            <p className="muted" style={{ margin: '4px 0 0', fontSize: '0.85rem' }}>
-              {branchName === 'All Branches' ? 'Organization-wide operational activity' : (branchName || 'Branch')}
-              {` · ${filtered.length} shown`}
-            </p>
-          </div>
-          <div className="flex flex-wrap gap-2">
-            <button className="button ghost" type="button" onClick={load}>Retry / Refresh</button>
-            <button className="button secondary" type="button" onClick={() => exportActivity('pdf')}>Export PDF</button>
-            <button className="button secondary" type="button" onClick={() => exportActivity('excel')}>Export Excel</button>
-          </div>
-        </div>
-      </section>
-
       <section className="panel content-panel relative overflow-hidden">
-        <div className="list-section-toolbar" style={{ marginBottom: 12, gap: 12, flexWrap: 'wrap' }}>
-          <div className="segmented-control">
-            {[
-              { key: 'all', label: 'All' },
-              { key: 'credit', label: 'Credit' },
-              { key: 'approvals', label: 'Approvals' },
-              { key: 'collections', label: 'Collections' },
-              { key: 'invoices', label: 'Invoices' },
-              { key: 'inventory', label: 'Inventory' },
-            ].map((m) => (
-              <button
-                key={m.key}
-                className={moduleGroup === m.key ? 'segment active' : 'segment'}
-                type="button"
-                onClick={() => setModuleGroup(m.key)}
-              >
-                {m.label}
-              </button>
-            ))}
+        <div className="segmented-control" role="tablist" aria-label="Activity modules" style={{ marginBottom: 12, flexWrap: 'wrap' }}>
+          {[
+            { key: 'all', label: 'All' },
+            { key: 'credit', label: 'Credit' },
+            { key: 'approvals', label: 'Approvals' },
+            { key: 'collections', label: 'Collections' },
+            { key: 'invoices', label: 'Invoices' },
+            { key: 'inventory', label: 'Inventory' },
+          ].map((m) => (
+            <button
+              key={m.key}
+              role="tab"
+              aria-selected={moduleGroup === m.key}
+              className={moduleGroup === m.key ? 'segment active' : 'segment'}
+              type="button"
+              onClick={() => setModuleGroup(m.key)}
+            >
+              {m.label}
+            </button>
+          ))}
+        </div>
+
+        <div className="list-section-toolbar suppliers-toolbar audit-logs-toolbar" style={{ marginBottom: 14 }}>
+          <div className="list-section-controls audit-logs-filters">
+            <input
+              className="filter-input search"
+              type="search"
+              placeholder="Search activity, user, reference…"
+              aria-label="Search activity, user, or reference"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              onKeyDown={(e) => { if (e.key === 'Enter') load(); }}
+            />
+            <input
+              className="filter-input"
+              type="search"
+              style={{ flex: '0 1 180px', minWidth: 140 }}
+              placeholder="Filter by actor…"
+              aria-label="Filter by actor"
+              value={actor}
+              onChange={(e) => setActor(e.target.value)}
+              onKeyDown={(e) => { if (e.key === 'Enter') load(); }}
+            />
+            <input
+              className="filter-input"
+              type="date"
+              value={dateFrom}
+              onChange={(e) => setDateFrom(e.target.value)}
+              aria-label="From date"
+              title="From date"
+            />
+            <span className="muted" aria-hidden="true">–</span>
+            <input
+              className="filter-input"
+              type="date"
+              value={dateTo}
+              onChange={(e) => setDateTo(e.target.value)}
+              aria-label="To date"
+              title="To date"
+            />
+            <button className="button ghost" type="button" onClick={resetFilters}>Reset</button>
           </div>
-          <input
-            className="input"
-            style={{ minWidth: 160, flex: '1 1 160px' }}
-            placeholder="Search activity, user, reference…"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            onKeyDown={(e) => { if (e.key === 'Enter') load(); }}
-          />
-          <input
-            className="input"
-            style={{ minWidth: 140 }}
-            placeholder="Actor"
-            value={actor}
-            onChange={(e) => setActor(e.target.value)}
-            onKeyDown={(e) => { if (e.key === 'Enter') load(); }}
-          />
-          <input className="input" type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} title="From date" />
-          <input className="input" type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} title="To date" />
-          <button className="button ghost" type="button" onClick={resetFilters}>Reset</button>
         </div>
 
         {error && !filtered.length ? (
-          <EmptyState title="Branch activity unavailable" description={error} />
+          <EmptyState title="Branch activity unavailable" description={error} actionLabel="Retry" onAction={load} />
         ) : filtered.length ? <>
           <div className="corvex-table-wrapper">
             <table className="corvex-table">
@@ -2049,31 +1977,19 @@ function AuditLogPage({
                       <td>{l.module || '—'}</td>
                       <td>{branchActivityLabel(l)}</td>
                       <td style={{ fontFamily: 'monospace', fontSize: '0.82rem' }}>{l.affected_record || '—'}</td>
-                      <td style={{ maxWidth: 280 }}>
+                      <td style={{ maxWidth: 280, whiteSpace: 'normal', wordBreak: 'break-word' }}>
                         <span className="muted" style={{ fontSize: '0.85rem' }}>
                           {String(l.description || l.status_details || '—').slice(0, 140)}
                         </span>
                       </td>
-                      <td className="table-actions">
-                        <button
-                          className="icon-action-button"
-                          type="button"
-                          title="View details"
-                          onClick={() => setViewingLog(l)}
-                        >
-                          <NavIcon name="view" />
-                        </button>
-                        {deep ? (
-                          <button
-                            className="button ghost"
-                            type="button"
-                            title="Open related record"
-                            style={{ fontSize: '0.78rem', padding: '4px 8px' }}
-                            onClick={() => navigate(deep)}
-                          >
-                            Open
-                          </button>
-                        ) : null}
+                      <td className="table-actions" onClick={(e) => e.stopPropagation()}>
+                        <RowActionMenu
+                          label="Activity actions"
+                          items={[
+                            { key: 'view', label: 'View details', onSelect: () => setViewingLog(l) },
+                            deep ? { key: 'open', label: 'Open related record', onSelect: () => navigate(deep) } : null,
+                          ]}
+                        />
                       </td>
                     </tr>
                   );

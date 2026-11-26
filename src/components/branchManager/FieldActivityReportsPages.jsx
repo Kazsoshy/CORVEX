@@ -11,8 +11,8 @@ import { LoadingState } from '../shared/LoadingState';
 import { Pagination } from '../shared/Pagination';
 import { usePagination } from '../../hooks/usePagination';
 import { DetailRowsTable } from '../shared/DetailRowsTable';
+import { RowActionMenu } from '../shared/RowActionMenu';
 import { StatusBadge } from '../StatusBadge';
-import { NavIcon } from '../../navIcons';
 import { formatDisplayDate, formatDisplayDateTime } from '../../utils/formatters.js';
 import {
   FAR_ACTIVITY_FILTER_GROUPS,
@@ -60,7 +60,6 @@ export function FieldActivityReportsPage({
   const showBranch = currentUser?.role?.slug === 'operating_manager'
     || currentUser?.role?.slug === 'super_admin';
   const [reports, setReports] = useState([]);
-  const [summary, setSummary] = useState(null);
   const [total, setTotal] = useState(0);
   const [staffOptions, setStaffOptions] = useState({ collectors: [], salesAgents: [] });
   const [loading, setLoading] = useState(true);
@@ -114,7 +113,6 @@ export function FieldActivityReportsPage({
       if (result.success) {
         setReports(result.data || []);
         setTotal(Number(result.total ?? result.data?.length ?? 0));
-        setSummary(result.summary || null);
       } else {
         setReports([]);
         setTotal(0);
@@ -143,15 +141,6 @@ export function FieldActivityReportsPage({
 
   return (
     <div className="page">
-      {summary ? (
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 16, marginBottom: 16, fontSize: '0.9rem' }}>
-          <span>Today&apos;s reports: <strong>{summary.today_count ?? 0}</strong></span>
-          <span>Incidents needing attention: <strong>{summary.incident_attention_count ?? 0}</strong></span>
-          <span>Sales agent reports today: <strong>{summary.sales_today_count ?? 0}</strong></span>
-          <span>Collector reports today: <strong>{summary.collector_today_count ?? 0}</strong></span>
-        </div>
-      ) : null}
-
       <section className="panel content-panel relative overflow-hidden">
         <div className="list-section-header">
           <div>
@@ -270,15 +259,17 @@ export function FieldActivityReportsPage({
                         <td>{formatDisplayDate(report.work_date || report.scheduled_date)}</td>
                         <td>{formatDisplayDateTime(report.created_at)}</td>
                         <PhotoCell report={report} />
-                        <td className="table-actions">
-                          <button
-                            className="icon-action-button"
-                            type="button"
-                            title="View report"
-                            onClick={() => navigate(`${opsBase}/field-activity-reports/${report.report_id}`)}
-                          >
-                            <NavIcon name="view" />
-                          </button>
+                        <td className="table-actions" onClick={(e) => e.stopPropagation()}>
+                          <RowActionMenu
+                            label="Report actions"
+                            items={[
+                              {
+                                key: 'view',
+                                label: 'View report',
+                                onSelect: () => navigate(`${opsBase}/field-activity-reports/${report.report_id}`),
+                              },
+                            ]}
+                          />
                         </td>
                       </tr>
                     );

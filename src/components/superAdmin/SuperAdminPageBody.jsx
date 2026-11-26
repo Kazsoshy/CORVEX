@@ -25,7 +25,7 @@ import {
 import { EmptyState } from '../shared/EmptyState';
 import { LoadingState } from '../shared/LoadingState';
 import { DetailRowsTable } from '../shared/DetailRowsTable';
-import { NavIcon } from '../../navIcons';
+import { RowActionMenu } from '../shared/RowActionMenu';
 import { StatusBadge } from '../StatusBadge';
 import { formatDisplayDate, formatDisplayDateTime, formatPhone } from '../../utils/formatters.js';
 import { UserSettingsPanel } from '../shared/UserSettingsPanel';
@@ -663,13 +663,12 @@ function RolesPage({
                           <td>{u.branch?.name || '—'}</td>
                           <td><StatusBadge status={u.status || 'Active'} /></td>
                           <td className="table-actions" onClick={(e) => e.stopPropagation()}>
-                            <button
-                              className="button"
-                              type="button"
-                              onClick={() => openUserPermissions(u)}
-                            >
-                              Permissions
-                            </button>
+                            <RowActionMenu
+                              label={`Actions for ${formatRoleUserName(u)}`}
+                              items={[
+                                { key: 'permissions', label: 'Permissions', onSelect: () => openUserPermissions(u) },
+                              ]}
+                            />
                           </td>
                         </tr>
                       )) : (
@@ -835,13 +834,16 @@ function RolesPage({
                           <td><code>{r.slug}</code></td>
                           <td><StatusBadge status={r.status || 'Active'} /></td>
                           <td>{formatDisplayDateTime(r.created_at)}</td>
-                          <td className="table-actions">
-                            {can('roles.edit') ? (
-                              <button className="icon-action-button" type="button" title="Edit" onClick={() => openRoleModal(r)}><NavIcon name="edit" /></button>
-                            ) : null}
-                            {can('roles.delete') && String(r.status || 'Active').toLowerCase() !== 'inactive' && r.slug !== 'super_admin' ? (
-                              <button className="icon-action-button danger" type="button" title="Archive" onClick={() => deleteRole(r)}><NavIcon name="archive" /></button>
-                            ) : null}
+                          <td className="table-actions" onClick={(e) => e.stopPropagation()}>
+                            <RowActionMenu
+                              label={`Actions for role ${r.name}`}
+                              items={[
+                                can('roles.edit') ? { key: 'edit', label: 'Edit', onSelect: () => openRoleModal(r) } : null,
+                                can('roles.delete') && String(r.status || 'Active').toLowerCase() !== 'inactive' && r.slug !== 'super_admin'
+                                  ? { key: 'archive', label: 'Archive', danger: true, onSelect: () => deleteRole(r) }
+                                  : null,
+                              ]}
+                            />
                           </td>
                         </tr>)}
                     </tbody>
@@ -867,13 +869,16 @@ function RolesPage({
                           <td><strong>{p.label}</strong></td>
                           <td>{p.description}</td>
                           <td><StatusBadge status={p.status || 'Active'} /></td>
-                          <td className="table-actions">
-                            {can('roles.edit') ? (
-                              <button className="icon-action-button" type="button" title="Edit" onClick={() => openPermModal(p)}><NavIcon name="edit" /></button>
-                            ) : null}
-                            {can('roles.delete') && String(p.status || 'Active').toLowerCase() !== 'inactive' ? (
-                              <button className="icon-action-button danger" type="button" title="Archive" onClick={() => deletePerm(p)}><NavIcon name="archive" /></button>
-                            ) : null}
+                          <td className="table-actions" onClick={(e) => e.stopPropagation()}>
+                            <RowActionMenu
+                              label={`Actions for permission ${p.label}`}
+                              items={[
+                                can('roles.edit') ? { key: 'edit', label: 'Edit', onSelect: () => openPermModal(p) } : null,
+                                can('roles.delete') && String(p.status || 'Active').toLowerCase() !== 'inactive'
+                                  ? { key: 'archive', label: 'Archive', danger: true, onSelect: () => deletePerm(p) }
+                                  : null,
+                              ]}
+                            />
                           </td>
                         </tr>)}
                     </tbody>
@@ -1186,17 +1191,26 @@ function BackupPage({
               {paginated_BACKUP_HISTORY.length ? paginated_BACKUP_HISTORY.map(b => <tr key={b.backup_id}>
                   <td>{b.backup_type}</td><td>{formatDisplayDateTime(b.created_at)}</td><td>{formatBytes(b.size_bytes)}</td><td>{b.created_by_name || '—'}</td>
                   <td><StatusBadge status={b.status} /></td>
-                  <td className="table-actions">
-                    {can('backup.download') ? (
-                      <button className="icon-action-button" type="button" title="Download" onClick={async () => {
-                        const result = await downloadSystemBackup(b.backup_id, b.file_name);
-                        if (result.success) showToast('Backup downloaded.', 'success');
-                        else showToast(result.message || 'Download failed.', 'error');
-                      }}><NavIcon name="download" /></button>
-                    ) : null}
-                    {can('backup.restore') ? (
-                      <button className="icon-action-button" type="button" title="Restore" onClick={() => setConfirmRestore(b)}><NavIcon name="history" /></button>
-                    ) : null}
+                  <td className="table-actions" onClick={(e) => e.stopPropagation()}>
+                    <RowActionMenu
+                      label={`Actions for backup ${b.backup_id}`}
+                      items={[
+                        can('backup.download')
+                          ? {
+                            key: 'download',
+                            label: 'Download',
+                            onSelect: async () => {
+                              const result = await downloadSystemBackup(b.backup_id, b.file_name);
+                              if (result.success) showToast('Backup downloaded.', 'success');
+                              else showToast(result.message || 'Download failed.', 'error');
+                            },
+                          }
+                          : null,
+                        can('backup.restore')
+                          ? { key: 'restore', label: 'Restore', onSelect: () => setConfirmRestore(b) }
+                          : null,
+                      ]}
+                    />
                   </td>
                 </tr>) : <tr><td colSpan="6">No backups yet. Create a manual backup to download company settings and catalog data.</td></tr>}
             </tbody>
@@ -1427,18 +1441,13 @@ function AuditLogsPage({
                   <td>{l.module || '—'}</td>
                   <td>{auditActivityLabel(l)}</td>
                   <td>{l.ip_address || '—'}</td>
-                  <td>
-                    {can('audit.details') ? (
-                      <button
-                        className="icon-action-button"
-                        type="button"
-                        title="View"
-                        aria-label={`View audit log ${l.log_id}`}
-                        onClick={() => setViewingLog(l)}
-                      >
-                        <NavIcon name="view" />
-                      </button>
-                    ) : '—'}
+                  <td className="table-actions" onClick={(e) => e.stopPropagation()}>
+                    <RowActionMenu
+                      label={`Actions for audit log ${l.log_id}`}
+                      items={[
+                        can('audit.details') ? { key: 'view', label: 'View', onSelect: () => setViewingLog(l) } : null,
+                      ]}
+                    />
                   </td>
                 </tr>
               )) : <tr><td colSpan="7">No audit logs match these filters.</td></tr>}
@@ -1659,13 +1668,14 @@ function UsersPage({
                       {u.lastLogin ? formatDisplayDateTime(u.lastLogin) : "Never"}
                     </td>
                     <td><StatusBadge status={u.status} /></td>
-                    <td className="table-actions">
-                      {can('users.edit', 'users.activate') ? (
-                        <button className="icon-action-button" type="button" title="Edit" onClick={() => openEdit(u)}><NavIcon name="edit" /></button>
-                      ) : null}
-                      {can('users.disable', 'users.activate') ? (
-                        <button className="icon-action-button danger" type="button" title="Disable" onClick={() => deactivateUser(u.id)}><NavIcon name="ban" /></button>
-                      ) : null}
+                    <td className="table-actions" onClick={(e) => e.stopPropagation()}>
+                      <RowActionMenu
+                        label={`Actions for ${u.first_name || u.email || 'user'}`}
+                        items={[
+                          can('users.edit', 'users.activate') ? { key: 'edit', label: 'Edit', onSelect: () => openEdit(u) } : null,
+                          can('users.disable', 'users.activate') ? { key: 'disable', label: 'Disable', danger: true, onSelect: () => deactivateUser(u.id) } : null,
+                        ]}
+                      />
                     </td>
                   </tr>)}
             </tbody>
@@ -2062,26 +2072,24 @@ function SecurityMonitoringPage({ showToast }) {
                   </td>
                   <td>{e.auto_action || '—'}</td>
                   <td><StatusBadge status={e.status} /></td>
-                  <td className="table-actions">
-                    {can('security.manage') && e.status === 'Open' ? (
-                      <button className="button ghost" type="button" onClick={() => onStatusChange(e.event_id, 'Investigating')}>Investigate</button>
-                    ) : null}
-                    {can('security.manage') && (e.status === 'Open' || e.status === 'Investigating') ? (
-                      <button className="button ghost" type="button" onClick={() => onStatusChange(e.event_id, 'Resolved')}>Resolve</button>
-                    ) : null}
-                    {can('security.manage') && e.status !== 'False Positive' ? (
-                      <button className="button ghost" type="button" onClick={() => onStatusChange(e.event_id, 'False Positive')}>False Positive</button>
-                    ) : null}
-                    {can('security.events', 'security.view') ? (
-                      <button
-                        className="button ghost"
-                        type="button"
-                        title="Export this result as PDF"
-                        onClick={() => exportSingleEventResult(e)}
-                      >
-                        Export PDF
-                      </button>
-                    ) : null}
+                  <td className="table-actions" onClick={(e) => e.stopPropagation()}>
+                    <RowActionMenu
+                      label={`Actions for event ${e.event_id}`}
+                      items={[
+                        can('security.manage') && e.status === 'Open'
+                          ? { key: 'investigate', label: 'Investigate', onSelect: () => onStatusChange(e.event_id, 'Investigating') }
+                          : null,
+                        can('security.manage') && (e.status === 'Open' || e.status === 'Investigating')
+                          ? { key: 'resolve', label: 'Resolve', onSelect: () => onStatusChange(e.event_id, 'Resolved') }
+                          : null,
+                        can('security.manage') && e.status !== 'False Positive'
+                          ? { key: 'false-positive', label: 'False Positive', onSelect: () => onStatusChange(e.event_id, 'False Positive') }
+                          : null,
+                        can('security.events', 'security.view')
+                          ? { key: 'export-pdf', label: 'Export PDF', title: 'Export this result as PDF', onSelect: () => exportSingleEventResult(e) }
+                          : null,
+                      ]}
+                    />
                   </td>
                 </tr>
               )) : (

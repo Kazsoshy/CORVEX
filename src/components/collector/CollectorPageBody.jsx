@@ -35,6 +35,7 @@ import { NotificationsInbox } from '../shared/NotificationsInbox';
 import { EmptyState } from '../shared/EmptyState';
 import { LoadingState } from '../shared/LoadingState';
 import { DetailRowsTable } from '../shared/DetailRowsTable';
+import { RowActionMenu } from '../shared/RowActionMenu';
 import { AccountProfilePanel } from '../shared/AccountProfilePanel';
 import { NavIcon } from '../../navIcons';
 import LeafletMap from '../common/LeafletMap';
@@ -705,37 +706,30 @@ function RoutePage({
                               </div>
                             </td>
                             <td className="table-actions" onClick={(e) => e.stopPropagation()}>
-                              <div className="flex flex-wrap items-center gap-1.5">
-                                <button
-                                  className="button ghost"
-                                  type="button"
-                                  style={{ padding: '4px 10px', fontSize: '0.8rem' }}
-                                  disabled={!callable}
-                                  title={callable ? `Call ${stop.customerName}` : 'No valid phone number on file'}
-                                  onClick={() => collectorCall(stop, showToast)}
-                                >
-                                  Call
-                                </button>
-                                <button
-                                  className="icon-action-button"
-                                  type="button"
-                                  title="View Customer Details"
-                                  onClick={() => navigate(`/collector/account-detail/${stop.id}?from=route`)}
-                                >
-                                  <NavIcon name="view" />
-                                </button>
-                                {!isRouteStopCompleted(stop) && (stop.outstandingBalance || 0) > 0 ? (
-                                  <button
-                                    className="button"
-                                    type="button"
-                                    style={{ padding: '4px 10px', fontSize: '0.8rem' }}
-                                    title="Log Collection"
-                                    onClick={() => navigate(`/collector/collection-log/${stop.id}?from=route`)}
-                                  >
-                                    Log Collection
-                                  </button>
-                                ) : null}
-                              </div>
+                              <RowActionMenu
+                                label={`Actions for ${stop.customerName}`}
+                                items={[
+                                  {
+                                    key: 'call',
+                                    label: 'Call',
+                                    disabled: !callable,
+                                    title: callable ? `Call ${stop.customerName}` : 'No valid phone number on file',
+                                    onSelect: () => collectorCall(stop, showToast),
+                                  },
+                                  {
+                                    key: 'view',
+                                    label: 'View Customer Details',
+                                    onSelect: () => navigate(`/collector/account-detail/${stop.id}?from=route`),
+                                  },
+                                  !isRouteStopCompleted(stop) && (stop.outstandingBalance || 0) > 0
+                                    ? {
+                                      key: 'log',
+                                      label: 'Log Collection',
+                                      onSelect: () => navigate(`/collector/collection-log/${stop.id}?from=route`),
+                                    }
+                                    : null,
+                                ]}
+                              />
                             </td>
                           </tr>
                         );

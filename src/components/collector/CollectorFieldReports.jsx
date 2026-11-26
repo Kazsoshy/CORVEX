@@ -12,10 +12,10 @@ import { isBrowserOnline } from '../../offline/connection.js';
 import { saveOfflineRecord } from '../../offline/db.js';
 import { DeviceQueue, loadWaiting } from '../../offline/DeviceQueue.jsx';
 import { isCollectorAutoSyncEnabled } from '../../offline/prefs.js';
-import { NavIcon } from '../../navIcons';
 import { EmptyState } from '../shared/EmptyState';
 import { LoadingState } from '../shared/LoadingState';
 import { DetailRowsTable } from '../shared/DetailRowsTable';
+import { RowActionMenu } from '../shared/RowActionMenu';
 import { Pagination } from '../shared/Pagination';
 import { StatusBadge } from '../StatusBadge';
 
@@ -456,14 +456,16 @@ export function FieldActivityReportsPage({ navigate, showToast }) {
                         {report.remarks || '—'}
                       </td>
                       <td className="table-actions" onClick={(e) => e.stopPropagation()}>
-                        <button
-                          className="icon-action-button"
-                          type="button"
-                          title="View Details"
-                          onClick={() => navigate(`/collector/field-reports/${report.report_id}`)}
-                        >
-                          <NavIcon name="view" />
-                        </button>
+                        <RowActionMenu
+                          label="Field report actions"
+                          items={[
+                            {
+                              key: 'view',
+                              label: 'View Details',
+                              onSelect: () => navigate(`/collector/field-reports/${report.report_id}`),
+                            },
+                          ]}
+                        />
                       </td>
                     </tr>
                   ))}

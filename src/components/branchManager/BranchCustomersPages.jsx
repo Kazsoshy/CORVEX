@@ -12,8 +12,8 @@ import { LoadingState } from '../shared/LoadingState';
 import { Stats } from '../shared/StatsGrid';
 import { Pagination } from '../shared/Pagination';
 import { DetailRowsTable } from '../shared/DetailRowsTable';
+import { RowActionMenu } from '../shared/RowActionMenu';
 import { StatusBadge } from '../StatusBadge';
-import { NavIcon } from '../../navIcons';
 import LeafletMap from '../common/LeafletMap';
 import { useServerPagination, DEFAULT_PAGE_SIZE } from '../../hooks/usePagination';
 import { formatCurrency, formatDisplayDate } from '../../utils/formatters.js';
@@ -175,12 +175,6 @@ export function BranchCustomersPage({ navigate, opsBase, showToast }) {
         <div className="list-section-header">
           <div>
             <h3>Customers</h3>
-            <p className="muted" style={{ marginTop: 4, marginBottom: 0 }}>
-              Monitor and supervise customer accounts across your assigned branch.
-              {agentFilter
-                ? ` Showing permanent book for Sales Agent${agentLabel ? ` ${agentLabel}` : ''} (#${agentFilter}).`
-                : ''}
-            </p>
           </div>
           {agentFilter ? (
             <button
@@ -318,34 +312,26 @@ export function BranchCustomersPage({ navigate, opsBase, showToast }) {
                         <td><StatusBadge status={customer.status || 'Active'} /></td>
                         <td>{customer.assigned_sales_agent_name || '—'}</td>
                         <td className="table-actions" onClick={(e) => e.stopPropagation()}>
-                          <button
-                            className="icon-action-button"
-                            type="button"
-                            title="Open"
-                            onClick={() => navigate(`${opsBase}/customers/${customer.customer_id}${returnQuery}`)}
-                          >
-                            <NavIcon name="view" />
-                          </button>
-                          {canNavigate ? (
-                            <button
-                              className="icon-action-button"
-                              type="button"
-                              title="Navigate"
-                              onClick={() => handleCustomerNavigate(customer, showToast)}
-                            >
-                              <NavIcon name="map" />
-                            </button>
-                          ) : null}
-                          {hasValidCoords(customer) ? (
-                            <button
-                              className="icon-action-button"
-                              type="button"
-                              title="View on Field Map"
-                              onClick={() => navigate(`${opsBase}/leaflet?customer=${encodeURIComponent(customer.customer_id)}`)}
-                            >
-                              <NavIcon name="map" />
-                            </button>
-                          ) : null}
+                          <RowActionMenu
+                            label={`Actions for ${formatCustomerFullName(customer)}`}
+                            items={[
+                              {
+                                key: 'open',
+                                label: 'Open',
+                                onSelect: () => navigate(`${opsBase}/customers/${customer.customer_id}${returnQuery}`),
+                              },
+                              canNavigate ? {
+                                key: 'navigate',
+                                label: 'Navigate',
+                                onSelect: () => handleCustomerNavigate(customer, showToast),
+                              } : null,
+                              hasValidCoords(customer) ? {
+                                key: 'map',
+                                label: 'View on Field Map',
+                                onSelect: () => navigate(`${opsBase}/leaflet?customer=${encodeURIComponent(customer.customer_id)}`),
+                              } : null,
+                            ]}
+                          />
                         </td>
                       </tr>
                     );
